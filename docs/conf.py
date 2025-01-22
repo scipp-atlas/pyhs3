@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.metadata
 from typing import Any
 
+from intersphinx_registry import get_intersphinx_mapping
+
 project = "pyhs3"
 copyright = "2025, Giordon Stark"
 author = "Giordon Stark"
@@ -11,13 +13,33 @@ version = release = importlib.metadata.version("pyhs3")
 extensions = [
     "myst_parser",
     "sphinx.ext.autodoc",
+    "sphinx.ext.autosummary",
+    "sphinx.ext.coverage",
+    "sphinx.ext.githubpages",
+    "sphinx.ext.ifconfig",
     "sphinx.ext.intersphinx",
     "sphinx.ext.mathjax",
     "sphinx.ext.napoleon",
+    "sphinx.ext.viewcode",
     "sphinx_autodoc_typehints",
+    "sphinx_copybutton",
+    "sphinx_click.ext",
+    "sphinx_issues",
     "sphinx_copybutton",
 ]
 
+# GitHub repo
+issues_github_path = "scipp-atlas/pyhs3"
+
+# Generate the API documentation when building
+autosummary_generate = True
+numpydoc_show_class_members = False
+
+# Add any paths that contain templates here, relative to this directory.
+templates_path = ["_templates"]
+
+# The suffix(es) of source filenames.
+# You can specify multiple suffix as a list of string:
 source_suffix = [".rst", ".md"]
 exclude_patterns = [
     "_build",
@@ -52,9 +74,11 @@ myst_enable_extensions = [
     "colon_fence",
 ]
 
-intersphinx_mapping = {
-    "python": ("https://docs.python.org/3", None),
-}
+intersphinx_mapping = get_intersphinx_mapping(
+    packages={
+        "python",
+    }
+)
 
 nitpick_ignore = [
     ("py:class", "_io.StringIO"),
@@ -62,3 +86,8 @@ nitpick_ignore = [
 ]
 
 always_document_param_types = True
+
+# sphinx-copybutton configuration
+copybutton_prompt_text = r">>> |\.\.\. |\$ "
+copybutton_prompt_is_regexp = True
+copybutton_here_doc_delimiter = "EOF"

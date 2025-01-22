@@ -41,6 +41,7 @@ test = [
 dev = [
   "pytest >=6",
   "pytest-cov >=3",
+  "tbump>=6.7.0",
 ]
 docs = [
   "sphinx>=7.0",

@@ -37,6 +37,7 @@ test = [
   "pytest >=6",
   "pytest-cov >=3",
   "pyhf >= 0.7.6",
+  "pydocstyle",
 ]
 dev = [
   "pytest >=6",

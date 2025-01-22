@@ -12,7 +12,11 @@ from ._version import version as __version__
 
 
 class Workspace:
-    def __init__(self, spec: dict[str, Any]): ...
+    """
+    HS3 Workspace Object
+    """
+
+    def __init__(self, _spec: dict[str, Any]): ...
     def model(self) -> Model:
         return Model()
 
@@ -21,6 +25,10 @@ class Workspace:
 
 
 class Model:
+    """
+    HS3 Model Object
+    """
+
     def pdf(self, _pars: list[float], _data: list[float]) -> float:
         return 0.0
 

@@ -36,6 +36,7 @@ dependencies = []
 test = [
   "pytest >=6",
   "pytest-cov >=3",
+  "pyhf >= 0.7.6",
 ]
 dev = [
   "pytest >=6",
@@ -104,6 +105,12 @@ disallow_incomplete_defs = false
 module = "pyhs3.*"
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+  "pyhf.*",
+]
+ignore_missing_imports = true
 
 
 [tool.ruff]

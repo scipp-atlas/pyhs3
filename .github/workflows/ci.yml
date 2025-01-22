@@ -58,10 +58,17 @@ jobs:
 
       - name: Test package
         run: >-
-          python -m pytest -ra --cov --cov-report=xml --cov-report=term
+          python -m pytest -ra --cov --cov-branch --cov-report=xml
+          --cov-report=term --junitxml=junit.xml -o junit_family=legacy
           --durations=20
 
       - name: Upload coverage report
         uses: codecov/codecov-action@v5.1.2
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

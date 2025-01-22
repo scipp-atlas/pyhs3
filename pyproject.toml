@@ -87,6 +87,9 @@ testpaths = [
 
 [tool.coverage]
 run.source = ["pyhs3"]
+report.precision = 1
+report.sort = "cover"
+report.show_missing = true
 report.exclude_also = [
   '\.\.\.',
   'if typing.TYPE_CHECKING:',

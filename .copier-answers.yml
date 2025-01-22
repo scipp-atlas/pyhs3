@@ -1,0 +1,12 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: 2024.08.19
+_src_path: gh:scientific-python/cookie
+backend: hatch
+email: kratsg@gmail.com
+full_name: Giordon Stark
+license: Apache
+org: scipp-atlas
+project_name: pyhs3
+project_short_description: pure-Python HS3 implementation with tensors and autodiff
+url: https://github.com/scipp-atlas/pyhs3
+vcs: true

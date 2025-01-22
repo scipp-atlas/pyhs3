@@ -8,7 +8,7 @@ import pytest
 import pyhs3
 
 
-@pytest.mark.xfail(True, reason="To be implemented")
+@pytest.mark.xfail(reason="To be implemented")
 @pytest.mark.parametrize(
     ("pars"),
     [[i, j, k] for i in [0.0, 1.0] for j in [0.0, 1.0] for k in [0.0, 1.0]],

@@ -52,7 +52,7 @@ jobs:
       - name: Check for broken links
         run: |
           pushd docs
-          make linkcheck
+          sphinx-build -M linkcheck ./ ./_build --fail-on-warning
           # Don't ship the linkcheck
           rm -r _build/linkcheck
           popd
@@ -61,7 +61,7 @@ jobs:
         run: |
           python -m doctest README.rst
           pushd docs
-          make html
+          sphinx-build -M html ./ ./_build --fail-on-warning
 
       - name: Fix permissions if needed
         run: |

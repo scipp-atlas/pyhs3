@@ -90,6 +90,7 @@ report.exclude_also = [
 ]
 
 [tool.mypy]
+mypy_path = ["src"]
 files = ["src", "tests"]
 python_version = "3.9"
 warn_unused_configs = true

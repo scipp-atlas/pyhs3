@@ -108,7 +108,7 @@ disallow_incomplete_defs = true
 
 [[tool.mypy.overrides]]
 module = [
-  'pyhf.*',
+  "pyhf.*",
 ]
 ignore_missing_imports = true
 

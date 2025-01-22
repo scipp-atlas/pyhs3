@@ -9,3 +9,16 @@ updates:
       actions:
         patterns:
           - "*"
+    labels:
+      - "github-actions"
+      - "dependencies"
+    reviewers:
+      - "kratsg"
+
+  # Ignore all pip dependencies to avoid PRs to update tests/constraints.txt
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    ignore:
+      - dependency-name: "*"

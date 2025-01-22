@@ -9,7 +9,7 @@ authors = [
   { name = "Giordon Stark", email = "kratsg@gmail.com" },
 ]
 description = "pure-Python HS3 implementation with tensors and autodiff"
-readme = "README.md"
+readme = "README.rst"
 license.file = "LICENSE"
 requires-python = ">=3.9"
 classifiers = [

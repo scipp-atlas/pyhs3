@@ -9,7 +9,7 @@ authors = [
   { name = "Giordon Stark", email = "kratsg@gmail.com" },
 ]
 description = "pure-Python HS3 implementation with tensors and autodiff"
-readme = "README.md"
+readme = "README.rst"
 license.file = "LICENSE"
 requires-python = ">=3.9"
 classifiers = [
@@ -37,10 +37,12 @@ test = [
   "pytest >=6",
   "pytest-cov >=3",
   "pyhf >= 0.7.6",
+  "pydocstyle",
 ]
 dev = [
   "pytest >=6",
   "pytest-cov >=3",
+  "tbump>=6.7.0",
 ]
 docs = [
   "sphinx>=7.0",
@@ -85,6 +87,9 @@ testpaths = [
 
 [tool.coverage]
 run.source = ["pyhs3"]
+report.precision = 1
+report.sort = "cover"
+report.show_missing = true
 report.exclude_also = [
   '\.\.\.',
   'if typing.TYPE_CHECKING:',

@@ -49,5 +49,5 @@ pure-python implementation of HS3
    :target: https://github.com/scipp-atlas/pyhs3/actions/workflows/ci.yml?query=branch%3Amain
 .. |GitHub Actions Status: Docs| image:: https://github.com/scipp-atlas/pyhs3/actions/workflows/docs.yml/badge.svg
    :target: https://github.com/scipp-atlas/pyhs3/actions/workflows/docs.yml?query=branch%3Amain
-.. |GitHub Actions Status: Publish| image:: https://github.com/scipp-atlas/pyhs3/actions/workflows/publish-package.yml/badge.svg
-   :target: https://github.com/scipp-atlas/pyhs3/actions/workflows/publish-package.yml?query=branch%3Amain
+.. |GitHub Actions Status: Publish| image:: https://github.com/scipp-atlas/pyhs3/actions/workflows/cd.yml/badge.svg
+   :target: https://github.com/scipp-atlas/pyhs3/actions/workflows/cd.yml?query=branch%3Amain

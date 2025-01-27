@@ -52,4 +52,4 @@ class Model:
         return 0.0
 
 
-__all__ = ["__version__", "Workspace"]
+__all__ = ["Workspace", "__version__"]

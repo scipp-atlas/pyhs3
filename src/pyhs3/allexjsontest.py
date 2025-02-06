@@ -191,15 +191,77 @@ json_content = r"""
 
 data = json.loads(json_content)
 
-f = pt.scalar("f")
-f_ctl = pt.scalar("f_ctl")
-mean = pt.scalar("mean")
-mean2 = pt.scalar("mean2")
-sigma = pt.scalar("sigma")
-sigma2 = pt.scalar("sigma2")
-mean_ctl = pt.scalar("mean_ctl")
-mean2_ctl = pt.scalar("mean2_ctl")
-x = pt.scalar("x")
+class jsonmodel:
+    def __init__(self):
+        self.name = data['domains'][0]['name']
+        self.startingpoints = data['parameter_points'][0]['parameters']
+        self.axes = data['domains'][0]['axes']
+        self.type = data['domains'][0]['type']
+
+# TODO: implement class for domain and class for parameter points (potentially for distributions also)
+# class ParameterPoints:
+#     def __init__(self, name, points):
+#         self.name = name
+#         self.pnames = [p['name'] for p in points]
+#         self.points = {p['name']: p['value'] for p in points}
+#
+#     def __getitem__(self, name):
+#         if isinstance(name, int):
+#             name = self.points[name]
+#         else:
+#             name = key
+#         return self.points[name]
+#
+# foo = ParameterPoints("default", [{'name': 'x', 'value': 1.0}])
+# foo['x'] -> 1.0
+# foo[0] -> 1.0
+
+# jsonmodel.parameters["default"]["x"] -> 1.0
+
+# similar struct for domains
+
+# def minimize(workspace, init_set='default', bounds="default_bounds"):
+#     params = workspace.inits[init_set]
+#     bounds = workspace.bounds[bounds]
+#
+#     compute(workspace.model(), bounds=bounds.dict(), inits=inits.dict())
+#     compute(workspace.model(), x=1.0, y=2.0, z=3.0)
+def boundedscalar(name, domain):
+    x = pt.scalar(name + "unconstrained")
+    # print(x)
+
+    i = domain[0]
+    f = domain[1]
+
+    # boundedx = pt.math.sigmoid(x-i) - pt.math.sigmoid(f-x)
+
+    return pt.clip(x, i, f)
+
+mymodel = jsonmodel()
+
+# print(mymodel.name)
+# print(mymodel.axes)
+# print(mymodel.type)
+# print(mymodel.startingpoints)
+# print("domains:\n\n", data['domains'], "\n\n\n")
+# print("axes:\n\n", data['domains'][0]['axes'], "\n\n\n")
+# print("name:\n\n", data['domains'][0]['name'], "\n\n\n")
+# print("type:\n\n", data['domains'][0]['type'], "\n\n\n")
+
+
+scalarranges = {p["name"]: [p["min"], p["max"]] for p in mymodel.axes}
+# print("\n\n\n",scalarranges,"\n\n\n")
+# print(scalarranges["f"],"\n\n\n ")
+
+f = boundedscalar("f", scalarranges["f"])
+f_ctl = boundedscalar("f_ctl", scalarranges["f_ctl"])
+mean = boundedscalar("mean", scalarranges["mean"])
+mean2 = boundedscalar("mean2", scalarranges["mean2"])
+sigma = boundedscalar("sigma", scalarranges["sigma"])
+sigma2 = boundedscalar("sigma2", scalarranges["sigma2"])
+mean_ctl = boundedscalar("mean_ctl", scalarranges["mean_ctl"])
+mean2_ctl = boundedscalar("mean2_ctl", scalarranges["mean2_ctl"])
+x = boundedscalar("x", scalarranges["x"])
 
 def gaussian_pdf(x, mu, sigma):
     norm_const = 1.0 / (pt.sqrt(2 * math.pi) * sigma)
@@ -246,8 +308,7 @@ pdf_combined = function(
     name="pdf_combined"
 )
 
-default_values_block = data["parameter_points"][0]["parameters"]
-default_params = {p["name"]: p["value"] for p in default_values_block}
+default_params = {p["name"]: p["value"] for p in mymodel.startingpoints}
 
 val_physics = pdf_physics(
     default_params["x"],
@@ -267,7 +328,7 @@ val_control = pdf_control(
 )
 
 val_combined_physics = pdf_combined(
-    0,
+    0, # sample
     default_params["x"],
     default_params["f"],
     default_params["mean"],
@@ -280,7 +341,7 @@ val_combined_physics = pdf_combined(
 )
 
 val_combined_control = pdf_combined(
-    1,
+    1, # sample
     default_params["x"],
     default_params["f"],
     default_params["mean"],
@@ -295,5 +356,15 @@ val_combined_control = pdf_combined(
 print("Physics PDF:", val_physics)
 print("Control PDF:", val_control)
 print("Simultaneous PDF:", val_combined_physics)
-print("Simultaneous PDF:", val_combined_control)
+print("Simultaneous PDF(control):", val_combined_control)
+
+print(default_params["x"],
+    default_params["f"],
+    default_params["mean"],
+    default_params["sigma"],
+    default_params["mean2"],
+    default_params["sigma2"],
+    default_params["f_ctl"],
+    default_params["mean_ctl"],
+    default_params["mean2_ctl"])
 

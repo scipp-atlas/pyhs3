@@ -197,8 +197,47 @@ class jsonmodel:
         self.startingpoints = data['parameter_points'][0]['parameters']
         self.axes = data['domains'][0]['axes']
         self.type = data['domains'][0]['type']
+        self.parameters = {p['name']: (ParameterPoints(data['parameter_points'][0]['name'], data['parameter_points'][0]['parameters'])) for p in data['parameter_points']}
+        self.domains = {a['name']: (Domains(data['domains'][0]['axes'], data['domains'][0]['name'], data['domains'][0]['type'])) for a in data['domains']}
 
 # TODO: implement class for domain and class for parameter points (potentially for distributions also)
+
+class ParameterPoints:
+    def __init__(self, name, points):
+        self.name = name
+        self.pnames = [p['name'] for p in points]
+        self.points = {p['name']: p['value'] for p in points}
+
+    def __getitem__(self, name):
+        # print(self.points)
+        # print(name)
+        if isinstance(name, int):
+            # print(list(self.points)[name])
+            return self.points[list(self.points)[name]]
+            # name = list(self.points[name])
+        else:
+            return self.points[name]
+
+        return -1
+
+class Domains:
+
+    def __init__(self, axes, name, type):
+        self.name = name
+        self.type = type
+        self.axesnames = [a['name'] for a in axes]
+        self.ranges = {a['name']: (a['min'], a['max']) for a in axes}
+
+    def __getitem__(self, name):
+        if isinstance(name, int):
+            # print(list(self.ranges)[name])
+            return self.ranges[list(self.ranges)[name]]
+            # name = list(self.points[name])
+        else:
+            return self.ranges[name]
+
+        return -1
+
 # class ParameterPoints:
 #     def __init__(self, name, points):
 #         self.name = name
@@ -239,6 +278,26 @@ def boundedscalar(name, domain):
 
 mymodel = jsonmodel()
 
+points = ParameterPoints(data['parameter_points'][0]['name'], data['parameter_points'][0]['parameters'])
+ranges = Domains(data['domains'][0]['axes'], data['domains'][0]['name'], data['domains'][0]['type'])
+
+# print(points[0])
+# print(points[1])
+# print(points['f'])
+# print(points['x'])
+# print(mymodel.parameters['default_values'][0])
+
+# print(ranges[0])
+# print(ranges[2])
+# print(ranges['f'])
+# print(ranges['mean'])
+# print(mymodel.domains['default_domain']['mean'])
+
+
+# print(points.name, '\n\n')
+# print(points.pnames, '\n\n')
+# print(points.points)
+
 # print(mymodel.name)
 # print(mymodel.axes)
 # print(mymodel.type)
@@ -249,7 +308,8 @@ mymodel = jsonmodel()
 # print("type:\n\n", data['domains'][0]['type'], "\n\n\n")
 
 
-scalarranges = {p["name"]: [p["min"], p["max"]] for p in mymodel.axes}
+scalarranges = mymodel.domains['default_domain']
+
 # print("\n\n\n",scalarranges,"\n\n\n")
 # print(scalarranges["f"],"\n\n\n ")
 
@@ -308,7 +368,8 @@ pdf_combined = function(
     name="pdf_combined"
 )
 
-default_params = {p["name"]: p["value"] for p in mymodel.startingpoints}
+# default_params = {p["name"]: p["value"] for p in mymodel.startingpoints}
+default_params = mymodel.parameters['default_values']
 
 val_physics = pdf_physics(
     default_params["x"],

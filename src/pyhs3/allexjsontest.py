@@ -189,24 +189,46 @@ json_content = r"""
 }
 """
 
-data = json.loads(json_content)
-
-class jsonmodel:
-    def __init__(self):
+class Workspace:
+    def __init__(self, data):
         self.name = data['domains'][0]['name']
         self.startingpoints = data['parameter_points'][0]['parameters']
         self.axes = data['domains'][0]['axes']
         self.type = data['domains'][0]['type']
-        self.parameters = {p['name']: (ParameterPoints(data['parameter_points'][0]['name'], data['parameter_points'][0]['parameters'])) for p in data['parameter_points']}
+        self.parameters = ParameterCollection(data['parameter_points'])
+        # self.parameters = {p['name']: (ParameterPoints(data['parameter_points'][0]['name'], data['parameter_points'][0]['parameters'])) for p in data['parameter_points']}
         self.domains = {a['name']: (Domains(data['domains'][0]['axes'], data['domains'][0]['name'], data['domains'][0]['type'])) for a in data['domains']}
 
-# TODO: implement class for domain and class for parameter points (potentially for distributions also)
 
-class ParameterPoints:
+# TODO: restructure Parameter points to Parameter, ParameterSet, ParameterCollection
+
+
+class ParameterCollection:
+    def __init__(self, parametersets):
+        print(parametersets[0]['parameters'])
+        setlist = []
+        for i in range(len(parametersets)):
+            templist = []
+            for j in range(len(parametersets[i]['parameters'])):
+                point = ParameterPoint(parametersets[i]['parameters'][j]['name'], parametersets[i]['parameters'][j]['value'])
+                templist.append(point)
+            setlist.append(ParameterSet(parametersets[i]['name'], templist))
+
+
+        self.psetnames = [set.name for set in setlist]
+        self.pcollection = {set.name: set.points for set in setlist}
+
+    def __getitem__(self, name):
+        if isinstance(name, int):
+            return self.pcollection[list(self.pcollection)[name]]
+        else:
+            return self.pcollection[name]
+
+class ParameterSet:
     def __init__(self, name, points):
         self.name = name
-        self.pnames = [p['name'] for p in points]
-        self.points = {p['name']: p['value'] for p in points}
+        self.pnames = [p.name for p in points]
+        self.points = {p.name: p.value for p in points}
 
     def __getitem__(self, name):
         # print(self.points)
@@ -218,7 +240,15 @@ class ParameterPoints:
         else:
             return self.points[name]
 
-        return -1
+
+
+class ParameterPoint:
+    def __init__(self, name, value):
+        self.name = name
+        self.value = value
+
+
+
 
 class Domains:
 
@@ -236,7 +266,30 @@ class Domains:
         else:
             return self.ranges[name]
 
-        return -1
+class Distribution:
+    def __init__(self, name, type):
+        self.name = name
+        self.type = type
+
+class GaussianDist(Distribution):
+    def __init__(self, name, mean, sigma, x, type='gaussian_dist'):
+        super().__init__(self, name, type)
+        self.mean = mean
+        self.sigma = sigma
+        self.x = x
+
+class MixtureDist(Distribution):
+    def __init__(self, name, coefficients, extended, summands, type="mixture_dist"):
+        super().__init__(name, type)
+        self.coefficients = coefficients
+        self.extended = extended
+        self.summands = summands
+
+class
+
+# class Distributions:
+#     def __init__(self, dist):
+#         self
 
 # class ParameterPoints:
 #     def __init__(self, name, points):
@@ -276,10 +329,12 @@ def boundedscalar(name, domain):
 
     return pt.clip(x, i, f)
 
-mymodel = jsonmodel()
+mymodel = Workspace(json.loads(json_content))
 
-points = ParameterPoints(data['parameter_points'][0]['name'], data['parameter_points'][0]['parameters'])
-ranges = Domains(data['domains'][0]['axes'], data['domains'][0]['name'], data['domains'][0]['type'])
+print(mymodel.parameters.pcollection)
+
+# points = ParameterPoints(data['parameter_points'][0]['name'], data['parameter_points'][0]['parameters'])
+# ranges = Domains(data['domains'][0]['axes'], data['domains'][0]['name'], data['domains'][0]['type'])
 
 # print(points[0])
 # print(points[1])

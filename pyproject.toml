@@ -30,7 +30,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dynamic = ["version"]
-dependencies = []
+dependencies = ["pytensor", "sympy"]
 
 [project.optional-dependencies]
 test = [
@@ -98,7 +98,7 @@ report.exclude_also = [
 [tool.mypy]
 mypy_path = ["src"]
 files = ["src", "tests"]
-python_version = "3.9"
+python_version = "3.10"
 warn_unused_configs = true
 strict = true
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
@@ -114,9 +114,9 @@ disallow_incomplete_defs = true
 [[tool.mypy.overrides]]
 module = [
   "pyhf.*",
+  "sympy.*",  # https://github.com/sympy/sympy/pull/26158
 ]
 ignore_missing_imports = true
-
 
 [tool.ruff]
 
@@ -156,6 +156,7 @@ isort.required-imports = ["from __future__ import annotations"]
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["T20"]
 "noxfile.py" = ["T20"]
+"src/pyhs3/parse.py" = ["T201"]
 
 
 [tool.pylint]

@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import json
 import math
-import pytensor
-from pytensor import function as function
-import pytensor.tensor as pt
 from collections import OrderedDict
+
+import pytensor.tensor as pt
+from pytensor import function as function
 
 json_content = r"""
 {
@@ -190,15 +192,25 @@ json_content = r"""
 }
 """
 
+
 class Workspace:
     def __init__(self, data):
-        self.name = data['domains'][0]['name']
-        self.startingpoints = data['parameter_points'][0]['parameters']
-        self.axes = data['domains'][0]['axes']
-        self.type = data['domains'][0]['type']
-        self.parameters = ParameterCollection(data['parameter_points'])
-        self.distributions = DistributionSet(data['distributions'])
-        self.domains = {a['name']: (Domains(data['domains'][0]['axes'], data['domains'][0]['name'], data['domains'][0]['type'])) for a in data['domains']}
+        self.name = data["domains"][0]["name"]
+        self.startingpoints = data["parameter_points"][0]["parameters"]
+        self.axes = data["domains"][0]["axes"]
+        self.type = data["domains"][0]["type"]
+        self.parameters = ParameterCollection(data["parameter_points"])
+        self.distributions = DistributionSet(data["distributions"])
+        self.domains = {
+            a["name"]: (
+                Domains(
+                    data["domains"][0]["axes"],
+                    data["domains"][0]["name"],
+                    data["domains"][0]["type"],
+                )
+            )
+            for a in data["domains"]
+        }
 
 
 class ParameterCollection:
@@ -206,11 +218,14 @@ class ParameterCollection:
         self.sets = OrderedDict()
 
         for parameterset_config in parametersets:
-            parameterset = ParameterSet(parameterset_config['name'], parameterset_config['parameters'])
+            parameterset = ParameterSet(
+                parameterset_config["name"], parameterset_config["parameters"]
+            )
             self.sets[parameterset.name] = parameterset
 
     def __getitem__(self, name):
         return self.sets[name]
+
 
 class ParameterSet:
     def __init__(self, name, points):
@@ -219,12 +234,11 @@ class ParameterSet:
         self.points = OrderedDict()
 
         for points_config in points:
-            point = ParameterPoint(points_config['name'], points_config['value'])
+            point = ParameterPoint(points_config["name"], points_config["value"])
             self.points[point.name] = point.value
 
     def __getitem__(self, name):
         return self.points[name]
-
 
 
 class ParameterPoint:
@@ -233,34 +247,41 @@ class ParameterPoint:
         self.value = value
 
 
-
-
 class Domains:
-
     def __init__(self, axes, name, type):
         self.name = name
         self.type = type
-        self.axesnames = [a['name'] for a in axes]
-        self.ranges = {a['name']: (a['min'], a['max']) for a in axes}
+        self.axesnames = [a["name"] for a in axes]
+        self.ranges = {a["name"]: (a["min"], a["max"]) for a in axes}
 
     def __getitem__(self, name):
         if isinstance(name, int):
             # print(list(self.ranges)[name])
             return self.ranges[list(self.ranges)[name]]
             # name = list(self.points[name])
-        else:
-            return self.ranges[name]
+        return self.ranges[name]
+
 
 class DistributionSet:
     def __init__(self, distributions):
         self.dists = OrderedDict()
         for dist_config in distributions:
-            if dist_config['type'] == 'gaussian_dist':
-                dist = GaussianDist(dist_config['name'], dist_config['mean'], dist_config['sigma'], dist_config['x'])
-            elif dist_config['type'] == 'mixture_dist':
-                dist = MixtureDist(dist_config['name'], dist_config['coefficients'], dist_config['extended'], dist_config['summands'])
+            if dist_config["type"] == "gaussian_dist":
+                dist = GaussianDist(
+                    dist_config["name"],
+                    dist_config["mean"],
+                    dist_config["sigma"],
+                    dist_config["x"],
+                )
+            elif dist_config["type"] == "mixture_dist":
+                dist = MixtureDist(
+                    dist_config["name"],
+                    dist_config["coefficients"],
+                    dist_config["extended"],
+                    dist_config["summands"],
+                )
             else:
-                dist = Distribution(dist_config['name'], dist_config['type'])
+                dist = Distribution(dist_config["name"], dist_config["type"])
 
             self.dists[dist.name] = dist
 
@@ -268,19 +289,19 @@ class DistributionSet:
         return self.dists[item]
 
 
-
 class Distribution:
-
     def __init__(self, name, type):
         self.name = name
         self.type = type
 
+
 class GaussianDist(Distribution):
     def __init__(self, name, mean, sigma, x):
-        super().__init__(name, 'gaussian_dist')
+        super().__init__(name, "gaussian_dist")
         self.mean = mean
         self.sigma = sigma
         self.x = x
+
 
 class MixtureDist(Distribution):
     def __init__(self, name, coefficients, extended, summands):
@@ -288,6 +309,7 @@ class MixtureDist(Distribution):
         self.coefficients = coefficients
         self.extended = extended
         self.summands = summands
+
 
 # for i in distributions:
 #     if i[type] == gaussian:
@@ -321,6 +343,7 @@ class MixtureDist(Distribution):
 
 # similar struct for domains
 
+
 # def minimize(workspace, init_set='default', bounds="default_bounds"):
 #     params = workspace.inits[init_set]
 #     bounds = workspace.bounds[bounds]
@@ -338,9 +361,10 @@ def boundedscalar(name, domain):
 
     return pt.clip(x, i, f)
 
+
 mymodel = Workspace(json.loads(json_content))
 
-print(mymodel.distributions['model'].summands)
+print(mymodel.distributions["model"].summands)
 
 # points = ParameterPoints(data['parameter_points'][0]['name'], data['parameter_points'][0]['parameters'])
 # ranges = Domains(data['domains'][0]['axes'], data['domains'][0]['name'], data['domains'][0]['type'])
@@ -372,7 +396,7 @@ print(mymodel.distributions['model'].summands)
 # print("type:\n\n", data['domains'][0]['type'], "\n\n\n")
 
 
-scalarranges = mymodel.domains['default_domain']
+scalarranges = mymodel.domains["default_domain"]
 
 # print("\n\n\n",scalarranges,"\n\n\n")
 # print(scalarranges["f"],"\n\n\n ")
@@ -387,14 +411,16 @@ mean_ctl = boundedscalar("mean_ctl", scalarranges["mean_ctl"])
 mean2_ctl = boundedscalar("mean2_ctl", scalarranges["mean2_ctl"])
 x = boundedscalar("x", scalarranges["x"])
 
+
 def gaussian_pdf(x, mu, sigma):
     norm_const = 1.0 / (pt.sqrt(2 * math.pi) * sigma)
     exponent = pt.exp(-0.5 * ((x - mu) / sigma) ** 2)
     return norm_const * exponent
 
-def mixture_pdf(coeff, pdf1, pdf2):
 
+def mixture_pdf(coeff, pdf1, pdf2):
     return coeff * pdf1 + (1.0 - coeff) * pdf2
+
 
 gx = gaussian_pdf(x, mean, sigma)
 px = gaussian_pdf(x, mean2, sigma2)
@@ -406,34 +432,22 @@ model_ctl = mixture_pdf(f_ctl, gx_ctl, px_ctl)
 
 sample = pt.scalar("sample", dtype="int32")
 
-simPdf = pt.switch(
-    pt.eq(sample, 0),
-    model,
-    model_ctl
-)
+simPdf = pt.switch(pt.eq(sample, 0), model, model_ctl)
 
-pdf_physics = function(
-    [x, f, mean, sigma, mean2, sigma2],
-    model,
-    name="pdf_physics"
-)
+pdf_physics = function([x, f, mean, sigma, mean2, sigma2], model, name="pdf_physics")
 
 pdf_control = function(
-    [x, f_ctl, mean_ctl, mean2_ctl, sigma],
-    model_ctl,
-    name="pdf_control"
+    [x, f_ctl, mean_ctl, mean2_ctl, sigma], model_ctl, name="pdf_control"
 )
 
 pdf_combined = function(
-    [sample, x,
-     f, mean, sigma, mean2, sigma2,
-     f_ctl, mean_ctl, mean2_ctl],
+    [sample, x, f, mean, sigma, mean2, sigma2, f_ctl, mean_ctl, mean2_ctl],
     simPdf,
-    name="pdf_combined"
+    name="pdf_combined",
 )
 
 # default_params = {p["name"]: p["value"] for p in mymodel.startingpoints}
-default_params = mymodel.parameters['default_values']
+default_params = mymodel.parameters["default_values"]
 
 val_physics = pdf_physics(
     default_params["x"],
@@ -441,7 +455,7 @@ val_physics = pdf_physics(
     default_params["mean"],
     default_params["sigma"],
     default_params["mean2"],
-    default_params["sigma2"]
+    default_params["sigma2"],
 )
 
 val_control = pdf_control(
@@ -449,11 +463,11 @@ val_control = pdf_control(
     default_params["f_ctl"],
     default_params["mean_ctl"],
     default_params["mean2_ctl"],
-    default_params["sigma"]
+    default_params["sigma"],
 )
 
 val_combined_physics = pdf_combined(
-    0, # sample
+    0,  # sample
     default_params["x"],
     default_params["f"],
     default_params["mean"],
@@ -462,11 +476,11 @@ val_combined_physics = pdf_combined(
     default_params["sigma2"],
     default_params["f_ctl"],
     default_params["mean_ctl"],
-    default_params["mean2_ctl"]
+    default_params["mean2_ctl"],
 )
 
 val_combined_control = pdf_combined(
-    1, # sample
+    1,  # sample
     default_params["x"],
     default_params["f"],
     default_params["mean"],
@@ -475,7 +489,7 @@ val_combined_control = pdf_combined(
     default_params["sigma2"],
     default_params["f_ctl"],
     default_params["mean_ctl"],
-    default_params["mean2_ctl"]
+    default_params["mean2_ctl"],
 )
 
 print("Physics PDF:", val_physics)
@@ -483,7 +497,8 @@ print("Control PDF:", val_control)
 print("Simultaneous PDF:", val_combined_physics)
 print("Simultaneous PDF(control):", val_combined_control)
 
-print(default_params["x"],
+print(
+    default_params["x"],
     default_params["f"],
     default_params["mean"],
     default_params["sigma"],
@@ -491,5 +506,5 @@ print(default_params["x"],
     default_params["sigma2"],
     default_params["f_ctl"],
     default_params["mean_ctl"],
-    default_params["mean2_ctl"])
-
+    default_params["mean2_ctl"],
+)

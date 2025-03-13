@@ -1,9 +1,9 @@
 from __future__ import annotations
+
 import json
 import math
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Union
 
 import pytensor.tensor as pt
 from pytensor import function as function
@@ -196,35 +196,50 @@ json_content = r"""
 
 class Workspace:
     def __init__(self, data: dict):
-        self.parameter_collection = ParameterCollection(data['parameter_points'])
-        self.distribution_set = DistributionSet(data['distributions'])
-        self.domain_collection = DomainCollection(data['domains'])
-    def model(self, *, domain: int|str|DomainSet = 0, parameter_point: int|str|ParameterSet = 0) -> Model:
-        ...
-#         TODO: build list of parameters from parametercollection class
-        distlist = self.distribution_set
-#         TODO: assert that the set of parameter names is the same as the set of domain names
-        assert(set(parameter_point.points.keys()) == set(domain.domains.keys())), "parameter and domain names do not match"
+        self.parameter_collection = ParameterCollection(data["parameter_points"])
+        self.distribution_set = DistributionSet(data["distributions"])
+        self.domain_collection = DomainCollection(data["domains"])
 
-        return Model(parameterset= parameter_point, distributions= distlist, domains= domain)
+    def model(
+        self,
+        *,
+        domain: int | str | DomainSet = 0,
+        parameter_point: int | str | ParameterSet = 0,
+    ) -> Model:
+        #         TODO: build list of parameters from parametercollection class
+        distlist = self.distribution_set
+        #         TODO: assert that the set of parameter names is the same as the set of domain names
+        assert set(parameter_point.points.keys()) == set(domain.domains.keys()), (
+            "parameter and domain names do not match"
+        )
+
+        return Model(
+            parameterset=parameter_point, distributions=distlist, domains=domain
+        )
+
 
 class Model:
-    def __init__(self, *, parameterset: ParameterSet, distributions: DistributionSet, domains: DomainSet):
+    def __init__(
+        self,
+        *,
+        parameterset: ParameterSet,
+        distributions: DistributionSet,
+        domains: DomainSet,
+    ):
         self.parameters = {}
         self.parameterset = parameterset
         for parameter in parameterset:
-            self.parameters[parameter.name] = boundedscalar(parameter.name, domains[parameter.name])
+            self.parameters[parameter.name] = boundedscalar(
+                parameter.name, domains[parameter.name]
+            )
 
         self.distributions = {}
         for dist in distributions:
             print(dist)
             self.distributions[dist.name] = dist.expression(self.parameters)
 
-
-    def pdf(self):
-        ...
-    def logpdf(self):
-        ...
+    def pdf(self): ...
+    def logpdf(self): ...
 
 
 class ParameterCollection:
@@ -240,8 +255,7 @@ class ParameterCollection:
     def __getitem__(self, name: str) -> ParameterSet:
         if isinstance(name, str):
             return self.sets[name]
-        else:
-            return self.sets[self.sets.keys()[name]]
+        return self.sets[self.sets.keys()[name]]
 
 
 class ParameterSet:
@@ -257,8 +271,7 @@ class ParameterSet:
     def __getitem__(self, name: str) -> ParameterPoint:
         if isinstance(name, str):
             return self.points[name]
-        else:
-            return self.points[list(self.points.keys())[name]]
+        return self.points[list(self.points.keys())[name]]
 
     def __iter__(self):
         return iter(self.points.values())
@@ -269,25 +282,31 @@ class ParameterPoint:
         self.name = name
         self.value = value
 
+
 @dataclass
 class ParameterPoint:
     name: str
     value: float
+
+
 #     research python data classes
+
 
 class DomainCollection:
     def __init__(self, domainsets: [DomainSet]):
         self.domains = OrderedDict()
 
         for domain_config in domainsets:
-            domain = DomainSet(domain_config['axes'], domain_config['name'], domain_config['type'])
+            domain = DomainSet(
+                domain_config["axes"], domain_config["name"], domain_config["type"]
+            )
             self.domains[domain.name] = domain
 
-    def __getitem__(self, item: str|int) -> DomainSet:
+    def __getitem__(self, item: str | int) -> DomainSet:
         if isinstance(item, int):
             return self.domains.keys()[item]
-        else:
-            return self.domains[item]
+        return self.domains[item]
+
 
 class DomainSet:
     def __init__(self, axes: [DomainPoint], name: str, type: str):
@@ -296,14 +315,17 @@ class DomainSet:
         self.domains = OrderedDict()
 
         for domain_config in axes:
-            domain = DomainPoint(domain_config['name'], domain_config['min'], domain_config['max'])
+            domain = DomainPoint(
+                domain_config["name"], domain_config["min"], domain_config["max"]
+            )
             self.domains[domain.name] = domain.range
 
-    def __getitem__(self, item: int|str) -> (int, int):
+    def __getitem__(self, item: int | str) -> (int, int):
         if isinstance(item, int):
             return list(self.domains.keys())[item]
-        else:
-            return self.domains[item]
+        return self.domains[item]
+
+
 class DomainPoint:
     def __init__(self, name: str, min: float, max: float):
         self.name = name
@@ -311,44 +333,52 @@ class DomainPoint:
         self.max = max
         self.range = (self.min, self.max)
 
+
 class Distribution:
     def __init__(self, name: str, type: str):
         self.name = name
         self.type = type
 
+
 class GaussianDist(Distribution):
     # need a way for the distribution to get the scalar function .parameter from parameterset
     def __init__(self, *, name: str, mean: str, sigma: str, x: str):
-        super().__init__(name, 'gaussian_dist')
+        super().__init__(name, "gaussian_dist")
         self.mean = mean
         self.sigma = sigma
         self.x = x
 
     def expression(self, parameters: dict(str, pt.scalar)):
         norm_const = 1.0 / (pt.sqrt(2 * math.pi) * parameters[self.sigma])
-        exponent = pt.exp(-0.5 * ((parameters[self.x] - parameters[self.mean]) / parameters[self.sigma]) ** 2)
+        exponent = pt.exp(
+            -0.5
+            * ((parameters[self.x] - parameters[self.mean]) / parameters[self.sigma])
+            ** 2
+        )
         return norm_const * exponent
 
+
 class MixtureDist(Distribution):
-    def __init__(self, *, name: str, coefficients: list, extended: bool, summands: list):
+    def __init__(
+        self, *, name: str, coefficients: list, extended: bool, summands: list
+    ):
         super().__init__(name, "mixture_dist")
         self.coefficients = coefficients
         self.extended = extended
         self.summands = summands
 
     @property
-    def expression(self):
-        ...
+    def expression(self): ...
 
 
+registered_distributions = {"gaussian_dist": GaussianDist, "mixture_dist": MixtureDist}
 
-registered_distributions = {'gaussian_dist': GaussianDist, 'mixture_dist': MixtureDist}
 
 class DistributionSet:
     def __init__(self, distributions: list[dict[str, str]]):
         self.dists = {}
         for dist_config in distributions:
-            dist_type = dist_config.pop('type')
+            dist_type = dist_config.pop("type")
             the_dist = registered_distributions.get(dist_type, Distribution)
             dist = the_dist(**dist_config)
 
@@ -360,6 +390,7 @@ class DistributionSet:
     def __iter__(self):
         return iter(self.dists.values())
 
+
 def boundedscalar(name: str, domain: tuple) -> pt.scalar:
     x = pt.scalar(name + "unconstrained")
 
@@ -369,15 +400,19 @@ def boundedscalar(name: str, domain: tuple) -> pt.scalar:
     print(x, i, f)
     return pt.clip(x, i, f)
 
+
 myworkspace = Workspace(json.loads(json_content))
-mymodel = myworkspace.model(parameter_point= myworkspace.parameter_collection['default_values'], domain= myworkspace.domain_collection['default_domain'])
+mymodel = myworkspace.model(
+    parameter_point=myworkspace.parameter_collection["default_values"],
+    domain=myworkspace.domain_collection["default_domain"],
+)
 
 # breakpoint()
 
 print(myworkspace.parameter_collection)
 
 
-scalarranges = myworkspace.domain_collection['default_domain']
+scalarranges = myworkspace.domain_collection["default_domain"]
 
 f = boundedscalar("f", scalarranges["f"])
 f_ctl = boundedscalar("f_ctl", scalarranges["f_ctl"])
@@ -402,7 +437,7 @@ def mixture_pdf(coeff, pdf1, pdf2):
 
 
 gx = gaussian_pdf(x, mean, sigma)
-#gx = mymodel.distributions[gx]
+# gx = mymodel.distributions[gx]
 px = gaussian_pdf(x, mean2, sigma2)
 model = mixture_pdf(f, gx, px)
 
@@ -436,7 +471,7 @@ val_physics = pdf_physics(
     mymodel.parameterset["mean"].value,
     mymodel.parameterset["sigma"].value,
     mymodel.parameterset["mean2"].value,
-    mymodel.parameterset["sigma2"].value
+    mymodel.parameterset["sigma2"].value,
 )
 
 val_control = pdf_control(
@@ -444,11 +479,11 @@ val_control = pdf_control(
     mymodel.parameterset["f_ctl"].value,
     mymodel.parameterset["mean_ctl"].value,
     mymodel.parameterset["mean2_ctl"].value,
-    mymodel.parameterset["sigma"].value
+    mymodel.parameterset["sigma"].value,
 )
 
 val_combined_physics = pdf_combined(
-    0, # sample
+    0,  # sample
     mymodel.parameterset["x"].value,
     mymodel.parameterset["f"].value,
     mymodel.parameterset["mean"].value,
@@ -457,11 +492,11 @@ val_combined_physics = pdf_combined(
     mymodel.parameterset["sigma2"].value,
     mymodel.parameterset["f_ctl"].value,
     mymodel.parameterset["mean_ctl"].value,
-    mymodel.parameterset["mean2_ctl"].value
+    mymodel.parameterset["mean2_ctl"].value,
 )
 
 val_combined_control = pdf_combined(
-    1, # sample
+    1,  # sample
     mymodel.parameterset["x"].value,
     mymodel.parameterset["f"].value,
     mymodel.parameterset["mean"].value,
@@ -470,7 +505,7 @@ val_combined_control = pdf_combined(
     mymodel.parameterset["sigma2"].value,
     mymodel.parameterset["f_ctl"].value,
     mymodel.parameterset["mean_ctl"].value,
-    mymodel.parameterset["mean2_ctl"].value
+    mymodel.parameterset["mean2_ctl"].value,
 )
 
 print("Physics PDF:", val_physics)

@@ -217,7 +217,8 @@ class Model:
 
         self.distributions = {}
         for dist in distributions:
-            self.distributions[dist.name] = dist
+            print(dist)
+            self.distributions[dist.name] = dist.expression(self.parameters)
 
 
     def pdf(self):
@@ -315,7 +316,6 @@ class Distribution:
         self.name = name
         self.type = type
 
-
 class GaussianDist(Distribution):
     # need a way for the distribution to get the scalar function .parameter from parameterset
     def __init__(self, *, name: str, mean: str, sigma: str, x: str):
@@ -324,9 +324,9 @@ class GaussianDist(Distribution):
         self.sigma = sigma
         self.x = x
 
-    def expresion(self):
-        norm_const = 1.0 / (pt.sqrt(2 * math.pi) * self.sigma)
-        exponent = pt.exp(-0.5 * ((self.x - self.mu) / self.sigma) ** 2)
+    def expression(self, parameters: dict(str, pt.scalar)):
+        norm_const = 1.0 / (pt.sqrt(2 * math.pi) * parameters[self.sigma])
+        exponent = pt.exp(-0.5 * ((parameters[self.x] - parameters[self.mean]) / parameters[self.sigma]) ** 2)
         return norm_const * exponent
 
 class MixtureDist(Distribution):
@@ -336,6 +336,7 @@ class MixtureDist(Distribution):
         self.extended = extended
         self.summands = summands
 
+    @property
     def expression(self):
         ...
 
@@ -401,6 +402,7 @@ def mixture_pdf(coeff, pdf1, pdf2):
 
 
 gx = gaussian_pdf(x, mean, sigma)
+#gx = mymodel.distributions[gx]
 px = gaussian_pdf(x, mean2, sigma2)
 model = mixture_pdf(f, gx, px)
 

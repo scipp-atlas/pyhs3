@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 from collections import OrderedDict
+from pytensor.graph.basic import graph_inputs
 
 import networkx as nx
 import numpy as np
@@ -305,8 +306,7 @@ class Model:
         print(parametervalues)
 
         dist = self.distributions[name]
-        # breakpoint()
-        return dist.eval(self.parameters)
+        return dist.eval({k: v for k,v in parametervalues.items() if k in [var.name for var in graph_inputs([dist]) if var.name is not None]})
 
     def logpdf(self, name: str, **parametervalues: float):
         """
@@ -645,12 +645,11 @@ def boundedscalar(name: str, domain: tuple) -> pt.scalar:
     Returns:
         pt.scalar: A pytensor scalar clipped to the domain range.
     """
-    x = pt.scalar(name + "unconstrained")
+    x = pt.scalar(name)
 
     i = domain[0]
     f = domain[1]
 
-    print(x, i, f)
     return pt.clip(x, i, f)
 
 

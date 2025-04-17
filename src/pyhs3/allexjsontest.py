@@ -3,10 +3,9 @@ from __future__ import annotations
 import json
 import math
 from collections import OrderedDict
-from dataclasses import dataclass
-import numpy as np
-import networkx as nx
 
+import networkx as nx
+import numpy as np
 import pytensor.tensor as pt
 from pytensor import function as function
 
@@ -209,13 +208,18 @@ class Workspace:
         distribution_set (DistributionSet): All distributions used in the workspace.
         domain_collection (DomainCollection): Domain definitions for all parameters.
     """
+
     def __init__(self, data: dict):
+        self.parameter_collection = ParameterCollection(data["parameter_points"])
+        self.distribution_set = DistributionSet(data["distributions"])
+        self.domain_collection = DomainCollection(data["domains"])
 
-        self.parameter_collection = ParameterCollection(data['parameter_points'])
-        self.distribution_set = DistributionSet(data['distributions'])
-        self.domain_collection = DomainCollection(data['domains'])
-
-    def model(self, *, domain: int|str|DomainSet = 0, parameter_point: int|str|ParameterSet = 0) -> Model:
+    def model(
+        self,
+        *,
+        domain: int | str | DomainSet = 0,
+        parameter_point: int | str | ParameterSet = 0,
+    ) -> Model:
         """
         Constructs a `Model` object using the provided domain and parameter point.
 
@@ -228,9 +232,16 @@ class Workspace:
         """
 
         distlist = self.distribution_set
-        assert(set(parameter_point.points.keys()) == set(domain.domains.keys())), "parameter and domain names do not match"
+        assert set(parameter_point.points.keys()) == set(domain.domains.keys()), (
+            "parameter and domain names do not match"
+        )
 
-        return Model(parameterset= parameter_point, distributions= self.distribution_set, domains= domain)
+        return Model(
+            parameterset=parameter_point,
+            distributions=self.distribution_set,
+            domains=domain,
+        )
+
 
 class Model:
     """
@@ -246,7 +257,14 @@ class Model:
         parameterset (ParameterSet): The original set of parameter values.
         distributions (dict[str, pt.TensorVariable]): Symbolic distribution expressions.
     """
-    def __init__(self, *, parameterset: ParameterSet, distributions: DistributionSet, domains: DomainSet):
+
+    def __init__(
+        self,
+        *,
+        parameterset: ParameterSet,
+        distributions: DistributionSet,
+        domains: DomainSet,
+    ):
         self.parameters = {}
         self.parameterset = parameterset
 
@@ -260,13 +278,18 @@ class Model:
         for dist in distributions:
             G.add_node(dist.name, type="distribution")
             for parameter in dist.parameters:
-                if not (parameter in G and G.nodes[parameter]["type"] == "distribution"):
+                if not (
+                    parameter in G and G.nodes[parameter]["type"] == "distribution"
+                ):
                     G.add_node(parameter, type="parameter")
                 G.add_edge(parameter, dist.name)
 
         for node in nx.topological_sort(G):
-            if G.nodes[node]['type'] != "distribution":continue
-            self.distributions[node] = distributions[node].expression({**self.parameters, **self.distributions})
+            if G.nodes[node]["type"] != "distribution":
+                continue
+            self.distributions[node] = distributions[node].expression(
+                {**self.parameters, **self.distributions}
+            )
 
     def pdf(self, name: str, **parametervalues: float):
         """
@@ -279,12 +302,11 @@ class Model:
         Returns:
             float: The evaluated PDF value.
         """
-        print (parametervalues)
+        print(parametervalues)
 
         dist = self.distributions[name]
         # breakpoint()
         return dist.eval(self.parameters)
-
 
     def logpdf(self, name: str, **parametervalues: float):
         """
@@ -310,6 +332,7 @@ class ParameterCollection:
     Attributes:
         sets (OrderedDict): Mapping from parameter set names to ParameterSet objects.
     """
+
     def __init__(self, parametersets: list):
         self.sets = OrderedDict()
 
@@ -337,6 +360,7 @@ class ParameterSet:
         name (str): Name of the parameter set.
         points (dict[str, ParameterPoint]): Mapping of parameter names to ParameterPoint objects.
     """
+
     def __init__(self, name: str, points: [ParameterPoint]):
         self.name = name
 
@@ -363,9 +387,11 @@ class ParameterPoint:
         name (str): Name of the parameter.
         value (float): Value of the parameter.
     """
+
     def __init__(self, name: str, value: float):
         self.name = name
         self.value = value
+
 
 # @dataclass
 # class ParameterPoint:
@@ -384,6 +410,7 @@ class DomainCollection:
     Attributes:
         domains (OrderedDict): Mapping of domain names to DomainSet objects.
     """
+
     def __init__(self, domainsets: [DomainSet]):
         self.domains = OrderedDict()
 
@@ -397,6 +424,8 @@ class DomainCollection:
         if isinstance(item, int):
             return self.domains.keys()[item]
         return self.domains[item]
+
+
 class DomainSet:
     """
     Represents a set of valid domains for parameters.
@@ -409,6 +438,7 @@ class DomainSet:
     Attributes:
         domains (OrderedDict): Mapping of parameter names to allowed ranges.
     """
+
     def __init__(self, axes: [DomainPoint], name: str, type: str):
         self.name = name
         self.type = type
@@ -441,6 +471,7 @@ class DomainPoint:
         min (float): Minimum value.
         max (float): Maximum value.
     """
+
     def __init__(self, name: str, min: float, max: float):
         self.name = name
         self.min = min
@@ -461,6 +492,7 @@ class Distribution:
         type (str): Type identifier.
         parameters (list[str]): initially empty list to be filled with parameter names.
     """
+
     def __init__(self, name: str, type: str):
         self.name = name
         self.type = type
@@ -484,6 +516,7 @@ class GaussianDist(Distribution):
         x (str): Input variable name.
         parameters (list[str]): list containing mean, sigma, and x.
     """
+
     # need a way for the distribution to get the scalar function .parameter from parameterset
     def __init__(self, *, name: str, mean: str, sigma: str, x: str):
         super().__init__(name, "gaussian_dist")
@@ -491,6 +524,7 @@ class GaussianDist(Distribution):
         self.sigma = sigma
         self.x = x
         self.parameters = [mean, sigma, x]
+
     def expression(self, distributionsandparameters: dict(str, pt.scalar)):
         """
         Builds a symbolic expression for the Gaussian PDF.
@@ -502,8 +536,20 @@ class GaussianDist(Distribution):
             pt.TensorVariable: Symbolic representation of the Gaussian PDF.
         """
         # print("parameters: ", parameters)
-        norm_const = 1.0 / (pt.sqrt(2 * math.pi) * distributionsandparameters[self.sigma])
-        exponent = pt.exp(-0.5 * ((distributionsandparameters[self.x] - distributionsandparameters[self.mean]) / distributionsandparameters[self.sigma]) ** 2)
+        norm_const = 1.0 / (
+            pt.sqrt(2 * math.pi) * distributionsandparameters[self.sigma]
+        )
+        exponent = pt.exp(
+            -0.5
+            * (
+                (
+                    distributionsandparameters[self.x]
+                    - distributionsandparameters[self.mean]
+                )
+                / distributionsandparameters[self.sigma]
+            )
+            ** 2
+        )
         return norm_const * exponent
 
 
@@ -524,13 +570,17 @@ class MixtureDist(Distribution):
         summands (list[str]): List of component distribution names.
         parameters (list[str]): List of coefficients and summands
     """
-    def __init__(self, *, name: str, coefficients: [str], extended: bool, summands: [str]):
+
+    def __init__(
+        self, *, name: str, coefficients: [str], extended: bool, summands: [str]
+    ):
         super().__init__(name, "mixture_dist")
         self.name = name
         self.coefficients = coefficients
         self.extended = extended
         self.summands = summands
         self.parameters = [*coefficients, *summands]
+
     def expression(self, distributionsandparameters: dict(str, pt.scalar)):
         """
         Builds a symbolic expression for the mixture distribution.
@@ -546,7 +596,10 @@ class MixtureDist(Distribution):
         i = 0
         for coeff in self.coefficients:
             coeffsum += distributionsandparameters[coeff]
-            mixturesum += distributionsandparameters[coeff] * distributionsandparameters[self.summands[i]]
+            mixturesum += (
+                distributionsandparameters[coeff]
+                * distributionsandparameters[self.summands[i]]
+            )
         mixturesum += (1 - coeffsum) * distributionsandparameters[self.summands[i]]
         return mixturesum
 
@@ -564,6 +617,7 @@ class DistributionSet:
     Attributes:
         dists (dict): Mapping of distribution names to Distribution objects.
     """
+
     def __init__(self, distributions: list[dict[str, str]]):
         self.dists = {}
         for dist_config in distributions:
@@ -629,7 +683,7 @@ physicspdfval = mymodel.pdf(
     mean=mymodel.parameterset["mean"].value,
     sigma=mymodel.parameterset["sigma"].value,
     mean2=mymodel.parameterset["mean2"].value,
-    sigma2=mymodel.parameterset["sigma2"].value
+    sigma2=mymodel.parameterset["sigma2"].value,
 )
 physicspdfvalctl = mymodel.pdf(
     "model_ctl",
@@ -637,12 +691,11 @@ physicspdfvalctl = mymodel.pdf(
     f_ctl=mymodel.parameterset["f_ctl"].value,
     mean_ctl=mymodel.parameterset["mean_ctl"].value,
     mean2_ctl=mymodel.parameterset["mean2_ctl"].value,
-    sigma=mymodel.parameterset["sigma"].value
+    sigma=mymodel.parameterset["sigma"].value,
 )
 
 print(physicspdfval)
 print(physicspdfvalctl)
-
 
 
 def gaussian_pdf(x, mu, sigma):
@@ -653,6 +706,7 @@ def gaussian_pdf(x, mu, sigma):
 
 def mixture_pdf(coeff, pdf1, pdf2):
     return coeff * pdf1 + (1.0 - coeff) * pdf2
+
 
 print("distributions: ", mymodel.distributions)
 gx = gaussian_pdf(x, mean, sigma)

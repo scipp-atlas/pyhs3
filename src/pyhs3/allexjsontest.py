@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import math
 from collections import OrderedDict
-from pytensor.graph.basic import graph_inputs
 
 import networkx as nx
 import numpy as np
 import pytensor.tensor as pt
 from pytensor import function as function
+from pytensor.graph.basic import graph_inputs
 
 json_content = r"""
 {
@@ -306,7 +306,14 @@ class Model:
         print(parametervalues)
 
         dist = self.distributions[name]
-        return dist.eval({k: v for k,v in parametervalues.items() if k in [var.name for var in graph_inputs([dist]) if var.name is not None]})
+        return dist.eval(
+            {
+                k: v
+                for k, v in parametervalues.items()
+                if k
+                in [var.name for var in graph_inputs([dist]) if var.name is not None]
+            }
+        )
 
     def logpdf(self, name: str, **parametervalues: float):
         """

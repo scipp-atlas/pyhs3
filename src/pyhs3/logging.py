@@ -53,19 +53,9 @@ LOGGING_CONFIG = {
             "level": "WARNING",
             "propagate": False,
         },
-        "measurement": {
+        "pyhs3": {
             "handlers": ["rich"],
-            "level": "NOTSET",
-            "propagate": False,
-        },
-        "emulator": {
-            "handlers": ["rich"],
-            "level": "NOTSET",
-            "propagate": False,
-        },
-        "upload": {
-            "handlers": ["rich"],
-            "level": "NOTSET",
+            "level": "INFO",
             "propagate": False,
         },
     },

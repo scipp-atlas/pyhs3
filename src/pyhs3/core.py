@@ -501,10 +501,11 @@ class Distribution:
         parameters (list[str]): initially empty list to be filled with parameter names.
     """
 
-    def __init__(self, name: str, type: str):
+    def __init__(self, name: str, type: str = "Distribution", **kwargs):
         self.name = name
         self.type = type
         self.parameters = []
+        self.kwargs = kwargs
 
 
 class GaussianDist(Distribution):

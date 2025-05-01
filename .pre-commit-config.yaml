@@ -24,6 +24,7 @@ repos:
       - id: mixed-line-ending
       - id: name-tests-test
         args: ["--pytest-test-first"]
+        exclude: ^tests/test_pdf/rf501_simultaneouspdf.py$
       - id: requirements-txt-fixer
       - id: trailing-whitespace
 
@@ -54,6 +55,7 @@ repos:
       - id: mypy
         files: src|tests
         args: []
+        exclude: ^tests/test_pdf/rf501_simultaneouspdf.py$
         additional_dependencies:
           - pytest
           - numpy

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
-from pytensor.graph.op import Apply
+from pytensor.graph.basic import Apply
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.variable import TensorVariable
 
 from pyhs3.typing.distribution import Distribution
-from pyhs3.typing.domain import ProductDomain
+from pyhs3.typing.domain import Axis, Domain, ProductDomain
 from pyhs3.typing.metadata import Metadata
 from pyhs3.typing.misc import Misc
 from pyhs3.typing.parameter_point import Parameter, ParameterPoint
@@ -26,9 +26,12 @@ class HS3Spec(TypedDict):
     misc: NotRequired[Misc]
 
 
-TensorVar: TypeAlias = TensorVariable[TensorType, Apply]
+TensorVar: TypeAlias = TensorVariable[TensorType, Apply[Any]]
 
 __all__ = (
+    "Axis",
+    "Distribution",
+    "Domain",
     "HS3Spec",
     "Parameter",
     "ParameterPoint",

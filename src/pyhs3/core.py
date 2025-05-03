@@ -4,14 +4,18 @@ import logging
 import math
 from collections import OrderedDict
 from collections.abc import Iterator
-from typing import Any, cast
+from dataclasses import dataclass, field
+from typing import Any, Callable, Generic, TypeVar, cast
 
 import networkx as nx
 import numpy as np
+import numpy.typing as npt
 import pytensor.tensor as pt
+from pytensor.compile.function import function
 from pytensor.graph.basic import graph_inputs
 
 from pyhs3 import typing as T
+from pyhs3.typing import distribution as TD
 
 log = logging.getLogger(__name__)
 
@@ -52,14 +56,23 @@ class Workspace:
             Model: The constructed model object.
         """
 
-        assert set(parameter_point.points.keys()) == set(domain.domains.keys()), (
+        domainset = (
+            domain if isinstance(domain, DomainSet) else self.domain_collection[domain]
+        )
+        parameterset = (
+            parameter_point
+            if isinstance(parameter_point, ParameterSet)
+            else self.parameter_collection[parameter_point]
+        )
+
+        assert set(parameterset.points.keys()) == set(domainset.domains.keys()), (
             "parameter and domain names do not match"
         )
 
         return Model(
-            parameterset=parameter_point,
+            parameterset=parameterset,
             distributions=self.distribution_set,
-            domains=domain,
+            domains=domainset,
         )
 
 
@@ -88,12 +101,12 @@ class Model:
         self.parameters = {}
         self.parameterset = parameterset
 
-        for parameter in parameterset:
-            self.parameters[parameter.name] = boundedscalar(
-                parameter.name, domains[parameter.name]
+        for parameter_point in parameterset:
+            self.parameters[parameter_point.name] = boundedscalar(
+                parameter_point.name, domains[parameter_point.name]
             )
 
-        self.distributions = {}
+        self.distributions: dict[str, T.TensorVar] = {}
         G: nx.DiGraph[str] = nx.DiGraph()
         for dist in distributions:
             G.add_node(dist.name, type="distribution")
@@ -102,6 +115,7 @@ class Model:
                     parameter in G and G.nodes[parameter]["type"] == "distribution"
                 ):
                     G.add_node(parameter, type="parameter")
+
                 G.add_edge(parameter, dist.name)
 
         for node in nx.topological_sort(G):
@@ -111,7 +125,7 @@ class Model:
                 {**self.parameters, **self.distributions}
             )
 
-    def pdf(self, name: str, **parametervalues: float) -> float:
+    def pdf(self, name: str, **parametervalues: float) -> npt.NDArray[np.float64]:
         """
         Evaluates the probability density function of the specified distribution.
 
@@ -122,19 +136,21 @@ class Model:
         Returns:
             float: The evaluated PDF value.
         """
-        log.info(parametervalues)
-
         dist = self.distributions[name]
-        return dist.eval(
-            {
-                k: v
-                for k, v in parametervalues.items()
-                if k
-                in [var.name for var in graph_inputs([dist]) if var.name is not None]
-            }
-        )
 
-    def logpdf(self, name: str, **parametervalues: float) -> np.ndarray:
+        inputs = [var for var in graph_inputs([dist]) if var.name is not None]
+        values: dict[str, float] = {}
+        for var in inputs:
+            assert var.name is not None
+            values[var.name] = parametervalues[var.name]
+
+        func = cast(
+            Callable[..., npt.NDArray[np.float64]],
+            function(inputs=inputs, outputs=dist),  # type: ignore[no-untyped-call]
+        )
+        return func(**values)
+
+    def logpdf(self, name: str, **parametervalues: float) -> npt.NDArray[np.float64]:
         """
         Evaluates the natural logarithm of the PDF.
 
@@ -168,10 +184,9 @@ class ParameterCollection:
             )
             self.sets[parameterset.name] = parameterset
 
-    def __getitem__(self, name: str) -> ParameterSet:
-        if isinstance(name, str):
-            return self.sets[name]
-        return self.sets[self.sets.keys()[name]]
+    def __getitem__(self, item: str | int) -> ParameterSet:
+        key = list(self.sets.keys())[item] if isinstance(item, int) else item
+        return self.sets[key]
 
 
 class ParameterSet:
@@ -190,19 +205,32 @@ class ParameterSet:
     def __init__(self, name: str, points: list[T.Parameter]):
         self.name = name
 
-        self.points: dict[str, T.ParameterPoint] = OrderedDict()
+        self.points: dict[str, ParameterPoint] = OrderedDict()
 
         for points_config in points:
-            point = T.ParameterPoint(points_config["name"], points_config["value"])
+            point = ParameterPoint(points_config["name"], points_config["value"])
             self.points[point.name] = point
 
-    def __getitem__(self, name: str) -> T.ParameterPoint:
-        if isinstance(name, str):
-            return self.points[name]
-        return self.points[list(self.points.keys())[name]]
+    def __getitem__(self, item: str | int) -> ParameterPoint:
+        key = list(self.points.keys())[item] if isinstance(item, int) else item
+        return self.points[key]
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[ParameterPoint]:
         return iter(self.points.values())
+
+
+@dataclass
+class ParameterPoint:
+    """
+    Represents a single parameter point.
+
+    Attributes:
+        name (str): Name of the parameter.
+        value (float): Value of the parameter.
+    """
+
+    name: str
+    value: float
 
 
 class DomainCollection:
@@ -216,7 +244,7 @@ class DomainCollection:
         domains (OrderedDict): Mapping of domain names to DomainSet objects.
     """
 
-    def __init__(self, domainsets: list[DomainSet]):
+    def __init__(self, domainsets: list[T.Domain]):
         self.domains: dict[str, DomainSet] = OrderedDict()
 
         for domain_config in domainsets:
@@ -226,9 +254,32 @@ class DomainCollection:
             self.domains[domain.name] = domain
 
     def __getitem__(self, item: str | int) -> DomainSet:
-        if isinstance(item, int):
-            return self.domains.keys()[item]
-        return self.domains[item]
+        key = list(self.domains.keys())[item] if isinstance(item, int) else item
+        return self.domains[key]
+
+
+@dataclass
+class DomainPoint:
+    """
+    Represents a valid domain (axis) for a single parameter.
+
+    Attributes:
+        name (str): Name of the parameter.
+        min (float): Minimum value.
+        max (float): Maximum value.
+        range (tuple): Computed range as (min, max), not included in serialization.
+    """
+
+    name: str
+    min: float
+    max: float
+    range: tuple[float, float] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.range = (self.min, self.max)
+
+    def to_dict(self) -> T.Axis:
+        return {"name": self.name, "min": self.min, "max": self.max}
 
 
 class DomainSet:
@@ -244,7 +295,7 @@ class DomainSet:
         domains (OrderedDict): Mapping of parameter names to allowed ranges.
     """
 
-    def __init__(self, axes: list[DomainPoint], name: str, type: str):
+    def __init__(self, axes: list[T.Axis], name: str, type: str):
         self.name = name
         self.type = type
         self.domains: dict[str, tuple[float, float]] = OrderedDict()
@@ -260,30 +311,11 @@ class DomainSet:
         return self.domains[key]
 
 
-class DomainPoint:
-    """
-    Represents a valid domain for a single parameter.
-
-    Args:
-        name (str): Name of the parameter.
-        min (float): Minimum value.
-        max (float): Maximum value.
-
-    Attributes:
-        range (tuple): Tuple containing (min, max).
-        name (str): Name of the parameter.
-        min (float): Minimum value.
-        max (float): Maximum value.
-    """
-
-    def __init__(self, name: str, min: float, max: float):
-        self.name = name
-        self.min = min
-        self.max = max
-        self.range = (self.min, self.max)
+DistType = TypeVar("DistType", bound="Distribution[T.Distribution]")
+DistConfig = TypeVar("DistConfig", bound=T.Distribution)
 
 
-class Distribution:
+class Distribution(Generic[DistConfig]):
     """
     Base class for distributions.
 
@@ -297,10 +329,17 @@ class Distribution:
         parameters (list[str]): initially empty list to be filled with parameter names.
     """
 
-    def __init__(self, name: str, type: str = "Distribution", **kwargs: Any):
+    def __init__(
+        self,
+        *,
+        name: str,
+        type: str = "Distribution",
+        parameters: list[str] | None = None,
+        **kwargs: Any,
+    ):
         self.name = name
         self.type = type
-        self.parameters: list[str] = []
+        self.parameters = parameters or []
         self.kwargs = kwargs
 
     def expression(
@@ -309,8 +348,23 @@ class Distribution:
         msg = f"Distribution type={self.type} is not implemented."
         raise NotImplementedError(msg)
 
+    @classmethod
+    def from_dict(
+        cls: type[Distribution[DistConfig]], config: DistConfig
+    ) -> Distribution[DistConfig]:
+        """
+        Factory method to create a distribution instance from a dictionary.
 
-class GaussianDist(Distribution):
+        Args:
+            config (dict): Dictionary containing configuration for the distribution.
+
+        Returns:
+            Distribution: A new instance of the appropriate distribution subclass.
+        """
+        raise NotImplementedError
+
+
+class GaussianDist(Distribution[TD.GaussianDistribution]):
     """
     Subclass of Distribution representing a Gaussian distribution.
 
@@ -330,11 +384,28 @@ class GaussianDist(Distribution):
 
     # need a way for the distribution to get the scalar function .parameter from parameterset
     def __init__(self, *, name: str, mean: str, sigma: str, x: str):
-        super().__init__(name, "gaussian_dist")
+        super().__init__(name=name, type="gaussian_dist", parameters=[mean, sigma, x])
         self.mean = mean
         self.sigma = sigma
         self.x = x
-        self.parameters = [mean, sigma, x]
+
+    @classmethod
+    def from_dict(cls, config: TD.GaussianDistribution) -> GaussianDist:
+        """
+        Creates an instance of GaussianDist from a dictionary configuration.
+
+        Args:
+            config (dict): Configuration dictionary.
+
+        Returns:
+            GaussianDist: The created GaussianDist instance.
+        """
+        return cls(
+            name=config["name"],
+            mean=config["mean"],
+            sigma=config["sigma"],
+            x=config["x"],
+        )
 
     def expression(
         self, distributionsandparameters: dict[str, T.TensorVar]
@@ -363,10 +434,10 @@ class GaussianDist(Distribution):
             )
             ** 2
         )
-        return norm_const * exponent
+        return cast(T.TensorVar, norm_const * exponent)
 
 
-class MixtureDist(Distribution):
+class MixtureDist(Distribution[TD.MixtureDistribution]):
     """
     Subclass of Distribution representing a mixture of distributions
 
@@ -387,12 +458,31 @@ class MixtureDist(Distribution):
     def __init__(
         self, *, name: str, coefficients: list[str], extended: bool, summands: list[str]
     ):
-        super().__init__(name, "mixture_dist")
+        super().__init__(
+            name=name, type="mixture_dist", parameters=[*coefficients, *summands]
+        )
         self.name = name
         self.coefficients = coefficients
         self.extended = extended
         self.summands = summands
-        self.parameters = [*coefficients, *summands]
+
+    @classmethod
+    def from_dict(cls, config: TD.MixtureDistribution) -> MixtureDist:
+        """
+        Creates an instance of MixtureDist from a dictionary configuration.
+
+        Args:
+            config (dict): Configuration dictionary.
+
+        Returns:
+            MixtureDist: The created MixtureDist instance.
+        """
+        return cls(
+            name=config["name"],
+            coefficients=config["coefficients"],
+            extended=config["extended"],
+            summands=config["summands"],
+        )
 
     def expression(
         self, distributionsandparameters: dict[str, T.TensorVar]
@@ -406,8 +496,9 @@ class MixtureDist(Distribution):
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of the mixture PDF.
         """
-        mixturesum = 0.0
-        coeffsum = 0.0
+
+        mixturesum = pt.constant(0.0)
+        coeffsum = pt.constant(0.0)
         i = 0
         for coeff in self.coefficients:
             coeffsum += distributionsandparameters[coeff]
@@ -419,7 +510,7 @@ class MixtureDist(Distribution):
         return mixturesum
 
 
-registered_distributions: dict[str, type[Distribution]] = {
+registered_distributions: dict[str, type[Distribution[Any]]] = {
     "gaussian_dist": GaussianDist,
     "mixture_dist": MixtureDist,
 }
@@ -436,18 +527,20 @@ class DistributionSet:
         dists (dict): Mapping of distribution names to Distribution objects.
     """
 
-    def __init__(self, distributions: list[dict[str, str]]) -> None:
-        self.dists: dict[str, Distribution] = {}
+    def __init__(self, distributions: list[T.Distribution]) -> None:
+        self.dists: dict[str, Distribution[Any]] = {}
         for dist_config in distributions:
-            dist_type = dist_config.pop("type")
+            dist_type = dist_config["type"]
             the_dist = registered_distributions.get(dist_type, Distribution)
-            dist = the_dist(**dist_config)
+            dist = the_dist.from_dict(
+                {k: v for k, v in dist_config.items() if k != "type"}
+            )
             self.dists[dist.name] = dist
 
-    def __getitem__(self, item: str) -> Distribution:
+    def __getitem__(self, item: str) -> Distribution[Any]:
         return self.dists[item]
 
-    def __iter__(self) -> Iterator[Distribution]:
+    def __iter__(self) -> Iterator[Distribution[Any]]:
         return iter(self.dists.values())
 
 

@@ -35,9 +35,11 @@ class Workspace:
     """
 
     def __init__(self, spec: T.HS3Spec):
-        self.parameter_collection = ParameterCollection(spec["parameter_points"])
-        self.distribution_set = DistributionSet(spec["distributions"])
-        self.domain_collection = DomainCollection(spec["domains"])
+        self.parameter_collection = ParameterCollection(
+            spec.get("parameter_points", [])
+        )
+        self.distribution_set = DistributionSet(spec.get("distributions", []))
+        self.domain_collection = DomainCollection(spec.get("domains", []))
 
     def model(
         self,

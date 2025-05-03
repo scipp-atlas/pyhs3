@@ -11,6 +11,24 @@ from pyhs3 import Workspace
 from pyhs3.core import boundedscalar
 
 
+def test_nondefault_points_domains_access(datadir):
+    workspace = Workspace(
+        json.loads(datadir.joinpath("nondefault_points_domains.json").read_text())
+    )
+
+    assert workspace.parameter_collection[0].name == "default_values"
+    assert workspace.parameter_collection[1].name == "nondefault_values"
+    assert workspace.parameter_collection["default_values"].name == "default_values"
+    assert (
+        workspace.parameter_collection["nondefault_values"].name == "nondefault_values"
+    )
+
+    assert workspace.domain_collection[0].name == "default_domain"
+    assert workspace.domain_collection[1].name == "nondefault_domain"
+    assert workspace.domain_collection["default_domain"].name == "default_domain"
+    assert workspace.domain_collection["nondefault_domain"].name == "nondefault_domain"
+
+
 def test_rf501_simultaneouspdf(datadir):
     workspace = Workspace(
         json.loads(datadir.joinpath("rf501_simultaneouspdf.json").read_text())

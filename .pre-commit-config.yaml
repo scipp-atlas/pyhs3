@@ -60,7 +60,7 @@ repos:
           - pytest
           - numpy
           - rich
-          - pytensor
+          - "pytensor < 2.20.0" # until we drop python 3.9
           - types-networkx
 
   - repo: https://github.com/codespell-project/codespell

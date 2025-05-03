@@ -55,7 +55,6 @@ repos:
       - id: mypy
         files: ^src
         args: []
-        language_version: python3.9
         exclude: ^tests/test_pdf/rf501_simultaneouspdf.py$
         additional_dependencies:
           - pytest

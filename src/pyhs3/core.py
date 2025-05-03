@@ -1,201 +1,19 @@
 from __future__ import annotations
 
-import json
 import logging
 import math
 from collections import OrderedDict
+from collections.abc import Iterator
+from typing import Any, cast
 
 import networkx as nx
 import numpy as np
 import pytensor.tensor as pt
 from pytensor.graph.basic import graph_inputs
 
-log = logging.getLogger(__name__)
+from pyhs3 import typing as T
 
-json_content = r"""
-{
-  "distributions": [
-    {
-      "coefficients": [
-        "f"
-      ],
-      "extended": false,
-      "name": "model",
-      "summands": [
-        "gx",
-        "px"
-      ],
-      "type": "mixture_dist"
-    },
-    {
-      "mean": "mean",
-      "name": "gx",
-      "sigma": "sigma",
-      "type": "gaussian_dist",
-      "x": "x"
-    },
-    {
-      "mean": "mean2",
-      "name": "px",
-      "sigma": "sigma2",
-      "type": "gaussian_dist",
-      "x": "x"
-    },
-    {
-      "coefficients": [
-        "f_ctl"
-      ],
-      "extended": false,
-      "name": "model_ctl",
-      "summands": [
-        "gx_ctl",
-        "px_ctl"
-      ],
-      "type": "mixture_dist"
-    },
-    {
-      "mean": "mean_ctl",
-      "name": "gx_ctl",
-      "sigma": "sigma",
-      "type": "gaussian_dist",
-      "x": "x"
-    },
-    {
-      "mean": "mean2_ctl",
-      "name": "px_ctl",
-      "sigma": "sigma",
-      "type": "gaussian_dist",
-      "x": "x"
-    }
-  ],
-  "domains": [
-    {
-      "axes": [
-        {
-          "max": 1.0,
-          "min": 0.0,
-          "name": "f"
-        },
-        {
-          "max": 1.0,
-          "min": 0.0,
-          "name": "f_ctl"
-        },
-        {
-          "max": 8.0,
-          "min": -8.0,
-          "name": "mean"
-        },
-        {
-          "max": 3.0,
-          "min": -3.0,
-          "name": "mean2"
-        },
-        {
-          "max": 3.0,
-          "min": -3.0,
-          "name": "mean2_ctl"
-        },
-        {
-          "max": 8.0,
-          "min": -8.0,
-          "name": "mean_ctl"
-        },
-        {
-          "max": 10.0,
-          "min": 0.1,
-          "name": "sigma"
-        },
-        {
-          "max": 10.0,
-          "min": 0.1,
-          "name": "sigma2"
-        },
-        {
-          "max": 8.0,
-          "min": -8.0,
-          "name": "x"
-        }
-      ],
-      "name": "default_domain",
-      "type": "product_domain"
-    }
-  ],
-  "metadata": {
-    "hs3_version": "0.2",
-    "packages": [
-      {
-        "name": "ROOT",
-        "version": "6.32.06"
-      }
-    ]
-  },
-  "misc": {
-    "ROOT_internal": {
-      "combined_distributions": {
-        "simPdf": {
-          "distributions": [
-            "model_ctl",
-            "model"
-          ],
-          "index_cat": "sample",
-          "indices": [
-            1,
-            0
-          ],
-          "labels": [
-            "control",
-            "physics"
-          ]
-        }
-      }
-    }
-  },
-  "parameter_points": [
-    {
-      "name": "default_values",
-      "parameters": [
-        {
-          "name": "f",
-          "value": 0.2
-        },
-        {
-          "name": "x",
-          "value": 0.0
-        },
-        {
-          "name": "mean",
-          "value": 0.0
-        },
-        {
-          "name": "sigma",
-          "value": 0.3
-        },
-        {
-          "name": "mean2",
-          "value": 0.0
-        },
-        {
-          "name": "sigma2",
-          "value": 0.3
-        },
-        {
-          "name": "f_ctl",
-          "value": 0.5
-        },
-        {
-          "name": "mean_ctl",
-          "value": -3.0
-        },
-        {
-          "name": "mean2_ctl",
-          "value": -3.0
-        }
-      ]
-    }
-  ]
-}
-"""
+log = logging.getLogger(__name__)
 
 
 class Workspace:
@@ -203,7 +21,7 @@ class Workspace:
     Manages the overall structure of the model including parameters, domains, and distributions.
 
     Args:
-        data (dict): A dictionary containing model definitions including parameter points, distributions,
+        spec (dict): A dictionary containing model definitions including parameter points, distributions,
             and domains.
 
     Attributes:
@@ -212,10 +30,10 @@ class Workspace:
         domain_collection (DomainCollection): Domain definitions for all parameters.
     """
 
-    def __init__(self, data: dict):
-        self.parameter_collection = ParameterCollection(data["parameter_points"])
-        self.distribution_set = DistributionSet(data["distributions"])
-        self.domain_collection = DomainCollection(data["domains"])
+    def __init__(self, spec: T.HS3Spec):
+        self.parameter_collection = ParameterCollection(spec["parameter_points"])
+        self.distribution_set = DistributionSet(spec["distributions"])
+        self.domain_collection = DomainCollection(spec["domains"])
 
     def model(
         self,
@@ -255,9 +73,9 @@ class Model:
         domains (DomainSet): Domain constraints for parameters.
 
     Attributes:
-        parameters (dict[str, pt.TensorVariable]): Symbolic parameter variables.
+        parameters (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic parameter variables.
         parameterset (ParameterSet): The original set of parameter values.
-        distributions (dict[str, pt.TensorVariable]): Symbolic distribution expressions.
+        distributions (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic distribution expressions.
     """
 
     def __init__(
@@ -276,7 +94,7 @@ class Model:
             )
 
         self.distributions = {}
-        G = nx.DiGraph()
+        G: nx.DiGraph[str] = nx.DiGraph()
         for dist in distributions:
             G.add_node(dist.name, type="distribution")
             for parameter in dist.parameters:
@@ -293,7 +111,7 @@ class Model:
                 {**self.parameters, **self.distributions}
             )
 
-    def pdf(self, name: str, **parametervalues: float):
+    def pdf(self, name: str, **parametervalues: float) -> float:
         """
         Evaluates the probability density function of the specified distribution.
 
@@ -316,7 +134,7 @@ class Model:
             }
         )
 
-    def logpdf(self, name: str, **parametervalues: float):
+    def logpdf(self, name: str, **parametervalues: float) -> np.ndarray:
         """
         Evaluates the natural logarithm of the PDF.
 
@@ -341,8 +159,8 @@ class ParameterCollection:
         sets (OrderedDict): Mapping from parameter set names to ParameterSet objects.
     """
 
-    def __init__(self, parametersets: list):
-        self.sets = OrderedDict()
+    def __init__(self, parametersets: list[T.ParameterPoint]):
+        self.sets: dict[str, ParameterSet] = OrderedDict()
 
         for parameterset_config in parametersets:
             parameterset = ParameterSet(
@@ -369,43 +187,22 @@ class ParameterSet:
         points (dict[str, ParameterPoint]): Mapping of parameter names to ParameterPoint objects.
     """
 
-    def __init__(self, name: str, points: [ParameterPoint]):
+    def __init__(self, name: str, points: list[T.Parameter]):
         self.name = name
 
-        self.points: dict[str, ParameterPoint] = OrderedDict()
+        self.points: dict[str, T.ParameterPoint] = OrderedDict()
 
         for points_config in points:
-            point = ParameterPoint(points_config["name"], points_config["value"])
+            point = T.ParameterPoint(points_config["name"], points_config["value"])
             self.points[point.name] = point
 
-    def __getitem__(self, name: str) -> ParameterPoint:
+    def __getitem__(self, name: str) -> T.ParameterPoint:
         if isinstance(name, str):
             return self.points[name]
         return self.points[list(self.points.keys())[name]]
 
     def __iter__(self):
         return iter(self.points.values())
-
-
-class ParameterPoint:
-    """
-    Represents a single parameter point.
-
-    Attributes:
-        name (str): Name of the parameter.
-        value (float): Value of the parameter.
-    """
-
-    def __init__(self, name: str, value: float):
-        self.name = name
-        self.value = value
-
-
-# @dataclass
-# class ParameterPoint:
-#     name: str
-#     value: float
-#     research python data classes
 
 
 class DomainCollection:
@@ -420,7 +217,7 @@ class DomainCollection:
     """
 
     def __init__(self, domainsets: list[DomainSet]):
-        self.domains = OrderedDict()
+        self.domains: dict[str, DomainSet] = OrderedDict()
 
         for domain_config in domainsets:
             domain = DomainSet(
@@ -447,10 +244,10 @@ class DomainSet:
         domains (OrderedDict): Mapping of parameter names to allowed ranges.
     """
 
-    def __init__(self, axes: [DomainPoint], name: str, type: str):
+    def __init__(self, axes: list[DomainPoint], name: str, type: str):
         self.name = name
         self.type = type
-        self.domains = OrderedDict()
+        self.domains: dict[str, tuple[float, float]] = OrderedDict()
 
         for domain_config in axes:
             domain = DomainPoint(
@@ -458,10 +255,9 @@ class DomainSet:
             )
             self.domains[domain.name] = domain.range
 
-    def __getitem__(self, item: int | str) -> (int, int):
-        if isinstance(item, int):
-            return list(self.domains.keys())[item]
-        return self.domains[item]
+    def __getitem__(self, item: int | str) -> tuple[float, float]:
+        key = list(self.domains.keys())[item] if isinstance(item, int) else item
+        return self.domains[key]
 
 
 class DomainPoint:
@@ -501,11 +297,17 @@ class Distribution:
         parameters (list[str]): initially empty list to be filled with parameter names.
     """
 
-    def __init__(self, name: str, type: str = "Distribution", **kwargs):
+    def __init__(self, name: str, type: str = "Distribution", **kwargs: Any):
         self.name = name
         self.type = type
-        self.parameters = []
+        self.parameters: list[str] = []
         self.kwargs = kwargs
+
+    def expression(
+        self, distributionsandparameters: dict[str, T.TensorVar]
+    ) -> T.TensorVar:
+        msg = f"Distribution type={self.type} is not implemented."
+        raise NotImplementedError(msg)
 
 
 class GaussianDist(Distribution):
@@ -534,7 +336,9 @@ class GaussianDist(Distribution):
         self.x = x
         self.parameters = [mean, sigma, x]
 
-    def expression(self, distributionsandparameters: dict(str, pt.scalar)):
+    def expression(
+        self, distributionsandparameters: dict[str, T.TensorVar]
+    ) -> T.TensorVar:
         """
         Builds a symbolic expression for the Gaussian PDF.
 
@@ -542,7 +346,7 @@ class GaussianDist(Distribution):
             distributionsandparameters (dict): Mapping of names to pytensor variables.
 
         Returns:
-            pt.TensorVariable: Symbolic representation of the Gaussian PDF.
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of the Gaussian PDF.
         """
         # log.info("parameters: ", parameters)
         norm_const = 1.0 / (
@@ -581,7 +385,7 @@ class MixtureDist(Distribution):
     """
 
     def __init__(
-        self, *, name: str, coefficients: [str], extended: bool, summands: [str]
+        self, *, name: str, coefficients: list[str], extended: bool, summands: list[str]
     ):
         super().__init__(name, "mixture_dist")
         self.name = name
@@ -590,7 +394,9 @@ class MixtureDist(Distribution):
         self.summands = summands
         self.parameters = [*coefficients, *summands]
 
-    def expression(self, distributionsandparameters: dict(str, pt.scalar)):
+    def expression(
+        self, distributionsandparameters: dict[str, T.TensorVar]
+    ) -> T.TensorVar:
         """
         Builds a symbolic expression for the mixture distribution.
 
@@ -598,10 +404,10 @@ class MixtureDist(Distribution):
             distributionsandparameters (dict): Mapping of names to pytensor variables.
 
         Returns:
-            pt.TensorVariable: Symbolic representation of the mixture PDF.
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of the mixture PDF.
         """
-        mixturesum = 0
-        coeffsum = 0
+        mixturesum = 0.0
+        coeffsum = 0.0
         i = 0
         for coeff in self.coefficients:
             coeffsum += distributionsandparameters[coeff]
@@ -613,7 +419,10 @@ class MixtureDist(Distribution):
         return mixturesum
 
 
-registered_distributions = {"gaussian_dist": GaussianDist, "mixture_dist": MixtureDist}
+registered_distributions: dict[str, type[Distribution]] = {
+    "gaussian_dist": GaussianDist,
+    "mixture_dist": MixtureDist,
+}
 
 
 class DistributionSet:
@@ -627,23 +436,22 @@ class DistributionSet:
         dists (dict): Mapping of distribution names to Distribution objects.
     """
 
-    def __init__(self, distributions: list[dict[str, str]]):
-        self.dists = {}
+    def __init__(self, distributions: list[dict[str, str]]) -> None:
+        self.dists: dict[str, Distribution] = {}
         for dist_config in distributions:
             dist_type = dist_config.pop("type")
             the_dist = registered_distributions.get(dist_type, Distribution)
             dist = the_dist(**dist_config)
-
             self.dists[dist.name] = dist
 
     def __getitem__(self, item: str) -> Distribution:
         return self.dists[item]
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Distribution]:
         return iter(self.dists.values())
 
 
-def boundedscalar(name: str, domain: tuple) -> pt.scalar:
+def boundedscalar(name: str, domain: tuple[float, float]) -> T.TensorVar:
     """
     Creates a pytensor scalar constrained within a given domain.
 
@@ -652,42 +460,11 @@ def boundedscalar(name: str, domain: tuple) -> pt.scalar:
         domain (tuple): Tuple specifying (min, max) range.
 
     Returns:
-        pt.scalar: A pytensor scalar clipped to the domain range.
+        pytensor.tensor.variable.TensorVariable: A pytensor scalar clipped to the domain range.
     """
     x = pt.scalar(name)
 
     i = domain[0]
     f = domain[1]
 
-    return pt.clip(x, i, f)
-
-
-myworkspace = Workspace(json.loads(json_content))
-mymodel = myworkspace.model(
-    parameter_point=myworkspace.parameter_collection["default_values"],
-    domain=myworkspace.domain_collection["default_domain"],
-)
-
-
-log.info("f: %f", mymodel.parameterset["f"].value)
-
-physicspdfval = mymodel.pdf(
-    "model",
-    x=mymodel.parameterset["x"].value,
-    f=mymodel.parameterset["f"].value,
-    mean=mymodel.parameterset["mean"].value,
-    sigma=mymodel.parameterset["sigma"].value,
-    mean2=mymodel.parameterset["mean2"].value,
-    sigma2=mymodel.parameterset["sigma2"].value,
-)
-physicspdfvalctl = mymodel.pdf(
-    "model_ctl",
-    x=mymodel.parameterset["x"].value,
-    f_ctl=mymodel.parameterset["f_ctl"].value,
-    mean_ctl=mymodel.parameterset["mean_ctl"].value,
-    mean2_ctl=mymodel.parameterset["mean2_ctl"].value,
-    sigma=mymodel.parameterset["sigma"].value,
-)
-
-log.info(physicspdfval)
-log.info(physicspdfvalctl)
+    return cast(T.TensorVar, pt.clip(x, i, f))

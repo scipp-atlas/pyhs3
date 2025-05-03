@@ -1,0 +1,18 @@
+from __future__ import annotations
+
+from typing import TypedDict
+
+
+class CombinedDistributions(TypedDict):
+    distributions: list[str]
+    index_cat: str
+    indices: list[int]
+    labels: list[str]
+
+
+class ROOTInternal(TypedDict):
+    combined_distributions: dict[str, CombinedDistributions]
+
+
+class Misc(TypedDict):
+    ROOT_internal: ROOTInternal

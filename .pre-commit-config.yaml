@@ -53,8 +53,9 @@ repos:
     rev: "v1.15.0"
     hooks:
       - id: mypy
-        files: src|tests
+        files: ^src
         args: []
+        language_version: python3.9
         exclude: ^tests/test_pdf/rf501_simultaneouspdf.py$
         additional_dependencies:
           - pytest

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import logging.config
+from logging import LogRecord
 from pathlib import Path
 
 from rich.console import Console
@@ -9,12 +10,12 @@ from rich.logging import RichHandler
 
 
 class AppFilter(logging.Filter):
-    def filter(self, record):
+    def filter(self, record: LogRecord) -> bool:
         record.filenameStem = Path(record.filename).stem
         return True
 
 
-def rich_handler_factory():
+def rich_handler_factory() -> RichHandler:
     return RichHandler(
         console=Console(width=160),
         rich_tracebacks=True,

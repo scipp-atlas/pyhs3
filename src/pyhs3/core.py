@@ -21,6 +21,10 @@ log = logging.getLogger(__name__)
 
 
 class Workspace:
+    """
+    Workspace
+    """
+
     def __init__(self, spec: T.HS3Spec):
         """
         Manages the overall structure of the model including parameters, domains, and distributions.
@@ -79,6 +83,10 @@ class Workspace:
 
 
 class Model:
+    """
+    Model
+    """
+
     def __init__(
         self,
         *,
@@ -166,6 +174,10 @@ class Model:
 
 
 class ParameterCollection:
+    """
+    ParameterCollection
+    """
+
     def __init__(self, parametersets: list[T.ParameterPoint]):
         """
         A collection of named parameter sets.
@@ -190,6 +202,10 @@ class ParameterCollection:
 
 
 class ParameterSet:
+    """
+    ParameterSet
+    """
+
     def __init__(self, name: str, points: list[T.Parameter]):
         """
         Represents a single named set of parameter values.
@@ -233,6 +249,10 @@ class ParameterPoint:
 
 
 class DomainCollection:
+    """
+    DomainCollection
+    """
+
     def __init__(self, domainsets: list[T.Domain]):
         """
         Collection of named domain sets.
@@ -278,10 +298,17 @@ class DomainPoint:
         self.range = (self.min, self.max)
 
     def to_dict(self) -> T.Axis:
+        """
+        to dictionary
+        """
         return {"name": self.name, "min": self.min, "max": self.max}
 
 
 class DomainSet:
+    """
+    DomainSet
+    """
+
     def __init__(self, axes: list[T.Axis], name: str, type: str):
         """
         Represents a set of valid domains for parameters.
@@ -314,6 +341,10 @@ DistConfig = TypeVar("DistConfig", bound=T.Distribution)
 
 
 class Distribution(Generic[DistConfig]):
+    """
+    Distribution
+    """
+
     def __init__(
         self,
         *,
@@ -342,6 +373,9 @@ class Distribution(Generic[DistConfig]):
     def expression(
         self, distributionsandparameters: dict[str, T.TensorVar]
     ) -> T.TensorVar:
+        """
+        Unimplemented
+        """
         msg = f"Distribution type={self.type} is not implemented."
         raise NotImplementedError(msg)
 
@@ -363,24 +397,27 @@ class Distribution(Generic[DistConfig]):
 
 class GaussianDist(Distribution[TD.GaussianDistribution]):
     """
-    Subclass of Distribution representing a Gaussian distribution.
-
-    Args:
-        name (str): Name of the distribution.
-        mean (str): Parameter name for the mean.
-        sigma (str): Parameter name for the standard deviation.
-        x (str): Input variable name.
-
-    Attributes:
-        name (str): Name of the distribution.
-        mean (str): Parameter name for the mean.
-        sigma (str): Parameter name for the standard deviation.
-        x (str): Input variable name.
-        parameters (list[str]): list containing mean, sigma, and x.
+    GaussianDist
     """
 
     # need a way for the distribution to get the scalar function .parameter from parameterset
     def __init__(self, *, name: str, mean: str, sigma: str, x: str):
+        """
+        Subclass of Distribution representing a Gaussian distribution.
+
+        Args:
+            name (str): Name of the distribution.
+            mean (str): Parameter name for the mean.
+            sigma (str): Parameter name for the standard deviation.
+            x (str): Input variable name.
+
+        Attributes:
+            name (str): Name of the distribution.
+            mean (str): Parameter name for the mean.
+            sigma (str): Parameter name for the standard deviation.
+            x (str): Input variable name.
+            parameters (list[str]): list containing mean, sigma, and x.
+        """
         super().__init__(name=name, type="gaussian_dist", parameters=[mean, sigma, x])
         self.mean = mean
         self.sigma = sigma
@@ -435,6 +472,10 @@ class GaussianDist(Distribution[TD.GaussianDistribution]):
 
 
 class MixtureDist(Distribution[TD.MixtureDistribution]):
+    """
+    MixtureDist
+    """
+
     def __init__(
         self, *, name: str, coefficients: list[str], extended: bool, summands: list[str]
     ):
@@ -513,6 +554,10 @@ registered_distributions: dict[str, type[Distribution[Any]]] = {
 
 
 class DistributionSet:
+    """
+    DistributionSet
+    """
+
     def __init__(self, distributions: list[T.Distribution]) -> None:
         """
         Collection of distributions.

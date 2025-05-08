@@ -116,19 +116,20 @@ class Model:
             )
 
         self.distributions: dict[str, T.TensorVar] = {}
-        G: nx.DiGraph[str] = nx.DiGraph()
+        graph: nx.DiGraph[str] = nx.DiGraph()
         for dist in distributions:
-            G.add_node(dist.name, type="distribution")
+            graph.add_node(dist.name, type="distribution")
             for parameter in dist.parameters:
                 if not (
-                    parameter in G and G.nodes[parameter]["type"] == "distribution"
+                    parameter in graph
+                    and graph.nodes[parameter]["type"] == "distribution"
                 ):
-                    G.add_node(parameter, type="parameter")
+                    graph.add_node(parameter, type="parameter")
 
-                G.add_edge(parameter, dist.name)
+                graph.add_edge(parameter, dist.name)
 
-        for node in nx.topological_sort(G):
-            if G.nodes[node]["type"] != "distribution":
+        for node in nx.topological_sort(graph):
+            if graph.nodes[node]["type"] != "distribution":
                 continue
             self.distributions[node] = distributions[node].expression(
                 {**self.parameters, **self.distributions}
@@ -309,20 +310,20 @@ class DomainSet:
     DomainSet
     """
 
-    def __init__(self, axes: list[T.Axis], name: str, type: str):
+    def __init__(self, axes: list[T.Axis], name: str, dtype: str):
         """
         Represents a set of valid domains for parameters.
 
         Args:
             axes (list): List of domain configurations.
             name (str): Name of the domain set.
-            type (str): Type of the domain.
+            dtype (str): Type of the domain.
 
         Attributes:
             domains (OrderedDict): Mapping of parameter names to allowed ranges.
         """
         self.name = name
-        self.type = type
+        self.type = dtype
         self.domains: dict[str, tuple[float, float]] = OrderedDict()
 
         for domain_config in axes:
@@ -336,11 +337,11 @@ class DomainSet:
         return self.domains[key]
 
 
-DistType = TypeVar("DistType", bound="Distribution[T.Distribution]")
-DistConfig = TypeVar("DistConfig", bound=T.Distribution)
+DistT = TypeVar("DistT", bound="Distribution[T.Distribution]")
+DistConfigT = TypeVar("DistConfigT", bound=T.Distribution)
 
 
-class Distribution(Generic[DistConfig]):
+class Distribution(Generic[DistConfigT]):
     """
     Distribution
     """
@@ -349,7 +350,7 @@ class Distribution(Generic[DistConfig]):
         self,
         *,
         name: str,
-        type: str = "Distribution",
+        dtype: str = "Distribution",
         parameters: list[str] | None = None,
         **kwargs: Any,
     ):
@@ -358,21 +359,19 @@ class Distribution(Generic[DistConfig]):
 
         Args:
             name (str): Name of the distribution.
-            type (str): Type identifier.
+            dtype (str): Type identifier.
 
         Attributes:
             name (str): Name of the distribution.
-            type (str): Type identifier.
+            dtype (str): Type identifier.
             parameters (list[str]): initially empty list to be filled with parameter names.
         """
         self.name = name
-        self.type = type
+        self.type = dtype
         self.parameters = parameters or []
         self.kwargs = kwargs
 
-    def expression(
-        self, distributionsandparameters: dict[str, T.TensorVar]
-    ) -> T.TensorVar:
+    def expression(self, _: dict[str, T.TensorVar]) -> T.TensorVar:
         """
         Unimplemented
         """
@@ -381,8 +380,8 @@ class Distribution(Generic[DistConfig]):
 
     @classmethod
     def from_dict(
-        cls: type[Distribution[DistConfig]], config: DistConfig
-    ) -> Distribution[DistConfig]:
+        cls: type[Distribution[DistConfigT]], config: DistConfigT
+    ) -> Distribution[DistConfigT]:
         """
         Factory method to create a distribution instance from a dictionary.
 
@@ -418,7 +417,7 @@ class GaussianDist(Distribution[TD.GaussianDistribution]):
             x (str): Input variable name.
             parameters (list[str]): list containing mean, sigma, and x.
         """
-        super().__init__(name=name, type="gaussian_dist", parameters=[mean, sigma, x])
+        super().__init__(name=name, dtype="gaussian_dist", parameters=[mean, sigma, x])
         self.mean = mean
         self.sigma = sigma
         self.x = x
@@ -496,7 +495,7 @@ class MixtureDist(Distribution[TD.MixtureDistribution]):
             parameters (list[str]): List of coefficients and summands
         """
         super().__init__(
-            name=name, type="mixture_dist", parameters=[*coefficients, *summands]
+            name=name, dtype="mixture_dist", parameters=[*coefficients, *summands]
         )
         self.name = name
         self.coefficients = coefficients

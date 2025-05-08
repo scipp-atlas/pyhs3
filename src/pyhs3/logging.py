@@ -10,6 +10,10 @@ from rich.logging import RichHandler
 
 
 class AppFilter(logging.Filter):
+    """
+    AppFilter
+    """
+
     def filter(self, record: LogRecord) -> bool:
         record.filenameStem = Path(record.filename).stem
         return True

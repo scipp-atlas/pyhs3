@@ -21,20 +21,20 @@ log = logging.getLogger(__name__)
 
 
 class Workspace:
-    """
-    Manages the overall structure of the model including parameters, domains, and distributions.
-
-    Args:
-        spec (dict): A dictionary containing model definitions including parameter points, distributions,
-            and domains.
-
-    Attributes:
-        parameter_collection (ParameterCollection): Set of named parameter points.
-        distribution_set (DistributionSet): All distributions used in the workspace.
-        domain_collection (DomainCollection): Domain definitions for all parameters.
-    """
-
     def __init__(self, spec: T.HS3Spec):
+        """
+        Manages the overall structure of the model including parameters, domains, and distributions.
+
+        Args:
+            spec (dict): A dictionary containing model definitions including parameter points, distributions,
+                and domains.
+
+        Attributes:
+            parameter_collection (ParameterCollection): Set of named parameter points.
+            distribution_set (DistributionSet): All distributions used in the workspace.
+            domain_collection (DomainCollection): Domain definitions for all parameters.
+        """
+
         self.parameter_collection = ParameterCollection(
             spec.get("parameter_points", [])
         )
@@ -79,20 +79,6 @@ class Workspace:
 
 
 class Model:
-    """
-    Represents a probabilistic model composed of parameters, domains, and distributions.
-
-    Args:
-        parameterset (ParameterSet): The parameter set used in the model.
-        distributions (DistributionSet): Set of distributions to include.
-        domains (DomainSet): Domain constraints for parameters.
-
-    Attributes:
-        parameters (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic parameter variables.
-        parameterset (ParameterSet): The original set of parameter values.
-        distributions (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic distribution expressions.
-    """
-
     def __init__(
         self,
         *,
@@ -100,6 +86,19 @@ class Model:
         distributions: DistributionSet,
         domains: DomainSet,
     ):
+        """
+        Represents a probabilistic model composed of parameters, domains, and distributions.
+
+        Args:
+            parameterset (ParameterSet): The parameter set used in the model.
+            distributions (DistributionSet): Set of distributions to include.
+            domains (DomainSet): Domain constraints for parameters.
+
+        Attributes:
+            parameters (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic parameter variables.
+            parameterset (ParameterSet): The original set of parameter values.
+            distributions (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic distribution expressions.
+        """
         self.parameters = {}
         self.parameterset = parameterset
 
@@ -167,17 +166,16 @@ class Model:
 
 
 class ParameterCollection:
-    """
-    A collection of named parameter sets.
-
-    Args:
-        parametersets (list): List of parameterset configurations.
-
-    Attributes:
-        sets (OrderedDict): Mapping from parameter set names to ParameterSet objects.
-    """
-
     def __init__(self, parametersets: list[T.ParameterPoint]):
+        """
+        A collection of named parameter sets.
+
+        Args:
+            parametersets (list): List of parameterset configurations.
+
+        Attributes:
+            sets (OrderedDict): Mapping from parameter set names to ParameterSet objects.
+        """
         self.sets: dict[str, ParameterSet] = OrderedDict()
 
         for parameterset_config in parametersets:
@@ -192,19 +190,18 @@ class ParameterCollection:
 
 
 class ParameterSet:
-    """
-    Represents a single named set of parameter values.
-
-    Args:
-        name (str): Name of the parameter set.
-        points (list): List of parameter point configurations.
-
-    Attributes:
-        name (str): Name of the parameter set.
-        points (dict[str, ParameterPoint]): Mapping of parameter names to ParameterPoint objects.
-    """
-
     def __init__(self, name: str, points: list[T.Parameter]):
+        """
+        Represents a single named set of parameter values.
+
+        Args:
+            name (str): Name of the parameter set.
+            points (list): List of parameter point configurations.
+
+        Attributes:
+            name (str): Name of the parameter set.
+            points (dict[str, ParameterPoint]): Mapping of parameter names to ParameterPoint objects.
+        """
         self.name = name
 
         self.points: dict[str, ParameterPoint] = OrderedDict()
@@ -236,17 +233,17 @@ class ParameterPoint:
 
 
 class DomainCollection:
-    """
-    Collection of named domain sets.
-
-    Args:
-        domainsets (list): List of domain set configurations.
-
-    Attributes:
-        domains (OrderedDict): Mapping of domain names to DomainSet objects.
-    """
-
     def __init__(self, domainsets: list[T.Domain]):
+        """
+        Collection of named domain sets.
+
+        Args:
+            domainsets (list): List of domain set configurations.
+
+        Attributes:
+            domains (OrderedDict): Mapping of domain names to DomainSet objects.
+        """
+
         self.domains: dict[str, DomainSet] = OrderedDict()
 
         for domain_config in domainsets:
@@ -285,19 +282,18 @@ class DomainPoint:
 
 
 class DomainSet:
-    """
-    Represents a set of valid domains for parameters.
-
-    Args:
-        axes (list): List of domain configurations.
-        name (str): Name of the domain set.
-        type (str): Type of the domain.
-
-    Attributes:
-        domains (OrderedDict): Mapping of parameter names to allowed ranges.
-    """
-
     def __init__(self, axes: list[T.Axis], name: str, type: str):
+        """
+        Represents a set of valid domains for parameters.
+
+        Args:
+            axes (list): List of domain configurations.
+            name (str): Name of the domain set.
+            type (str): Type of the domain.
+
+        Attributes:
+            domains (OrderedDict): Mapping of parameter names to allowed ranges.
+        """
         self.name = name
         self.type = type
         self.domains: dict[str, tuple[float, float]] = OrderedDict()
@@ -318,19 +314,6 @@ DistConfig = TypeVar("DistConfig", bound=T.Distribution)
 
 
 class Distribution(Generic[DistConfig]):
-    """
-    Base class for distributions.
-
-    Args:
-        name (str): Name of the distribution.
-        type (str): Type identifier.
-
-    Attributes:
-        name (str): Name of the distribution.
-        type (str): Type identifier.
-        parameters (list[str]): initially empty list to be filled with parameter names.
-    """
-
     def __init__(
         self,
         *,
@@ -339,6 +322,18 @@ class Distribution(Generic[DistConfig]):
         parameters: list[str] | None = None,
         **kwargs: Any,
     ):
+        """
+        Base class for distributions.
+
+        Args:
+            name (str): Name of the distribution.
+            type (str): Type identifier.
+
+        Attributes:
+            name (str): Name of the distribution.
+            type (str): Type identifier.
+            parameters (list[str]): initially empty list to be filled with parameter names.
+        """
         self.name = name
         self.type = type
         self.parameters = parameters or []
@@ -440,26 +435,25 @@ class GaussianDist(Distribution[TD.GaussianDistribution]):
 
 
 class MixtureDist(Distribution[TD.MixtureDistribution]):
-    """
-    Subclass of Distribution representing a mixture of distributions
-
-    Args:
-        name (str): Name of the distribution.
-        coefficients (list): Coefficient parameter names.
-        extended (bool): Whether the distribution is extended.
-        summands (list): List of component distribution names.
-
-    Attributes:
-        name (str): Name of the distribution.
-        coefficients (list[str]): Coefficient parameter names.
-        extended (bool): Whether the distribution is extended.
-        summands (list[str]): List of component distribution names.
-        parameters (list[str]): List of coefficients and summands
-    """
-
     def __init__(
         self, *, name: str, coefficients: list[str], extended: bool, summands: list[str]
     ):
+        """
+        Subclass of Distribution representing a mixture of distributions
+
+        Args:
+            name (str): Name of the distribution.
+            coefficients (list): Coefficient parameter names.
+            extended (bool): Whether the distribution is extended.
+            summands (list): List of component distribution names.
+
+        Attributes:
+            name (str): Name of the distribution.
+            coefficients (list[str]): Coefficient parameter names.
+            extended (bool): Whether the distribution is extended.
+            summands (list[str]): List of component distribution names.
+            parameters (list[str]): List of coefficients and summands
+        """
         super().__init__(
             name=name, type="mixture_dist", parameters=[*coefficients, *summands]
         )
@@ -519,17 +513,16 @@ registered_distributions: dict[str, type[Distribution[Any]]] = {
 
 
 class DistributionSet:
-    """
-    Collection of distributions.
-
-    Args:
-        distributions (list[dict[str, str]]): List of distribution configurations.
-
-    Attributes:
-        dists (dict): Mapping of distribution names to Distribution objects.
-    """
-
     def __init__(self, distributions: list[T.Distribution]) -> None:
+        """
+        Collection of distributions.
+
+        Args:
+            distributions (list[dict[str, str]]): List of distribution configurations.
+
+        Attributes:
+            dists (dict): Mapping of distribution names to Distribution objects.
+        """
         self.dists: dict[str, Distribution[Any]] = {}
         for dist_config in distributions:
             dist_type = dist_config["type"]

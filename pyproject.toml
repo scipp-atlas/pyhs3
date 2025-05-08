@@ -31,6 +31,8 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
+    'rich',
+    'networkx',
     'pytensor',
     'typing-extensions; python_version < "3.11"',
 ]

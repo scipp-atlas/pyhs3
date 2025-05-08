@@ -7,6 +7,6 @@ pyhs3: pure-Python HS3 implementation with tensors and autodiff
 from __future__ import annotations
 
 from pyhs3._version import version as __version__
-from pyhs3.core import Workspace
+from pyhs3.core import Model, Workspace
 
-__all__ = ["Workspace", "__version__"]
+__all__ = ["Model", "Workspace", "__version__"]

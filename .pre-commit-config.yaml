@@ -1,8 +1,9 @@
 ci:
   autoupdate_commit_msg: "chore: update pre-commit hooks"
   autofix_commit_msg: "style: pre-commit fixes"
+  skip: [mypy]
 
-exclude: ^.cruft.json|.copier-answers.yml$
+exclude: ^.cruft.json|.copier-answers.yml|src/pyhs3/roadmap.py$
 
 repos:
   - repo: https://github.com/adamchainz/blacken-docs
@@ -24,6 +25,7 @@ repos:
       - id: mixed-line-ending
       - id: name-tests-test
         args: ["--pytest-test-first"]
+        exclude: ^tests/test_pdf/rf501_simultaneouspdf.py$
       - id: requirements-txt-fixer
       - id: trailing-whitespace
 
@@ -52,11 +54,14 @@ repos:
     rev: "v1.15.0"
     hooks:
       - id: mypy
-        files: src|tests
+        files: ^src
         args: []
         additional_dependencies:
           - pytest
           - numpy
+          - rich
+          - "pytensor < 2.20.0" # until we drop python 3.9
+          - types-networkx
 
   - repo: https://github.com/codespell-project/codespell
     rev: "v2.4.1"

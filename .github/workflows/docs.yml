@@ -45,9 +45,7 @@ jobs:
           sudo apt-get install ./pandoc-*amd64.deb
 
       - name: Check docstrings
-        run: |
-          # Group 1 is related to docstrings
-          pydocstyle --select D1 src/pyhs3/
+        run: pydocstyle src/pyhs3/
 
       - name: Check for broken links
         continue-on-error: true # until we get a conda-forge release

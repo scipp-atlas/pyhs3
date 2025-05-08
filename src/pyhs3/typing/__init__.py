@@ -1,3 +1,7 @@
+"""
+typing
+"""
+
 from __future__ import annotations
 
 from typing import Any, TypedDict
@@ -15,6 +19,10 @@ from pyhs3.typing_compat import NotRequired, TypeAlias
 
 
 class HS3Spec(TypedDict):
+    """
+    HS3Spec
+    """
+
     distributions: NotRequired[list[Distribution]]
     functions: NotRequired[list[dict[str, Any]]]
     data: NotRequired[list[dict[str, Any]]]

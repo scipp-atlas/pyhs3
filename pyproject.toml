@@ -173,3 +173,11 @@ messages_control.disable = [
   "missing-function-docstring",
   "wrong-import-position",
 ]
+
+
+[tool.pydocstyle]
+select = ["D1"]
+add_ignore = [
+  "D100",
+  "D105",
+]

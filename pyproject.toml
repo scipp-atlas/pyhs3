@@ -35,7 +35,8 @@ dependencies = [
     'networkx',
     'pytensor',
     'typing-extensions; python_version < "3.11"',
-    'setuptools >= 59' # https://github.com/pymc-devs/pytensor/issues/481
+    'setuptools >= 59', # https://github.com/pymc-devs/pytensor/issues/481
+    'numpy < 2; python_version < "3.10"', # https://github.com/pymc-devs/pytensor/issues/827
 ]
 
 [project.optional-dependencies]
@@ -85,7 +86,6 @@ xfail_strict = true
 filterwarnings = [
     "error",
     'ignore:Use shutil.which instead of find_executable:DeprecationWarning',  # pytensor in py3.9
-    'ignore:`np.obj2sctype` was removed in the NumPy 2.0 release. Use `np.dtype(obj).type` instead.:AttributeError', # pytensor in py3.9
 ]
 log_cli_level = "INFO"
 testpaths = [

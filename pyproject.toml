@@ -35,6 +35,7 @@ dependencies = [
     'networkx',
     'pytensor',
     'typing-extensions; python_version < "3.11"',
+    'setuptools >= 59' # https://github.com/pymc-devs/pytensor/issues/481
 ]
 
 [project.optional-dependencies]
@@ -75,7 +76,7 @@ build.hooks.vcs.version-file = "src/pyhs3/_version.py"
 [tool.hatch.envs.default]
 features = ["test"]
 scripts.test = "pytest {args}"
-
+installer = "uv"
 
 [tool.pytest.ini_options]
 minversion = "6.0"

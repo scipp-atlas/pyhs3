@@ -1,0 +1,163 @@
+{
+  "distributions": [
+    {
+      "coefficients": ["f"],
+      "extended": false,
+      "name": "model",
+      "summands": ["gx", "px"],
+      "type": "mixture_dist"
+    },
+    {
+      "mean": "mean",
+      "name": "gx",
+      "sigma": "sigma",
+      "type": "gaussian_dist",
+      "x": "x"
+    },
+    {
+      "mean": "mean2",
+      "name": "px",
+      "sigma": "sigma2",
+      "type": "gaussian_dist",
+      "x": "x"
+    },
+    {
+      "coefficients": ["f_ctl"],
+      "extended": false,
+      "name": "model_ctl",
+      "summands": ["gx_ctl", "px_ctl"],
+      "type": "mixture_dist"
+    },
+    {
+      "mean": "mean_ctl",
+      "name": "gx_ctl",
+      "sigma": "sigma",
+      "type": "gaussian_dist",
+      "x": "x"
+    },
+    {
+      "mean": "mean2_ctl",
+      "name": "px_ctl",
+      "sigma": "sigma",
+      "type": "gaussian_dist",
+      "x": "x"
+    }
+  ],
+  "domains": [
+    {
+      "axes": [
+        {
+          "max": 1.0,
+          "min": 0.0,
+          "name": "f"
+        },
+        {
+          "max": 1.0,
+          "min": 0.0,
+          "name": "f_ctl"
+        },
+        {
+          "max": 8.0,
+          "min": -8.0,
+          "name": "mean"
+        },
+        {
+          "max": 3.0,
+          "min": -3.0,
+          "name": "mean2"
+        },
+        {
+          "max": 3.0,
+          "min": -3.0,
+          "name": "mean2_ctl"
+        },
+        {
+          "max": 8.0,
+          "min": -8.0,
+          "name": "mean_ctl"
+        },
+        {
+          "max": 10.0,
+          "min": 0.1,
+          "name": "sigma"
+        },
+        {
+          "max": 10.0,
+          "min": 0.1,
+          "name": "sigma2"
+        },
+        {
+          "max": 8.0,
+          "min": -8.0,
+          "name": "x"
+        }
+      ],
+      "name": "default_domain",
+      "type": "product_domain"
+    }
+  ],
+  "metadata": {
+    "hs3_version": "0.2",
+    "packages": [
+      {
+        "name": "ROOT",
+        "version": "6.32.06"
+      }
+    ]
+  },
+  "misc": {
+    "ROOT_internal": {
+      "combined_distributions": {
+        "simPdf": {
+          "distributions": ["model_ctl", "model"],
+          "index_cat": "sample",
+          "indices": [1, 0],
+          "labels": ["control", "physics"]
+        }
+      }
+    }
+  },
+  "parameter_points": [
+    {
+      "name": "default_values",
+      "parameters": [
+        {
+          "name": "f",
+          "value": 0.2
+        },
+        {
+          "name": "x",
+          "value": 0.0
+        },
+        {
+          "name": "mean",
+          "value": 0.0
+        },
+        {
+          "name": "sigma",
+          "value": 0.3
+        },
+        {
+          "name": "mean2",
+          "value": 0.0
+        },
+        {
+          "name": "sigma2",
+          "value": 0.3
+        },
+        {
+          "name": "f_ctl",
+          "value": 0.5
+        },
+        {
+          "name": "mean_ctl",
+          "value": -3.0
+        },
+        {
+          "name": "mean2_ctl",
+          "value": -3.0
+        }
+      ]
+    }
+  ]
+}

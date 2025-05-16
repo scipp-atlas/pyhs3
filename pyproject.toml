@@ -30,7 +30,14 @@ classifiers = [
   "Typing :: Typed",
 ]
 dynamic = ["version"]
-dependencies = []
+dependencies = [
+    'rich',
+    'networkx',
+    'pytensor',
+    'typing-extensions; python_version < "3.11"',
+    'setuptools >= 59', # https://github.com/pymc-devs/pytensor/issues/481
+    'numpy < 2; python_version < "3.10"', # https://github.com/pymc-devs/pytensor/issues/827
+]
 
 [project.optional-dependencies]
 test = [
@@ -70,14 +77,15 @@ build.hooks.vcs.version-file = "src/pyhs3/_version.py"
 [tool.hatch.envs.default]
 features = ["test"]
 scripts.test = "pytest {args}"
-
+installer = "uv"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
 addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
 xfail_strict = true
 filterwarnings = [
-  "error",
+    "error",
+    'ignore:Use shutil.which instead of find_executable:DeprecationWarning',  # pytensor in py3.9
 ]
 log_cli_level = "INFO"
 testpaths = [
@@ -150,8 +158,7 @@ ignore = [
   "ISC001",   # Conflicts with formatter
 ]
 isort.required-imports = ["from __future__ import annotations"]
-# Uncomment if using a _compat.typing backport
-# typing-modules = ["pyhs3._compat.typing"]
+typing-modules = ["pyhs3.typing_compat"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["T20"]
@@ -170,4 +177,12 @@ messages_control.disable = [
   "missing-module-docstring",
   "missing-function-docstring",
   "wrong-import-position",
+]
+
+
+[tool.pydocstyle]
+select = ["D1"]
+add_ignore = [
+  "D100",
+  "D105",
 ]

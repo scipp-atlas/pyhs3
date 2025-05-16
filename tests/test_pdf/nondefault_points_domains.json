@@ -1,0 +1,51 @@
+{
+  "domains": [
+    {
+      "axes": [
+        {
+          "max": 1.0,
+          "min": 0.0,
+          "name": "x"
+        }
+      ],
+      "name": "default_domain",
+      "type": "product_domain"
+    },
+    {
+      "axes": [
+        {
+          "max": 5.0,
+          "min": 1.0,
+          "name": "x"
+        }
+      ],
+      "name": "nondefault_domain",
+      "type": "product_domain"
+    }
+  ],
+  "metadata": {
+    "hs3_version": "0.2",
+    "packages": []
+  },
+  "misc": {},
+  "parameter_points": [
+    {
+      "name": "default_values",
+      "parameters": [
+        {
+          "name": "x",
+          "value": 0.0
+        }
+      ]
+    },
+    {
+      "name": "nondefault_values",
+      "parameters": [
+        {
+          "name": "x",
+          "value": 1.0
+        }
+      ]
+    }
+  ]
+}

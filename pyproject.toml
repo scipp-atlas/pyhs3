@@ -83,7 +83,8 @@ minversion = "6.0"
 addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
 xfail_strict = true
 filterwarnings = [
-  "error",
+    "error",
+    'ignore:Use shutil.which instead of find_executable:DeprecationWarning',  # pytensor in py3.9
 ]
 log_cli_level = "INFO"
 testpaths = [

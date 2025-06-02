@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Generic, TypeVar, cast
 
 import networkx as nx
+import rustworkx as rx
 import numpy as np
 import numpy.typing as npt
 import pytensor.tensor as pt
@@ -116,22 +117,32 @@ class Model:
             )
 
         self.distributions: dict[str, T.TensorVar] = {}
-        graph: nx.DiGraph[str] = nx.DiGraph()
+
+        graph = rx.PyDiGraph()
+        nodes: dict[str, int] = {}
         for dist in distributions:
-            graph.add_node(dist.name, type="distribution")
-            for parameter in dist.parameters:
-                if not (
-                    parameter in graph
-                    and graph.nodes[parameter]["type"] == "distribution"
-                ):
-                    graph.add_node(parameter, type="parameter")
+            if dist.name not in nodes:
+                idx = graph.add_node({"type": "distribution", "name": dist.name})
+                nodes[dist.name] = idx
+            else:
+                idx = nodes[dist.name]
+                graph[idx] = {"type": "distribution", "name": dist.name}
+            for param in dist.parameters:
+                p_idx = nodes.get(param)
+                if p_idx is None or graph[p_idx]["type"] == "distribution":
+                    if p_idx is None:
+                        p_idx = graph.add_node({"type": "parameter", "name": param})
+                        nodes[param] = p_idx
+                    else:
+                        graph[p_idx] = {"type": "parameter", "name": param}
+                graph.add_edge(p_idx, idx, None)
 
-                graph.add_edge(parameter, dist.name)
-
-        for node in nx.topological_sort(graph):
-            if graph.nodes[node]["type"] != "distribution":
+        for node_idx in rx.topological_sort(graph):
+            node_data = graph[node_idx]
+            if node_data["type"] != "distribution":
                 continue
-            self.distributions[node] = distributions[node].expression(
+            dist_name = node_data["name"]
+            self.distributions[dist_name] = distributions[dist_name].expression(
                 {**self.parameters, **self.distributions}
             )
 

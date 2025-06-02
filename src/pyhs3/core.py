@@ -543,7 +543,7 @@ class MixtureDist(Distribution[TD.MixtureDistribution]):
                 * distributionsandparameters[self.summands[i]]
             )
         mixturesum += (1 - coeffsum) * distributionsandparameters[self.summands[i]]
-        return mixturesum
+        return cast(T.TensorVar, mixturesum)
 
 
 registered_distributions: dict[str, type[Distribution[Any]]] = {

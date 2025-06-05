@@ -7,11 +7,10 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, Callable, Generic, TypeVar, cast
 
-import networkx as nx
-import rustworkx as rx
 import numpy as np
 import numpy.typing as npt
 import pytensor.tensor as pt
+import rustworkx as rx
 from pytensor.compile.function import function
 from pytensor.graph.basic import graph_inputs
 

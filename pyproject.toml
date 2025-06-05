@@ -32,7 +32,7 @@ classifiers = [
 dynamic = ["version"]
 dependencies = [
     'rich',
-    'networkx',
+    'rustworkx',
     'pytensor',
     'typing-extensions; python_version < "3.11"',
     'setuptools >= 59', # https://github.com/pymc-devs/pytensor/issues/481

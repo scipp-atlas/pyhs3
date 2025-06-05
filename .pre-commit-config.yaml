@@ -61,7 +61,7 @@ repos:
           - numpy
           - rich
           - "pytensor < 2.20.0" # until we drop python 3.9
-          - types-networkx
+          - rustworkx
 
   - repo: https://github.com/codespell-project/codespell
     rev: "v2.4.1"

@@ -404,6 +404,7 @@ class Distribution(Generic[DistConfigT]):
         raise NotImplementedError
 
 
+
 class GaussianDist(Distribution[TD.GaussianDistribution]):
     """
     GaussianDist
@@ -545,20 +546,127 @@ class MixtureDist(Distribution[TD.MixtureDistribution]):
 
         mixturesum = pt.constant(0.0)
         coeffsum = pt.constant(0.0)
-        i = 0
-        for coeff in self.coefficients:
+
+        for i, coeff in enumerate(self.coefficients):
             coeffsum += distributionsandparameters[coeff]
             mixturesum += (
                 distributionsandparameters[coeff]
                 * distributionsandparameters[self.summands[i]]
             )
-        mixturesum += (1 - coeffsum) * distributionsandparameters[self.summands[i]]
+            
+        last_index = len(self.summands) - 1
+        f_last = distributionsandparameters[self.summands[last_index]]
+        mixturesum = mixturesum + (1 - coeffsum) * f_last
         return cast(T.TensorVar, mixturesum)
+    
+class ProductDist(Distribution[TD.ProductDistribution]):
+
+    def __init__(self, *, name: str, factors: list[str]):
+        super().__init__(name=name, dtype="product_dist", parameters=factors)
+        self.name = name
+        self.factors = factors
+    
+    @classmethod
+    def from_dict(cls, config: TD.ProductDistribution) -> ProductDist:
+        """
+        Creates an instance of ProductDist from a dictionary configuration.
+
+        Args:
+            config (dict): Configuration dictionary.
+
+        Returns:
+            ProductDist: The created ProductDist instance.
+        """
+        return cls(name=config["name"], factors=config["factors"])
+    
+    def expression(
+        self, distributionsandparameters: dict[str, T.TensorVar]
+    ) -> T.TensorVar:
+        
+        pt_factors = pt.stack(
+            [distributionsandparameters[factor] for factor in self.factors]
+        )
+        return np.prod(pt_factors, axis=0)
+
+class CrystalDist(Distribution[TD.CrystalDistribution]):
+
+    def __init__(self, *, name: str, alpha_L: str, alpha_R: str, m: str, m0: str, n_R: 
+                 str, n_L: str, sigma_L: str, sigma_R: str):
+
+        super().__init__(name=name, dtype="crystal_dist", parameters=[
+            alpha_L, alpha_R, m, m0, n_R, n_L, sigma_L, sigma_R
+        ])
+        self.name = name
+        self.alpha_L = alpha_L
+        self.alpha_R = alpha_R
+        self.m = m
+        self.m0 = m0
+        self.n_R = n_R
+        self.n_L = n_L
+        self.sigma_L = sigma_L
+        self.sigma_R = sigma_R
+
+    @classmethod
+    def from_dict(cls, config: TD.CrystalDistribution) -> CrystalDist:
+
+        return cls(
+            name=config["name"],
+            alpha_L=config["alpha_L"],
+            alpha_R=config["alpha_R"],
+            m=config["m"],
+            m0=config["m0"],
+            n_R=config["n_R"],
+            n_L=config["n_L"],
+            sigma_L=config["sigma_L"],
+            sigma_R=config["sigma_R"],
+        )
+        
+    def expression(
+        self, distributionsandparameters: dict[str, T.TensorVar]
+    ) -> T.TensorVar:
+        
+        sigma = abs(self.sigma_L) + abs(self.sigma_R)
+            
+        A_L = (self.n_L / self.alpha_L) * pt.exp(-(self.alpha_L ** 2) / 2) / (((self.n_L / self.alpha_L) - self.alpha_L) ** self.n_L)
+        A_R = (self.n_R / self.alpha_R) * pt.exp(-(self.alpha_R ** 2) / 2) / (((self.n_R / self.alpha_R) - self.alpha_R) ** self.n_R)
+        B_L = ((self.n_L / self.alpha_L) - self.alpha_L)
+        B_R = ((self.n_R / self.alpha_R) - self.alpha_R)
+
+        if ((self.m - self.m0) / sigma) <= -self.alpha_L:
+            return A_L * (
+                    (B_L - (self.m - self.m0) / sigma) ** (-self.n_L)
+                )
+        elif ((self.m - self.m0) / sigma) < self.alpha_R:
+            return pt.exp(
+                -((self.m - self.m0) ** 2) / (2 * sigma ** 2)
+            )
+        else:
+            return A_R * (
+                (B_R + ((self.m - self.m0) / sigma)) ** (-self.n_R)
+            )
+
+class GenericDist(Distribution[TD.GenericDistribution]):
+
+    def __init__(self, *, name: str, expression: str, **kwargs: Any):
+        super().__init__(name=name, dtype="generic_dist")
+
+    @classmethod
+    def from_dict(cls, config: TD.GenericDistribution) -> GenericDist:
+
+        return cls(name=config["name"], expression=config["expression"])
+    
+    def expression(
+            self, distributionsandparameters: dict[str, T.TensorVar]
+        ) -> T.TensorVar:
+            return -1
 
 
 registered_distributions: dict[str, type[Distribution[Any]]] = {
     "gaussian_dist": GaussianDist,
     "mixture_dist": MixtureDist,
+    "product_dist": ProductDist,
+    "crystalball_doublesided_dist": CrystalDist,
+    "generic_dist": GenericDist,
 }
 
 
@@ -581,10 +689,13 @@ class DistributionSet:
         for dist_config in distributions:
             dist_type = dist_config["type"]
             the_dist = registered_distributions.get(dist_type, Distribution)
+            if the_dist is Distribution:
+                raise ValueError(f"Unknown distribution type: {dist_type}")
             dist = the_dist.from_dict(
                 {k: v for k, v in dist_config.items() if k != "type"}
             )
             self.dists[dist.name] = dist
+
 
     def __getitem__(self, item: str) -> Distribution[Any]:
         return self.dists[item]

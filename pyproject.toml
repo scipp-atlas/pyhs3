@@ -45,6 +45,7 @@ test = [
   "pytest-cov >=3",
   "pyhf >= 0.7.6",
   "pydocstyle",
+  "scikit-hep-testdata >= 0.5.7",
 ]
 dev = [
   "pytest >=6",

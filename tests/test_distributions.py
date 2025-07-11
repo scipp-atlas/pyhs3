@@ -14,6 +14,7 @@ import numpy as np
 import pytensor.tensor as pt
 import pytest
 from pytensor import function
+from skhep_testdata import data_path as skhep_testdata_path
 
 import pyhs3 as hs3
 from pyhs3.core import CrystalDist, GenericDist, ProductDist, boundedscalar
@@ -226,8 +227,10 @@ class TestRealWorldWorkspace:
     @pytest.fixture
     def ws_json(self):
         """Load the real-world workspace JSON."""
-        json_path = Path(__file__).parent / "issue41_diHiggs_workspace.json"
-        return json.loads(json_path.read_text(encoding="utf-8"))
+        fpath = Path(
+            skhep_testdata_path("test_hs3_unbinned_pyhs3_validation_issue41.json")
+        )
+        return json.loads(fpath.read_text(encoding="utf-8"))
 
     @pytest.fixture
     def expected_nll_data(self):
@@ -240,17 +243,11 @@ class TestRealWorldWorkspace:
         """Create workspace from JSON."""
         return hs3.Workspace(ws_json)
 
-    @pytest.mark.xfail(
-        reason="Real-world workspace file not available (moved to separate testdata repo)"
-    )
     def test_workspace_loads_successfully(self, ws_workspace):
         """Test that the workspace loads without errors."""
         assert ws_workspace is not None
         assert len(ws_workspace.distribution_set) > 0
 
-    @pytest.mark.xfail(
-        reason="Real-world workspace file not available (moved to separate testdata repo)"
-    )
     def test_workspace_has_expected_distributions(self, ws_workspace):
         """Test that workspace contains the expected distribution types."""
         # Check that we have the distributions we expect
@@ -291,9 +288,6 @@ class TestRealWorldWorkspace:
             # TODO: Implement actual NLL calculation and comparison
             # when GenericDist is properly implemented
 
-    @pytest.mark.xfail(
-        reason="Real-world workspace file not available (moved to separate testdata repo)"
-    )
     def test_workspace_parameter_structure(self, ws_workspace):
         """Test that workspace has expected parameter structure."""
         assert len(ws_workspace.parameter_collection) > 0

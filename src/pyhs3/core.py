@@ -244,6 +244,9 @@ class ParameterSet:
     def __iter__(self) -> Iterator[ParameterPoint]:
         return iter(self.points.values())
 
+    def __len__(self) -> int:
+        return len(self.points)
+
 
 @dataclass
 class ParameterPoint:
@@ -286,6 +289,12 @@ class DomainCollection:
     def __getitem__(self, item: str | int) -> DomainSet:
         key = list(self.domains.keys())[item] if isinstance(item, int) else item
         return self.domains[key]
+
+    def __iter__(self) -> Iterator[DomainSet]:
+        return iter(self.domains.values())
+
+    def __len__(self) -> int:
+        return len(self.domains)
 
 
 @dataclass
@@ -792,6 +801,9 @@ class DistributionSet:
     def __iter__(self) -> Iterator[Distribution[Any]]:
         return iter(self.dists.values())
 
+    def __len__(self) -> int:
+        return len(self.dists)
+
 
 def boundedscalar(name: str, domain: tuple[float | None, float | None]) -> T.TensorVar:
     """
@@ -815,4 +827,8 @@ def boundedscalar(name: str, domain: tuple[float | None, float | None]) -> T.Ten
     i = domain[0]
     f = domain[1]
 
-    return cast(T.TensorVar, pt.clip(x, i, f))
+    # Use infinity constants for unbounded sides
+    ninf = pt.constant(-np.inf)
+    inf = pt.constant(np.inf)
+
+    return cast(T.TensorVar, pt.clip(x, i or ninf, f or inf))

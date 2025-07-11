@@ -751,6 +751,22 @@ class CrystalDist(Distribution[TD.CrystalDistribution]):
 
 
 class GenericDist(Distribution[TD.GenericDistribution]):
+    """
+    Generic distribution implementation.
+
+    A placeholder implementation for distributions with custom expressions.
+    Currently returns a constant value of 1.0 until a proper expression
+    parser is implemented.
+
+    Parameters:
+        name: Name of the distribution
+        expression: Mathematical expression string (stored but not evaluated)
+
+    Note:
+        This is a placeholder implementation. The actual expression parsing
+        and evaluation will be implemented in a future version.
+    """
+
     def __init__(self, *, name: str, expression: str, **_kwargs: Any):
         super().__init__(name=name, dtype="generic_dist", parameters=None)
         self.expression_str = expression

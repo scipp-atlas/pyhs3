@@ -563,7 +563,6 @@ class ProductDist(Distribution[TD.ProductDistribution]):
 
     def __init__(self, *, name: str, factors: list[str]):
         super().__init__(name=name, dtype="product_dist", parameters=factors)
-        self.name = name
         self.factors = factors
     
     @classmethod
@@ -586,7 +585,7 @@ class ProductDist(Distribution[TD.ProductDistribution]):
         pt_factors = pt.stack(
             [distributionsandparameters[factor] for factor in self.factors]
         )
-        return np.prod(pt_factors, axis=0)
+        return cast(T.TensorVar, pt.prod(pt_factors, axis=0))
 
 class CrystalDist(Distribution[TD.CrystalDistribution]):
 
@@ -596,7 +595,6 @@ class CrystalDist(Distribution[TD.CrystalDistribution]):
         super().__init__(name=name, dtype="crystal_dist", parameters=[
             alpha_L, alpha_R, m, m0, n_R, n_L, sigma_L, sigma_R
         ])
-        self.name = name
         self.alpha_L = alpha_L
         self.alpha_R = alpha_R
         self.m = m
@@ -625,30 +623,43 @@ class CrystalDist(Distribution[TD.CrystalDistribution]):
         self, distributionsandparameters: dict[str, T.TensorVar]
     ) -> T.TensorVar:
         
-        sigma = abs(self.sigma_L) + abs(self.sigma_R)
+        alpha_L = distributionsandparameters[self.alpha_L]
+        alpha_R = distributionsandparameters[self.alpha_R]
+        m = distributionsandparameters[self.m]
+        m0 = distributionsandparameters[self.m0]
+        n_L = distributionsandparameters[self.n_L]
+        n_R = distributionsandparameters[self.n_R]
+        sigma_L = distributionsandparameters[self.sigma_L]
+        sigma_R = distributionsandparameters[self.sigma_R]
+        
+        sigma = pt.abs(sigma_L) + pt.abs(sigma_R)
             
-        A_L = (self.n_L / self.alpha_L) * pt.exp(-(self.alpha_L ** 2) / 2) / (((self.n_L / self.alpha_L) - self.alpha_L) ** self.n_L)
-        A_R = (self.n_R / self.alpha_R) * pt.exp(-(self.alpha_R ** 2) / 2) / (((self.n_R / self.alpha_R) - self.alpha_R) ** self.n_R)
-        B_L = ((self.n_L / self.alpha_L) - self.alpha_L)
-        B_R = ((self.n_R / self.alpha_R) - self.alpha_R)
+        A_L = (n_L / alpha_L) * pt.exp(-(alpha_L ** 2) / 2) / (((n_L / alpha_L) - alpha_L) ** n_L)
+        A_R = (n_R / alpha_R) * pt.exp(-(alpha_R ** 2) / 2) / (((n_R / alpha_R) - alpha_R) ** n_R)
+        B_L = ((n_L / alpha_L) - alpha_L)
+        B_R = ((n_R / alpha_R) - alpha_R)
 
-        if ((self.m - self.m0) / sigma) <= -self.alpha_L:
-            return A_L * (
-                    (B_L - (self.m - self.m0) / sigma) ** (-self.n_L)
-                )
-        elif ((self.m - self.m0) / sigma) < self.alpha_R:
-            return pt.exp(
-                -((self.m - self.m0) ** 2) / (2 * sigma ** 2)
+        t = (m - m0) / sigma
+        
+        left_tail = A_L * ((B_L - t) ** (-n_L))
+        core = pt.exp(-((m - m0) ** 2) / (2 * sigma ** 2))
+        right_tail = A_R * ((B_R + t) ** (-n_R))
+        
+        return cast(T.TensorVar, pt.switch(
+            t <= -alpha_L,
+            left_tail,
+            pt.switch(
+                t < alpha_R,
+                core,
+                right_tail
             )
-        else:
-            return A_R * (
-                (B_R + ((self.m - self.m0) / sigma)) ** (-self.n_R)
-            )
+        ))
 
 class GenericDist(Distribution[TD.GenericDistribution]):
 
     def __init__(self, *, name: str, expression: str, **kwargs: Any):
-        super().__init__(name=name, dtype="generic_dist")
+        super().__init__(name=name, dtype="generic_dist", parameters=None)
+        self.expression_str = expression
 
     @classmethod
     def from_dict(cls, config: TD.GenericDistribution) -> GenericDist:
@@ -658,7 +669,7 @@ class GenericDist(Distribution[TD.GenericDistribution]):
     def expression(
             self, distributionsandparameters: dict[str, T.TensorVar]
         ) -> T.TensorVar:
-            return -1
+            return cast(T.TensorVar, pt.constant(1.0))
 
 
 registered_distributions: dict[str, type[Distribution[Any]]] = {

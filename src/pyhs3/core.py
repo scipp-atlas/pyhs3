@@ -595,6 +595,13 @@ class ProductDist(Distribution[TD.ProductDistribution]):
     """
 
     def __init__(self, *, name: str, factors: list[str]):
+        """
+        Initialize a ProductDist.
+
+        Args:
+            name: Name of the distribution
+            factors: List of component distribution names to multiply together
+        """
         super().__init__(name=name, dtype="product_dist", parameters=factors)
         self.factors = factors
 
@@ -614,6 +621,15 @@ class ProductDist(Distribution[TD.ProductDistribution]):
     def expression(
         self, distributionsandparameters: dict[str, T.TensorVar]
     ) -> T.TensorVar:
+        """
+        Evaluate the product distribution.
+
+        Args:
+            distributionsandparameters: Mapping of names to pytensor variables
+
+        Returns:
+            Symbolic representation of the product PDF
+        """
         pt_factors = pt.stack(
             [distributionsandparameters[factor] for factor in self.factors]
         )
@@ -672,6 +688,20 @@ class CrystalDist(Distribution[TD.CrystalDistribution]):
         sigma_L: str,
         sigma_R: str,
     ):
+        """
+        Initialize a CrystalDist.
+
+        Args:
+            name: Name of the distribution
+            alpha_L: Left-side transition point parameter name
+            alpha_R: Right-side transition point parameter name
+            m: Observable variable name
+            m0: Peak position parameter name
+            n_L: Left-side power law exponent parameter name
+            n_R: Right-side power law exponent parameter name
+            sigma_L: Left-side width parameter name
+            sigma_R: Right-side width parameter name
+        """
         super().__init__(
             name=name,
             dtype="crystal_dist",
@@ -688,6 +718,15 @@ class CrystalDist(Distribution[TD.CrystalDistribution]):
 
     @classmethod
     def from_dict(cls, config: TD.CrystalDistribution) -> CrystalDist:
+        """
+        Create a CrystalDist from a dictionary configuration.
+
+        Args:
+            config: Configuration dictionary
+
+        Returns:
+            The created CrystalDist instance
+        """
         return cls(
             name=config["name"],
             alpha_L=config["alpha_L"],
@@ -768,16 +807,42 @@ class GenericDist(Distribution[TD.GenericDistribution]):
     """
 
     def __init__(self, *, name: str, expression: str, **_kwargs: Any):
+        """
+        Initialize a GenericDist.
+
+        Args:
+            name: Name of the distribution
+            expression: Mathematical expression string
+            **_kwargs: Additional keyword arguments (ignored)
+        """
         super().__init__(name=name, dtype="generic_dist", parameters=None)
         self.expression_str = expression
 
     @classmethod
     def from_dict(cls, config: TD.GenericDistribution) -> GenericDist:
+        """
+        Create a GenericDist from a dictionary configuration.
+
+        Args:
+            config: Configuration dictionary
+
+        Returns:
+            The created GenericDist instance
+        """
         return cls(name=config["name"], expression=config["expression"])
 
     def expression(
         self, _distributionsandparameters: dict[str, T.TensorVar]
     ) -> T.TensorVar:
+        """
+        Evaluate the generic distribution (placeholder implementation).
+
+        Args:
+            _distributionsandparameters: Mapping of names to pytensor variables (unused)
+
+        Returns:
+            Constant value of 1.0 as placeholder
+        """
         return cast(T.TensorVar, pt.constant(1.0))
 
 

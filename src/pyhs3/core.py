@@ -560,6 +560,24 @@ class MixtureDist(Distribution[TD.MixtureDistribution]):
 
 
 class ProductDist(Distribution[TD.ProductDistribution]):
+    """
+    Product distribution implementation.
+    
+    Implements a product of PDFs as defined in ROOT's RooProdPdf.
+    
+    The probability density function is defined as:
+    
+    $$f(x, \\ldots) = \\prod_{i=1}^{N} \\text{PDF}_i(x, \\ldots)$$
+    
+    where each PDF_i is a component distribution that may share observables.
+    
+    Parameters:
+        factors: List of component distribution names to multiply together
+        
+    Note:
+        In the context of pytensor variables/tensors, this is implemented as
+        an elementwise product of all factor distributions.
+    """
     def __init__(self, *, name: str, factors: list[str]):
         super().__init__(name=name, dtype="product_dist", parameters=factors)
         self.factors = factors
@@ -587,6 +605,43 @@ class ProductDist(Distribution[TD.ProductDistribution]):
 
 
 class CrystalDist(Distribution[TD.CrystalDistribution]):
+    """
+    Crystal Ball distribution implementation.
+    
+    Implements the generalized asymmetrical double-sided Crystal Ball line shape
+    as defined in ROOT's RooCrystalBall.
+    
+    The probability density function is defined as:
+    
+    $$f(m; m_0, \\sigma_L, \\sigma_R, \\alpha_L, \\alpha_R, n_L, n_R) = \\begin{cases}
+    A_L \\cdot \\left(B_L - \\frac{m - m_0}{\\sigma_L}\\right)^{-n_L}, & \\text{for } \\frac{m - m_0}{\\sigma_L} < -\\alpha_L \\\\
+    \\exp\\left(-\\frac{1}{2} \\cdot \\left[\\frac{m - m_0}{\\sigma_L}\\right]^2\\right), & \\text{for } \\frac{m - m_0}{\\sigma_L} \\leq 0 \\\\
+    \\exp\\left(-\\frac{1}{2} \\cdot \\left[\\frac{m - m_0}{\\sigma_R}\\right]^2\\right), & \\text{for } \\frac{m - m_0}{\\sigma_R} \\leq \\alpha_R \\\\
+    A_R \\cdot \\left(B_R + \\frac{m - m_0}{\\sigma_R}\\right)^{-n_R}, & \\text{otherwise}
+    \\end{cases}$$
+    
+    where:
+    
+    $$\\begin{align}
+    A_i &= \\left(\\frac{n_i}{\\alpha_i}\\right)^{n_i} \\cdot \\exp\\left(-\\frac{\\alpha_i^2}{2}\\right) \\\\
+    B_i &= \\frac{n_i}{\\alpha_i} - \\alpha_i
+    \\end{align}$$
+    
+    Parameters:
+        m: Observable variable
+        m0: Peak position (mean)
+        sigma_L: Left-side width parameter (must be > 0)
+        sigma_R: Right-side width parameter (must be > 0)
+        alpha_L: Left-side transition point (must be > 0)
+        alpha_R: Right-side transition point (must be > 0)
+        n_L: Left-side power law exponent (must be > 0)
+        n_R: Right-side power law exponent (must be > 0)
+    
+    Note:
+        All parameters except m and m0 must be positive. The distribution
+        reduces to a single-sided Crystal Ball when one of the alpha parameters
+        is set to zero.
+    """
     def __init__(
         self,
         *,
@@ -727,16 +782,22 @@ class DistributionSet:
         return iter(self.dists.values())
 
 
-def boundedscalar(name: str, domain: tuple[float, float]) -> T.TensorVar:
+def boundedscalar(name: str, domain: tuple[float | None, float | None]) -> T.TensorVar:
     """
     Creates a pytensor scalar constrained within a given domain.
 
     Args:
         name (str): Name of the scalar.
-        domain (tuple): Tuple specifying (min, max) range.
+        domain (tuple): Tuple specifying (min, max) range. Use None for unbounded sides.
+                       For example: (0.0, None) for lower bound only, (None, 1.0) for upper bound only.
 
     Returns:
         pytensor.tensor.variable.TensorVariable: A pytensor scalar clipped to the domain range.
+    
+    Examples:
+        >>> boundedscalar("sigma", (0.0, None))  # sigma >= 0
+        >>> boundedscalar("fraction", (0.0, 1.0))  # 0 <= fraction <= 1
+        >>> boundedscalar("temperature", (None, 100.0))  # temperature <= 100
     """
     x = pt.scalar(name)
 

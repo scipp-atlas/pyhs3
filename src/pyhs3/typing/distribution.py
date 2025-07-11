@@ -32,6 +32,7 @@ class MixtureDistribution(TypedDict):
     coefficients: list[str]
     extended: NotRequired[bool]
 
+
 class ProductDistribution(TypedDict):
     """
     ProductDistribution
@@ -40,6 +41,7 @@ class ProductDistribution(TypedDict):
     type: Literal["product_dist"]
     name: str
     factors: list[str]
+
 
 class CrystalDistribution(TypedDict):
     """
@@ -57,6 +59,7 @@ class CrystalDistribution(TypedDict):
     sigma_R: str
     sigma_L: str
 
+
 class GenericDistribution(TypedDict):
     """
     GenericDistribution
@@ -66,4 +69,11 @@ class GenericDistribution(TypedDict):
     name: str
     expression: str
 
-Distribution = Union[GaussianDistribution, MixtureDistribution]
+
+Distribution = Union[
+    GaussianDistribution,
+    MixtureDistribution,
+    ProductDistribution,
+    CrystalDistribution,
+    GenericDistribution,
+]

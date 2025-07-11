@@ -562,22 +562,23 @@ class MixtureDist(Distribution[TD.MixtureDistribution]):
 class ProductDist(Distribution[TD.ProductDistribution]):
     """
     Product distribution implementation.
-    
+
     Implements a product of PDFs as defined in ROOT's RooProdPdf.
-    
+
     The probability density function is defined as:
-    
+
     $$f(x, \\ldots) = \\prod_{i=1}^{N} \\text{PDF}_i(x, \\ldots)$$
-    
+
     where each PDF_i is a component distribution that may share observables.
-    
+
     Parameters:
         factors: List of component distribution names to multiply together
-        
+
     Note:
         In the context of pytensor variables/tensors, this is implemented as
         an elementwise product of all factor distributions.
     """
+
     def __init__(self, *, name: str, factors: list[str]):
         super().__init__(name=name, dtype="product_dist", parameters=factors)
         self.factors = factors
@@ -607,26 +608,26 @@ class ProductDist(Distribution[TD.ProductDistribution]):
 class CrystalDist(Distribution[TD.CrystalDistribution]):
     """
     Crystal Ball distribution implementation.
-    
+
     Implements the generalized asymmetrical double-sided Crystal Ball line shape
     as defined in ROOT's RooCrystalBall.
-    
+
     The probability density function is defined as:
-    
+
     $$f(m; m_0, \\sigma_L, \\sigma_R, \\alpha_L, \\alpha_R, n_L, n_R) = \\begin{cases}
     A_L \\cdot \\left(B_L - \\frac{m - m_0}{\\sigma_L}\\right)^{-n_L}, & \\text{for } \\frac{m - m_0}{\\sigma_L} < -\\alpha_L \\\\
     \\exp\\left(-\\frac{1}{2} \\cdot \\left[\\frac{m - m_0}{\\sigma_L}\\right]^2\\right), & \\text{for } \\frac{m - m_0}{\\sigma_L} \\leq 0 \\\\
     \\exp\\left(-\\frac{1}{2} \\cdot \\left[\\frac{m - m_0}{\\sigma_R}\\right]^2\\right), & \\text{for } \\frac{m - m_0}{\\sigma_R} \\leq \\alpha_R \\\\
     A_R \\cdot \\left(B_R + \\frac{m - m_0}{\\sigma_R}\\right)^{-n_R}, & \\text{otherwise}
     \\end{cases}$$
-    
+
     where:
-    
+
     $$\\begin{align}
     A_i &= \\left(\\frac{n_i}{\\alpha_i}\\right)^{n_i} \\cdot \\exp\\left(-\\frac{\\alpha_i^2}{2}\\right) \\\\
     B_i &= \\frac{n_i}{\\alpha_i} - \\alpha_i
     \\end{align}$$
-    
+
     Parameters:
         m: Observable variable
         m0: Peak position (mean)
@@ -636,12 +637,13 @@ class CrystalDist(Distribution[TD.CrystalDistribution]):
         alpha_R: Right-side transition point (must be > 0)
         n_L: Left-side power law exponent (must be > 0)
         n_R: Right-side power law exponent (must be > 0)
-    
+
     Note:
         All parameters except m and m0 must be positive. The distribution
         reduces to a single-sided Crystal Ball when one of the alpha parameters
         is set to zero.
     """
+
     def __init__(
         self,
         *,
@@ -686,6 +688,12 @@ class CrystalDist(Distribution[TD.CrystalDistribution]):
     def expression(
         self, distributionsandparameters: dict[str, T.TensorVar]
     ) -> T.TensorVar:
+        """
+        Evaluate the Crystal Ball distribution.
+
+        Implements the ROOT RooCrystalBall formula with proper parameter validation.
+        All shape parameters (alpha, n, sigma) are assumed to be positive.
+        """
         alpha_L = distributionsandparameters[self.alpha_L]
         alpha_R = distributionsandparameters[self.alpha_R]
         m = distributionsandparameters[self.m]
@@ -695,31 +703,34 @@ class CrystalDist(Distribution[TD.CrystalDistribution]):
         sigma_L = distributionsandparameters[self.sigma_L]
         sigma_R = distributionsandparameters[self.sigma_R]
 
-        sigma = pt.abs(sigma_L) + pt.abs(sigma_R)
-
-        A_L = (
-            (n_L / alpha_L)
-            * pt.exp(-(alpha_L**2) / 2)
-            / (((n_L / alpha_L) - alpha_L) ** n_L)
-        )
-        A_R = (
-            (n_R / alpha_R)
-            * pt.exp(-(alpha_R**2) / 2)
-            / (((n_R / alpha_R) - alpha_R) ** n_R)
-        )
+        # Calculate A_i and B_i per ROOT formula
+        # Note: alpha, n, sigma are assumed to be positive
+        A_L = (n_L / alpha_L) ** n_L * pt.exp(-(alpha_L**2) / 2)
+        A_R = (n_R / alpha_R) ** n_R * pt.exp(-(alpha_R**2) / 2)
         B_L = (n_L / alpha_L) - alpha_L
         B_R = (n_R / alpha_R) - alpha_R
 
-        t = (m - m0) / sigma
+        # Calculate normalized distance from peak for each side
+        t_L = (m - m0) / sigma_L
+        t_R = (m - m0) / sigma_R
 
-        left_tail = A_L * ((B_L - t) ** (-n_L))
-        core = pt.exp(-((m - m0) ** 2) / (2 * sigma**2))
-        right_tail = A_R * ((B_R + t) ** (-n_R))
+        # Calculate each region per ROOT formula
+        left_tail = A_L * ((B_L - t_L) ** (-n_L))
+        core_left = pt.exp(-(t_L**2) / 2)
+        core_right = pt.exp(-(t_R**2) / 2)
+        right_tail = A_R * ((B_R + t_R) ** (-n_R))
 
+        # Apply ROOT conditions
         return cast(
             T.TensorVar,
             pt.switch(
-                t <= -alpha_L, left_tail, pt.switch(t < alpha_R, core, right_tail)
+                t_L < -alpha_L,
+                left_tail,
+                pt.switch(
+                    t_L <= 0,
+                    core_left,
+                    pt.switch(t_R <= alpha_R, core_right, right_tail),
+                ),
             ),
         )
 
@@ -793,7 +804,7 @@ def boundedscalar(name: str, domain: tuple[float | None, float | None]) -> T.Ten
 
     Returns:
         pytensor.tensor.variable.TensorVariable: A pytensor scalar clipped to the domain range.
-    
+
     Examples:
         >>> boundedscalar("sigma", (0.0, None))  # sigma >= 0
         >>> boundedscalar("fraction", (0.0, 1.0))  # 0 <= fraction <= 1

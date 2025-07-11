@@ -211,6 +211,12 @@ class ParameterCollection:
         key = list(self.sets.keys())[item] if isinstance(item, int) else item
         return self.sets[key]
 
+    def __iter__(self) -> Iterator[ParameterSet]:
+        return iter(self.sets.values())
+
+    def __len__(self) -> int:
+        return len(self.sets)
+
 
 class ParameterSet:
     """

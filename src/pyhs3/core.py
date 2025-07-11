@@ -583,7 +583,7 @@ class ProductDist(Distribution[TD.ProductDistribution]):
         pt_factors = pt.stack(
             [distributionsandparameters[factor] for factor in self.factors]
         )
-        return cast(T.TensorVar, pt.prod(pt_factors, axis=0))
+        return cast(T.TensorVar, pt.prod(pt_factors, axis=0))  # type: ignore[no-untyped-call]
 
 
 class CrystalDist(Distribution[TD.CrystalDistribution]):
@@ -670,7 +670,7 @@ class CrystalDist(Distribution[TD.CrystalDistribution]):
 
 
 class GenericDist(Distribution[TD.GenericDistribution]):
-    def __init__(self, *, name: str, expression: str, **kwargs: Any):
+    def __init__(self, *, name: str, expression: str, **_kwargs: Any):
         super().__init__(name=name, dtype="generic_dist", parameters=None)
         self.expression_str = expression
 
@@ -679,7 +679,7 @@ class GenericDist(Distribution[TD.GenericDistribution]):
         return cls(name=config["name"], expression=config["expression"])
 
     def expression(
-        self, distributionsandparameters: dict[str, T.TensorVar]
+        self, _distributionsandparameters: dict[str, T.TensorVar]
     ) -> T.TensorVar:
         return cast(T.TensorVar, pt.constant(1.0))
 
@@ -713,7 +713,8 @@ class DistributionSet:
             dist_type = dist_config["type"]
             the_dist = registered_distributions.get(dist_type, Distribution)
             if the_dist is Distribution:
-                raise ValueError(f"Unknown distribution type: {dist_type}")
+                msg = f"Unknown distribution type: {dist_type}"
+                raise ValueError(msg)
             dist = the_dist.from_dict(
                 {k: v for k, v in dist_config.items() if k != "type"}
             )

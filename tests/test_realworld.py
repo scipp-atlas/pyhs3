@@ -82,7 +82,7 @@ class TestDiHiggsIssue41Workspace:
         assert len(dist_types) > 0
 
     @pytest.mark.xfail(
-        reason="GenericDist not fully implemented - will fix in separate PR"
+        reason="Workspace data integrity issue - missing parameter 'muCB_ggFHH_kl1p0_mc23a_Run3LM_4'"
     )
     def test_nll_validation_against_root(self, ws_workspace, expected_nll_data):
         """Test NLL values match expected ROOT results."""
@@ -125,7 +125,7 @@ class TestDiHiggsIssue41Workspace:
         assert len(domain_names) > 0
 
     @pytest.mark.xfail(
-        reason="Real-world workspace has parameter/domain mismatch - GenericDist implementation needed"
+        reason="Workspace data integrity issue - missing parameter 'muCB_ggFHH_kl1p0_mc23a_Run3LM_4'"
     )
     def test_workspace_model_creation(self, ws_workspace):
         """Test that we can create a model from the workspace."""

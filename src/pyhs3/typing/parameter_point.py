@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from typing import TypedDict
 
+from pyhs3.typing_compat import NotRequired
+
 
 class Parameter(TypedDict):
     """
@@ -13,7 +15,9 @@ class Parameter(TypedDict):
     """
 
     name: str
+    const: NotRequired[bool]  # default: False
     value: float
+    nbins: NotRequired[int]
 
 
 class ParameterPoint(TypedDict):

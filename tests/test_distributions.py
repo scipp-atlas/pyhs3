@@ -166,9 +166,9 @@ class TestGenericDist:
 
     def test_generic_dist_creation(self):
         """Test GenericDist can be created and configured."""
-        dist = GenericDist(name="test_generic", expression="x^2 + y^2")
+        dist = GenericDist(name="test_generic", expression="x**2 + y**2")
         assert dist.name == "test_generic"
-        assert dist.expression_str == "x^2 + y^2"
+        assert dist.expression_str == "x**2 + y**2"
 
     def test_generic_dist_from_dict(self):
         """Test GenericDist can be created from dictionary."""
@@ -177,18 +177,24 @@ class TestGenericDist:
         assert dist.name == "test_generic"
         assert dist.expression_str == "sin(x) + cos(y)"
 
-    def test_generic_dist_expression_returns_constant(self):
-        """Test GenericDist returns constant value (placeholder)."""
-        dist = GenericDist(name="test_generic", expression="x^2")
+    def test_generic_dist_expression_evaluation(self):
+        """Test GenericDist evaluates mathematical expressions."""
+        dist = GenericDist(name="test_generic", expression="x**2")
 
-        params = {"x": pt.constant(5.0)}
+        # Create a PyTensor scalar variable
+        x = pt.scalar("x")
+        params = {"x": x}
+
+        # Get the expression result from the distribution
         result = dist.expression(params)
 
-        f = function([], result)
-        result_val = f()
+        # Compile and test the function
+        f = function([x], result)
 
-        # Should return constant 1.0 as placeholder
-        assert result_val == 1.0
+        # Test that x^2 is evaluated correctly
+        assert f(2.0) == 4.0
+        assert f(3.0) == 9.0
+        assert f(0.0) == 0.0
 
 
 class TestBoundedScalar:

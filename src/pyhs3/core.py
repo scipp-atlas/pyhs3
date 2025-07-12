@@ -15,6 +15,7 @@ from pytensor.compile.function import function
 from pytensor.graph.basic import graph_inputs
 
 from pyhs3 import typing as T
+from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor
 from pyhs3.typing import distribution as TD
 
 log = logging.getLogger(__name__)
@@ -793,17 +794,23 @@ class GenericDist(Distribution[TD.GenericDistribution]):
     """
     Generic distribution implementation.
 
-    A placeholder implementation for distributions with custom expressions.
-    Currently returns a constant value of 1.0 until a proper expression
-    parser is implemented.
+    Evaluates custom mathematical expressions using SymPy parsing and
+    PyTensor computation graphs.
 
     Parameters:
         name: Name of the distribution
-        expression: Mathematical expression string (stored but not evaluated)
+        expression: Mathematical expression string to be evaluated
 
-    Note:
-        This is a placeholder implementation. The actual expression parsing
-        and evaluation will be implemented in a future version.
+    Supported Functions:
+        - Basic arithmetic: +, -, *, /, **
+        - Trigonometric: sin, cos, tan
+        - Exponential/Logarithmic: exp, log
+        - Other: sqrt, abs
+
+    Examples:
+        - "x**2 + 2*x + 1"
+        - "exp(-x**2/2) * cos(y)"
+        - "sin(x) + log(abs(y))"
     """
 
     def __init__(self, *, name: str, expression: str, **_kwargs: Any):
@@ -815,8 +822,17 @@ class GenericDist(Distribution[TD.GenericDistribution]):
             expression: Mathematical expression string
             **_kwargs: Additional keyword arguments (ignored)
         """
-        super().__init__(name=name, dtype="generic_dist", parameters=None)
+        # Parse and analyze the expression during initialization
         self.expression_str = expression
+        self.sympy_expr = parse_expression(expression)
+
+        # Analyze the expression to determine dependencies
+        analysis = analyze_sympy_expr(self.sympy_expr)
+        independent_vars = [str(symbol) for symbol in analysis["independent_vars"]]
+        self.dependent_vars = [str(symbol) for symbol in analysis["dependent_vars"]]
+
+        # Initialize the parent with the independent variables as parameters
+        super().__init__(name=name, dtype="generic_dist", parameters=independent_vars)
 
     @classmethod
     def from_dict(cls, config: TD.GenericDistribution) -> GenericDist:
@@ -832,18 +848,35 @@ class GenericDist(Distribution[TD.GenericDistribution]):
         return cls(name=config["name"], expression=config["expression"])
 
     def expression(
-        self, _distributionsandparameters: dict[str, T.TensorVar]
+        self, distributionsandparameters: dict[str, T.TensorVar]
     ) -> T.TensorVar:
         """
-        Evaluate the generic distribution (placeholder implementation).
+        Evaluate the generic distribution using expression parsing.
 
         Args:
-            _distributionsandparameters: Mapping of names to pytensor variables (unused)
+            distributionsandparameters: Mapping of names to pytensor variables
 
         Returns:
-            Constant value of 1.0 as placeholder
+            PyTensor expression representing the parsed mathematical expression
+
+        Raises:
+            ValueError: If the expression cannot be parsed or contains undefined variables
         """
-        return cast(T.TensorVar, pt.constant(1.0))
+        try:
+            # Get the required variables using the parameters determined during initialization
+            variables = [distributionsandparameters[name] for name in self.parameters]
+
+            # Convert using the pre-parsed sympy expression
+            result = sympy_to_pytensor(self.sympy_expr, variables)
+
+            return cast(T.TensorVar, result)
+
+        except Exception as exc:
+            log.error(
+                "Failed to evaluate expression '%s': %s", self.expression_str, exc
+            )
+            # Fall back to constant if parsing fails
+            return cast(T.TensorVar, pt.constant(1.0))
 
 
 registered_distributions: dict[str, type[Distribution[Any]]] = {

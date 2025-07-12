@@ -72,8 +72,12 @@ class Workspace:
             else self.parameter_collection[parameter_point]
         )
 
-        assert set(parameterset.points.keys()) == set(domainset.domains.keys()), (
-            "parameter and domain names do not match"
+        # Verify that domains are a subset of parameters (not all parameters need bounds)
+        param_names = set(parameterset.points.keys())
+        domain_names = set(domainset.domains.keys())
+        assert domain_names.issubset(param_names), (
+            f"Domain names must be a subset of parameter names. "
+            f"Extra domains: {domain_names - param_names}"
         )
 
         return Model(
@@ -112,8 +116,10 @@ class Model:
         self.parameterset = parameterset
 
         for parameter_point in parameterset:
+            # Use domain bounds if available, otherwise use unbounded (None, None)
+            domain = domains.domains.get(parameter_point.name, (None, None))
             self.parameters[parameter_point.name] = boundedscalar(
-                parameter_point.name, domains[parameter_point.name]
+                parameter_point.name, domain
             )
 
         self.distributions: dict[str, T.TensorVar] = {}

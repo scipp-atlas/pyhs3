@@ -868,21 +868,13 @@ class GenericDist(Distribution[TD.GenericDistribution]):
         Raises:
             ValueError: If the expression cannot be parsed or contains undefined variables
         """
-        try:
-            # Get the required variables using the parameters determined during initialization
-            variables = [distributionsandparameters[name] for name in self.parameters]
+        # Get the required variables using the parameters determined during initialization
+        variables = [distributionsandparameters[name] for name in self.parameters]
 
-            # Convert using the pre-parsed sympy expression
-            result = sympy_to_pytensor(self.sympy_expr, variables)
+        # Convert using the pre-parsed sympy expression
+        result = sympy_to_pytensor(self.sympy_expr, variables)
 
-            return cast(T.TensorVar, result)
-
-        except Exception as exc:
-            log.error(
-                "Failed to evaluate expression '%s': %s", self.expression_str, exc
-            )
-            # Fall back to constant if parsing fails
-            return cast(T.TensorVar, pt.constant(1.0))
+        return cast(T.TensorVar, result)
 
 
 registered_distributions: dict[str, type[Distribution[Any]]] = {

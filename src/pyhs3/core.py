@@ -211,6 +211,12 @@ class ParameterCollection:
         key = list(self.sets.keys())[item] if isinstance(item, int) else item
         return self.sets[key]
 
+    def __iter__(self) -> Iterator[ParameterSet]:
+        return iter(self.sets.values())
+
+    def __len__(self) -> int:
+        return len(self.sets)
+
 
 class ParameterSet:
     """
@@ -243,6 +249,9 @@ class ParameterSet:
 
     def __iter__(self) -> Iterator[ParameterPoint]:
         return iter(self.points.values())
+
+    def __len__(self) -> int:
+        return len(self.points)
 
 
 @dataclass
@@ -286,6 +295,12 @@ class DomainCollection:
     def __getitem__(self, item: str | int) -> DomainSet:
         key = list(self.domains.keys())[item] if isinstance(item, int) else item
         return self.domains[key]
+
+    def __iter__(self) -> Iterator[DomainSet]:
+        return iter(self.domains.values())
+
+    def __len__(self) -> int:
+        return len(self.domains)
 
 
 @dataclass
@@ -545,20 +560,298 @@ class MixtureDist(Distribution[TD.MixtureDistribution]):
 
         mixturesum = pt.constant(0.0)
         coeffsum = pt.constant(0.0)
-        i = 0
-        for coeff in self.coefficients:
+
+        for i, coeff in enumerate(self.coefficients):
             coeffsum += distributionsandparameters[coeff]
             mixturesum += (
                 distributionsandparameters[coeff]
                 * distributionsandparameters[self.summands[i]]
             )
-        mixturesum += (1 - coeffsum) * distributionsandparameters[self.summands[i]]
+
+        last_index = len(self.summands) - 1
+        f_last = distributionsandparameters[self.summands[last_index]]
+        mixturesum = mixturesum + (1 - coeffsum) * f_last
         return cast(T.TensorVar, mixturesum)
+
+
+class ProductDist(Distribution[TD.ProductDistribution]):
+    """
+    Product distribution implementation.
+
+    Implements a product of PDFs as defined in ROOT's RooProdPdf.
+
+    The probability density function is defined as:
+
+    $$f(x, \\ldots) = \\prod_{i=1}^{N} \\text{PDF}_i(x, \\ldots)$$
+
+    where each PDF_i is a component distribution that may share observables.
+
+    Parameters:
+        factors: List of component distribution names to multiply together
+
+    Note:
+        In the context of pytensor variables/tensors, this is implemented as
+        an elementwise product of all factor distributions.
+    """
+
+    def __init__(self, *, name: str, factors: list[str]):
+        """
+        Initialize a ProductDist.
+
+        Args:
+            name: Name of the distribution
+            factors: List of component distribution names to multiply together
+        """
+        super().__init__(name=name, dtype="product_dist", parameters=factors)
+        self.factors = factors
+
+    @classmethod
+    def from_dict(cls, config: TD.ProductDistribution) -> ProductDist:
+        """
+        Creates an instance of ProductDist from a dictionary configuration.
+
+        Args:
+            config (dict): Configuration dictionary.
+
+        Returns:
+            ProductDist: The created ProductDist instance.
+        """
+        return cls(name=config["name"], factors=config["factors"])
+
+    def expression(
+        self, distributionsandparameters: dict[str, T.TensorVar]
+    ) -> T.TensorVar:
+        """
+        Evaluate the product distribution.
+
+        Args:
+            distributionsandparameters: Mapping of names to pytensor variables
+
+        Returns:
+            Symbolic representation of the product PDF
+        """
+        pt_factors = pt.stack(
+            [distributionsandparameters[factor] for factor in self.factors]
+        )
+        return cast(T.TensorVar, pt.prod(pt_factors, axis=0))  # type: ignore[no-untyped-call]
+
+
+class CrystalDist(Distribution[TD.CrystalDistribution]):
+    """
+    Crystal Ball distribution implementation.
+
+    Implements the generalized asymmetrical double-sided Crystal Ball line shape
+    as defined in ROOT's RooCrystalBall.
+
+    The probability density function is defined as:
+
+    $$f(m; m_0, \\sigma_L, \\sigma_R, \\alpha_L, \\alpha_R, n_L, n_R) = \\begin{cases}
+    A_L \\cdot \\left(B_L - \\frac{m - m_0}{\\sigma_L}\\right)^{-n_L}, & \\text{for } \\frac{m - m_0}{\\sigma_L} < -\\alpha_L \\\\
+    \\exp\\left(-\\frac{1}{2} \\cdot \\left[\\frac{m - m_0}{\\sigma_L}\\right]^2\\right), & \\text{for } \\frac{m - m_0}{\\sigma_L} \\leq 0 \\\\
+    \\exp\\left(-\\frac{1}{2} \\cdot \\left[\\frac{m - m_0}{\\sigma_R}\\right]^2\\right), & \\text{for } \\frac{m - m_0}{\\sigma_R} \\leq \\alpha_R \\\\
+    A_R \\cdot \\left(B_R + \\frac{m - m_0}{\\sigma_R}\\right)^{-n_R}, & \\text{otherwise}
+    \\end{cases}$$
+
+    where:
+
+    $$\\begin{align}
+    A_i &= \\left(\\frac{n_i}{\\alpha_i}\\right)^{n_i} \\cdot \\exp\\left(-\\frac{\\alpha_i^2}{2}\\right) \\\\
+    B_i &= \\frac{n_i}{\\alpha_i} - \\alpha_i
+    \\end{align}$$
+
+    Parameters:
+        m: Observable variable
+        m0: Peak position (mean)
+        sigma_L: Left-side width parameter (must be > 0)
+        sigma_R: Right-side width parameter (must be > 0)
+        alpha_L: Left-side transition point (must be > 0)
+        alpha_R: Right-side transition point (must be > 0)
+        n_L: Left-side power law exponent (must be > 0)
+        n_R: Right-side power law exponent (must be > 0)
+
+    Note:
+        All parameters except m and m0 must be positive. The distribution
+        reduces to a single-sided Crystal Ball when one of the alpha parameters
+        is set to zero.
+    """
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        alpha_L: str,
+        alpha_R: str,
+        m: str,
+        m0: str,
+        n_R: str,
+        n_L: str,
+        sigma_L: str,
+        sigma_R: str,
+    ):
+        """
+        Initialize a CrystalDist.
+
+        Args:
+            name: Name of the distribution
+            alpha_L: Left-side transition point parameter name
+            alpha_R: Right-side transition point parameter name
+            m: Observable variable name
+            m0: Peak position parameter name
+            n_L: Left-side power law exponent parameter name
+            n_R: Right-side power law exponent parameter name
+            sigma_L: Left-side width parameter name
+            sigma_R: Right-side width parameter name
+        """
+        super().__init__(
+            name=name,
+            dtype="crystal_dist",
+            parameters=[alpha_L, alpha_R, m, m0, n_R, n_L, sigma_L, sigma_R],
+        )
+        self.alpha_L = alpha_L
+        self.alpha_R = alpha_R
+        self.m = m
+        self.m0 = m0
+        self.n_R = n_R
+        self.n_L = n_L
+        self.sigma_L = sigma_L
+        self.sigma_R = sigma_R
+
+    @classmethod
+    def from_dict(cls, config: TD.CrystalDistribution) -> CrystalDist:
+        """
+        Create a CrystalDist from a dictionary configuration.
+
+        Args:
+            config: Configuration dictionary
+
+        Returns:
+            The created CrystalDist instance
+        """
+        return cls(
+            name=config["name"],
+            alpha_L=config["alpha_L"],
+            alpha_R=config["alpha_R"],
+            m=config["m"],
+            m0=config["m0"],
+            n_R=config["n_R"],
+            n_L=config["n_L"],
+            sigma_L=config["sigma_L"],
+            sigma_R=config["sigma_R"],
+        )
+
+    def expression(
+        self, distributionsandparameters: dict[str, T.TensorVar]
+    ) -> T.TensorVar:
+        """
+        Evaluate the Crystal Ball distribution.
+
+        Implements the ROOT RooCrystalBall formula with proper parameter validation.
+        All shape parameters (alpha, n, sigma) are assumed to be positive.
+        """
+        alpha_L = distributionsandparameters[self.alpha_L]
+        alpha_R = distributionsandparameters[self.alpha_R]
+        m = distributionsandparameters[self.m]
+        m0 = distributionsandparameters[self.m0]
+        n_L = distributionsandparameters[self.n_L]
+        n_R = distributionsandparameters[self.n_R]
+        sigma_L = distributionsandparameters[self.sigma_L]
+        sigma_R = distributionsandparameters[self.sigma_R]
+
+        # Calculate A_i and B_i per ROOT formula
+        # Note: alpha, n, sigma are assumed to be positive
+        A_L = (n_L / alpha_L) ** n_L * pt.exp(-(alpha_L**2) / 2)
+        A_R = (n_R / alpha_R) ** n_R * pt.exp(-(alpha_R**2) / 2)
+        B_L = (n_L / alpha_L) - alpha_L
+        B_R = (n_R / alpha_R) - alpha_R
+
+        # Calculate normalized distance from peak for each side
+        t_L = (m - m0) / sigma_L
+        t_R = (m - m0) / sigma_R
+
+        # Calculate each region per ROOT formula
+        left_tail = A_L * ((B_L - t_L) ** (-n_L))
+        core_left = pt.exp(-(t_L**2) / 2)
+        core_right = pt.exp(-(t_R**2) / 2)
+        right_tail = A_R * ((B_R + t_R) ** (-n_R))
+
+        # Apply ROOT conditions
+        return cast(
+            T.TensorVar,
+            pt.switch(
+                t_L < -alpha_L,
+                left_tail,
+                pt.switch(
+                    t_L <= 0,
+                    core_left,
+                    pt.switch(t_R <= alpha_R, core_right, right_tail),
+                ),
+            ),
+        )
+
+
+class GenericDist(Distribution[TD.GenericDistribution]):
+    """
+    Generic distribution implementation.
+
+    A placeholder implementation for distributions with custom expressions.
+    Currently returns a constant value of 1.0 until a proper expression
+    parser is implemented.
+
+    Parameters:
+        name: Name of the distribution
+        expression: Mathematical expression string (stored but not evaluated)
+
+    Note:
+        This is a placeholder implementation. The actual expression parsing
+        and evaluation will be implemented in a future version.
+    """
+
+    def __init__(self, *, name: str, expression: str, **_kwargs: Any):
+        """
+        Initialize a GenericDist.
+
+        Args:
+            name: Name of the distribution
+            expression: Mathematical expression string
+            **_kwargs: Additional keyword arguments (ignored)
+        """
+        super().__init__(name=name, dtype="generic_dist", parameters=None)
+        self.expression_str = expression
+
+    @classmethod
+    def from_dict(cls, config: TD.GenericDistribution) -> GenericDist:
+        """
+        Create a GenericDist from a dictionary configuration.
+
+        Args:
+            config: Configuration dictionary
+
+        Returns:
+            The created GenericDist instance
+        """
+        return cls(name=config["name"], expression=config["expression"])
+
+    def expression(
+        self, _distributionsandparameters: dict[str, T.TensorVar]
+    ) -> T.TensorVar:
+        """
+        Evaluate the generic distribution (placeholder implementation).
+
+        Args:
+            _distributionsandparameters: Mapping of names to pytensor variables (unused)
+
+        Returns:
+            Constant value of 1.0 as placeholder
+        """
+        return cast(T.TensorVar, pt.constant(1.0))
 
 
 registered_distributions: dict[str, type[Distribution[Any]]] = {
     "gaussian_dist": GaussianDist,
     "mixture_dist": MixtureDist,
+    "product_dist": ProductDist,
+    "crystalball_doublesided_dist": CrystalDist,
+    "generic_dist": GenericDist,
 }
 
 
@@ -581,6 +874,9 @@ class DistributionSet:
         for dist_config in distributions:
             dist_type = dist_config["type"]
             the_dist = registered_distributions.get(dist_type, Distribution)
+            if the_dist is Distribution:
+                msg = f"Unknown distribution type: {dist_type}"
+                raise ValueError(msg)
             dist = the_dist.from_dict(
                 {k: v for k, v in dist_config.items() if k != "type"}
             )
@@ -592,21 +888,34 @@ class DistributionSet:
     def __iter__(self) -> Iterator[Distribution[Any]]:
         return iter(self.dists.values())
 
+    def __len__(self) -> int:
+        return len(self.dists)
 
-def boundedscalar(name: str, domain: tuple[float, float]) -> T.TensorVar:
+
+def boundedscalar(name: str, domain: tuple[float | None, float | None]) -> T.TensorVar:
     """
     Creates a pytensor scalar constrained within a given domain.
 
     Args:
         name (str): Name of the scalar.
-        domain (tuple): Tuple specifying (min, max) range.
+        domain (tuple): Tuple specifying (min, max) range. Use None for unbounded sides.
+                       For example: (0.0, None) for lower bound only, (None, 1.0) for upper bound only.
 
     Returns:
         pytensor.tensor.variable.TensorVariable: A pytensor scalar clipped to the domain range.
+
+    Examples:
+        >>> boundedscalar("sigma", (0.0, None))  # sigma >= 0
+        >>> boundedscalar("fraction", (0.0, 1.0))  # 0 <= fraction <= 1
+        >>> boundedscalar("temperature", (None, 100.0))  # temperature <= 100
     """
     x = pt.scalar(name)
 
     i = domain[0]
     f = domain[1]
 
-    return cast(T.TensorVar, pt.clip(x, i, f))
+    # Use infinity constants for unbounded sides
+    ninf = pt.constant(-np.inf)
+    inf = pt.constant(np.inf)
+
+    return cast(T.TensorVar, pt.clip(x, i or ninf, f or inf))

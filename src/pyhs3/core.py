@@ -15,6 +15,7 @@ from pytensor.compile.function import function
 from pytensor.graph.basic import graph_inputs
 
 from pyhs3 import typing as T
+from pyhs3.functions import FunctionSet
 from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor
 from pyhs3.typing import distribution as TD
 
@@ -45,6 +46,7 @@ class Workspace:
         )
         self.distribution_set = DistributionSet(spec.get("distributions", []))
         self.domain_collection = DomainCollection(spec.get("domains", []))
+        self.function_set = FunctionSet(spec.get("functions", []))
 
     def model(
         self,
@@ -84,6 +86,7 @@ class Workspace:
             parameterset=parameterset,
             distributions=self.distribution_set,
             domains=domainset,
+            functions=self.function_set,
         )
 
 
@@ -98,22 +101,26 @@ class Model:
         parameterset: ParameterSet,
         distributions: DistributionSet,
         domains: DomainSet,
+        functions: FunctionSet,
     ):
         """
-        Represents a probabilistic model composed of parameters, domains, and distributions.
+        Represents a probabilistic model composed of parameters, domains, distributions, and functions.
 
         Args:
             parameterset (ParameterSet): The parameter set used in the model.
             distributions (DistributionSet): Set of distributions to include.
             domains (DomainSet): Domain constraints for parameters.
+            functions (FunctionSet): Set of functions that compute parameter values.
 
         Attributes:
             parameters (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic parameter variables.
             parameterset (ParameterSet): The original set of parameter values.
             distributions (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic distribution expressions.
+            functions (dict[str, pytensor.tensor.variable.TensorVariable]): Computed function values.
         """
         self.parameters = {}
         self.parameterset = parameterset
+        self.functions: dict[str, T.TensorVar] = {}
 
         for parameter_point in parameterset:
             # Use domain bounds if available, otherwise use unbounded (None, None)
@@ -124,8 +131,31 @@ class Model:
 
         self.distributions: dict[str, T.TensorVar] = {}
 
+        # Build dependency graph including functions and distributions
         graph = rx.PyDiGraph()
         nodes: dict[str, int] = {}
+
+        # Add functions to the graph (same pattern as distributions)
+        for func in functions.functions.values():
+            if func.name not in nodes:
+                idx = graph.add_node({"type": "function", "name": func.name})
+                nodes[func.name] = idx
+
+            for param in func.parameters:
+                p_idx = nodes.get(param)
+                if p_idx is None:
+                    # Could be a parameter, function, or distribution
+                    node_type = "parameter"  # Default assumption
+                    if param in functions:
+                        node_type = "function"
+                    elif param in distributions.dists:
+                        node_type = "distribution"
+
+                    p_idx = graph.add_node({"type": node_type, "name": param})
+                    nodes[param] = p_idx
+                graph.add_edge(p_idx, idx, None)
+
+        # Add distributions to the graph (existing logic)
         for dist in distributions:
             if dist.name not in nodes:
                 idx = graph.add_node({"type": "distribution", "name": dist.name})
@@ -137,20 +167,30 @@ class Model:
                 p_idx = nodes.get(param)
                 if p_idx is None or graph[p_idx]["type"] == "distribution":
                     if p_idx is None:
-                        p_idx = graph.add_node({"type": "parameter", "name": param})
+                        # Could be a parameter or function
+                        node_type = "parameter"  # Default assumption
+                        if param in functions:
+                            node_type = "function"
+
+                        p_idx = graph.add_node({"type": node_type, "name": param})
                         nodes[param] = p_idx
                     else:
                         graph[p_idx] = {"type": "parameter", "name": param}
                 graph.add_edge(p_idx, idx, None)
 
+        # Evaluate functions and distributions in topological order
         for node_idx in rx.topological_sort(graph):
             node_data = graph[node_idx]
-            if node_data["type"] != "distribution":
-                continue
-            dist_name = node_data["name"]
-            self.distributions[dist_name] = distributions[dist_name].expression(
-                {**self.parameters, **self.distributions}
-            )
+            if node_data["type"] == "function":
+                func_name = node_data["name"]
+                context = {**self.parameters, **self.functions, **self.distributions}
+                self.functions[func_name] = functions[func_name].expression(context)
+            elif node_data["type"] == "distribution":
+                dist_name = node_data["name"]
+                context = {**self.parameters, **self.functions, **self.distributions}
+                self.distributions[dist_name] = distributions[dist_name].expression(
+                    context
+                )
 
     def pdf(self, name: str, **parametervalues: float) -> npt.NDArray[np.float64]:
         """
@@ -949,4 +989,6 @@ def boundedscalar(name: str, domain: tuple[float | None, float | None]) -> T.Ten
     ninf = pt.constant(-np.inf)
     inf = pt.constant(np.inf)
 
-    return cast(T.TensorVar, pt.clip(x, i or ninf, f or inf))
+    clipped = pt.clip(x, i or ninf, f or inf)
+    clipped.name = name  # Preserve the original name
+    return cast(T.TensorVar, clipped)

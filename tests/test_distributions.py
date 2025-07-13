@@ -11,7 +11,8 @@ import numpy as np
 import pytensor.tensor as pt
 from pytensor import function
 
-from pyhs3.core import CrystalDist, GenericDist, ProductDist, boundedscalar
+from pyhs3.core import boundedscalar
+from pyhs3.distributions import CrystalDist, GenericDist, ProductDist
 
 
 class TestProductDist:

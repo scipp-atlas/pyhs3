@@ -30,16 +30,19 @@ class GenericFunction(TypedDict):
 class InterpolationFunction(TypedDict):
     """
     InterpolationFunction
+
+    Implements piecewise interpolation between nominal and variation distributions.
+    Based on ROOT's PiecewiseInterpolation class for HistFactory models.
     """
 
     type: Literal["interpolation"]
     name: str
-    high: list[str]
-    low: list[str]
-    nom: list[str]
-    interpolationCodes: list[str]
-    positiveDefinite: bool
-    vars: list[str]
+    high: list[str]  # List of high variation parameter names
+    low: list[str]  # List of low variation parameter names
+    nom: str  # Single nominal parameter name
+    interpolationCodes: list[int]  # List of interpolation codes (0-6)
+    positiveDefinite: bool  # Whether result should be positive definite
+    vars: list[str]  # List of nuisance parameter names
 
 
 Function = Union[

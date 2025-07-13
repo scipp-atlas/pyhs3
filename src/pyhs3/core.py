@@ -181,13 +181,12 @@ class Model:
         # Evaluate functions and distributions in topological order
         for node_idx in rx.topological_sort(graph):
             node_data = graph[node_idx]
+            context = {**self.parameters, **self.functions, **self.distributions}
             if node_data["type"] == "function":
                 func_name = node_data["name"]
-                context = {**self.parameters, **self.functions, **self.distributions}
                 self.functions[func_name] = functions[func_name].expression(context)
             elif node_data["type"] == "distribution":
                 dist_name = node_data["name"]
-                context = {**self.parameters, **self.functions, **self.distributions}
                 self.distributions[dist_name] = distributions[dist_name].expression(
                     context
                 )

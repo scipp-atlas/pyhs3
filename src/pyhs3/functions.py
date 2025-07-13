@@ -42,7 +42,7 @@ class Function(Generic[FuncConfigT]):
         self.parameters = parameters
         self.kwargs = kwargs
 
-    def expression(self, context: dict[str, T.TensorVar]) -> T.TensorVar:
+    def expression(self, _: dict[str, T.TensorVar]) -> T.TensorVar:
         """
         Evaluate the function expression.
 

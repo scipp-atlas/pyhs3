@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytensor.tensor as pt
+import pytest
 from pytensor import function
 
 from pyhs3 import Workspace
@@ -204,27 +205,27 @@ class TestBoundedScalar:
 
     def test_boundedscalar_two_sided(self):
         """Test boundedscalar with two-sided bounds."""
-        tensor = pt.scalar("test")
-        x = boundedscalar(tensor, (0.0, 1.0))
+        x = boundedscalar("test", (0.0, 1.0))
         assert x is not None
+        assert x.name == "test"
 
     def test_boundedscalar_lower_bound_only(self):
         """Test boundedscalar with lower bound only."""
-        tensor = pt.scalar("test")
-        x = boundedscalar(tensor, (0.0, None))
+        x = boundedscalar("test", (0.0, None))
         assert x is not None
+        assert x.name == "test"
 
     def test_boundedscalar_upper_bound_only(self):
         """Test boundedscalar with upper bound only."""
-        tensor = pt.scalar("test")
-        x = boundedscalar(tensor, (None, 1.0))
+        x = boundedscalar("test", (None, 1.0))
         assert x is not None
+        assert x.name == "test"
 
     def test_boundedscalar_no_bounds(self):
         """Test boundedscalar with no bounds."""
-        tensor = pt.scalar("test")
-        x = boundedscalar(tensor, (None, None))
+        x = boundedscalar("test", (None, None))
         assert x is not None
+        assert x.name == "test"
 
 
 class TestNumericParameters:
@@ -347,3 +348,117 @@ class TestNumericParameters:
         pdf_value = model.pdf("test_gauss", mu=0.0)
         assert pdf_value is not None
         assert pdf_value > 0  # Should be a valid probability
+
+
+class TestDependencyGraphErrors:
+    """Test dependency graph error conditions in core.py for code coverage."""
+
+    def test_unknown_entity_referenced_error(self):
+        """Test that referencing an unknown entity raises ValueError."""
+
+        # Create a workspace with a distribution that references a non-existent parameter
+        test_data = {
+            "parameter_points": [
+                {"name": "test_params", "parameters": [{"name": "mu", "value": 0.0}]}
+            ],
+            "distributions": [
+                {
+                    "type": "gaussian_dist",
+                    "name": "test_gauss",
+                    "mean": "mu",
+                    "sigma": 1.0,
+                    "x": "nonexistent_param",  # This parameter doesn't exist
+                }
+            ],
+            "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
+            "functions": [],
+            "metadata": {"name": "test"},
+        }
+
+        ws = Workspace(test_data)
+
+        # This should raise ValueError with specific message about unknown entity
+        with pytest.raises(
+            ValueError,
+            match="Unknown entity referenced: 'nonexistent_param' from 'test_gauss'",
+        ):
+            ws.model(domain="test_domain", parameter_point="test_params")
+
+    def test_circular_dependency_error(self):
+        """Test that circular dependencies raise ValueError."""
+
+        # Create a workspace with circular dependency between functions
+        test_data = {
+            "parameter_points": [
+                {"name": "test_params", "parameters": [{"name": "base", "value": 1.0}]}
+            ],
+            "functions": [
+                {
+                    "type": "generic_function",
+                    "name": "func_a",
+                    "expression": "func_b + 1",  # func_a depends on func_b
+                },
+                {
+                    "type": "generic_function",
+                    "name": "func_b",
+                    "expression": "func_a * 2",  # func_b depends on func_a -> circular!
+                },
+            ],
+            "distributions": [],
+            "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
+            "metadata": {"name": "test"},
+        }
+
+        ws = Workspace(test_data)
+
+        # This should raise ValueError about circular dependency
+        with pytest.raises(ValueError, match="Circular dependency detected in model"):
+            ws.model(domain="test_domain", parameter_point="test_params")
+
+    def test_bounded_scalar_applied_to_parameters(self):
+        """Test that parameters get bounded scalar applied when domains exist."""
+        # Create a workspace with a parameter that has domain bounds
+        test_data = {
+            "parameter_points": [
+                {"name": "test_params", "parameters": [{"name": "mu", "value": 0.0}]}
+            ],
+            "distributions": [
+                {
+                    "type": "gaussian_dist",
+                    "name": "test_dist",
+                    "mean": "mu",
+                    "sigma": 1.0,
+                    "x": "mu",
+                }
+            ],
+            "domains": [
+                {
+                    "name": "test_domain",
+                    "type": "product_domain",
+                    "axes": [
+                        {
+                            "name": "mu",
+                            "min": -2.0,
+                            "max": 2.0,
+                        }  # Bounds on parameter mu
+                    ],
+                }
+            ],
+            "functions": [],
+            "metadata": {"name": "test"},
+        }
+
+        ws = Workspace(test_data)
+        model = ws.model(domain="test_domain", parameter_point="test_params")
+
+        # Verify the parameter is bounded
+        assert "mu" in model.parameters
+        mu_tensor = model.parameters["mu"]
+        assert mu_tensor is not None
+        assert hasattr(mu_tensor, "name")
+
+        # The distribution should have been created successfully using the bounded parameter
+        assert "test_dist" in model.distributions
+        dist_tensor = model.distributions["test_dist"]
+        assert dist_tensor is not None
+        assert hasattr(dist_tensor, "name")

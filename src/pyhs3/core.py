@@ -4,7 +4,7 @@ import logging
 from collections import OrderedDict
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Callable, cast
+from typing import Callable, TypeVar, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -25,8 +25,12 @@ from rich.progress import (
 from pyhs3 import typing as T
 from pyhs3.distributions import DistributionSet
 from pyhs3.functions import FunctionSet
+from pyhs3.typing_compat import TypeAlias
 
 log = logging.getLogger(__name__)
+
+TDefault = TypeVar("TDefault")
+Axis: TypeAlias = tuple[float | None, float | None]
 
 
 class Workspace:
@@ -135,19 +139,21 @@ class Model:
         self.functions: dict[str, T.TensorVar] = {}
 
         for parameter_point in parameterset:
-            # Create unbounded scalar first, bounds will be applied later in dependency graph
-            self.parameters[parameter_point.name] = pt.scalar(parameter_point.name)
+            # Create scalar parameter with domain bounds applied
+            domain = domains.domains.get(parameter_point.name, (None, None))
+            self.parameters[parameter_point.name] = boundedscalar(
+                parameter_point.name, domain
+            )
 
         self.distributions: dict[str, T.TensorVar] = {}
 
         # Build dependency graph with proper entity identification
-        self._build_dependency_graph(functions, distributions, domains, progress)
+        self._build_dependency_graph(functions, distributions, progress)
 
     def _build_dependency_graph(
         self,
         functions: FunctionSet,
         distributions: DistributionSet,
-        domains: DomainSet,
         progress: bool = True,
     ) -> None:
         """
@@ -249,11 +255,8 @@ class Model:
                 context = {**self.parameters, **self.functions, **self.distributions}
 
                 if node_type == "parameter":
-                    # Parameters are already created as pt.scalar, just apply bounds if needed
-                    tensor = self.parameters[node_name]
-                    domain = domains.domains.get(node_name, (None, None))
-                    if domain != (None, None):
-                        self.parameters[node_name] = boundedscalar(tensor, domain)
+                    # Parameters are already created with bounds applied, nothing to do
+                    pass
 
                 elif node_type == "constant":
                     # Constants are pre-created by distributions - add to parameters
@@ -261,21 +264,13 @@ class Model:
 
                 elif node_type == "function":
                     # Functions are evaluated by design
-                    result = functions[node_name].expression(context)
-                    # Apply domain bounds if they exist
-                    domain = domains.domains.get(node_name, (None, None))
-                    if domain != (None, None):
-                        result = boundedscalar(result, domain)
-                    self.functions[node_name] = result
+                    self.functions[node_name] = functions[node_name].expression(context)
 
                 elif node_type == "distribution":
                     # Distributions are evaluated by design
-                    result = distributions[node_name].expression(context)
-                    # Apply domain bounds if they exist
-                    domain = domains.domains.get(node_name, (None, None))
-                    if domain != (None, None):
-                        result = boundedscalar(result, domain)
-                    self.distributions[node_name] = result
+                    self.distributions[node_name] = distributions[node_name].expression(
+                        context
+                    )
 
                 # Advance progress
                 progress_bar.advance(task)
@@ -346,6 +341,11 @@ class ParameterCollection:
         key = list(self.sets.keys())[item] if isinstance(item, int) else item
         return self.sets[key]
 
+    def get(
+        self, item: str, default: TDefault | None = None
+    ) -> ParameterSet | TDefault | None:
+        return self.sets.get(item, default)
+
     def __contains__(self, item: str) -> bool:
         return item in self.sets
 
@@ -384,6 +384,11 @@ class ParameterSet:
     def __getitem__(self, item: str | int) -> ParameterPoint:
         key = list(self.points.keys())[item] if isinstance(item, int) else item
         return self.points[key]
+
+    def get(
+        self, item: str, default: TDefault | None = None
+    ) -> ParameterPoint | TDefault | None:
+        return self.points.get(item, default)
 
     def __contains__(self, item: str) -> bool:
         return item in self.points
@@ -436,6 +441,11 @@ class DomainCollection:
     def __getitem__(self, item: str | int) -> DomainSet:
         key = list(self.domains.keys())[item] if isinstance(item, int) else item
         return self.domains[key]
+
+    def get(
+        self, item: str, default: TDefault | None = None
+    ) -> DomainSet | TDefault | None:
+        return self.domains.get(item, default)
 
     def __contains__(self, item: str) -> bool:
         return item in self.domains
@@ -493,42 +503,60 @@ class DomainSet:
         """
         self.name = name
         self.kind = kind
-        self.domains: dict[str, tuple[float, float]] = OrderedDict()
+        self.domains: dict[str, Axis] = OrderedDict()
 
-        for domain_config in axes:
+        for axis_config in axes:
             domain = DomainPoint(
-                domain_config["name"], domain_config["min"], domain_config["max"]
+                axis_config["name"], axis_config["min"], axis_config["max"]
             )
             self.domains[domain.name] = domain.range
 
-    def __getitem__(self, item: int | str) -> tuple[float, float]:
+    def __getitem__(self, item: int | str) -> Axis:
         key = list(self.domains.keys())[item] if isinstance(item, int) else item
         return self.domains[key]
+
+    def get(
+        self, item: str, default: TDefault | Axis = (None, None)
+    ) -> Axis | TDefault:
+        return self.domains.get(item, default)
 
     def __contains__(self, item: str) -> bool:
         return item in self.domains
 
+    def __iter__(self) -> Iterator[Axis]:
+        return iter(self.domains.values())
 
-def boundedscalar(
-    tensor: T.TensorVar, domain: tuple[float | None, float | None]
-) -> T.TensorVar:
+    def __len__(self) -> int:
+        return len(self.domains)
+
+
+def boundedscalar(name: str, domain: Axis) -> T.TensorVar:
     """
-    Applies domain constraints to a pytensor tensor variable.
+    Creates a scalar tensor variable with optional domain constraints.
 
     Args:
-        tensor: The tensor variable to constrain.
+        name: Name of the scalar parameter.
         domain (tuple): Tuple specifying (min, max) range. Use None for unbounded sides.
                        For example: (0.0, None) for lower bound only, (None, 1.0) for upper bound only.
+                       If both bounds are None, returns an unbounded scalar.
 
     Returns:
-        pytensor.tensor.variable.TensorVariable: The tensor clipped to the domain range.
+        pytensor.tensor.variable.TensorVariable: The scalar tensor, clipped to domain if bounds exist.
 
     Examples:
-        >>> boundedscalar(pt.scalar("sigma"), (0.0, None))  # sigma >= 0
-        >>> boundedscalar(pt.scalar("fraction"), (0.0, 1.0))  # 0 <= fraction <= 1
-        >>> boundedscalar(pt.scalar("temperature"), (None, 100.0))  # temperature <= 100
+        >>> boundedscalar("sigma", (0.0, None))  # sigma >= 0
+        >>> boundedscalar("fraction", (0.0, 1.0))  # 0 <= fraction <= 1
+        >>> boundedscalar("temperature", (None, 100.0))  # temperature <= 100
+        >>> boundedscalar("unbounded", (None, None))  # no bounds applied
     """
     min_bound, max_bound = domain
+
+    # Create the base scalar tensor
+    tensor = pt.scalar(name)
+
+    # If both bounds are None, return unbounded scalar
+    if min_bound is None and max_bound is None:
+        return cast(T.TensorVar, tensor)
 
     # Use infinity constants for unbounded sides
     min_val = pt.constant(-np.inf) if min_bound is None else pt.constant(min_bound)

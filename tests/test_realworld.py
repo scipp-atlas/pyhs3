@@ -82,11 +82,13 @@ class TestDiHiggsIssue41Workspace:
         assert len(dist_types) > 0
 
     @pytest.mark.xfail(
-        reason="Workspace data integrity issue - missing parameter 'muCB_ggFHH_kl1p0_mc23a_Run3LM_4'"
+        reason="Dependency graph construction fails due to KeyError: 'constr__THEO_BR_Hbb'. "
+        "The dependency graph builder doesn't correctly handle cross-references between "
+        "functions and distributions, causing missing entities during topological evaluation."
     )
     def test_nll_validation_against_root(self, ws_workspace, expected_nll_data):
         """Test NLL values match expected ROOT results."""
-        # This test is expected to fail until GenericDist is implemented
+        # This test is expected to fail until dependency graph construction is fixed
         mu_HH_values = expected_nll_data["mu_HH"]
         expected_nll_values = expected_nll_data["nll"]
 
@@ -98,7 +100,7 @@ class TestDiHiggsIssue41Workspace:
             _expected_nll = expected_nll_values[i]
 
             # Create model with mu_HH set to specific value
-            # Note: This will fail with GenericDist until properly implemented
+            # Note: This will fail due to dependency graph issues
             model = ws_workspace.model(
                 parameter_point=param_collection, domain=domain_collection
             )
@@ -109,7 +111,7 @@ class TestDiHiggsIssue41Workspace:
             assert model is not None
 
             # TODO: Implement actual NLL calculation and comparison
-            # when GenericDist is properly implemented
+            # when dependency graph construction is fixed
 
     def test_workspace_parameter_structure(self, ws_workspace):
         """Test that workspace has expected parameter structure."""
@@ -125,7 +127,9 @@ class TestDiHiggsIssue41Workspace:
         assert len(domain_names) > 0
 
     @pytest.mark.xfail(
-        reason="Workspace data integrity issue - missing parameter 'muCB_ggFHH_kl1p0_mc23a_Run3LM_4'"
+        reason="Dependency graph construction fails due to KeyError: 'constr__THEO_BR_Hbb'. "
+        "The dependency graph builder doesn't correctly handle cross-references between "
+        "functions and distributions, causing missing entities during topological evaluation."
     )
     def test_workspace_model_creation(self, ws_workspace):
         """Test that we can create a model from the workspace."""

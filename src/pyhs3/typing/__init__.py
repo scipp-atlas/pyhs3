@@ -12,6 +12,7 @@ from pytensor.tensor.variable import TensorVariable
 
 from pyhs3.typing.distribution import Distribution
 from pyhs3.typing.domain import Axis, Domain, ProductDomain
+from pyhs3.typing.function import Function
 from pyhs3.typing.metadata import Metadata
 from pyhs3.typing.misc import Misc
 from pyhs3.typing.parameter_point import Parameter, ParameterPoint
@@ -24,7 +25,7 @@ class HS3Spec(TypedDict):
     """
 
     distributions: NotRequired[list[Distribution]]
-    functions: NotRequired[list[dict[str, Any]]]
+    functions: NotRequired[list[Function]]
     data: NotRequired[list[dict[str, Any]]]
     likelihoods: NotRequired[list[dict[str, Any]]]
     domains: NotRequired[list[ProductDomain]]
@@ -40,6 +41,7 @@ __all__ = (
     "Axis",
     "Distribution",
     "Domain",
+    "Function",
     "HS3Spec",
     "Parameter",
     "ParameterPoint",

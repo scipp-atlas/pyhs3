@@ -206,23 +206,15 @@ class FunctionSet:
         """
         self.funcs: dict[str, Function[Any]] = {}
         for func_config in funcs:
-            try:
-                func_type = func_config["type"]
-                the_func = registered_functions.get(func_type, Function)
-                if the_func is Function:
-                    msg = f"Unknown function type: {func_type}"
-                    raise ValueError(msg)
-                func = the_func.from_dict(
-                    {k: v for k, v in func_config.items() if k != "type"}
-                )
-                self.funcs[func.name] = func
-            except Exception as exc:
-                log.warning(
-                    "Failed to create function %s of type %s: %s",
-                    func_config["name"],
-                    func_config["type"],
-                    exc,
-                )
+            func_type = func_config["type"]
+            the_func = registered_functions.get(func_type, Function)
+            if the_func is Function:
+                msg = f"Unknown function type: {func_type}"
+                raise ValueError(msg)
+            func = the_func.from_dict(
+                {k: v for k, v in func_config.items() if k != "type"}
+            )
+            self.funcs[func.name] = func
 
     def __getitem__(self, item: str) -> Function[Any]:
         return self.funcs[item]

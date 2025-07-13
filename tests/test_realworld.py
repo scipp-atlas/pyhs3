@@ -9,26 +9,6 @@ from skhep_testdata import data_path as skhep_testdata_path
 import pyhs3 as hs3
 
 
-def summarize(node, max_depth=3, _depth=0):
-    indent = "  " * _depth
-    if _depth >= max_depth:
-        print(f"{indent}…")
-        return
-
-    if isinstance(node, dict):
-        for key, value in node.items():
-            print(f"{indent}{key} -> {type(value).__name__}")
-            summarize(value, max_depth, _depth + 1)
-
-    elif isinstance(node, list):
-        print(f"{indent}[list of {len(node)} items]")
-        if node:
-            summarize(node[0], max_depth, _depth + 1)
-
-    else:
-        print(f"{indent}{node!r} ({type(node).__name__})")
-
-
 @pytest.fixture
 def ws_json():
     """Load issue41_diHiggs_workspace.json file and return parsed JSON content.
@@ -44,12 +24,6 @@ def ws_json():
 def ws_workspace(ws_json):
     """Create workspace from WS.json content."""
     return hs3.Workspace(ws_json)
-
-
-def test_workspace_structure(ws_json):
-    """Test and display workspace structure."""
-    summarize(ws_json, max_depth=3)
-    assert isinstance(ws_json, dict)
 
 
 def test_workspace_loading(ws_workspace):
@@ -81,11 +55,7 @@ class TestDiHiggsIssue41Workspace:
         # Should have various distribution types
         assert len(dist_types) > 0
 
-    @pytest.mark.xfail(
-        reason="Dependency graph construction fails due to KeyError: 'constr__THEO_BR_Hbb'. "
-        "The dependency graph builder doesn't correctly handle cross-references between "
-        "functions and distributions, causing missing entities during topological evaluation."
-    )
+    @pytest.mark.xfail(reason="No expected nlls added in yet")
     def test_nll_validation_against_root(self, ws_workspace, expected_nll_data):
         """Test NLL values match expected ROOT results."""
         # This test is expected to fail until dependency graph construction is fixed
@@ -96,19 +66,21 @@ class TestDiHiggsIssue41Workspace:
         param_collection = ws_workspace.parameter_collection[0]  # default_values
         domain_collection = ws_workspace.domain_collection[0]  # default_domain
 
+        # Create model with mu_HH set to specific value
+        # Note: This will fail due to dependency graph issues
+        model = ws_workspace.model(
+            parameter_point=param_collection, domain=domain_collection
+        )
+
+        # Evaluate NLL at this mu_HH value
+        # This is where the test should validate against expected_nll
+        # For now, we'll just check that we can create the model
+        assert model is not None
+
         for i, _mu_HH_val in enumerate(mu_HH_values):
-            _expected_nll = expected_nll_values[i]
+            expected_nll = expected_nll_values[i]
 
-            # Create model with mu_HH set to specific value
-            # Note: This will fail due to dependency graph issues
-            model = ws_workspace.model(
-                parameter_point=param_collection, domain=domain_collection
-            )
-
-            # Evaluate NLL at this mu_HH value
-            # This is where the test should validate against expected_nll
-            # For now, we'll just check that we can create the model
-            assert model is not None
+            assert expected_nll == 0
 
             # TODO: Implement actual NLL calculation and comparison
             # when dependency graph construction is fixed
@@ -126,11 +98,6 @@ class TestDiHiggsIssue41Workspace:
         assert len(param_names) > 0
         assert len(domain_names) > 0
 
-    @pytest.mark.xfail(
-        reason="Dependency graph construction fails due to KeyError: 'constr__THEO_BR_Hbb'. "
-        "The dependency graph builder doesn't correctly handle cross-references between "
-        "functions and distributions, causing missing entities during topological evaluation."
-    )
     def test_workspace_model_creation(self, ws_workspace):
         """Test that we can create a model from the workspace."""
         # This tests basic model creation without full evaluation

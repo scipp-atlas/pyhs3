@@ -12,6 +12,15 @@ import pytensor.tensor as pt
 import rustworkx as rx
 from pytensor.compile.function import function
 from pytensor.graph.basic import graph_inputs
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 
 from pyhs3 import typing as T
 from pyhs3.distributions import DistributionSet
@@ -51,6 +60,7 @@ class Workspace:
         *,
         domain: int | str | DomainSet = 0,
         parameter_point: int | str | ParameterSet = 0,
+        progress: bool = True,
     ) -> Model:
         """
         Constructs a `Model` object using the provided domain and parameter point.
@@ -58,6 +68,7 @@ class Workspace:
         Args:
             domain (int | str | DomainSet): Identifier or object specifying the domain to use.
             parameter_point (int | str | ParameterSet): Identifier or object specifying the parameter values to use.
+            progress (bool): Whether to show progress bar during dependency graph construction. Defaults to True.
 
         Returns:
             Model: The constructed model object.
@@ -85,6 +96,7 @@ class Workspace:
             distributions=self.distribution_set,
             domains=domainset,
             functions=self.function_set,
+            progress=progress,
         )
 
 
@@ -100,6 +112,7 @@ class Model:
         distributions: DistributionSet,
         domains: DomainSet,
         functions: FunctionSet,
+        progress: bool = True,
     ):
         """
         Represents a probabilistic model composed of parameters, domains, distributions, and functions.
@@ -109,6 +122,7 @@ class Model:
             distributions (DistributionSet): Set of distributions to include.
             domains (DomainSet): Domain constraints for parameters.
             functions (FunctionSet): Set of functions that compute parameter values.
+            progress (bool): Whether to show progress bar during dependency graph construction.
 
         Attributes:
             parameters (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic parameter variables.
@@ -127,10 +141,14 @@ class Model:
         self.distributions: dict[str, T.TensorVar] = {}
 
         # Build dependency graph with proper entity identification
-        self._build_dependency_graph(functions, distributions, domains)
+        self._build_dependency_graph(functions, distributions, domains, progress)
 
     def _build_dependency_graph(
-        self, functions: FunctionSet, distributions: DistributionSet, domains: DomainSet
+        self,
+        functions: FunctionSet,
+        distributions: DistributionSet,
+        domains: DomainSet,
+        progress: bool = True,
     ) -> None:
         """
         Build and evaluate dependency graph for functions and distributions.
@@ -194,42 +212,73 @@ class Model:
             msg = "Circular dependency detected in model"
             raise ValueError(msg) from e
 
-        for node_idx in sorted_nodes:
-            node_data = graph[node_idx]
-            node_type = node_data["type"]
-            node_name = node_data["name"]
+        # Evaluate nodes in topological order with optional progress bar
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}", style="cyan"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            expand=True,
+            transient=True,  # Progress bar disappears when finished
+            disable=not progress,  # Disable progress bar if progress=False
+        ) as progress_bar:
+            task = progress_bar.add_task(
+                "Building expressions...", total=len(sorted_nodes)
+            )
 
-            # Build context with all currently available entities
-            context = {**self.parameters, **self.functions, **self.distributions}
+            for node_idx in sorted_nodes:
+                node_data = graph[node_idx]
+                node_type = node_data["type"]
+                node_name = node_data["name"]
 
-            if node_type == "parameter":
-                # Parameters are already created as pt.scalar, just apply bounds if needed
-                tensor = self.parameters[node_name]
-                domain = domains.domains.get(node_name, (None, None))
-                if domain != (None, None):
-                    self.parameters[node_name] = boundedscalar(tensor, domain)
+                # Truncate long names to prevent jumpiness
+                max_name_length = 60
+                display_name = node_name
+                if len(node_name) > max_name_length:
+                    display_name = node_name[: max_name_length - 3] + "..."
 
-            elif node_type == "constant":
-                # Constants are pre-created by distributions - add to parameters
-                self.parameters[node_name] = constants_map[node_name]
+                # Update progress description with current entity (fixed width)
+                progress_bar.update(
+                    task,
+                    description=f"Building {node_type:<12}: {display_name:<{max_name_length}}",
+                )
 
-            elif node_type == "function":
-                # Functions are evaluated by design
-                result = functions[node_name].expression(context)
-                # Apply domain bounds if they exist
-                domain = domains.domains.get(node_name, (None, None))
-                if domain != (None, None):
-                    result = boundedscalar(result, domain)
-                self.functions[node_name] = result
+                # Build context with all currently available entities
+                context = {**self.parameters, **self.functions, **self.distributions}
 
-            elif node_type == "distribution":
-                # Distributions are evaluated by design
-                result = distributions[node_name].expression(context)
-                # Apply domain bounds if they exist
-                domain = domains.domains.get(node_name, (None, None))
-                if domain != (None, None):
-                    result = boundedscalar(result, domain)
-                self.distributions[node_name] = result
+                if node_type == "parameter":
+                    # Parameters are already created as pt.scalar, just apply bounds if needed
+                    tensor = self.parameters[node_name]
+                    domain = domains.domains.get(node_name, (None, None))
+                    if domain != (None, None):
+                        self.parameters[node_name] = boundedscalar(tensor, domain)
+
+                elif node_type == "constant":
+                    # Constants are pre-created by distributions - add to parameters
+                    self.parameters[node_name] = constants_map[node_name]
+
+                elif node_type == "function":
+                    # Functions are evaluated by design
+                    result = functions[node_name].expression(context)
+                    # Apply domain bounds if they exist
+                    domain = domains.domains.get(node_name, (None, None))
+                    if domain != (None, None):
+                        result = boundedscalar(result, domain)
+                    self.functions[node_name] = result
+
+                elif node_type == "distribution":
+                    # Distributions are evaluated by design
+                    result = distributions[node_name].expression(context)
+                    # Apply domain bounds if they exist
+                    domain = domains.domains.get(node_name, (None, None))
+                    if domain != (None, None):
+                        result = boundedscalar(result, domain)
+                    self.distributions[node_name] = result
+
+                # Advance progress
+                progress_bar.advance(task)
 
     def pdf(self, name: str, **parametervalues: float) -> npt.NDArray[np.float64]:
         """

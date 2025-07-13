@@ -29,18 +29,18 @@ class TestFunction:
         """Test Function base class initialization."""
         func = Function(
             name="test_func",
-            function_type="test",
+            type="test",
             parameters=["param1", "param2"],
         )
         assert func.name == "test_func"
-        assert func.function_type == "test"
+        assert func.type == "test"
         assert func.parameters == ["param1", "param2"]
 
     def test_function_expression_not_implemented(self):
         """Test that base Function expression raises NotImplementedError."""
         func = Function(
             name="test_func",
-            function_type="test",
+            type="test",
             parameters=["param1"],
         )
         with pytest.raises(
@@ -61,7 +61,7 @@ class TestProductFunction:
         """Test ProductFunction can be created and configured."""
         func = ProductFunction(name="test_product", factors=["factor1", "factor2"])
         assert func.name == "test_product"
-        assert func.function_type == "product"
+        assert func.type == "product"
         assert func.factors == ["factor1", "factor2"]
         assert func.parameters == ["factor1", "factor2"]
 
@@ -135,7 +135,7 @@ class TestGenericFunction:
         """Test GenericFunction can be created and configured."""
         func = GenericFunction(name="test_generic", expression="x + y")
         assert func.name == "test_generic"
-        assert func.function_type == "generic_function"
+        assert func.type == "generic_function"
         assert func.expression_str == "x + y"
         assert set(func.parameters) == {"x", "y"}
 
@@ -252,7 +252,7 @@ class TestInterpolationFunction:
             vars=["var1", "var2"],
         )
         assert func.name == "test_interp"
-        assert func.function_type == "interpolation"
+        assert func.type == "interpolation"
         assert func.high == ["high1", "high2"]
         assert func.low == ["low1", "low2"]
         assert func.nom == ["nom1", "nom2"]

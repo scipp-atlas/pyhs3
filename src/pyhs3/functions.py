@@ -21,18 +21,18 @@ log = logging.getLogger(__name__)
 class Function:
     """Base class for HS3 functions."""
 
-    def __init__(self, *, name: str, type: str, parameters: list[str], **kwargs: Any):
+    def __init__(self, *, name: str, dtype: str, parameters: list[str], **kwargs: Any):
         """
         Base class for functions that compute parameter values.
 
         Args:
             name: Name of the function
-            type: Type of the function (product, generic_function, interpolation)
+            dtype: Type of the function (product, generic_function, interpolation)
             parameters: List of parameter/function names this function depends on
             **kwargs: Additional function-specific parameters
         """
         self.name = name
-        self.type = type
+        self.dtype = dtype
         self.parameters = parameters
         self.kwargs = kwargs
 
@@ -46,7 +46,7 @@ class Function:
         Returns:
             PyTensor expression representing the function result
         """
-        msg = f"Function type {self.type} not implemented"
+        msg = f"Function type {self.dtype} not implemented"
         raise NotImplementedError(msg)
 
     @classmethod
@@ -67,7 +67,7 @@ class ProductFunction(Function):
             factors: List of factor names to multiply together
         """
         # factors become the parameters this function depends on
-        super().__init__(name=name, type="product", parameters=factors)
+        super().__init__(name=name, dtype="product", parameters=factors)
         self.factors = factors
 
     @classmethod
@@ -106,7 +106,7 @@ class GenericFunction(Function):
         parameters = [str(symbol) for symbol in analysis["independent_vars"]]
 
         # Initialize parent with the parsed parameters
-        super().__init__(name=name, type="generic_function", parameters=parameters)
+        super().__init__(name=name, dtype="generic_function", parameters=parameters)
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> GenericFunction:
@@ -152,7 +152,7 @@ class InterpolationFunction(Function):
             **kwargs: Additional interpolation-specific parameters
         """
         # Use vars as the parameters this function depends on
-        super().__init__(name=name, type="interpolation", parameters=vars, **kwargs)
+        super().__init__(name=name, dtype="interpolation", parameters=vars, **kwargs)
         self.high = high
         self.low = low
         self.nom = nom

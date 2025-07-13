@@ -349,6 +349,7 @@ class ParameterCollection:
     def get(
         self, item: str, default: TDefault | None = None
     ) -> ParameterSet | TDefault | None:
+        """Get a parameter set by name, returning default if not found."""
         return self.sets.get(item, default)
 
     def __contains__(self, item: str) -> bool:
@@ -393,6 +394,7 @@ class ParameterSet:
     def get(
         self, item: str, default: TDefault | None = None
     ) -> ParameterPoint | TDefault | None:
+        """Get a parameter point by name, returning default if not found."""
         return self.points.get(item, default)
 
     def __contains__(self, item: str) -> bool:
@@ -450,6 +452,7 @@ class DomainCollection:
     def get(
         self, item: str, default: TDefault | None = None
     ) -> DomainSet | TDefault | None:
+        """Get a domain set by name, returning default if not found."""
         return self.domains.get(item, default)
 
     def __contains__(self, item: str) -> bool:
@@ -523,6 +526,7 @@ class DomainSet:
     def get(
         self, item: str, default: TDefault | Axis = (None, None)
     ) -> Axis | TDefault:
+        """Get domain bounds for a parameter, returning default if not found."""
         return self.domains.get(item, default)
 
     def __contains__(self, item: str) -> bool:

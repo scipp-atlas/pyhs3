@@ -134,6 +134,63 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
     Implements ROOT's PiecewiseInterpolation logic to morph between nominal
     and variation distributions based on nuisance parameter values.
     Supports multiple interpolation codes (0-6) for different mathematical approaches.
+
+    Mathematical Formulations:
+        For **additive** interpolation modes (codes 0, 2, 3, 4):
+        $$\text{result} = \text{nominal} + \sum_i I_i(\theta_i; \text{low}_i, \text{nominal}, \text{high}_i)$$
+
+        For **multiplicative** interpolation modes (codes 1, 5, 6):
+        $$\text{result} = \text{nominal} \times \prod_i [1 + I_i(\theta_i; \text{low}_i/\text{nominal}, 1, \text{high}_i/\text{nominal})]$$
+
+    Interpolation Code Definitions:
+        **Code 0** - Linear Interpolation/Extrapolation (Additive):
+        $$I_0(\theta) = \begin{cases}
+        \theta(\text{high} - \text{nom}) & \text{if } \theta \geq 0 \\
+        \theta(\text{nom} - \text{low}) & \text{if } \theta < 0
+        \end{cases}$$
+
+        **Code 1** - Exponential Interpolation/Extrapolation (Multiplicative):
+        $$I_1(\theta) = \begin{cases}
+        \left(\frac{\text{high}}{\text{nom}}\right)^{\theta} - 1 & \text{if } \theta \geq 0 \\
+        \left(\frac{\text{low}}{\text{nom}}\right)^{-\theta} - 1 & \text{if } \theta < 0
+        \end{cases}$$
+
+        **Code 2** - Exponential Interpolation + Linear Extrapolation (Additive):
+        Uses $\exp(\theta)$ behavior for $|\theta| \leq 1$, linear extrapolation for $|\theta| > 1$
+        with smooth transition at $\theta = \pm 1$.
+
+        **Code 3** - Exponential Interpolation + Different Linear Extrapolation (Additive):
+        Uses $\exp(\theta)$ behavior for $|\theta| \leq 1$, different linear extrapolation
+        for $|\theta| > 1$ compared to code 2.
+
+        **Code 4** - 6th Order Polynomial Interpolation + Linear Extrapolation (Additive):
+        $$I_4(\theta) = \begin{cases}
+        \text{linear extrapolation} & \text{if } |\theta| \geq 1 \\
+        \theta \times (1 + \theta^2(-3 + \theta^2)/16) \times (\text{high} - \text{nom}) & \text{if } \theta \geq 0, |\theta| < 1
+        \end{cases}$$
+
+        **Code 5** - 6th Order Polynomial Interpolation + Exponential Extrapolation (Multiplicative):
+        Uses exponential extrapolation for $|\theta| \geq 1$, 6th order polynomial for $|\theta| < 1$.
+        Recommended for normalization factors.
+
+        **Code 6** - 6th Order Polynomial Interpolation + Linear Extrapolation (Multiplicative):
+        Uses linear extrapolation for $|\theta| \geq 1$, 6th order polynomial for $|\theta| < 1$.
+        Recommended for normalization factors (no roots outside $|\theta| < 1$).
+
+    Args:
+        name: Name of the function
+        high: High variation parameter names
+        low: Low variation parameter names
+        nom: Nominal parameter name
+        interpolationCodes: Interpolation method codes (0-6)
+        positiveDefinite: Whether function should be positive definite
+        parameters: Variable names this function depends on (nuisance parameters)
+
+    Note:
+        - At $\theta_i = 0$, all codes return the nominal value
+        - At $\theta_i = \pm 1$, variations should match high/low values for appropriate codes
+        - Polynomial codes (4,5,6) provide smoother interpolation with matching derivatives
+        - Based on A.Bukin, Budker INP, Novosibirsk and ROOT's RooFit implementation
     """
 
     def __init__(
@@ -192,18 +249,25 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
         Implement flexible interpolation for a single parameter.
 
         Based on ROOT's flexibleInterpSingle method with support for
-        interpolation codes 0-6.
+        interpolation codes 0-6. This method computes the interpolation
+        contribution $I_i(\theta_i)$ for a single nuisance parameter.
 
         Args:
-            interp_code: Interpolation code (0-6)
-            low_val: Low variation value
-            high_val: High variation value
-            boundary: Boundary value (typically 1.0)
-            nominal: Nominal value
-            param_val: Parameter value (theta)
+            interp_code: Interpolation code (0-6) determining the mathematical approach
+            low_val: Low variation value (used when $\theta < 0$)
+            high_val: High variation value (used when $\theta \geq 0$)
+            boundary: Boundary value for switching between interpolation and extrapolation (typically 1.0)
+            nominal: Nominal value (baseline)
+            param_val: Parameter value $\theta$ (nuisance parameter)
 
         Returns:
-            Interpolated contribution
+            Interpolated contribution $I_i(\theta_i)$ to be added (additive modes)
+            or multiplied (multiplicative modes) with the result
+
+        Note:
+            The returned value interpretation depends on the interpolation code:
+            - Codes 0,2,3,4: Direct additive contribution
+            - Codes 1,5,6: Multiplicative factor (subtract 1 before use)
         """
         # Codes 0, 2, 3, 4 are additive modes
         # Codes 1, 5, 6 are multiplicative modes
@@ -397,16 +461,28 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
         """
         Evaluate the interpolation function.
 
-        Implements ROOT's PiecewiseInterpolation algorithm:
-        1. Start with nominal value
-        2. For each nuisance parameter, add interpolated contribution
-        3. Apply positive definite constraint if requested
+        Implements ROOT's PiecewiseInterpolation algorithm following the mathematical
+        formulations described in the class docstring. The algorithm proceeds as:
+
+        1. Start with nominal value: $\\text{result} = \\text{nominal}$
+        2. For each nuisance parameter $\\theta_i$, compute interpolation contribution $I_i(\\theta_i)$
+        3. Combine contributions based on interpolation mode:
+           - **Additive modes** (codes 0,2,3,4): $\\text{result} += I_i(\\theta_i)$
+           - **Multiplicative modes** (codes 1,5,6): $\\text{result} \\times= (1 + I_i(\\theta_i))$
+        4. Apply positive definite constraint: $\\text{result} = \\max(\\text{result}, 0)$ if requested
 
         Args:
-            context: Mapping of names to pytensor variables
+            context: Mapping of names to pytensor variables containing:
+                - Nominal parameter (referenced by `nom`)
+                - High/low variation parameters (referenced by `high`/`low` lists)
+                - Nuisance parameters (referenced by `parameters` list)
 
         Returns:
             PyTensor expression representing the interpolated result
+
+        Note:
+            The evaluation order ensures that all interpolation contributions are properly
+            combined according to their mathematical modes before applying constraints.
         """
         # Start with nominal value
         nominal = context[self.nom]

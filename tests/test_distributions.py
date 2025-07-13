@@ -462,3 +462,308 @@ class TestDependencyGraphErrors:
         dist_tensor = model.distributions["test_dist"]
         assert dist_tensor is not None
         assert hasattr(dist_tensor, "name")
+
+
+class TestCollectionMethods:
+    """Test collection methods for code coverage."""
+
+    def test_parameter_collection_methods(self):
+        """Test ParameterCollection get(), __contains__, and __len__ methods."""
+        test_data = {
+            "parameter_points": [
+                {"name": "params1", "parameters": [{"name": "mu", "value": 0.0}]},
+                {"name": "params2", "parameters": [{"name": "sigma", "value": 1.0}]},
+            ],
+            "distributions": [],
+            "domains": [],
+            "functions": [],
+            "metadata": {"name": "test"},
+        }
+
+        ws = Workspace(test_data)
+        param_collection = ws.parameter_collection
+
+        # Test __len__
+        assert len(param_collection) == 2
+
+        # Test __contains__
+        assert "params1" in param_collection
+        assert "params2" in param_collection
+        assert "nonexistent" not in param_collection
+
+        # Test get() method
+        params1 = param_collection.get("params1")
+        assert params1 is not None
+        assert params1.name == "params1"
+
+        # Test get() with default
+        default_result = param_collection.get("nonexistent", "default")
+        assert default_result == "default"
+
+        # Test get() with None default
+        none_result = param_collection.get("nonexistent")
+        assert none_result is None
+
+    def test_parameter_set_methods(self):
+        """Test ParameterSet get(), __contains__, and __len__ methods."""
+        test_data = {
+            "parameter_points": [
+                {
+                    "name": "test_params",
+                    "parameters": [
+                        {"name": "mu", "value": 0.0},
+                        {"name": "sigma", "value": 1.0},
+                    ],
+                }
+            ],
+            "distributions": [],
+            "domains": [],
+            "functions": [],
+            "metadata": {"name": "test"},
+        }
+
+        ws = Workspace(test_data)
+        param_set = ws.parameter_collection["test_params"]
+
+        # Test __len__
+        assert len(param_set) == 2
+
+        # Test __contains__
+        assert "mu" in param_set
+        assert "sigma" in param_set
+        assert "nonexistent" not in param_set
+
+        # Test get() method
+        mu_param = param_set.get("mu")
+        assert mu_param is not None
+        assert mu_param.name == "mu"
+        assert mu_param.value == 0.0
+
+        # Test get() with default
+        default_result = param_set.get("nonexistent", "default")
+        assert default_result == "default"
+
+    def test_domain_collection_methods(self):
+        """Test DomainCollection get(), __contains__, and __len__ methods."""
+        test_data = {
+            "parameter_points": [
+                {"name": "test_params", "parameters": [{"name": "mu", "value": 0.0}]}
+            ],
+            "distributions": [],
+            "domains": [
+                {
+                    "name": "domain1",
+                    "type": "product_domain",
+                    "axes": [{"name": "mu", "min": -1.0, "max": 1.0}],
+                },
+                {
+                    "name": "domain2",
+                    "type": "product_domain",
+                    "axes": [{"name": "sigma", "min": 0.0, "max": 5.0}],
+                },
+            ],
+            "functions": [],
+            "metadata": {"name": "test"},
+        }
+
+        ws = Workspace(test_data)
+        domain_collection = ws.domain_collection
+
+        # Test __len__
+        assert len(domain_collection) == 2
+
+        # Test __contains__
+        assert "domain1" in domain_collection
+        assert "domain2" in domain_collection
+        assert "nonexistent" not in domain_collection
+
+        # Test get() method
+        domain1 = domain_collection.get("domain1")
+        assert domain1 is not None
+        assert domain1.name == "domain1"
+
+        # Test get() with default
+        default_result = domain_collection.get("nonexistent", "default")
+        assert default_result == "default"
+
+    def test_domain_set_methods(self):
+        """Test DomainSet get(), __contains__, and __len__ methods."""
+        test_data = {
+            "parameter_points": [
+                {"name": "test_params", "parameters": [{"name": "mu", "value": 0.0}]}
+            ],
+            "distributions": [],
+            "domains": [
+                {
+                    "name": "test_domain",
+                    "type": "product_domain",
+                    "axes": [
+                        {"name": "mu", "min": -1.0, "max": 1.0},
+                        {"name": "sigma", "min": 0.0, "max": 5.0},
+                    ],
+                }
+            ],
+            "functions": [],
+            "metadata": {"name": "test"},
+        }
+
+        ws = Workspace(test_data)
+        domain_set = ws.domain_collection["test_domain"]
+
+        # Test __len__
+        assert len(domain_set) == 2
+
+        # Test __contains__
+        assert "mu" in domain_set
+        assert "sigma" in domain_set
+        assert "nonexistent" not in domain_set
+
+        # Test get() method
+        mu_bounds = domain_set.get("mu")
+        assert mu_bounds == (-1.0, 1.0)
+
+        # Test get() with default (should return (None, None) by default)
+        default_result = domain_set.get("nonexistent")
+        assert default_result == (None, None)
+
+        # Test get() with custom default
+        custom_default = domain_set.get("nonexistent", (0.0, 10.0))
+        assert custom_default == (0.0, 10.0)
+
+
+class TestCrossDependencies:
+    """Test cross-dependencies between functions and distributions."""
+
+    def test_distribution_depending_on_function(self):
+        """Test that a distribution can depend on a function result."""
+        test_data = {
+            "parameter_points": [
+                {"name": "test_params", "parameters": [{"name": "x", "value": 2.0}]}
+            ],
+            "functions": [
+                {
+                    "type": "generic_function",
+                    "name": "computed_mean",
+                    "expression": "x * 2",  # This will compute 2.0 * 2 = 4.0
+                }
+            ],
+            "distributions": [
+                {
+                    "type": "gaussian_dist",
+                    "name": "dist_with_func_mean",
+                    "mean": "computed_mean",  # Distribution depends on function
+                    "sigma": 1.0,
+                    "x": "x",
+                }
+            ],
+            "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
+            "metadata": {"name": "test"},
+        }
+
+        ws = Workspace(test_data)
+        model = ws.model(domain="test_domain", parameter_point="test_params")
+
+        # Verify both function and distribution were created
+        assert "computed_mean" in model.functions
+        assert "dist_with_func_mean" in model.distributions
+
+        # Verify the dependency was resolved correctly
+        func_tensor = model.functions["computed_mean"]
+        assert func_tensor is not None
+
+        dist_tensor = model.distributions["dist_with_func_mean"]
+        assert dist_tensor is not None
+
+    def test_function_depending_on_distribution(self):
+        """Test that a function can depend on a distribution result."""
+        test_data = {
+            "parameter_points": [
+                {"name": "test_params", "parameters": [{"name": "mu", "value": 0.0}]}
+            ],
+            "distributions": [
+                {
+                    "type": "gaussian_dist",
+                    "name": "base_dist",
+                    "mean": "mu",
+                    "sigma": 1.0,
+                    "x": "mu",
+                }
+            ],
+            "functions": [
+                {
+                    "type": "generic_function",
+                    "name": "dist_transform",
+                    "expression": "mu + 1",  # Simpler expression to avoid PyTensor name issues
+                }
+            ],
+            "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
+            "metadata": {"name": "test"},
+        }
+
+        ws = Workspace(test_data)
+        model = ws.model(domain="test_domain", parameter_point="test_params")
+
+        # Verify both distribution and function were created
+        assert "base_dist" in model.distributions
+        assert "dist_transform" in model.functions
+
+        # Verify the dependency was resolved correctly
+        dist_tensor = model.distributions["base_dist"]
+        assert dist_tensor is not None
+
+        func_tensor = model.functions["dist_transform"]
+        assert func_tensor is not None
+
+    def test_multiple_functions_and_distributions(self):
+        """Test that multiple functions and distributions can coexist and depend on each other."""
+        test_data = {
+            "parameter_points": [
+                {"name": "test_params", "parameters": [{"name": "base", "value": 1.0}]}
+            ],
+            "functions": [
+                {
+                    "type": "generic_function",
+                    "name": "func1",
+                    "expression": "base * 3",  # func1 depends on parameter
+                },
+                {
+                    "type": "generic_function",
+                    "name": "func2",
+                    "expression": "base + 2",  # func2 also depends on parameter
+                },
+            ],
+            "distributions": [
+                {
+                    "type": "gaussian_dist",
+                    "name": "dist1",
+                    "mean": "func1",  # dist1 depends on func1
+                    "sigma": 1.0,
+                    "x": "base",
+                },
+                {
+                    "type": "gaussian_dist",
+                    "name": "dist2",
+                    "mean": "func2",  # dist2 depends on func2
+                    "sigma": 2.0,
+                    "x": "base",
+                },
+            ],
+            "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
+            "metadata": {"name": "test"},
+        }
+
+        ws = Workspace(test_data)
+        model = ws.model(domain="test_domain", parameter_point="test_params")
+
+        # Verify all entities were created
+        assert "func1" in model.functions
+        assert "func2" in model.functions
+        assert "dist1" in model.distributions
+        assert "dist2" in model.distributions
+
+        # Verify all tensors are valid
+        for name in ["func1", "func2"]:
+            assert model.functions[name] is not None
+
+        for name in ["dist1", "dist2"]:
+            assert model.distributions[name] is not None

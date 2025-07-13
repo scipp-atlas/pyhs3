@@ -25,6 +25,33 @@ DistT = TypeVar("DistT", bound="Distribution[T.Distribution]")
 DistConfigT = TypeVar("DistConfigT", bound=T.Distribution)
 
 
+def process_parameter(
+    config: T.Distribution, param_key: str
+) -> tuple[str, T.TensorVar | None]:
+    """
+    Process a parameter that can be either a string reference or a numeric value.
+
+    For numeric values, creates a pt.constant and generates a unique name.
+    For string values, returns the value as-is with None for the constant.
+
+    Args:
+        config: The distribution configuration
+        param_key: The parameter key to process (e.g., "mean", "sigma")
+
+    Returns:
+        Tuple of (processed_name, constant_tensor_or_none)
+    """
+    param_value = config[param_key]  # type: ignore[literal-required]
+    if isinstance(param_value, (float, int)):
+        # Generate unique constant name
+        constant_name = f"constant_{config['name']}_{param_key}"
+        # Create the constant tensor
+        constant_tensor = cast(T.TensorVar, pt.constant(param_value))
+        return constant_name, constant_tensor
+    # It's a string reference - return as-is with no constant
+    return param_value, None
+
+
 class Distribution(Generic[DistConfigT]):
     """
     Distribution
@@ -49,11 +76,13 @@ class Distribution(Generic[DistConfigT]):
             name (str): Name of the distribution.
             kind (str): Type identifier.
             parameters (list[str]): initially empty list to be filled with parameter names.
+            constants (dict[str, pt.TensorVar]): Generated constants for numeric parameter values.
         """
         self.name = name
         self.kind = kind
         self.parameters = parameters or []
         self.kwargs = kwargs
+        self.constants: dict[str, T.TensorVar] = {}
 
     def expression(self, _: dict[str, T.TensorVar]) -> T.TensorVar:
         """
@@ -117,12 +146,28 @@ class GaussianDist(Distribution[TD.GaussianDistribution]):
         Returns:
             GaussianDist: The created GaussianDist instance.
         """
-        return cls(
+        # Process parameters first to get correct string names and constants
+        mean_name, mean_constant = process_parameter(config, "mean")
+        sigma_name, sigma_constant = process_parameter(config, "sigma")
+        x_name, x_constant = process_parameter(config, "x")
+
+        # Create instance with processed string names
+        instance = cls(
             name=config["name"],
-            mean=config["mean"],
-            sigma=config["sigma"],
-            x=config["x"],
+            mean=mean_name,
+            sigma=sigma_name,
+            x=x_name,
         )
+
+        # Add any generated constants to the instance
+        if mean_constant is not None:
+            instance.constants[mean_name] = mean_constant
+        if sigma_constant is not None:
+            instance.constants[sigma_name] = sigma_constant
+        if x_constant is not None:
+            instance.constants[x_name] = x_constant
+
+        return instance
 
     def expression(
         self, distributionsandparameters: dict[str, T.TensorVar]

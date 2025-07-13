@@ -62,7 +62,7 @@ jobs:
         run: >-
           python -m pytest -ra --cov --cov-branch --cov-report=xml
           --cov-report=term --junitxml=junit.xml -o junit_family=legacy
-          --durations=20
+          --durations=20 --runslow
 
       - name: Upload coverage report
         uses: codecov/codecov-action@v5.4.3

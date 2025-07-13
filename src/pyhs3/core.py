@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
+import sys
 from collections import OrderedDict
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Callable, cast
+from typing import Callable, TypeVar, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -12,12 +13,29 @@ import pytensor.tensor as pt
 import rustworkx as rx
 from pytensor.compile.function import function
 from pytensor.graph.basic import graph_inputs
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 
 from pyhs3 import typing as T
 from pyhs3.distributions import DistributionSet
 from pyhs3.functions import FunctionSet
+from pyhs3.typing_compat import TypeAlias
 
 log = logging.getLogger(__name__)
+
+TDefault = TypeVar("TDefault")
+
+if sys.version_info >= (3, 10):
+    Axis: TypeAlias = tuple[float | None, float | None]
+else:
+    Axis: TypeAlias = tuple["float | None", "float | None"]
 
 
 class Workspace:
@@ -51,6 +69,7 @@ class Workspace:
         *,
         domain: int | str | DomainSet = 0,
         parameter_point: int | str | ParameterSet = 0,
+        progress: bool = True,
     ) -> Model:
         """
         Constructs a `Model` object using the provided domain and parameter point.
@@ -58,6 +77,7 @@ class Workspace:
         Args:
             domain (int | str | DomainSet): Identifier or object specifying the domain to use.
             parameter_point (int | str | ParameterSet): Identifier or object specifying the parameter values to use.
+            progress (bool): Whether to show progress bar during dependency graph construction. Defaults to True.
 
         Returns:
             Model: The constructed model object.
@@ -85,6 +105,7 @@ class Workspace:
             distributions=self.distribution_set,
             domains=domainset,
             functions=self.function_set,
+            progress=progress,
         )
 
 
@@ -100,6 +121,7 @@ class Model:
         distributions: DistributionSet,
         domains: DomainSet,
         functions: FunctionSet,
+        progress: bool = True,
     ):
         """
         Represents a probabilistic model composed of parameters, domains, distributions, and functions.
@@ -109,6 +131,7 @@ class Model:
             distributions (DistributionSet): Set of distributions to include.
             domains (DomainSet): Domain constraints for parameters.
             functions (FunctionSet): Set of functions that compute parameter values.
+            progress (bool): Whether to show progress bar during dependency graph construction.
 
         Attributes:
             parameters (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic parameter variables.
@@ -121,7 +144,7 @@ class Model:
         self.functions: dict[str, T.TensorVar] = {}
 
         for parameter_point in parameterset:
-            # Use domain bounds if available, otherwise use unbounded (None, None)
+            # Create scalar parameter with domain bounds applied
             domain = domains.domains.get(parameter_point.name, (None, None))
             self.parameters[parameter_point.name] = boundedscalar(
                 parameter_point.name, domain
@@ -129,65 +152,133 @@ class Model:
 
         self.distributions: dict[str, T.TensorVar] = {}
 
-        # Build dependency graph including functions and distributions
+        # Build dependency graph with proper entity identification
+        self._build_dependency_graph(functions, distributions, progress)
+
+    def _build_dependency_graph(
+        self,
+        functions: FunctionSet,
+        distributions: DistributionSet,
+        progress: bool = True,
+    ) -> None:
+        """
+        Build and evaluate dependency graph for functions and distributions.
+
+        This method properly handles cross-references between functions, distributions,
+        and parameters by building a complete dependency graph first, then evaluating
+        in topological order.
+        """
         graph = rx.PyDiGraph()
         nodes: dict[str, int] = {}
 
-        # Add functions to the graph (same pattern as distributions)
+        # Build entity type mapping for O(1) lookup
+        entity_types: dict[str, str] = {}
+        # Build constants mapping for O(1) lookup
+        constants_map: dict[str, T.TensorVar] = {}
+
+        # Map all parameter names
+        for param in self.parameterset:
+            entity_types[param.name] = "parameter"
+
+        # Map all function names
         for func in functions:
-            if func.name not in nodes:
-                idx = graph.add_node({"type": "function", "name": func.name})
-                nodes[func.name] = idx
+            entity_types[func.name] = "function"
 
-            for param in func.parameters:
-                p_idx = nodes.get(param)
-                if p_idx is None:
-                    # Could be a parameter, function, or distribution
-                    node_type = "parameter"  # Default assumption
-                    if param in functions:
-                        node_type = "function"
-                    elif param in distributions:
-                        node_type = "distribution"
-
-                    p_idx = graph.add_node({"type": node_type, "name": param})
-                    nodes[param] = p_idx
-                graph.add_edge(p_idx, idx, None)
-
-        # Add distributions to the graph (existing logic)
+        # Map all distribution names and collect their constants
         for dist in distributions:
-            if dist.name not in nodes:
-                idx = graph.add_node({"type": "distribution", "name": dist.name})
-                nodes[dist.name] = idx
-            else:
-                idx = nodes[dist.name]
-                graph[idx] = {"type": "distribution", "name": dist.name}
-            for param in dist.parameters:
-                p_idx = nodes.get(param)
-                if p_idx is None or graph[p_idx]["type"] == "distribution":
-                    if p_idx is None:
-                        # Could be a parameter or function
-                        node_type = "parameter"  # Default assumption
-                        if param in functions:
-                            node_type = "function"
+            entity_types[dist.name] = "distribution"
+            # Also map any constants generated by this distribution
+            for constant_name, constant_tensor in dist.constants.items():
+                entity_types[constant_name] = "constant"
+                constants_map[constant_name] = constant_tensor
 
-                        p_idx = graph.add_node({"type": node_type, "name": param})
-                        nodes[param] = p_idx
-                    else:
-                        graph[p_idx] = {"type": "parameter", "name": param}
-                graph.add_edge(p_idx, idx, None)
+        # First pass: Add all nodes to the graph using entity_types
+        for entity_name, entity_type in entity_types.items():
+            node_idx = graph.add_node({"type": entity_type, "name": entity_name})
+            nodes[entity_name] = node_idx
 
-        # Evaluate functions and distributions in topological order
-        for node_idx in rx.topological_sort(graph):
-            node_data = graph[node_idx]
-            context = {**self.parameters, **self.functions, **self.distributions}
-            if node_data["type"] == "function":
-                func_name = node_data["name"]
-                self.functions[func_name] = functions[func_name].expression(context)
-            elif node_data["type"] == "distribution":
-                dist_name = node_data["name"]
-                self.distributions[dist_name] = distributions[dist_name].expression(
-                    context
+        # Second pass: Add edges by iterating through all computational entities
+        # Both functions and distributions have .parameters, so treat them uniformly
+        for entity in [*functions, *distributions]:
+            entity_idx = nodes[entity.name]
+
+            # Add dependencies (parameters this entity depends on)
+            for param_name in entity.parameters:
+                try:
+                    param_idx = nodes[param_name]
+                except KeyError:
+                    msg = (
+                        f"Unknown entity referenced: '{param_name}' from '{entity.name}'. "
+                        f"Not found in parameters, functions, or distributions."
+                    )
+                    raise ValueError(msg) from None
+
+                # Add edge: dependency -> entity (param/func/dist feeds into entity)
+                graph.add_edge(param_idx, entity_idx, None)
+
+        # Third pass: Evaluate in topological order
+        try:
+            sorted_nodes = rx.topological_sort(graph)
+        except rx.DAGHasCycle as e:
+            msg = "Circular dependency detected in model"
+            raise ValueError(msg) from e
+
+        # Evaluate nodes in topological order with optional progress bar
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}", style="cyan"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            expand=True,
+            transient=True,  # Progress bar disappears when finished
+            disable=not progress,  # Disable progress bar if progress=False
+        ) as progress_bar:
+            task = progress_bar.add_task(
+                "Building expressions...", total=len(sorted_nodes)
+            )
+
+            for node_idx in sorted_nodes:
+                node_data = graph[node_idx]
+                node_type = node_data["type"]
+                node_name = node_data["name"]
+
+                # Truncate long names to prevent jumpiness
+                max_name_length = 60
+                display_name = node_name
+                if len(node_name) > max_name_length:
+                    display_name = node_name[: max_name_length - 3] + "..."
+
+                # Update progress description with current entity (fixed width)
+                progress_bar.update(
+                    task,
+                    description=f"Building {node_type:<12}: {display_name:<{max_name_length}}",
                 )
+
+                # Build context with all currently available entities
+                context = {**self.parameters, **self.functions, **self.distributions}
+
+                if node_type == "parameter":
+                    # Parameters are already created with bounds applied, nothing to do
+                    pass
+
+                elif node_type == "constant":
+                    # Constants are pre-created by distributions - add to parameters
+                    self.parameters[node_name] = constants_map[node_name]
+
+                elif node_type == "function":
+                    # Functions are evaluated by design
+                    self.functions[node_name] = functions[node_name].expression(context)
+
+                elif node_type == "distribution":
+                    # Distributions are evaluated by design
+                    self.distributions[node_name] = distributions[node_name].expression(
+                        context
+                    )
+
+                # Advance progress
+                progress_bar.advance(task)
 
     def pdf(self, name: str, **parametervalues: float) -> npt.NDArray[np.float64]:
         """
@@ -255,6 +346,12 @@ class ParameterCollection:
         key = list(self.sets.keys())[item] if isinstance(item, int) else item
         return self.sets[key]
 
+    def get(
+        self, item: str, default: TDefault | None = None
+    ) -> ParameterSet | TDefault | None:
+        """Get a parameter set by name, returning default if not found."""
+        return self.sets.get(item, default)
+
     def __contains__(self, item: str) -> bool:
         return item in self.sets
 
@@ -293,6 +390,12 @@ class ParameterSet:
     def __getitem__(self, item: str | int) -> ParameterPoint:
         key = list(self.points.keys())[item] if isinstance(item, int) else item
         return self.points[key]
+
+    def get(
+        self, item: str, default: TDefault | None = None
+    ) -> ParameterPoint | TDefault | None:
+        """Get a parameter point by name, returning default if not found."""
+        return self.points.get(item, default)
 
     def __contains__(self, item: str) -> bool:
         return item in self.points
@@ -345,6 +448,12 @@ class DomainCollection:
     def __getitem__(self, item: str | int) -> DomainSet:
         key = list(self.domains.keys())[item] if isinstance(item, int) else item
         return self.domains[key]
+
+    def get(
+        self, item: str, default: TDefault | None = None
+    ) -> DomainSet | TDefault | None:
+        """Get a domain set by name, returning default if not found."""
+        return self.domains.get(item, default)
 
     def __contains__(self, item: str) -> bool:
         return item in self.domains
@@ -402,48 +511,66 @@ class DomainSet:
         """
         self.name = name
         self.kind = kind
-        self.domains: dict[str, tuple[float, float]] = OrderedDict()
+        self.domains: dict[str, Axis] = OrderedDict()
 
-        for domain_config in axes:
+        for axis_config in axes:
             domain = DomainPoint(
-                domain_config["name"], domain_config["min"], domain_config["max"]
+                axis_config["name"], axis_config["min"], axis_config["max"]
             )
             self.domains[domain.name] = domain.range
 
-    def __getitem__(self, item: int | str) -> tuple[float, float]:
+    def __getitem__(self, item: int | str) -> Axis:
         key = list(self.domains.keys())[item] if isinstance(item, int) else item
         return self.domains[key]
+
+    def get(
+        self, item: str, default: TDefault | Axis = (None, None)
+    ) -> Axis | TDefault:
+        """Get domain bounds for a parameter, returning default if not found."""
+        return self.domains.get(item, default)
 
     def __contains__(self, item: str) -> bool:
         return item in self.domains
 
+    def __iter__(self) -> Iterator[Axis]:
+        return iter(self.domains.values())
 
-def boundedscalar(name: str, domain: tuple[float | None, float | None]) -> T.TensorVar:
+    def __len__(self) -> int:
+        return len(self.domains)
+
+
+def boundedscalar(name: str, domain: Axis) -> T.TensorVar:
     """
-    Creates a pytensor scalar constrained within a given domain.
+    Creates a scalar tensor variable with optional domain constraints.
 
     Args:
-        name (str): Name of the scalar.
+        name: Name of the scalar parameter.
         domain (tuple): Tuple specifying (min, max) range. Use None for unbounded sides.
                        For example: (0.0, None) for lower bound only, (None, 1.0) for upper bound only.
+                       If both bounds are None, returns an unbounded scalar.
 
     Returns:
-        pytensor.tensor.variable.TensorVariable: A pytensor scalar clipped to the domain range.
+        pytensor.tensor.variable.TensorVariable: The scalar tensor, clipped to domain if bounds exist.
 
     Examples:
         >>> boundedscalar("sigma", (0.0, None))  # sigma >= 0
         >>> boundedscalar("fraction", (0.0, 1.0))  # 0 <= fraction <= 1
         >>> boundedscalar("temperature", (None, 100.0))  # temperature <= 100
+        >>> boundedscalar("unbounded", (None, None))  # no bounds applied
     """
-    x = pt.scalar(name)
+    min_bound, max_bound = domain
 
-    i = domain[0]
-    f = domain[1]
+    # Create the base scalar tensor
+    tensor = pt.scalar(name)
+
+    # If both bounds are None, return unbounded scalar
+    if min_bound is None and max_bound is None:
+        return cast(T.TensorVar, tensor)
 
     # Use infinity constants for unbounded sides
-    ninf = pt.constant(-np.inf)
-    inf = pt.constant(np.inf)
+    min_val = pt.constant(-np.inf) if min_bound is None else pt.constant(min_bound)
+    max_val = pt.constant(np.inf) if max_bound is None else pt.constant(max_bound)
 
-    clipped = pt.clip(x, i or ninf, f or inf)
-    clipped.name = name  # Preserve the original name
+    clipped = pt.clip(tensor, min_val, max_val)
+    clipped.name = tensor.name  # Preserve the original name
     return cast(T.TensorVar, clipped)

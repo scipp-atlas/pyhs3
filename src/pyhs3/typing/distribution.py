@@ -16,9 +16,9 @@ class GaussianDistribution(TypedDict):
 
     type: Literal["gaussian_dist"]
     name: str
-    mean: str
-    sigma: str
-    x: str
+    mean: str | float | int
+    sigma: str | float | int
+    x: str | float | int
 
 
 class MixtureDistribution(TypedDict):

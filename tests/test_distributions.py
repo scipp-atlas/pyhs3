@@ -11,8 +11,9 @@ import numpy as np
 import pytensor.tensor as pt
 from pytensor import function
 
+from pyhs3 import Workspace
 from pyhs3.core import boundedscalar
-from pyhs3.distributions import CrystalDist, GenericDist, ProductDist
+from pyhs3.distributions import CrystalDist, GaussianDist, GenericDist, ProductDist
 
 
 class TestProductDist:
@@ -220,3 +221,125 @@ class TestBoundedScalar:
         """Test boundedscalar with no bounds."""
         x = boundedscalar("test", (None, None))
         assert x is not None
+
+
+class TestNumericParameters:
+    """Test handling of numeric parameters in distributions."""
+
+    def test_gaussian_with_numeric_sigma(self):
+        """Test GaussianDist handles numeric sigma parameter."""
+        config = {
+            "name": "test_gauss",
+            "mean": "mu_param",
+            "sigma": 1.5,  # Numeric value, not string reference
+            "x": "obs_var",
+        }
+
+        dist = GaussianDist.from_dict(config)
+
+        # Check that sigma parameter was converted to a constant name
+        assert dist.sigma == "constant_test_gauss_sigma"
+        assert dist.mean == "mu_param"  # String reference unchanged
+        assert dist.x == "obs_var"  # String reference unchanged
+
+        # Check that all parameters (including constants) are in parameters list
+        assert "mu_param" in dist.parameters
+        assert "obs_var" in dist.parameters
+        assert (
+            "constant_test_gauss_sigma" in dist.parameters
+        )  # Constants are dependencies
+
+        # Check that the constant was created
+        assert "constant_test_gauss_sigma" in dist.constants
+        constant_tensor = dist.constants["constant_test_gauss_sigma"]
+
+        # Verify the constant has the correct value
+        f = function([], constant_tensor)
+        assert np.isclose(f(), 1.5)
+
+    def test_gaussian_with_all_numeric_parameters(self):
+        """Test GaussianDist handles all numeric parameters."""
+        config = {"name": "numeric_gauss", "mean": 2.0, "sigma": 0.5, "x": 1.0}
+
+        dist = GaussianDist.from_dict(config)
+
+        # All should be converted to constant names
+        assert dist.mean == "constant_numeric_gauss_mean"
+        assert dist.sigma == "constant_numeric_gauss_sigma"
+        assert dist.x == "constant_numeric_gauss_x"
+
+        # All constants, so parameters list contains all constant names
+        expected_params = [
+            "constant_numeric_gauss_mean",
+            "constant_numeric_gauss_sigma",
+            "constant_numeric_gauss_x",
+        ]
+        assert set(dist.parameters) == set(expected_params)
+
+        # All constants should be created
+        assert len(dist.constants) == 3
+        assert "constant_numeric_gauss_mean" in dist.constants
+        assert "constant_numeric_gauss_sigma" in dist.constants
+        assert "constant_numeric_gauss_x" in dist.constants
+
+    def test_gaussian_mixed_parameters(self):
+        """Test GaussianDist with mix of string and numeric parameters."""
+        config = {
+            "name": "mixed_gauss",
+            "mean": "mu_param",  # String reference
+            "sigma": 2.0,  # Numeric constant
+            "x": "obs_var",  # String reference
+        }
+
+        dist = GaussianDist.from_dict(config)
+
+        assert dist.mean == "mu_param"
+        assert dist.sigma == "constant_mixed_gauss_sigma"
+        assert dist.x == "obs_var"
+
+        # String references and constants in parameters
+        assert set(dist.parameters) == {
+            "mu_param",
+            "obs_var",
+            "constant_mixed_gauss_sigma",
+        }
+
+        # Only sigma constant created
+        assert len(dist.constants) == 1
+        assert "constant_mixed_gauss_sigma" in dist.constants
+
+    def test_numeric_parameters_end_to_end_integration(self):
+        """Test that numeric parameters work in a full Model workflow."""
+
+        # Test data with numeric sigma - mimics the real-world issue
+        test_data = {
+            "parameter_points": [
+                {"name": "test_params", "parameters": [{"name": "mu", "value": 0.0}]}
+            ],
+            "distributions": [
+                {
+                    "type": "gaussian_dist",
+                    "name": "test_gauss",
+                    "mean": "mu",
+                    "sigma": 1.0,  # This is numeric, should work
+                    "x": "mu",
+                }
+            ],
+            "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
+            "functions": [],
+            "metadata": {"name": "test"},
+        }
+
+        # This should not raise "Unknown entity referenced: '1.0'" error
+        ws = Workspace(test_data)
+        model = ws.model(domain="test_domain", parameter_point="test_params")
+
+        # Verify the model was created successfully
+        assert "mu" in model.parameters
+        assert "constant_test_gauss_sigma" in model.parameters
+        assert "test_gauss" in model.distributions
+
+        # Verify we can evaluate the distribution
+        pdf_value = model.pdf("test_gauss", mu=0.0)
+        assert pdf_value is not None
+        assert pdf_value > 0  # Should be a valid probability

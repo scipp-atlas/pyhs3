@@ -136,7 +136,7 @@ class Model:
         nodes: dict[str, int] = {}
 
         # Add functions to the graph (same pattern as distributions)
-        for func in functions.functions.values():
+        for func in functions:
             if func.name not in nodes:
                 idx = graph.add_node({"type": "function", "name": func.name})
                 nodes[func.name] = idx
@@ -148,7 +148,7 @@ class Model:
                     node_type = "parameter"  # Default assumption
                     if param in functions:
                         node_type = "function"
-                    elif param in distributions.dists:
+                    elif param in distributions:
                         node_type = "distribution"
 
                     p_idx = graph.add_node({"type": node_type, "name": param})
@@ -258,6 +258,9 @@ class ParameterCollection:
         key = list(self.sets.keys())[item] if isinstance(item, int) else item
         return self.sets[key]
 
+    def __contains__(self, item: str) -> bool:
+        return item in self.sets
+
     def __iter__(self) -> Iterator[ParameterSet]:
         return iter(self.sets.values())
 
@@ -293,6 +296,9 @@ class ParameterSet:
     def __getitem__(self, item: str | int) -> ParameterPoint:
         key = list(self.points.keys())[item] if isinstance(item, int) else item
         return self.points[key]
+
+    def __contains__(self, item: str) -> bool:
+        return item in self.points
 
     def __iter__(self) -> Iterator[ParameterPoint]:
         return iter(self.points.values())
@@ -342,6 +348,9 @@ class DomainCollection:
     def __getitem__(self, item: str | int) -> DomainSet:
         key = list(self.domains.keys())[item] if isinstance(item, int) else item
         return self.domains[key]
+
+    def __contains__(self, item: str) -> bool:
+        return item in self.domains
 
     def __iter__(self) -> Iterator[DomainSet]:
         return iter(self.domains.values())
@@ -407,6 +416,9 @@ class DomainSet:
     def __getitem__(self, item: int | str) -> tuple[float, float]:
         key = list(self.domains.keys())[item] if isinstance(item, int) else item
         return self.domains[key]
+
+    def __contains__(self, item: str) -> bool:
+        return item in self.domains
 
 
 DistT = TypeVar("DistT", bound="Distribution[T.Distribution]")
@@ -955,6 +967,9 @@ class DistributionSet:
 
     def __getitem__(self, item: str) -> Distribution[Any]:
         return self.dists[item]
+
+    def __contains__(self, item: str) -> bool:
+        return item in self.dists
 
     def __iter__(self) -> Iterator[Distribution[Any]]:
         return iter(self.dists.values())

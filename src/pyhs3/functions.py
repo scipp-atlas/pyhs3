@@ -8,17 +8,23 @@ generic functions with mathematical expressions, and interpolation functions.
 from __future__ import annotations
 
 import logging
-from typing import Any, cast
+from collections.abc import Iterator
+from typing import Any, Generic, TypeVar, cast
 
 import pytensor.tensor as pt
 
 from pyhs3 import typing as T
 from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor
+from pyhs3.typing import function as TF
 
 log = logging.getLogger(__name__)
 
 
-class Function:
+FuncT = TypeVar("FuncT", bound="Function[T.Function]")
+FuncConfigT = TypeVar("FuncConfigT", bound=T.Function)
+
+
+class Function(Generic[FuncConfigT]):
     """Base class for HS3 functions."""
 
     def __init__(self, *, name: str, kind: str, parameters: list[str], **kwargs: Any):
@@ -50,12 +56,12 @@ class Function:
         raise NotImplementedError(msg)
 
     @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> Function:
+    def from_dict(cls, config: dict[str, Any]) -> Function[FuncConfigT]:
         """Create a Function instance from dictionary configuration."""
         raise NotImplementedError
 
 
-class ProductFunction(Function):
+class ProductFunction(Function[TF.ProductFunction]):
     """Product function that multiplies factors together."""
 
     def __init__(self, *, name: str, factors: list[str]):
@@ -87,7 +93,7 @@ class ProductFunction(Function):
         return result
 
 
-class GenericFunction(Function):
+class GenericFunction(Function[TF.GenericFunction]):
     """Generic function with custom mathematical expression."""
 
     def __init__(self, *, name: str, expression: str):
@@ -123,7 +129,7 @@ class GenericFunction(Function):
         return sympy_to_pytensor(self.sympy_expr, variables)
 
 
-class InterpolationFunction(Function):
+class InterpolationFunction(Function[TF.InterpolationFunction]):
     """Interpolation function (placeholder implementation)."""
 
     def __init__(
@@ -135,7 +141,7 @@ class InterpolationFunction(Function):
         nom: list[str],
         interpolationCodes: list[str],
         positiveDefinite: bool,
-        vars: list[str],
+        parameters: list[str],
         **kwargs: Any,
     ):
         """
@@ -148,17 +154,17 @@ class InterpolationFunction(Function):
             nom: Nominal parameter names
             interpolationCodes: Interpolation method codes
             positiveDefinite: Whether function should be positive definite
-            vars: Variable names this function depends on
+            parameters: Variable names this function depends on
             **kwargs: Additional interpolation-specific parameters
         """
-        # Use vars as the parameters this function depends on
-        super().__init__(name=name, kind="interpolation", parameters=vars, **kwargs)
+        super().__init__(
+            name=name, kind="interpolation", parameters=parameters, **kwargs
+        )
         self.high = high
         self.low = low
         self.nom = nom
         self.interpolationCodes = interpolationCodes
         self.positiveDefinite = positiveDefinite
-        self.vars = vars
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> InterpolationFunction:
@@ -170,7 +176,7 @@ class InterpolationFunction(Function):
             nom=config["nom"],
             interpolationCodes=config["interpolationCodes"],
             positiveDefinite=config["positiveDefinite"],
-            vars=config["vars"],
+            parameters=config["vars"],
         )
 
     def expression(self, _context: dict[str, T.TensorVar]) -> T.TensorVar:
@@ -181,7 +187,7 @@ class InterpolationFunction(Function):
         return cast(T.TensorVar, pt.constant(1.0))
 
 
-registered_functions: dict[str, type[Function]] = {
+registered_functions: dict[str, type[Function[Any]]] = {
     "product": ProductFunction,
     "generic_function": GenericFunction,
     "interpolation": InterpolationFunction,
@@ -191,16 +197,15 @@ registered_functions: dict[str, type[Function]] = {
 class FunctionSet:
     """Collection of HS3 functions."""
 
-    def __init__(self, functions: list[dict[str, Any]]) -> None:
+    def __init__(self, funcs: list[T.Function]) -> None:
         """
         Collection of functions that compute parameter values.
 
         Args:
-            functions: List of function configurations from HS3 spec
+            funcs: List of function configurations from HS3 spec
         """
-        self.functions: dict[str, Function] = {}
-
-        for func_config in functions:
+        self.funcs: dict[str, Function[Any]] = {}
+        for func_config in funcs:
             try:
                 func_type = func_config["type"]
                 the_func = registered_functions.get(func_type, Function)
@@ -210,22 +215,23 @@ class FunctionSet:
                 func = the_func.from_dict(
                     {k: v for k, v in func_config.items() if k != "type"}
                 )
-                self.functions[func.name] = func
+                self.funcs[func.name] = func
             except Exception as exc:
-                func_name = func_config.get("name", "unknown")
-                func_type = func_config.get("type", "unknown")
                 log.warning(
                     "Failed to create function %s of type %s: %s",
-                    func_name,
-                    func_type,
+                    func_config["name"],
+                    func_config["type"],
                     exc,
                 )
 
-    def __getitem__(self, item: str) -> Function:
-        return self.functions[item]
+    def __getitem__(self, item: str) -> Function[Any]:
+        return self.funcs[item]
 
     def __contains__(self, item: str) -> bool:
-        return item in self.functions
+        return item in self.funcs
+
+    def __iter__(self) -> Iterator[Function[Any]]:
+        return iter(self.funcs.values())
 
     def __len__(self) -> int:
-        return len(self.functions)
+        return len(self.funcs)

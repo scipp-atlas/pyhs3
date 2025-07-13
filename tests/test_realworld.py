@@ -55,6 +55,7 @@ class TestDiHiggsIssue41Workspace:
         # Should have various distribution types
         assert len(dist_types) > 0
 
+    @pytest.mark.slow
     @pytest.mark.xfail(reason="No expected nlls added in yet")
     def test_nll_validation_against_root(self, ws_workspace, expected_nll_data):
         """Test NLL values match expected ROOT results."""
@@ -98,6 +99,7 @@ class TestDiHiggsIssue41Workspace:
         assert len(param_names) > 0
         assert len(domain_names) > 0
 
+    @pytest.mark.slow
     def test_workspace_model_creation(self, ws_workspace):
         """Test that we can create a model from the workspace."""
         # This tests basic model creation without full evaluation

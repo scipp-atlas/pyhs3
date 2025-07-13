@@ -93,6 +93,9 @@ log_cli_level = "INFO"
 testpaths = [
   "tests",
 ]
+markers = [
+    "slow: marks tests as slow (skipped by default, use --runslow to run)",
+]
 
 
 [tool.coverage]

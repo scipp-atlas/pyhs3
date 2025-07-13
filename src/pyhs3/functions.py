@@ -27,7 +27,7 @@ FuncConfigT = TypeVar("FuncConfigT", bound=T.Function)
 class Function(Generic[FuncConfigT]):
     """Base class for HS3 functions."""
 
-    def __init__(self, *, name: str, kind: str, parameters: list[str], **kwargs: Any):
+    def __init__(self, *, name: str, kind: str, parameters: list[str]):
         """
         Base class for functions that compute parameter values.
 
@@ -35,12 +35,10 @@ class Function(Generic[FuncConfigT]):
             name: Name of the function
             kind: Type of the function (product, generic_function, interpolation)
             parameters: List of parameter/function names this function depends on
-            **kwargs: Additional function-specific parameters
         """
         self.name = name
         self.kind = kind
         self.parameters = parameters
-        self.kwargs = kwargs
 
     def expression(self, _: dict[str, T.TensorVar]) -> T.TensorVar:
         """
@@ -148,7 +146,6 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
         interpolationCodes: list[int],
         positiveDefinite: bool,
         parameters: list[str],
-        **kwargs: Any,
     ):
         """
         Initialize an InterpolationFunction.
@@ -161,11 +158,8 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
             interpolationCodes: Interpolation method codes (0-6)
             positiveDefinite: Whether function should be positive definite
             parameters: Variable names this function depends on (nuisance parameters)
-            **kwargs: Additional interpolation-specific parameters
         """
-        super().__init__(
-            name=name, kind="interpolation", parameters=parameters, **kwargs
-        )
+        super().__init__(name=name, kind="interpolation", parameters=parameters)
         self.high = high
         self.low = low
         self.nom = nom

@@ -249,7 +249,7 @@ class TestInterpolationFunction:
             nom=["nom1", "nom2"],
             interpolationCodes=["code1", "code2"],
             positiveDefinite=True,
-            vars=["var1", "var2"],
+            parameters=["var1", "var2"],
         )
         assert func.name == "test_interp"
         assert func.kind == "interpolation"
@@ -258,7 +258,6 @@ class TestInterpolationFunction:
         assert func.nom == ["nom1", "nom2"]
         assert func.interpolationCodes == ["code1", "code2"]
         assert func.positiveDefinite is True
-        assert func.vars == ["var1", "var2"]
         assert func.parameters == ["var1", "var2"]
 
     @pytest.mark.parametrize(
@@ -311,7 +310,6 @@ class TestInterpolationFunction:
         assert func.nom == config["nom"]
         assert func.interpolationCodes == config["interpolationCodes"]
         assert func.positiveDefinite == config["positiveDefinite"]
-        assert func.vars == config["vars"]
         assert func.parameters == config["vars"]
 
     def test_interpolation_function_expression_placeholder(self):
@@ -323,7 +321,7 @@ class TestInterpolationFunction:
             nom=[],
             interpolationCodes=[],
             positiveDefinite=True,
-            vars=[],
+            parameters=[],
         )
         context = {}
 
@@ -419,7 +417,7 @@ class TestFunctionSet:
         func = function_set["interp1"]
         assert isinstance(func, InterpolationFunction)
         assert func.high == ["h1"]
-        assert func.vars == ["x"]
+        assert func.parameters == ["x"]
 
     def test_function_set_mixed_types(self):
         """Test FunctionSet with mixed function types."""
@@ -445,38 +443,28 @@ class TestFunctionSet:
         assert isinstance(function_set["interp"], InterpolationFunction)
 
     def test_function_set_unknown_type(self):
-        """Test FunctionSet handles unknown function types gracefully."""
+        """Test FunctionSet raises error for unknown function types."""
         functions_config = [
             {"name": "good", "type": "product", "factors": ["a"]},
             {"name": "bad", "type": "unknown_type", "param": "value"},
             {"name": "good2", "type": "generic_function", "expression": "x"},
         ]
 
-        # Should log warnings for unknown types but continue
-        function_set = FunctionSet(functions_config)
-
-        # Should only have the valid functions
-        assert len(function_set) == 2
-        assert "good" in function_set
-        assert "good2" in function_set
-        assert "bad" not in function_set
+        # Should raise ValueError for unknown types
+        with pytest.raises(ValueError, match="Unknown function type: unknown_type"):
+            FunctionSet(functions_config)
 
     def test_function_set_malformed_config(self):
-        """Test FunctionSet handles malformed function configs gracefully."""
+        """Test FunctionSet raises error for malformed function configs."""
         functions_config = [
             {"name": "good", "type": "product", "factors": ["a"]},
             {"name": "bad", "type": "product"},  # Missing factors
             {"name": "good2", "type": "generic_function", "expression": "x"},
         ]
 
-        # Should log warnings for malformed configs but continue
-        function_set = FunctionSet(functions_config)
-
-        # Should only have the valid functions
-        assert len(function_set) == 2
-        assert "good" in function_set
-        assert "good2" in function_set
-        assert "bad" not in function_set
+        # Should raise KeyError for missing required fields
+        with pytest.raises(KeyError, match="factors"):
+            FunctionSet(functions_config)
 
     def test_function_set_getitem_keyerror(self):
         """Test FunctionSet raises KeyError for missing functions."""
@@ -540,6 +528,6 @@ class TestFunctionIntegration:
             nom=[],
             interpolationCodes=[],
             positiveDefinite=True,
-            vars=["param1", "param2"],
+            parameters=["param1", "param2"],
         )
         assert set(interp_func.parameters) == {"param1", "param2"}

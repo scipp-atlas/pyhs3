@@ -204,22 +204,26 @@ class TestBoundedScalar:
 
     def test_boundedscalar_two_sided(self):
         """Test boundedscalar with two-sided bounds."""
-        x = boundedscalar("test", (0.0, 1.0))
+        tensor = pt.scalar("test")
+        x = boundedscalar(tensor, (0.0, 1.0))
         assert x is not None
 
     def test_boundedscalar_lower_bound_only(self):
         """Test boundedscalar with lower bound only."""
-        x = boundedscalar("test", (0.0, None))
+        tensor = pt.scalar("test")
+        x = boundedscalar(tensor, (0.0, None))
         assert x is not None
 
     def test_boundedscalar_upper_bound_only(self):
         """Test boundedscalar with upper bound only."""
-        x = boundedscalar("test", (None, 1.0))
+        tensor = pt.scalar("test")
+        x = boundedscalar(tensor, (None, 1.0))
         assert x is not None
 
     def test_boundedscalar_no_bounds(self):
         """Test boundedscalar with no bounds."""
-        x = boundedscalar("test", (None, None))
+        tensor = pt.scalar("test")
+        x = boundedscalar(tensor, (None, None))
         assert x is not None
 
 

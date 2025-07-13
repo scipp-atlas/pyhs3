@@ -73,15 +73,15 @@ def test_rf501_manual(datadir):
 
     scalarranges = workspace.domain_collection["default_domain"]
 
-    f = boundedscalar("f", scalarranges["f"])
-    f_ctl = boundedscalar("f_ctl", scalarranges["f_ctl"])
-    mean = boundedscalar("mean", scalarranges["mean"])
-    mean2 = boundedscalar("mean2", scalarranges["mean2"])
-    sigma = boundedscalar("sigma", scalarranges["sigma"])
-    sigma2 = boundedscalar("sigma2", scalarranges["sigma2"])
-    mean_ctl = boundedscalar("mean_ctl", scalarranges["mean_ctl"])
-    mean2_ctl = boundedscalar("mean2_ctl", scalarranges["mean2_ctl"])
-    x = boundedscalar("x", scalarranges["x"])
+    f = boundedscalar(pt.scalar("f"), scalarranges["f"])
+    f_ctl = boundedscalar(pt.scalar("f_ctl"), scalarranges["f_ctl"])
+    mean = boundedscalar(pt.scalar("mean"), scalarranges["mean"])
+    mean2 = boundedscalar(pt.scalar("mean2"), scalarranges["mean2"])
+    sigma = boundedscalar(pt.scalar("sigma"), scalarranges["sigma"])
+    sigma2 = boundedscalar(pt.scalar("sigma2"), scalarranges["sigma2"])
+    mean_ctl = boundedscalar(pt.scalar("mean_ctl"), scalarranges["mean_ctl"])
+    mean2_ctl = boundedscalar(pt.scalar("mean2_ctl"), scalarranges["mean2_ctl"])
+    x = boundedscalar(pt.scalar("x"), scalarranges["x"])
 
     def gaussian_pdf(x, mu, sigma):
         norm_const = 1.0 / (pt.sqrt(2 * math.pi) * sigma)

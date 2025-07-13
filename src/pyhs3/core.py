@@ -382,20 +382,20 @@ class DomainSet:
     DomainSet
     """
 
-    def __init__(self, axes: list[T.Axis], name: str, dtype: str):
+    def __init__(self, axes: list[T.Axis], name: str, kind: str):
         """
         Represents a set of valid domains for parameters.
 
         Args:
             axes (list): List of domain configurations.
             name (str): Name of the domain set.
-            dtype (str): Type of the domain.
+            kind (str): Type of the domain.
 
         Attributes:
             domains (OrderedDict): Mapping of parameter names to allowed ranges.
         """
         self.name = name
-        self.type = dtype
+        self.kind = kind
         self.domains: dict[str, tuple[float, float]] = OrderedDict()
 
         for domain_config in axes:
@@ -422,7 +422,7 @@ class Distribution(Generic[DistConfigT]):
         self,
         *,
         name: str,
-        dtype: str = "Distribution",
+        kind: str = "Distribution",
         parameters: list[str] | None = None,
         **kwargs: Any,
     ):
@@ -431,15 +431,15 @@ class Distribution(Generic[DistConfigT]):
 
         Args:
             name (str): Name of the distribution.
-            dtype (str): Type identifier.
+            kind (str): Type identifier.
 
         Attributes:
             name (str): Name of the distribution.
-            dtype (str): Type identifier.
+            kind (str): Type identifier.
             parameters (list[str]): initially empty list to be filled with parameter names.
         """
         self.name = name
-        self.type = dtype
+        self.kind = kind
         self.parameters = parameters or []
         self.kwargs = kwargs
 
@@ -447,7 +447,7 @@ class Distribution(Generic[DistConfigT]):
         """
         Unimplemented
         """
-        msg = f"Distribution type={self.type} is not implemented."
+        msg = f"Distribution type={self.kind} is not implemented."
         raise NotImplementedError(msg)
 
     @classmethod
@@ -489,7 +489,7 @@ class GaussianDist(Distribution[TD.GaussianDistribution]):
             x (str): Input variable name.
             parameters (list[str]): list containing mean, sigma, and x.
         """
-        super().__init__(name=name, dtype="gaussian_dist", parameters=[mean, sigma, x])
+        super().__init__(name=name, kind="gaussian_dist", parameters=[mean, sigma, x])
         self.mean = mean
         self.sigma = sigma
         self.x = x
@@ -567,7 +567,7 @@ class MixtureDist(Distribution[TD.MixtureDistribution]):
             parameters (list[str]): List of coefficients and summands
         """
         super().__init__(
-            name=name, dtype="mixture_dist", parameters=[*coefficients, *summands]
+            name=name, kind="mixture_dist", parameters=[*coefficients, *summands]
         )
         self.name = name
         self.coefficients = coefficients
@@ -649,7 +649,7 @@ class ProductDist(Distribution[TD.ProductDistribution]):
             name: Name of the distribution
             factors: List of component distribution names to multiply together
         """
-        super().__init__(name=name, dtype="product_dist", parameters=factors)
+        super().__init__(name=name, kind="product_dist", parameters=factors)
         self.factors = factors
 
     @classmethod
@@ -751,7 +751,7 @@ class CrystalDist(Distribution[TD.CrystalDistribution]):
         """
         super().__init__(
             name=name,
-            dtype="crystal_dist",
+            kind="crystal_dist",
             parameters=[alpha_L, alpha_R, m, m0, n_R, n_L, sigma_L, sigma_R],
         )
         self.alpha_L = alpha_L
@@ -878,7 +878,7 @@ class GenericDist(Distribution[TD.GenericDistribution]):
         self.dependent_vars = [str(symbol) for symbol in analysis["dependent_vars"]]
 
         # Initialize the parent with the independent variables as parameters
-        super().__init__(name=name, dtype="generic_dist", parameters=independent_vars)
+        super().__init__(name=name, kind="generic_dist", parameters=independent_vars)
 
     @classmethod
     def from_dict(cls, config: TD.GenericDistribution) -> GenericDist:

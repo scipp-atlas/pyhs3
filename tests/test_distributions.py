@@ -1,7 +1,7 @@
 """
 Unit tests for new distribution implementations.
 
-Tests for ProductDist, CrystalDist, and GenericDist implementations,
+Tests for ProductDist, CrystalBallDist, and GenericDist implementations,
 including validation against expected NLL values from ROOT fits.
 """
 
@@ -14,7 +14,7 @@ from pytensor import function
 
 from pyhs3 import Workspace
 from pyhs3.core import boundedscalar
-from pyhs3.distributions import CrystalDist, GaussianDist, GenericDist, ProductDist
+from pyhs3.distributions import CrystalBallDist, GaussianDist, GenericDist, ProductDist
 
 
 class TestProductDist:
@@ -54,12 +54,12 @@ class TestProductDist:
         np.testing.assert_allclose(result_val, expected_val)
 
 
-class TestCrystalDist:
-    """Test CrystalDist implementation."""
+class TestCrystalBallDist:
+    """Test CrystalBallDist implementation."""
 
     def test_crystal_dist_creation(self):
-        """Test CrystalDist can be created and configured."""
-        dist = CrystalDist(
+        """Test CrystalBallDist can be created and configured."""
+        dist = CrystalBallDist(
             name="test_crystal",
             alpha_L="alpha_L",
             alpha_R="alpha_R",
@@ -76,7 +76,7 @@ class TestCrystalDist:
         assert len(dist.parameters) == 8
 
     def test_crystal_dist_from_dict(self):
-        """Test CrystalDist can be created from dictionary."""
+        """Test CrystalBallDist can be created from dictionary."""
         config = {
             "name": "test_crystal",
             "alpha_L": "aL",
@@ -88,14 +88,14 @@ class TestCrystalDist:
             "sigma_L": "sL",
             "sigma_R": "sR",
         }
-        dist = CrystalDist.from_dict(config)
+        dist = CrystalBallDist.from_dict(config)
         assert dist.name == "test_crystal"
         assert dist.m == "mass"
         assert dist.m0 == "mean"
 
     def test_crystal_dist_expression_gaussian_core(self):
-        """Test CrystalDist reduces to Gaussian in core region."""
-        dist = CrystalDist(
+        """Test CrystalBallDist reduces to Gaussian in core region."""
+        dist = CrystalBallDist(
             name="test_crystal",
             alpha_L="alpha_L",
             alpha_R="alpha_R",
@@ -128,8 +128,8 @@ class TestCrystalDist:
         np.testing.assert_allclose(result_val, expected_val)
 
     def test_crystal_dist_expression_power_law_tails(self):
-        """Test CrystalDist gives power law behavior in tails."""
-        dist = CrystalDist(
+        """Test CrystalBallDist gives power law behavior in tails."""
+        dist = CrystalBallDist(
             name="test_crystal",
             alpha_L="alpha_L",
             alpha_R="alpha_R",

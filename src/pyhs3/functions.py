@@ -128,7 +128,7 @@ class GenericFunction(Function[TF.GenericFunction]):
 
 
 class InterpolationFunction(Function[TF.InterpolationFunction]):
-    """
+    r"""
     Piecewise interpolation function implementation.
 
     Implements ROOT's PiecewiseInterpolation logic to morph between nominal
@@ -245,7 +245,7 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
         nominal: T.TensorVar,
         param_val: T.TensorVar,
     ) -> T.TensorVar:
-        """
+        r"""
         Implement flexible interpolation for a single parameter.
 
         Based on ROOT's flexibleInterpSingle method with support for
@@ -458,7 +458,7 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
         )
 
     def expression(self, context: dict[str, T.TensorVar]) -> T.TensorVar:
-        """
+        r"""
         Evaluate the interpolation function.
 
         Implements ROOT's PiecewiseInterpolation algorithm following the mathematical

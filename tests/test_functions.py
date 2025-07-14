@@ -7,6 +7,8 @@ and FunctionSet implementations.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pytensor.tensor as pt
 import pytest
@@ -438,6 +440,74 @@ class TestInterpolationFunction:
 
         # At theta=0, all codes should return nominal value
         np.testing.assert_allclose(result_val, 10.0, rtol=1e-10)
+
+    def test_interpolation_function_code_6_polynomial_multiplicative(self):
+        """Test InterpolationFunction with code 6 (polynomial + linear multiplicative)."""
+        func = InterpolationFunction(
+            name="test_interp",
+            high=["high_var"],
+            low=["low_var"],
+            nom="nominal",
+            interpolationCodes=[6],
+            positiveDefinite=False,
+            parameters=["nuisance_param"],
+        )
+
+        # Test with positive parameter value in polynomial region (|theta| < 1)
+        context = {
+            "nominal": pt.constant(10.0),
+            "high_var": pt.constant(20.0),  # ratio = 2.0
+            "low_var": pt.constant(5.0),  # ratio = 0.5
+            "nuisance_param": pt.constant(0.5),  # |0.5| < 1, polynomial region
+        }
+
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Code 6: polynomial multiplicative mode
+        # Expected: 10.0 * (1 + 0.5 * (2.0 - 1.0) * (1 + 0.5^2 * (-3 + 0.5^2) / 16))
+        # = 10.0 * (1 + 0.5 * 1.0 * (1 + 0.25 * (-3 + 0.25) / 16))
+        # = 10.0 * (1 + 0.5 * (1 + 0.25 * (-2.75) / 16))
+        # = 10.0 * (1 + 0.5 * (1 - 0.04296875))
+        # = 10.0 * (1 + 0.5 * 0.95703125) = 10.0 * 1.478515625 ≈ 14.785
+        expected = 10.0 * (1 + 0.5 * (2.0 - 1.0) * (1 + 0.25 * (-3 + 0.25) / 16))
+        np.testing.assert_allclose(result_val, expected, rtol=1e-10)
+
+    def test_interpolation_function_parameter_index_warning(self, caplog):
+        """Test InterpolationFunction logs warning when parameter index exceeds lists."""
+        func = InterpolationFunction(
+            name="test_interp",
+            high=["high_var"],  # Only one element
+            low=["low_var"],  # Only one element
+            nom="nominal",
+            interpolationCodes=[0],  # Only one element
+            positiveDefinite=False,
+            parameters=["param1", "param2"],  # Two parameters - exceeds lists!
+        )
+
+        context = {
+            "nominal": pt.constant(10.0),
+            "high_var": pt.constant(12.0),
+            "low_var": pt.constant(8.0),
+            "param1": pt.constant(0.5),
+            "param2": pt.constant(0.3),  # This will trigger the warning
+        }
+
+        with caplog.at_level(logging.WARNING):
+            result = func.expression(context)
+            f = function([], result)
+            result_val = f()
+
+        # Should log warning about parameter index exceeding lists
+        assert (
+            "Parameter index 1 exceeds variation lists for function test_interp"
+            in caplog.text
+        )
+
+        # Result should still be computed (only first parameter processed)
+        # Expected: 10.0 + 0.5 * (12.0 - 10.0) = 11.0
+        np.testing.assert_allclose(result_val, 11.0, rtol=1e-10)
 
     def test_interpolation_function_integration(self):
         """Test InterpolationFunction integration with FunctionSet."""

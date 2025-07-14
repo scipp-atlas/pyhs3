@@ -43,9 +43,9 @@ class ProductDistribution(TypedDict):
     factors: list[str]
 
 
-class CrystalDistribution(TypedDict):
+class CrystalBallDistribution(TypedDict):
     """
-    CrystalDistribution
+    CrystalBallDistribution
     """
 
     type: Literal["crystalball_doublesided_dist"]
@@ -74,6 +74,6 @@ Distribution = Union[
     GaussianDistribution,
     MixtureDistribution,
     ProductDistribution,
-    CrystalDistribution,
+    CrystalBallDistribution,
     GenericDistribution,
 ]

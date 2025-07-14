@@ -338,7 +338,7 @@ class ProductDist(Distribution[TD.ProductDistribution]):
         return cast(T.TensorVar, pt.prod(pt_factors, axis=0))  # type: ignore[no-untyped-call]
 
 
-class CrystalDist(Distribution[TD.CrystalDistribution]):
+class CrystalBallDist(Distribution[TD.CrystalBallDistribution]):
     """
     Crystal Ball distribution implementation.
 
@@ -391,7 +391,7 @@ class CrystalDist(Distribution[TD.CrystalDistribution]):
         sigma_R: str,
     ):
         """
-        Initialize a CrystalDist.
+        Initialize a CrystalBallDist.
 
         Args:
             name: Name of the distribution
@@ -419,15 +419,15 @@ class CrystalDist(Distribution[TD.CrystalDistribution]):
         self.sigma_R = sigma_R
 
     @classmethod
-    def from_dict(cls, config: TD.CrystalDistribution) -> CrystalDist:
+    def from_dict(cls, config: TD.CrystalBallDistribution) -> CrystalBallDist:
         """
-        Create a CrystalDist from a dictionary configuration.
+        Create a CrystalBallDist from a dictionary configuration.
 
         Args:
             config: Configuration dictionary
 
         Returns:
-            The created CrystalDist instance
+            The created CrystalBallDist instance
         """
         return cls(
             name=config["name"],
@@ -575,7 +575,7 @@ registered_distributions: dict[str, type[Distribution[Any]]] = {
     "gaussian_dist": GaussianDist,
     "mixture_dist": MixtureDist,
     "product_dist": ProductDist,
-    "crystalball_doublesided_dist": CrystalDist,
+    "crystalball_doublesided_dist": CrystalBallDist,
     "generic_dist": GenericDist,
 }
 

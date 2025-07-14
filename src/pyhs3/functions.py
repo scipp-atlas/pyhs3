@@ -138,45 +138,60 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
 
     Mathematical Formulations:
         For **additive** interpolation modes (codes 0, 2, 3, 4):
-        $$\text{result} = \text{nominal} + \sum_i I_i(\theta_i; \text{low}_i, \text{nominal}, \text{high}_i)$$
+
+        .. math::
+
+            \text{result} = \text{nominal} + \sum_i I_i(\theta_i; \text{low}_i, \text{nominal}, \text{high}_i)
 
         For **multiplicative** interpolation modes (codes 1, 5, 6):
-        $$\text{result} = \text{nominal} \times \prod_i [1 + I_i(\theta_i; \text{low}_i/\text{nominal}, 1, \text{high}_i/\text{nominal})]$$
+
+        .. math::
+
+            \text{result} = \text{nominal} \times \prod_i [1 + I_i(\theta_i; \text{low}_i/\text{nominal}, 1, \text{high}_i/\text{nominal})]
 
     Interpolation Code Definitions:
         **Code 0** - Linear Interpolation/Extrapolation (Additive):
-        $$I_0(\theta) = \begin{cases}
-        \theta(\text{high} - \text{nom}) & \text{if } \theta \geq 0 \\
-        \theta(\text{nom} - \text{low}) & \text{if } \theta < 0
-        \end{cases}$$
+
+        .. math::
+
+            I_0(\theta) = \begin{cases}
+            \theta(\text{high} - \text{nom}) & \text{if } \theta \geq 0 \\
+            \theta(\text{nom} - \text{low}) & \text{if } \theta < 0
+            \end{cases}
 
         **Code 1** - Exponential Interpolation/Extrapolation (Multiplicative):
-        $$I_1(\theta) = \begin{cases}
-        \left(\frac{\text{high}}{\text{nom}}\right)^{\theta} - 1 & \text{if } \theta \geq 0 \\
-        \left(\frac{\text{low}}{\text{nom}}\right)^{-\theta} - 1 & \text{if } \theta < 0
-        \end{cases}$$
+
+        .. math::
+
+            I_1(\theta) = \begin{cases}
+            \left(\frac{\text{high}}{\text{nom}}\right)^{\theta} - 1 & \text{if } \theta \geq 0 \\
+            \left(\frac{\text{low}}{\text{nom}}\right)^{-\theta} - 1 & \text{if } \theta < 0
+            \end{cases}
 
         **Code 2** - Exponential Interpolation + Linear Extrapolation (Additive):
-        Uses $\exp(\theta)$ behavior for $|\theta| \leq 1$, linear extrapolation for $|\theta| > 1$
-        with smooth transition at $\theta = \pm 1$.
+        Uses :math:`\exp(\theta)` behavior for :math:`|\theta| \leq 1`, linear extrapolation for :math:`|\theta| > 1`
+        with smooth transition at :math:`\theta = \pm 1`.
 
         **Code 3** - Exponential Interpolation + Different Linear Extrapolation (Additive):
-        Uses $\exp(\theta)$ behavior for $|\theta| \leq 1$, different linear extrapolation
-        for $|\theta| > 1$ compared to code 2.
+        Uses :math:`\exp(\theta)` behavior for :math:`|\theta| \leq 1`, different linear extrapolation
+        for :math:`|\theta| > 1` compared to code 2.
 
         **Code 4** - 6th Order Polynomial Interpolation + Linear Extrapolation (Additive):
-        $$I_4(\theta) = \begin{cases}
-        \text{linear extrapolation} & \text{if } |\theta| \geq 1 \\
-        \theta \times (1 + \theta^2(-3 + \theta^2)/16) \times (\text{high} - \text{nom}) & \text{if } \theta \geq 0, |\theta| < 1
-        \end{cases}$$
+
+        .. math::
+
+            I_4(\theta) = \begin{cases}
+            \text{linear extrapolation} & \text{if } |\theta| \geq 1 \\
+            \theta \times (1 + \theta^2(-3 + \theta^2)/16) \times (\text{high} - \text{nom}) & \text{if } \theta \geq 0, |\theta| < 1
+            \end{cases}
 
         **Code 5** - 6th Order Polynomial Interpolation + Exponential Extrapolation (Multiplicative):
-        Uses exponential extrapolation for $|\theta| \geq 1$, 6th order polynomial for $|\theta| < 1$.
+        Uses exponential extrapolation for :math:`|\theta| \geq 1`, 6th order polynomial for :math:`|\theta| < 1`.
         Recommended for normalization factors.
 
         **Code 6** - 6th Order Polynomial Interpolation + Linear Extrapolation (Multiplicative):
-        Uses linear extrapolation for $|\theta| \geq 1$, 6th order polynomial for $|\theta| < 1$.
-        Recommended for normalization factors (no roots outside $|\theta| < 1$).
+        Uses linear extrapolation for :math:`|\theta| \geq 1`, 6th order polynomial for :math:`|\theta| < 1`.
+        Recommended for normalization factors (no roots outside :math:`|\theta| < 1`).
 
     Args:
         name: Name of the function
@@ -188,8 +203,8 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
         parameters: Variable names this function depends on (nuisance parameters)
 
     Note:
-        - At $\theta_i = 0$, all codes return the nominal value
-        - At $\theta_i = \pm 1$, variations should match high/low values for appropriate codes
+        - At :math:`\theta_i = 0`, all codes return the nominal value
+        - At :math:`\theta_i = \pm 1`, variations should match high/low values for appropriate codes
         - Polynomial codes (4,5,6) provide smoother interpolation with matching derivatives
         - Based on A.Bukin, Budker INP, Novosibirsk and ROOT's RooFit implementation
     """
@@ -265,14 +280,14 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
 
         Args:
             interp_code: Interpolation code (0-6) determining the mathematical approach
-            low_val: Low variation value (used when $\theta < 0$)
-            high_val: High variation value (used when $\theta \geq 0$)
+            low_val: Low variation value (used when :math:`\theta < 0`)
+            high_val: High variation value (used when :math:`\theta \geq 0`)
             boundary: Boundary value for switching between interpolation and extrapolation (typically 1.0)
             nominal: Nominal value (baseline)
-            param_val: Parameter value $\theta$ (nuisance parameter)
+            param_val: Parameter value :math:`\theta` (nuisance parameter)
 
         Returns:
-            Interpolated contribution $I_i(\theta_i)$ to be added (additive modes)
+            Interpolated contribution :math:`I_i(\theta_i)` to be added (additive modes)
             or multiplied (multiplicative modes) with the result
 
         Note:
@@ -457,10 +472,10 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
         formulations described in the class docstring. The algorithm proceeds as:
 
         1. Start with nominal value: $\\text{result} = \\text{nominal}$
-        2. For each nuisance parameter $\\theta_i$, compute interpolation contribution $I_i(\\theta_i)$
+        2. For each nuisance parameter :math:`\theta_i`, compute interpolation contribution :math:`I_i(\theta_i)`
         3. Combine contributions based on interpolation mode:
-           - **Additive modes** (codes 0,2,3,4): $\\text{result} += I_i(\\theta_i)$
-           - **Multiplicative modes** (codes 1,5,6): $\\text{result} \\times= (1 + I_i(\\theta_i))$
+           - **Additive modes** (codes 0,2,3,4): :math:`\text{result} += I_i(\theta_i)`
+           - **Multiplicative modes** (codes 1,5,6): :math:`\text{result} \times= (1 + I_i(\theta_i))`
         4. Apply positive definite constraint: $\\text{result} = \\max(\\text{result}, 0)$ if requested
 
         Args:

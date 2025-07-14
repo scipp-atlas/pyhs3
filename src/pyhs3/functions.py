@@ -14,6 +14,7 @@ from typing import Any, Generic, TypeVar, cast
 import pytensor.tensor as pt
 
 from pyhs3 import typing as T
+from pyhs3.exceptions import UnknownInterpolationCodeError
 from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor
 from pyhs3.typing import function as TF
 
@@ -215,8 +216,18 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
             interpolationCodes: Interpolation method codes (0-6)
             positiveDefinite: Whether function should be positive definite
             parameters: Variable names this function depends on (nuisance parameters)
+
+        Raises:
+            UnknownInterpolationCodeError: If any interpolation code is not in range 0-6
         """
         super().__init__(name=name, kind="interpolation", parameters=parameters)
+
+        # Validate interpolation codes at initialization
+        valid_codes = {0, 1, 2, 3, 4, 5, 6}
+        for code in interpolationCodes:
+            if code not in valid_codes:
+                msg = f"Unknown interpolation code {code} in function '{name}'. Valid codes are 0-6."
+                raise UnknownInterpolationCodeError(msg)
         self.high = high
         self.low = low
         self.nom = nom
@@ -412,48 +423,29 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
                 ),
             )
 
-        if interp_code == 6:
-            # Polynomial interpolation + linear extrapolation (multiplicative)
-            ratio_high = high_val / nominal
-            ratio_low = low_val / nominal
-            return cast(
-                T.TensorVar,
-                pt.switch(
-                    pt.abs(param_val) >= boundary,
-                    # Linear extrapolation for |theta| >= 1
-                    pt.switch(
-                        param_val >= 0,
-                        param_val * (ratio_high - 1.0),
-                        param_val * (ratio_low - 1.0),
-                    ),
-                    # 6th order polynomial interpolation for |theta| < 1
-                    pt.switch(
-                        param_val >= 0,
-                        param_val
-                        * (ratio_high - 1.0)
-                        * (
-                            1
-                            + param_val * param_val * (-3 + param_val * param_val) / 16
-                        ),
-                        param_val
-                        * (ratio_low - 1.0)
-                        * (
-                            1
-                            + param_val * param_val * (-3 + param_val * param_val) / 16
-                        ),
-                    ),
-                ),
-            )
-        # Default to linear interpolation for unknown codes
-        log.warning(
-            "Unknown interpolation code %d, using linear interpolation", interp_code
-        )
+        # Code 6: Polynomial interpolation + linear extrapolation (multiplicative)
+        ratio_high = high_val / nominal
+        ratio_low = low_val / nominal
         return cast(
             T.TensorVar,
             pt.switch(
-                param_val >= 0,
-                param_val * (high_val - nominal),
-                param_val * (nominal - low_val),
+                pt.abs(param_val) >= boundary,
+                # Linear extrapolation for |theta| >= 1
+                pt.switch(
+                    param_val >= 0,
+                    param_val * (ratio_high - 1.0),
+                    param_val * (ratio_low - 1.0),
+                ),
+                # 6th order polynomial interpolation for |theta| < 1
+                pt.switch(
+                    param_val >= 0,
+                    param_val
+                    * (ratio_high - 1.0)
+                    * (1 + param_val * param_val * (-3 + param_val * param_val) / 16),
+                    param_val
+                    * (ratio_low - 1.0)
+                    * (1 + param_val * param_val * (-3 + param_val * param_val) / 16),
+                ),
             ),
         )
 

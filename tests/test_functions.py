@@ -14,6 +14,7 @@ import pytensor.tensor as pt
 import pytest
 from pytensor import function
 
+from pyhs3.exceptions import UnknownInterpolationCodeError
 from pyhs3.functions import (
     Function,
     FunctionSet,
@@ -508,6 +509,38 @@ class TestInterpolationFunction:
         # Result should still be computed (only first parameter processed)
         # Expected: 10.0 + 0.5 * (12.0 - 10.0) = 11.0
         np.testing.assert_allclose(result_val, 11.0, rtol=1e-10)
+
+    def test_interpolation_function_unknown_code_raises_exception(self):
+        """Test InterpolationFunction raises exception for unknown interpolation codes."""
+        # Test invalid code during initialization
+        with pytest.raises(
+            UnknownInterpolationCodeError,
+            match="Unknown interpolation code 99 in function 'bad_interp'. Valid codes are 0-6.",
+        ):
+            InterpolationFunction(
+                name="bad_interp",
+                high=["high_var"],
+                low=["low_var"],
+                nom="nominal",
+                interpolationCodes=[99],  # Invalid code
+                positiveDefinite=False,
+                parameters=["param"],
+            )
+
+        # Test mix of valid and invalid codes
+        with pytest.raises(
+            UnknownInterpolationCodeError,
+            match="Unknown interpolation code -1 in function 'bad_interp2'. Valid codes are 0-6.",
+        ):
+            InterpolationFunction(
+                name="bad_interp2",
+                high=["high1", "high2"],
+                low=["low1", "low2"],
+                nom="nominal",
+                interpolationCodes=[0, -1],  # Mix of valid and invalid
+                positiveDefinite=False,
+                parameters=["param1", "param2"],
+            )
 
     def test_interpolation_function_integration(self):
         """Test InterpolationFunction integration with FunctionSet."""

@@ -661,8 +661,8 @@ class TestFunctionSet:
                 "type": "interpolation",
                 "high": ["h1"],
                 "low": ["l1"],
-                "nom": ["n1"],
-                "interpolationCodes": ["linear"],
+                "nom": "n1",
+                "interpolationCodes": [0],
                 "positiveDefinite": True,
                 "vars": ["x"],
             }

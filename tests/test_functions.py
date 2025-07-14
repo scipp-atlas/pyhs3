@@ -7,11 +7,14 @@ and FunctionSet implementations.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pytensor.tensor as pt
 import pytest
 from pytensor import function
 
+from pyhs3.exceptions import UnknownInterpolationCodeError
 from pyhs3.functions import (
     Function,
     FunctionSet,
@@ -246,8 +249,8 @@ class TestInterpolationFunction:
             name="test_interp",
             high=["high1", "high2"],
             low=["low1", "low2"],
-            nom=["nom1", "nom2"],
-            interpolationCodes=["code1", "code2"],
+            nom="nominal",
+            interpolationCodes=[0, 1],
             positiveDefinite=True,
             parameters=["var1", "var2"],
         )
@@ -255,8 +258,8 @@ class TestInterpolationFunction:
         assert func.kind == "interpolation"
         assert func.high == ["high1", "high2"]
         assert func.low == ["low1", "low2"]
-        assert func.nom == ["nom1", "nom2"]
-        assert func.interpolationCodes == ["code1", "code2"]
+        assert func.nom == "nominal"
+        assert func.interpolationCodes == [0, 1]
         assert func.positiveDefinite is True
         assert func.parameters == ["var1", "var2"]
 
@@ -268,8 +271,8 @@ class TestInterpolationFunction:
                     "name": "test_interp",
                     "high": ["h1"],
                     "low": ["l1"],
-                    "nom": ["n1"],
-                    "interpolationCodes": ["linear"],
+                    "nom": "n1",
+                    "interpolationCodes": [0],
                     "positiveDefinite": False,
                     "vars": ["x"],
                 },
@@ -280,8 +283,8 @@ class TestInterpolationFunction:
                     "name": "multi_interp",
                     "high": ["h1", "h2", "h3"],
                     "low": ["l1", "l2", "l3"],
-                    "nom": ["n1", "n2", "n3"],
-                    "interpolationCodes": ["linear", "polynomial", "exponential"],
+                    "nom": "nominal",
+                    "interpolationCodes": [0, 1, 2],
                     "positiveDefinite": True,
                     "vars": ["x", "y", "z"],
                 },
@@ -292,7 +295,7 @@ class TestInterpolationFunction:
                     "name": "empty_interp",
                     "high": [],
                     "low": [],
-                    "nom": [],
+                    "nom": "nominal",
                     "interpolationCodes": [],
                     "positiveDefinite": False,
                     "vars": [],
@@ -312,22 +315,275 @@ class TestInterpolationFunction:
         assert func.positiveDefinite == config["positiveDefinite"]
         assert func.parameters == config["vars"]
 
-    def test_interpolation_function_expression_placeholder(self):
-        """Test InterpolationFunction returns constant 1.0 (placeholder)."""
+    def test_interpolation_function_expression_nominal_only(self):
+        """Test InterpolationFunction returns nominal value when no parameters."""
         func = InterpolationFunction(
             name="test_interp",
             high=[],
             low=[],
-            nom=[],
+            nom="nominal",
             interpolationCodes=[],
             positiveDefinite=True,
             parameters=[],
         )
-        context = {}
+        context = {"nominal": pt.constant(5.0)}
 
         result = func.expression(context)
         f = function([], result)
-        assert np.isclose(f(), 1.0)
+        assert np.isclose(f(), 5.0)
+
+    def test_interpolation_function_linear_interpolation(self):
+        """Test InterpolationFunction with linear interpolation (code 0)."""
+        func = InterpolationFunction(
+            name="test_interp",
+            high=["high_var"],
+            low=["low_var"],
+            nom="nominal",
+            interpolationCodes=[0],
+            positiveDefinite=False,
+            parameters=["nuisance_param"],
+        )
+
+        # Test with positive parameter value
+        context = {
+            "nominal": pt.constant(10.0),
+            "high_var": pt.constant(12.0),
+            "low_var": pt.constant(8.0),
+            "nuisance_param": pt.constant(0.5),
+        }
+
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Expected: 10.0 + 0.5 * (12.0 - 10.0) = 11.0
+        np.testing.assert_allclose(result_val, 11.0, rtol=1e-10)
+
+    def test_interpolation_function_exponential_interpolation(self):
+        """Test InterpolationFunction with exponential interpolation (code 1)."""
+        func = InterpolationFunction(
+            name="test_interp",
+            high=["high_var"],
+            low=["low_var"],
+            nom="nominal",
+            interpolationCodes=[1],
+            positiveDefinite=False,
+            parameters=["nuisance_param"],
+        )
+
+        # Test with positive parameter value
+        context = {
+            "nominal": pt.constant(10.0),
+            "high_var": pt.constant(20.0),  # ratio = 2.0
+            "low_var": pt.constant(5.0),  # ratio = 0.5
+            "nuisance_param": pt.constant(0.5),
+        }
+
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Expected: 10.0 * (1 + (2.0^0.5 - 1)) = 10.0 * sqrt(2) ≈ 14.14
+        expected = 10.0 * np.sqrt(2.0)
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    def test_interpolation_function_positive_definite(self):
+        """Test InterpolationFunction with positive definite constraint."""
+        func = InterpolationFunction(
+            name="test_interp",
+            high=["high_var"],
+            low=["low_var"],
+            nom="nominal",
+            interpolationCodes=[0],
+            positiveDefinite=True,
+            parameters=["nuisance_param"],
+        )
+
+        # Create context that would give negative result without constraint
+        context = {
+            "nominal": pt.constant(5.0),
+            "high_var": pt.constant(2.0),
+            "low_var": pt.constant(8.0),
+            "nuisance_param": pt.constant(2.0),  # Large positive value
+        }
+
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Without constraint: 5.0 + 2.0 * (2.0 - 5.0) = 5.0 - 6.0 = -1.0
+        # With constraint: max(-1.0, 0.0) = 0.0
+        np.testing.assert_allclose(result_val, 0.0, rtol=1e-10)
+
+    @pytest.mark.parametrize("interp_code", [0, 1, 2, 3, 4, 5, 6])
+    def test_interpolation_function_all_codes_at_zero(self, interp_code):
+        """Test InterpolationFunction with all interpolation codes at theta=0."""
+        func = InterpolationFunction(
+            name="test_interp",
+            high=["high_var"],
+            low=["low_var"],
+            nom="nominal",
+            interpolationCodes=[interp_code],
+            positiveDefinite=False,
+            parameters=["nuisance_param"],
+        )
+
+        context = {
+            "nominal": pt.constant(10.0),
+            "high_var": pt.constant(12.0),
+            "low_var": pt.constant(8.0),
+            "nuisance_param": pt.constant(0.0),  # At nominal
+        }
+
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # At theta=0, all codes should return nominal value
+        np.testing.assert_allclose(result_val, 10.0, rtol=1e-10)
+
+    def test_interpolation_function_code_6_polynomial_multiplicative(self):
+        """Test InterpolationFunction with code 6 (polynomial + linear multiplicative)."""
+        func = InterpolationFunction(
+            name="test_interp",
+            high=["high_var"],
+            low=["low_var"],
+            nom="nominal",
+            interpolationCodes=[6],
+            positiveDefinite=False,
+            parameters=["nuisance_param"],
+        )
+
+        # Test with positive parameter value in polynomial region (|theta| < 1)
+        context = {
+            "nominal": pt.constant(10.0),
+            "high_var": pt.constant(20.0),  # ratio = 2.0
+            "low_var": pt.constant(5.0),  # ratio = 0.5
+            "nuisance_param": pt.constant(0.5),  # |0.5| < 1, polynomial region
+        }
+
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Code 6: polynomial multiplicative mode
+        # Expected: 10.0 * (1 + 0.5 * (2.0 - 1.0) * (1 + 0.5^2 * (-3 + 0.5^2) / 16))
+        # = 10.0 * (1 + 0.5 * 1.0 * (1 + 0.25 * (-3 + 0.25) / 16))
+        # = 10.0 * (1 + 0.5 * (1 + 0.25 * (-2.75) / 16))
+        # = 10.0 * (1 + 0.5 * (1 - 0.04296875))
+        # = 10.0 * (1 + 0.5 * 0.95703125) = 10.0 * 1.478515625 ≈ 14.785
+        expected = 10.0 * (1 + 0.5 * (2.0 - 1.0) * (1 + 0.25 * (-3 + 0.25) / 16))
+        np.testing.assert_allclose(result_val, expected, rtol=1e-10)
+
+    def test_interpolation_function_parameter_index_warning(self, caplog):
+        """Test InterpolationFunction logs warning when parameter index exceeds lists."""
+        func = InterpolationFunction(
+            name="test_interp",
+            high=["high_var"],  # Only one element
+            low=["low_var"],  # Only one element
+            nom="nominal",
+            interpolationCodes=[0],  # Only one element
+            positiveDefinite=False,
+            parameters=["param1", "param2"],  # Two parameters - exceeds lists!
+        )
+
+        context = {
+            "nominal": pt.constant(10.0),
+            "high_var": pt.constant(12.0),
+            "low_var": pt.constant(8.0),
+            "param1": pt.constant(0.5),
+            "param2": pt.constant(0.3),  # This will trigger the warning
+        }
+
+        with caplog.at_level(logging.WARNING):
+            result = func.expression(context)
+            f = function([], result)
+            result_val = f()
+
+        # Should log warning about parameter index exceeding lists
+        assert (
+            "Parameter index 1 exceeds variation lists for function test_interp"
+            in caplog.text
+        )
+
+        # Result should still be computed (only first parameter processed)
+        # Expected: 10.0 + 0.5 * (12.0 - 10.0) = 11.0
+        np.testing.assert_allclose(result_val, 11.0, rtol=1e-10)
+
+    def test_interpolation_function_unknown_code_raises_exception(self):
+        """Test InterpolationFunction raises exception for unknown interpolation codes."""
+        # Test invalid code during initialization
+        with pytest.raises(
+            UnknownInterpolationCodeError,
+            match="Unknown interpolation code 99 in function 'bad_interp'. Valid codes are 0-6.",
+        ):
+            InterpolationFunction(
+                name="bad_interp",
+                high=["high_var"],
+                low=["low_var"],
+                nom="nominal",
+                interpolationCodes=[99],  # Invalid code
+                positiveDefinite=False,
+                parameters=["param"],
+            )
+
+        # Test mix of valid and invalid codes
+        with pytest.raises(
+            UnknownInterpolationCodeError,
+            match="Unknown interpolation code -1 in function 'bad_interp2'. Valid codes are 0-6.",
+        ):
+            InterpolationFunction(
+                name="bad_interp2",
+                high=["high1", "high2"],
+                low=["low1", "low2"],
+                nom="nominal",
+                interpolationCodes=[0, -1],  # Mix of valid and invalid
+                positiveDefinite=False,
+                parameters=["param1", "param2"],
+            )
+
+    def test_interpolation_function_integration(self):
+        """Test InterpolationFunction integration with FunctionSet."""
+
+        # Create function configuration matching your example structure
+        functions_config = [
+            {
+                "type": "interpolation",
+                "name": "test_shape_interp",
+                "high": ["high_variation"],
+                "low": ["low_variation"],
+                "nom": "nominal_shape",
+                "interpolationCodes": [0],
+                "positiveDefinite": False,
+                "vars": ["shape_param"],
+            }
+        ]
+
+        function_set = FunctionSet(functions_config)
+        assert len(function_set) == 1
+
+        interp_func = function_set["test_shape_interp"]
+        assert isinstance(interp_func, InterpolationFunction)
+        assert interp_func.nom == "nominal_shape"
+        assert interp_func.high == ["high_variation"]
+        assert interp_func.low == ["low_variation"]
+        assert interp_func.interpolationCodes == [0]
+        assert interp_func.parameters == ["shape_param"]
+
+        # Test evaluation
+        context = {
+            "nominal_shape": pt.constant(100.0),
+            "high_variation": pt.constant(110.0),
+            "low_variation": pt.constant(90.0),
+            "shape_param": pt.constant(0.2),
+        }
+
+        result = interp_func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Expected: 100.0 + 0.2 * (110.0 - 100.0) = 102.0
+        np.testing.assert_allclose(result_val, 102.0, rtol=1e-10)
 
 
 class TestRegisteredFunctions:
@@ -405,8 +661,8 @@ class TestFunctionSet:
                 "type": "interpolation",
                 "high": ["h1"],
                 "low": ["l1"],
-                "nom": ["n1"],
-                "interpolationCodes": ["linear"],
+                "nom": "n1",
+                "interpolationCodes": [0],
                 "positiveDefinite": True,
                 "vars": ["x"],
             }
@@ -525,7 +781,7 @@ class TestFunctionIntegration:
             name="interp",
             high=[],
             low=[],
-            nom=[],
+            nom="nominal",
             interpolationCodes=[],
             positiveDefinite=True,
             parameters=["param1", "param2"],

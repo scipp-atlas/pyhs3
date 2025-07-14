@@ -14,6 +14,7 @@ from typing import Any, Generic, TypeVar, cast
 import pytensor.tensor as pt
 
 from pyhs3 import typing as T
+from pyhs3.exceptions import UnknownInterpolationCodeError
 from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor
 from pyhs3.typing import function as TF
 
@@ -27,7 +28,7 @@ FuncConfigT = TypeVar("FuncConfigT", bound=T.Function)
 class Function(Generic[FuncConfigT]):
     """Base class for HS3 functions."""
 
-    def __init__(self, *, name: str, kind: str, parameters: list[str], **kwargs: Any):
+    def __init__(self, *, name: str, kind: str, parameters: list[str]):
         """
         Base class for functions that compute parameter values.
 
@@ -35,12 +36,10 @@ class Function(Generic[FuncConfigT]):
             name: Name of the function
             kind: Type of the function (product, generic_function, interpolation)
             parameters: List of parameter/function names this function depends on
-            **kwargs: Additional function-specific parameters
         """
         self.name = name
         self.kind = kind
         self.parameters = parameters
-        self.kwargs = kwargs
 
     def expression(self, _: dict[str, T.TensorVar]) -> T.TensorVar:
         """
@@ -130,7 +129,70 @@ class GenericFunction(Function[TF.GenericFunction]):
 
 
 class InterpolationFunction(Function[TF.InterpolationFunction]):
-    """Interpolation function (placeholder implementation)."""
+    r"""
+    Piecewise interpolation function implementation.
+
+    Implements ROOT's PiecewiseInterpolation logic to morph between nominal
+    and variation distributions based on nuisance parameter values.
+    Supports multiple interpolation codes (0-6) for different mathematical approaches.
+
+    Mathematical Formulations:
+        For **additive** interpolation modes (codes 0, 2, 3, 4):
+        $$\text{result} = \text{nominal} + \sum_i I_i(\theta_i; \text{low}_i, \text{nominal}, \text{high}_i)$$
+
+        For **multiplicative** interpolation modes (codes 1, 5, 6):
+        $$\text{result} = \text{nominal} \times \prod_i [1 + I_i(\theta_i; \text{low}_i/\text{nominal}, 1, \text{high}_i/\text{nominal})]$$
+
+    Interpolation Code Definitions:
+        **Code 0** - Linear Interpolation/Extrapolation (Additive):
+        $$I_0(\theta) = \begin{cases}
+        \theta(\text{high} - \text{nom}) & \text{if } \theta \geq 0 \\
+        \theta(\text{nom} - \text{low}) & \text{if } \theta < 0
+        \end{cases}$$
+
+        **Code 1** - Exponential Interpolation/Extrapolation (Multiplicative):
+        $$I_1(\theta) = \begin{cases}
+        \left(\frac{\text{high}}{\text{nom}}\right)^{\theta} - 1 & \text{if } \theta \geq 0 \\
+        \left(\frac{\text{low}}{\text{nom}}\right)^{-\theta} - 1 & \text{if } \theta < 0
+        \end{cases}$$
+
+        **Code 2** - Exponential Interpolation + Linear Extrapolation (Additive):
+        Uses $\exp(\theta)$ behavior for $|\theta| \leq 1$, linear extrapolation for $|\theta| > 1$
+        with smooth transition at $\theta = \pm 1$.
+
+        **Code 3** - Exponential Interpolation + Different Linear Extrapolation (Additive):
+        Uses $\exp(\theta)$ behavior for $|\theta| \leq 1$, different linear extrapolation
+        for $|\theta| > 1$ compared to code 2.
+
+        **Code 4** - 6th Order Polynomial Interpolation + Linear Extrapolation (Additive):
+        $$I_4(\theta) = \begin{cases}
+        \text{linear extrapolation} & \text{if } |\theta| \geq 1 \\
+        \theta \times (1 + \theta^2(-3 + \theta^2)/16) \times (\text{high} - \text{nom}) & \text{if } \theta \geq 0, |\theta| < 1
+        \end{cases}$$
+
+        **Code 5** - 6th Order Polynomial Interpolation + Exponential Extrapolation (Multiplicative):
+        Uses exponential extrapolation for $|\theta| \geq 1$, 6th order polynomial for $|\theta| < 1$.
+        Recommended for normalization factors.
+
+        **Code 6** - 6th Order Polynomial Interpolation + Linear Extrapolation (Multiplicative):
+        Uses linear extrapolation for $|\theta| \geq 1$, 6th order polynomial for $|\theta| < 1$.
+        Recommended for normalization factors (no roots outside $|\theta| < 1$).
+
+    Args:
+        name: Name of the function
+        high: High variation parameter names
+        low: Low variation parameter names
+        nom: Nominal parameter name
+        interpolationCodes: Interpolation method codes (0-6)
+        positiveDefinite: Whether function should be positive definite
+        parameters: Variable names this function depends on (nuisance parameters)
+
+    Note:
+        - At $\theta_i = 0$, all codes return the nominal value
+        - At $\theta_i = \pm 1$, variations should match high/low values for appropriate codes
+        - Polynomial codes (4,5,6) provide smoother interpolation with matching derivatives
+        - Based on A.Bukin, Budker INP, Novosibirsk and ROOT's RooFit implementation
+    """
 
     def __init__(
         self,
@@ -138,11 +200,10 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
         name: str,
         high: list[str],
         low: list[str],
-        nom: list[str],
-        interpolationCodes: list[str],
+        nom: str,
+        interpolationCodes: list[int],
         positiveDefinite: bool,
         parameters: list[str],
-        **kwargs: Any,
     ):
         """
         Initialize an InterpolationFunction.
@@ -151,15 +212,22 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
             name: Name of the function
             high: High variation parameter names
             low: Low variation parameter names
-            nom: Nominal parameter names
-            interpolationCodes: Interpolation method codes
+            nom: Nominal parameter name
+            interpolationCodes: Interpolation method codes (0-6)
             positiveDefinite: Whether function should be positive definite
-            parameters: Variable names this function depends on
-            **kwargs: Additional interpolation-specific parameters
+            parameters: Variable names this function depends on (nuisance parameters)
+
+        Raises:
+            UnknownInterpolationCodeError: If any interpolation code is not in range 0-6
         """
-        super().__init__(
-            name=name, kind="interpolation", parameters=parameters, **kwargs
-        )
+        super().__init__(name=name, kind="interpolation", parameters=parameters)
+
+        # Validate interpolation codes at initialization
+        valid_codes = {0, 1, 2, 3, 4, 5, 6}
+        for code in interpolationCodes:
+            if code not in valid_codes:
+                msg = f"Unknown interpolation code {code} in function '{name}'. Valid codes are 0-6."
+                raise UnknownInterpolationCodeError(msg)
         self.high = high
         self.low = low
         self.nom = nom
@@ -179,12 +247,279 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
             parameters=config["vars"],
         )
 
-    def expression(self, _context: dict[str, T.TensorVar]) -> T.TensorVar:
-        """Placeholder implementation - return constant for now."""
-        log.warning(
-            "Interpolation function %s not fully implemented, returning 1.0", self.name
+    def _flexible_interp_single(
+        self,
+        interp_code: int,
+        low_val: T.TensorVar,
+        high_val: T.TensorVar,
+        boundary: float,
+        nominal: T.TensorVar,
+        param_val: T.TensorVar,
+    ) -> T.TensorVar:
+        r"""
+        Implement flexible interpolation for a single parameter.
+
+        Based on ROOT's flexibleInterpSingle method with support for
+        interpolation codes 0-6. This method computes the interpolation
+        contribution $I_i(\theta_i)$ for a single nuisance parameter.
+
+        Args:
+            interp_code: Interpolation code (0-6) determining the mathematical approach
+            low_val: Low variation value (used when $\theta < 0$)
+            high_val: High variation value (used when $\theta \geq 0$)
+            boundary: Boundary value for switching between interpolation and extrapolation (typically 1.0)
+            nominal: Nominal value (baseline)
+            param_val: Parameter value $\theta$ (nuisance parameter)
+
+        Returns:
+            Interpolated contribution $I_i(\theta_i)$ to be added (additive modes)
+            or multiplied (multiplicative modes) with the result
+
+        Note:
+            The returned value interpretation depends on the interpolation code:
+            - Codes 0,2,3,4: Direct additive contribution
+            - Codes 1,5,6: Multiplicative factor (subtract 1 before use)
+        """
+        # Codes 0, 2, 3, 4 are additive modes
+        # Codes 1, 5, 6 are multiplicative modes
+
+        if interp_code == 0:
+            # Linear interpolation/extrapolation (additive)
+            return cast(
+                T.TensorVar,
+                pt.switch(
+                    param_val >= 0,
+                    param_val * (high_val - nominal),
+                    param_val * (nominal - low_val),
+                ),
+            )
+
+        if interp_code == 1:
+            # Exponential interpolation/extrapolation (multiplicative)
+            ratio_high = high_val / nominal
+            ratio_low = low_val / nominal
+            return cast(
+                T.TensorVar,
+                pt.switch(
+                    param_val >= 0,
+                    cast(T.TensorVar, pt.power(ratio_high, param_val)) - 1.0,  # type: ignore[no-untyped-call]
+                    cast(T.TensorVar, pt.power(ratio_low, -param_val)) - 1.0,  # type: ignore[no-untyped-call]
+                ),
+            )
+
+        if interp_code == 2:
+            # Exponential interpolation, linear extrapolation (additive)
+            return cast(
+                T.TensorVar,
+                pt.switch(
+                    pt.abs(param_val) <= boundary,
+                    # Exponential interpolation for |theta| <= 1
+                    pt.switch(
+                        param_val >= 0,
+                        (high_val - nominal) * (pt.exp(param_val) - 1),
+                        (nominal - low_val) * (pt.exp(-param_val) - 1),
+                    ),
+                    # Linear extrapolation for |theta| > 1
+                    pt.switch(
+                        param_val >= 0,
+                        (high_val - nominal)
+                        * (
+                            pt.exp(boundary)
+                            - 1
+                            + (param_val - boundary) * pt.exp(boundary)
+                        ),
+                        (nominal - low_val)
+                        * (
+                            pt.exp(boundary)
+                            - 1
+                            + (-param_val - boundary) * pt.exp(boundary)
+                        ),
+                    ),
+                ),
+            )
+
+        if interp_code == 3:
+            # Similar to code 2 but with different extrapolation
+            return cast(
+                T.TensorVar,
+                pt.switch(
+                    pt.abs(param_val) <= boundary,
+                    # Exponential interpolation for |theta| <= 1
+                    pt.switch(
+                        param_val >= 0,
+                        (high_val - nominal) * (pt.exp(param_val) - 1),
+                        (nominal - low_val) * (pt.exp(-param_val) - 1),
+                    ),
+                    # Linear extrapolation for |theta| > 1
+                    pt.switch(
+                        param_val >= 0,
+                        param_val * (high_val - nominal),
+                        param_val * (nominal - low_val),
+                    ),
+                ),
+            )
+
+        if interp_code == 4:
+            # Polynomial interpolation + linear extrapolation (additive)
+            return cast(
+                T.TensorVar,
+                pt.switch(
+                    pt.abs(param_val) >= boundary,
+                    # Linear extrapolation for |theta| >= 1
+                    pt.switch(
+                        param_val >= 0,
+                        param_val * (high_val - nominal),
+                        param_val * (nominal - low_val),
+                    ),
+                    # 6th order polynomial interpolation for |theta| < 1
+                    pt.switch(
+                        param_val >= 0,
+                        param_val
+                        * (high_val - nominal)
+                        * (
+                            1
+                            + param_val * param_val * (-3 + param_val * param_val) / 16
+                        ),
+                        param_val
+                        * (nominal - low_val)
+                        * (
+                            1
+                            + param_val * param_val * (-3 + param_val * param_val) / 16
+                        ),
+                    ),
+                ),
+            )
+
+        if interp_code == 5:
+            # Polynomial interpolation + exponential extrapolation (multiplicative)
+            ratio_high = high_val / nominal
+            ratio_low = low_val / nominal
+            return cast(
+                T.TensorVar,
+                pt.switch(
+                    pt.abs(param_val) >= boundary,
+                    # Exponential extrapolation for |theta| >= 1
+                    pt.switch(
+                        param_val >= 0,
+                        cast(T.TensorVar, pt.power(ratio_high, param_val)) - 1.0,  # type: ignore[no-untyped-call]
+                        cast(T.TensorVar, pt.power(ratio_low, -param_val)) - 1.0,  # type: ignore[no-untyped-call]
+                    ),
+                    # 6th order polynomial interpolation for |theta| < 1
+                    pt.switch(
+                        param_val >= 0,
+                        param_val
+                        * (ratio_high - 1.0)
+                        * (
+                            1
+                            + param_val * param_val * (-3 + param_val * param_val) / 16
+                        ),
+                        param_val
+                        * (ratio_low - 1.0)
+                        * (
+                            1
+                            + param_val * param_val * (-3 + param_val * param_val) / 16
+                        ),
+                    ),
+                ),
+            )
+
+        # Code 6: Polynomial interpolation + linear extrapolation (multiplicative)
+        ratio_high = high_val / nominal
+        ratio_low = low_val / nominal
+        return cast(
+            T.TensorVar,
+            pt.switch(
+                pt.abs(param_val) >= boundary,
+                # Linear extrapolation for |theta| >= 1
+                pt.switch(
+                    param_val >= 0,
+                    param_val * (ratio_high - 1.0),
+                    param_val * (ratio_low - 1.0),
+                ),
+                # 6th order polynomial interpolation for |theta| < 1
+                pt.switch(
+                    param_val >= 0,
+                    param_val
+                    * (ratio_high - 1.0)
+                    * (1 + param_val * param_val * (-3 + param_val * param_val) / 16),
+                    param_val
+                    * (ratio_low - 1.0)
+                    * (1 + param_val * param_val * (-3 + param_val * param_val) / 16),
+                ),
+            ),
         )
-        return cast(T.TensorVar, pt.constant(1.0))
+
+    def expression(self, context: dict[str, T.TensorVar]) -> T.TensorVar:
+        r"""
+        Evaluate the interpolation function.
+
+        Implements ROOT's PiecewiseInterpolation algorithm following the mathematical
+        formulations described in the class docstring. The algorithm proceeds as:
+
+        1. Start with nominal value: $\\text{result} = \\text{nominal}$
+        2. For each nuisance parameter $\\theta_i$, compute interpolation contribution $I_i(\\theta_i)$
+        3. Combine contributions based on interpolation mode:
+           - **Additive modes** (codes 0,2,3,4): $\\text{result} += I_i(\\theta_i)$
+           - **Multiplicative modes** (codes 1,5,6): $\\text{result} \\times= (1 + I_i(\\theta_i))$
+        4. Apply positive definite constraint: $\\text{result} = \\max(\\text{result}, 0)$ if requested
+
+        Args:
+            context: Mapping of names to pytensor variables containing:
+                - Nominal parameter (referenced by `nom`)
+                - High/low variation parameters (referenced by `high`/`low` lists)
+                - Nuisance parameters (referenced by `parameters` list)
+
+        Returns:
+            PyTensor expression representing the interpolated result
+
+        Note:
+            The evaluation order ensures that all interpolation contributions are properly
+            combined according to their mathematical modes before applying constraints.
+        """
+        # Start with nominal value
+        nominal = context[self.nom]
+        result = nominal
+
+        # Apply interpolation for each nuisance parameter
+        for i, var_name in enumerate(self.parameters):
+            if (
+                i >= len(self.high)
+                or i >= len(self.low)
+                or i >= len(self.interpolationCodes)
+            ):
+                log.warning(
+                    "Parameter index %d exceeds variation lists for function %s",
+                    i,
+                    self.name,
+                )
+                continue
+
+            param_val = context[var_name]
+            low_val = context[self.low[i]]
+            high_val = context[self.high[i]]
+            interp_code = self.interpolationCodes[i]
+
+            # Calculate interpolated contribution
+            contribution = self._flexible_interp_single(
+                interp_code=interp_code,
+                low_val=low_val,
+                high_val=high_val,
+                boundary=1.0,
+                nominal=nominal,
+                param_val=param_val,
+            )
+
+            # Add contribution based on interpolation mode
+            if interp_code in [0, 2, 3, 4]:  # Additive modes
+                result = result + contribution
+            else:  # Multiplicative modes (1, 5, 6)
+                result = result * (1.0 + contribution)
+
+        # Apply positive definite constraint if requested
+        if self.positiveDefinite:
+            result = pt.maximum(result, 0.0)
+
+        return result
 
 
 registered_functions: dict[str, type[Function[Any]]] = {

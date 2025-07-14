@@ -36,3 +36,12 @@ class ExpressionEvaluationError(HS3Exception):
     - The expression results in mathematical errors (division by zero, etc.)
     - PyTensor conversion fails
     """
+
+
+class UnknownInterpolationCodeError(HS3Exception):
+    """
+    Exception raised when an unknown interpolation code is used.
+
+    This occurs when an InterpolationFunction is configured with an
+    interpolation code outside the valid range (0-6).
+    """

@@ -63,7 +63,6 @@ class Distribution(Generic[DistConfigT]):
         name: str,
         kind: str = "Distribution",
         parameters: list[str] | None = None,
-        **kwargs: Any,
     ):
         """
         Base class for distributions.
@@ -81,7 +80,6 @@ class Distribution(Generic[DistConfigT]):
         self.name = name
         self.kind = kind
         self.parameters = parameters or []
-        self.kwargs = kwargs
         self.constants: dict[str, T.TensorVar] = {}
 
     def expression(self, _: dict[str, T.TensorVar]) -> T.TensorVar:
@@ -516,14 +514,13 @@ class GenericDist(Distribution[TD.GenericDistribution]):
         - "sin(x) + log(abs(y))"
     """
 
-    def __init__(self, *, name: str, expression: str, **_kwargs: Any):
+    def __init__(self, *, name: str, expression: str):
         """
         Initialize a GenericDist.
 
         Args:
             name: Name of the distribution
             expression: Mathematical expression string
-            **_kwargs: Additional keyword arguments (ignored)
         """
         # Parse and analyze the expression during initialization
         self.expression_str = expression

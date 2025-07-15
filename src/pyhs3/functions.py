@@ -276,7 +276,7 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
 
         Based on ROOT's flexibleInterpSingle method with support for
         interpolation codes 0-6. This method computes the interpolation
-        contribution $I_i(\theta_i)$ for a single nuisance parameter.
+        contribution :math:`I_i(\theta_i)` for a single nuisance parameter.
 
         Args:
             interp_code: Interpolation code (0-6) determining the mathematical approach
@@ -471,12 +471,12 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
         Implements ROOT's PiecewiseInterpolation algorithm following the mathematical
         formulations described in the class docstring. The algorithm proceeds as:
 
-        1. Start with nominal value: $\\text{result} = \\text{nominal}$
+        1. Start with nominal value: :math:`\text{result} = \text{nominal}`
         2. For each nuisance parameter :math:`\theta_i`, compute interpolation contribution :math:`I_i(\theta_i)`
         3. Combine contributions based on interpolation mode:
            - **Additive modes** (codes 0,2,3,4): :math:`\text{result} += I_i(\theta_i)`
            - **Multiplicative modes** (codes 1,5,6): :math:`\text{result} \times= (1 + I_i(\theta_i))`
-        4. Apply positive definite constraint: $\\text{result} = \\max(\\text{result}, 0)$ if requested
+        4. Apply positive definite constraint: :math:`\text{result} = \max(\text{result}, 0)` if requested
 
         Args:
             context: Mapping of names to pytensor variables containing:

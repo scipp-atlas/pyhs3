@@ -277,14 +277,16 @@ class MixtureDist(Distribution[TD.MixtureDistribution]):
 
 
 class ProductDist(Distribution[TD.ProductDistribution]):
-    """
+    r"""
     Product distribution implementation.
 
     Implements a product of PDFs as defined in ROOT's RooProdPdf.
 
     The probability density function is defined as:
 
-    $$f(x, \\ldots) = \\prod_{i=1}^{N} \\text{PDF}_i(x, \\ldots)$$
+    .. math::
+
+        f(x, \ldots) = \prod_{i=1}^{N} \text{PDF}_i(x, \ldots)
 
     where each PDF_i is a component distribution that may share observables.
 
@@ -339,7 +341,7 @@ class ProductDist(Distribution[TD.ProductDistribution]):
 
 
 class CrystalBallDist(Distribution[TD.CrystalBallDistribution]):
-    """
+    r"""
     Crystal Ball distribution implementation.
 
     Implements the generalized asymmetrical double-sided Crystal Ball line shape
@@ -347,19 +349,23 @@ class CrystalBallDist(Distribution[TD.CrystalBallDistribution]):
 
     The probability density function is defined as:
 
-    $$f(m; m_0, \\sigma_L, \\sigma_R, \\alpha_L, \\alpha_R, n_L, n_R) = \\begin{cases}
-    A_L \\cdot \\left(B_L - \\frac{m - m_0}{\\sigma_L}\\right)^{-n_L}, & \\text{for } \\frac{m - m_0}{\\sigma_L} < -\\alpha_L \\\\
-    \\exp\\left(-\\frac{1}{2} \\cdot \\left[\\frac{m - m_0}{\\sigma_L}\\right]^2\\right), & \\text{for } \\frac{m - m_0}{\\sigma_L} \\leq 0 \\\\
-    \\exp\\left(-\\frac{1}{2} \\cdot \\left[\\frac{m - m_0}{\\sigma_R}\\right]^2\\right), & \\text{for } \\frac{m - m_0}{\\sigma_R} \\leq \\alpha_R \\\\
-    A_R \\cdot \\left(B_R + \\frac{m - m_0}{\\sigma_R}\\right)^{-n_R}, & \\text{otherwise}
-    \\end{cases}$$
+    .. math::
+
+        f(m; m_0, \sigma_L, \sigma_R, \alpha_L, \alpha_R, n_L, n_R) = \begin{cases}
+        A_L \cdot \left(B_L - \frac{m - m_0}{\sigma_L}\right)^{-n_L}, & \text{for } \frac{m - m_0}{\sigma_L} < -\alpha_L \\
+        \exp\left(-\frac{1}{2} \cdot \left[\frac{m - m_0}{\sigma_L}\right]^2\right), & \text{for } \frac{m - m_0}{\sigma_L} \leq 0 \\
+        \exp\left(-\frac{1}{2} \cdot \left[\frac{m - m_0}{\sigma_R}\right]^2\right), & \text{for } \frac{m - m_0}{\sigma_R} \leq \alpha_R \\
+        A_R \cdot \left(B_R + \frac{m - m_0}{\sigma_R}\right)^{-n_R}, & \text{otherwise}
+        \end{cases}
 
     where:
 
-    $$\\begin{align}
-    A_i &= \\left(\\frac{n_i}{\\alpha_i}\\right)^{n_i} \\cdot \\exp\\left(-\\frac{\\alpha_i^2}{2}\\right) \\\\
-    B_i &= \\frac{n_i}{\\alpha_i} - \\alpha_i
-    \\end{align}$$
+    .. math::
+
+        \begin{align}
+        A_i &= \left(\frac{n_i}{\alpha_i}\right)^{n_i} \cdot \exp\left(-\frac{\alpha_i^2}{2}\right) \\
+        B_i &= \frac{n_i}{\alpha_i} - \alpha_i
+        \end{align}
 
     Parameters:
         m: Observable variable

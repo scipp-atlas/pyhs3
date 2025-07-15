@@ -3,7 +3,7 @@ ci:
   autofix_commit_msg: "style: pre-commit fixes"
   skip: [mypy]
 
-exclude: ^.cruft.json|.copier-answers.yml|src/pyhs3/roadmap.py$
+exclude: ^.cruft.json|.copier-answers.yml|src/pyhs3/roadmap.py|example.py$
 
 repos:
   - repo: https://github.com/adamchainz/blacken-docs

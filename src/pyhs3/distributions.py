@@ -116,7 +116,7 @@ class Distribution(Generic[DistConfigT]):
 
 
 class GaussianDist(Distribution[TD.GaussianDistribution]):
-    """
+    r"""
     Gaussian (normal) probability distribution.
 
     Implements the standard Gaussian probability density function:

@@ -3,7 +3,7 @@
 Example usage of PyHS3 with compilation optimization and visualization features.
 
 This script demonstrates:
-1. Interpreted mode (compile=False)
+1. Interpreted mode (jit=False)
 2. Compiled mode for better performance (default behavior)
 3. Graph visualization and inspection
 4. Performance comparison between modes
@@ -44,7 +44,7 @@ def main():
 
     # Explicitly disable compilation for comparison
     with time_block("Creating interpreted model"):
-        model_interpreted = ws.model(compile=False)
+        model_interpreted = ws.model(jit=False)
     print(f"Model created: {model_interpreted}")
 
     # Prepare parameter values
@@ -64,7 +64,7 @@ def main():
 
     # Use default behavior (compilation enabled)
     with time_block("Creating compiled model"):
-        model_compiled = ws.model()  # compile=True by default
+        model_compiled = ws.model()  # jit=True by default
     print(f"Model created: {model_compiled}")
 
     # First call compiles the function
@@ -143,12 +143,12 @@ def main():
     try:
         print("Generating graph visualization...")
         with time_block("Creating SVG graph"):
-            output_file = model_compiled.visualize_graph('_model_Run2HM_1', format='svg')
+            output_file = model_compiled.visualize_graph('_model_Run2HM_1', fmt='svg')
         print(f"Graph saved to: {output_file}")
 
         # Also create a PNG version
         with time_block("Creating PNG graph"):
-            png_file = model_compiled.visualize_graph('_model_Run2HM_1', format='png')
+            png_file = model_compiled.visualize_graph('_model_Run2HM_1', fmt='png')
         print(f"PNG graph saved to: {png_file}")
 
     except ImportError as e:

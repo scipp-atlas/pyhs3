@@ -219,7 +219,7 @@ class GaussianDist(Distribution[TD.GaussianDistribution]):
 
 
 class MixtureDist(Distribution[TD.MixtureDistribution]):
-    """
+    r"""
     Mixture of probability distributions.
 
     Implements a weighted combination of multiple distributions:
@@ -550,9 +550,17 @@ class GenericDist(Distribution[TD.GenericDistribution]):
         - Other: sqrt, abs
 
     Examples:
-        - "x**2 + 2*x + 1"
-        - "exp(-x**2/2) * cos(y)"
-        - "sin(x) + log(abs(y))"
+        Create a quadratic distribution:
+
+        >>> dist = GenericDist(name="quadratic", expression="x**2 + 2*x + 1")
+
+        Create a custom exponential with oscillation:
+
+        >>> dist = GenericDist(name="exp_cos", expression="exp(-x**2/2) * cos(y)")
+
+        Create a complex mathematical function:
+
+        >>> dist = GenericDist(name="complex", expression="sin(x) + log(abs(y) + 1)")
     """
 
     def __init__(self, *, name: str, expression: str):

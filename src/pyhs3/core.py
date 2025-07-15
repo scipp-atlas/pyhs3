@@ -80,7 +80,7 @@ class Workspace:
         domain: int | str | DomainSet = 0,
         parameter_point: int | str | ParameterSet = 0,
         progress: bool = True,
-        compile: bool = True,
+        jit: bool = True,
     ) -> Model:
         """
         Constructs a `Model` object using the provided domain and parameter point.
@@ -89,7 +89,7 @@ class Workspace:
             domain (int | str | DomainSet): Identifier or object specifying the domain to use.
             parameter_point (int | str | ParameterSet): Identifier or object specifying the parameter values to use.
             progress (bool): Whether to show progress bar during dependency graph construction. Defaults to True.
-            compile (bool): Whether to enable PyTensor graph compilation and optimization. Defaults to True.
+            jit (bool): Whether to enable PyTensor graph compilation and optimization. Defaults to True.
                           When True, functions are compiled with FAST_RUN mode and cached for better performance.
 
         Returns:
@@ -119,7 +119,7 @@ class Workspace:
             domains=domainset,
             functions=self.function_set,
             progress=progress,
-            compile=compile,
+            jit=jit,
         )
 
 
@@ -145,7 +145,7 @@ class Model:
         domains: DomainSet,
         functions: FunctionSet,
         progress: bool = True,
-        compile: bool = True,
+        jit: bool = True,
     ):
         """
         Represents a probabilistic model composed of parameters, domains, distributions, and functions.
@@ -156,7 +156,7 @@ class Model:
             domains (DomainSet): Domain constraints for parameters.
             functions (FunctionSet): Set of functions that compute parameter values.
             progress (bool): Whether to show progress bar during dependency graph construction.
-            compile (bool): Whether to enable PyTensor graph compilation and optimization. Defaults to True.
+            jit (bool): Whether to enable PyTensor graph compilation and optimization. Defaults to True.
                           When True, functions are compiled with FAST_RUN mode and cached for better performance.
 
         Attributes:
@@ -170,7 +170,7 @@ class Model:
         self.parameters = {}
         self.parameterset = parameterset
         self.functions: dict[str, T.TensorVar] = {}
-        self.compile = compile
+        self.compile = jit
         self._compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]] = {}
 
         for parameter_point in parameterset:
@@ -389,15 +389,15 @@ class Model:
         return np.log(self.pdf(name, **parametervalues))
 
     def visualize_graph(
-        self, name: str, format: str = "svg", outfile: str | None = None
+        self, name: str, fmt: str = "svg", outfile: str | None = None
     ) -> str:
         """
         Visualize the computation graph for a distribution.
 
         Args:
             name (str): Distribution name.
-            format (str): Output format ('svg', 'png', 'pdf'). Defaults to 'svg'.
-            outfile (str | None): Output filename. If None, uses '{name}_graph.{format}'.
+            fmt (str): Output format ('svg', 'png', 'pdf'). Defaults to 'svg'.
+            outfile (str | None): Output filename. If None, uses '{name}_graph.{fmt}'.
 
         Returns:
             str: Path to the generated visualization file.
@@ -406,7 +406,9 @@ class Model:
             ImportError: If pydot is not installed.
         """
         try:
-            from pytensor.printing import pydotprint  # noqa: PLC0415
+            from pytensor.printing import (  # noqa: PLC0415
+                pydotprint,  # pylint: disable=import-outside-toplevel
+            )
         except ImportError as e:
             msg = "Graph visualization requires pydot. Install with: pip install pydot"
             raise ImportError(msg) from e
@@ -416,10 +418,10 @@ class Model:
             raise ValueError(msg)
 
         dist = self.distributions[name]
-        filename = outfile or f"{name}_graph.{format}"
+        filename = outfile or f"{name}_graph.{fmt}"
 
         pydotprint(  # type: ignore[no-untyped-call]
-            dist, outfile=filename, format=format, with_ids=True, high_contrast=True
+            dist, outfile=filename, format=fmt, with_ids=True, high_contrast=True
         )
         return filename
 

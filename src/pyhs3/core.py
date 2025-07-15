@@ -12,7 +12,7 @@ import numpy.typing as npt
 import pytensor.tensor as pt
 import rustworkx as rx
 from pytensor.compile.function import function
-from pytensor.graph.basic import graph_inputs
+from pytensor.graph.basic import applys_between, graph_inputs
 from rich.progress import (
     BarColumn,
     Progress,
@@ -70,6 +70,7 @@ class Workspace:
         domain: int | str | DomainSet = 0,
         parameter_point: int | str | ParameterSet = 0,
         progress: bool = True,
+        compile: bool = True,
     ) -> Model:
         """
         Constructs a `Model` object using the provided domain and parameter point.
@@ -78,6 +79,8 @@ class Workspace:
             domain (int | str | DomainSet): Identifier or object specifying the domain to use.
             parameter_point (int | str | ParameterSet): Identifier or object specifying the parameter values to use.
             progress (bool): Whether to show progress bar during dependency graph construction. Defaults to True.
+            compile (bool): Whether to enable PyTensor graph compilation and optimization. Defaults to True.
+                          When True, functions are compiled with FAST_RUN mode and cached for better performance.
 
         Returns:
             Model: The constructed model object.
@@ -106,6 +109,7 @@ class Workspace:
             domains=domainset,
             functions=self.function_set,
             progress=progress,
+            compile=compile,
         )
 
 
@@ -122,6 +126,7 @@ class Model:
         domains: DomainSet,
         functions: FunctionSet,
         progress: bool = True,
+        compile: bool = True,
     ):
         """
         Represents a probabilistic model composed of parameters, domains, distributions, and functions.
@@ -132,16 +137,22 @@ class Model:
             domains (DomainSet): Domain constraints for parameters.
             functions (FunctionSet): Set of functions that compute parameter values.
             progress (bool): Whether to show progress bar during dependency graph construction.
+            compile (bool): Whether to enable PyTensor graph compilation and optimization. Defaults to True.
+                          When True, functions are compiled with FAST_RUN mode and cached for better performance.
 
         Attributes:
             parameters (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic parameter variables.
             parameterset (ParameterSet): The original set of parameter values.
             distributions (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic distribution expressions.
             functions (dict[str, pytensor.tensor.variable.TensorVariable]): Computed function values.
+            compile (bool): Whether compilation mode is enabled.
+            _compiled_functions (dict[str, Callable[..., npt.NDArray[np.float64]]]): Cache of compiled PyTensor functions.
         """
         self.parameters = {}
         self.parameterset = parameterset
         self.functions: dict[str, T.TensorVar] = {}
+        self.compile = compile
+        self._compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]] = {}
 
         for parameter_point in parameterset:
             # Create scalar parameter with domain bounds applied
@@ -280,6 +291,33 @@ class Model:
                 # Advance progress
                 progress_bar.advance(task)
 
+    def _get_compiled_function(
+        self, name: str
+    ) -> Callable[..., npt.NDArray[np.float64]]:
+        """
+        Get or create a compiled PyTensor function for the specified distribution.
+
+        Args:
+            name (str): Name of the distribution.
+
+        Returns:
+            Callable: Compiled PyTensor function.
+        """
+        if name not in self._compiled_functions:
+            dist = self.distributions[name]
+            inputs = [var for var in graph_inputs([dist]) if var.name is not None]
+
+            # Use optimized mode when compile=True
+            mode = "FAST_RUN" if self.compile else "FAST_COMPILE"
+
+            self._compiled_functions[name] = cast(
+                Callable[..., npt.NDArray[np.float64]],
+                function(
+                    inputs=inputs, outputs=dist, mode=mode, on_unused_input="ignore"
+                ),  # type: ignore[no-untyped-call]
+            )
+        return self._compiled_functions[name]
+
     def pdf(self, name: str, **parametervalues: float) -> npt.NDArray[np.float64]:
         """
         Evaluates the probability density function of the specified distribution.
@@ -291,19 +329,32 @@ class Model:
         Returns:
             float: The evaluated PDF value.
         """
+        if self.compile:
+            # Use compiled function for better performance
+            func = self._get_compiled_function(name)
+            inputs = [
+                var
+                for var in graph_inputs([self.distributions[name]])
+                if var.name is not None
+            ]
+            positional_values = []
+            for var in inputs:
+                assert var.name is not None
+                positional_values.append(parametervalues[var.name])
+            return func(*positional_values)
+        # Use original uncompiled approach
         dist = self.distributions[name]
-
         inputs = [var for var in graph_inputs([dist]) if var.name is not None]
-        values: dict[str, float] = {}
+        keyword_values: dict[str, float] = {}
         for var in inputs:
             assert var.name is not None
-            values[var.name] = parametervalues[var.name]
+            keyword_values[var.name] = parametervalues[var.name]
 
         func = cast(
             Callable[..., npt.NDArray[np.float64]],
             function(inputs=inputs, outputs=dist),  # type: ignore[no-untyped-call]
         )
-        return func(**values)
+        return func(**keyword_values)
 
     def logpdf(self, name: str, **parametervalues: float) -> npt.NDArray[np.float64]:
         """
@@ -317,6 +368,99 @@ class Model:
             float: The log of the PDF.
         """
         return np.log(self.pdf(name, **parametervalues))
+
+    def visualize_graph(
+        self, name: str, format: str = "svg", outfile: str | None = None
+    ) -> str:
+        """
+        Visualize the computation graph for a distribution.
+
+        Args:
+            name (str): Distribution name.
+            format (str): Output format ('svg', 'png', 'pdf'). Defaults to 'svg'.
+            outfile (str | None): Output filename. If None, uses '{name}_graph.{format}'.
+
+        Returns:
+            str: Path to the generated visualization file.
+
+        Raises:
+            ImportError: If pydot is not installed.
+        """
+        try:
+            from pytensor.printing import pydotprint  # noqa: PLC0415
+        except ImportError as e:
+            msg = "Graph visualization requires pydot. Install with: pip install pydot"
+            raise ImportError(msg) from e
+
+        if name not in self.distributions:
+            msg = f"Distribution '{name}' not found in model"
+            raise ValueError(msg)
+
+        dist = self.distributions[name]
+        filename = outfile or f"{name}_graph.{format}"
+
+        pydotprint(  # type: ignore[no-untyped-call]
+            dist, outfile=filename, format=format, with_ids=True, high_contrast=True
+        )
+        return filename
+
+    def __repr__(self) -> str:
+        """Provide a concise overview of the model structure."""
+        param_names = list(self.parameters.keys())
+        dist_names = list(self.distributions.keys())
+        func_names = list(self.functions.keys())
+
+        param_display = ", ".join(param_names[:5]) + (
+            "..." if len(param_names) > 5 else ""
+        )
+        dist_display = ", ".join(dist_names[:3]) + (
+            "..." if len(dist_names) > 3 else ""
+        )
+        func_display = ", ".join(func_names[:3]) + (
+            "..." if len(func_names) > 3 else ""
+        )
+
+        compile_status = "compiled" if self.compile else "interpreted"
+
+        return f"""Model(
+    mode: {compile_status}
+    parameters: {len(param_names)} ({param_display})
+    distributions: {len(dist_names)} ({dist_display})
+    functions: {len(func_names)} ({func_display})
+)"""
+
+    def graph_summary(self, name: str) -> str:
+        """
+        Get a summary of the computation graph structure.
+
+        Args:
+            name (str): Distribution name.
+
+        Returns:
+            str: Summary of the graph structure.
+        """
+        if name not in self.distributions:
+            msg = f"Distribution '{name}' not found in model"
+            raise ValueError(msg)
+
+        dist = self.distributions[name]
+        inputs = list(graph_inputs([dist]))
+
+        # Count different types of operations
+        applies = list(applys_between(inputs, [dist]))
+
+        op_types: dict[str, int] = {}
+        for apply in applies:
+            op_name = type(apply.op).__name__
+            op_types[op_name] = op_types.get(op_name, 0) + 1
+
+        compile_info = f"\n    Compiled: {'Yes' if self.compile and name in self._compiled_functions else 'No'}"
+
+        return f"""Distribution '{name}':
+    Input variables: {len(inputs)}
+    Graph operations: {len(applies)}
+    Operation types: {dict(sorted(op_types.items()))}{compile_info}
+"""
 
 
 class ParameterCollection:

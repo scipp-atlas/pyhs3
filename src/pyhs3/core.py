@@ -406,8 +406,8 @@ class Model:
             ImportError: If pydot is not installed.
         """
         try:
-            from pytensor.printing import (  # noqa: PLC0415
-                pydotprint,  # pylint: disable=import-outside-toplevel
+            from pytensor.printing import (  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
+                pydotprint,
             )
         except ImportError as e:
             msg = "Graph visualization requires pydot. Install with: pip install pydot"

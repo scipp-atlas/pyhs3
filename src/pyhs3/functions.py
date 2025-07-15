@@ -81,7 +81,15 @@ class ProductFunction(Function[TF.ProductFunction]):
         return cls(name=config["name"], factors=config["factors"])
 
     def expression(self, context: dict[str, T.TensorVar]) -> T.TensorVar:
-        """Evaluate the product function."""
+        """
+        Evaluate the product function.
+
+        Args:
+            context: Mapping of names to PyTensor variables.
+
+        Returns:
+            T.TensorVar: PyTensor expression representing the product of all factors.
+        """
         if not self.factors:
             return pt.constant(1.0)
 
@@ -93,7 +101,24 @@ class ProductFunction(Function[TF.ProductFunction]):
 
 
 class GenericFunction(Function[TF.GenericFunction]):
-    """Generic function with custom mathematical expression."""
+    """
+    Generic function with custom mathematical expression.
+
+    Evaluates arbitrary mathematical expressions using SymPy parsing
+    and PyTensor computation. Supports common mathematical operations
+    including arithmetic, trigonometric, exponential, and logarithmic functions.
+
+    The expression is parsed once during initialization and converted to
+    a PyTensor computation graph for efficient evaluation.
+
+    Parameters:
+        name (str): Name of the function.
+        expression (str): Mathematical expression string to evaluate.
+
+    Examples:
+        >>> func = GenericFunction(name="quadratic", expression="x**2 + 2*x + 1")
+        >>> func = GenericFunction(name="sinusoid", expression="sin(x) * exp(-t)")
+    """
 
     def __init__(self, *, name: str, expression: str):
         """
@@ -119,7 +144,15 @@ class GenericFunction(Function[TF.GenericFunction]):
         return cls(name=config["name"], expression=config["expression"])
 
     def expression(self, context: dict[str, T.TensorVar]) -> T.TensorVar:
-        """Evaluate the generic function expression."""
+        """
+        Evaluate the generic function expression.
+
+        Args:
+            context: Mapping of names to PyTensor variables.
+
+        Returns:
+            T.TensorVar: PyTensor expression representing the parsed mathematical expression.
+        """
 
         # Get required variables
         variables = [context[name] for name in self.parameters]
@@ -545,7 +578,19 @@ registered_functions: dict[str, type[Function[Any]]] = {
 
 
 class FunctionSet:
-    """Collection of HS3 functions."""
+    """
+    Collection of HS3 functions for parameter computation.
+
+    Manages a set of function instances that compute parameter values
+    based on other parameters. Functions can be products, generic
+    mathematical expressions, or interpolation functions.
+
+    Provides dict-like access to functions by name and handles
+    function creation from configuration dictionaries.
+
+    Attributes:
+        funcs (dict[str, Function[Any]]): Mapping from function names to Function instances.
+    """
 
     def __init__(self, funcs: list[T.Function]) -> None:
         """

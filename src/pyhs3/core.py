@@ -40,7 +40,17 @@ else:
 
 class Workspace:
     """
-    Workspace
+    Workspace for managing HS3 model specifications.
+
+    A workspace contains parameter points, distributions, domains, and functions
+    that define a probabilistic model. It provides methods to construct Model
+    objects with specific parameter values and domain constraints.
+
+    Attributes:
+        parameter_collection (ParameterCollection): Named parameter sets.
+        distribution_set (DistributionSet): Available distributions.
+        domain_collection (DomainCollection): Domain constraints for parameters.
+        function_set (FunctionSet): Available functions for parameter computation.
     """
 
     def __init__(self, spec: T.HS3Spec):
@@ -115,7 +125,16 @@ class Workspace:
 
 class Model:
     """
-    Model
+    Probabilistic model with compiled tensor operations.
+
+    A model represents a specific instantiation of a workspace with concrete
+    parameter values and domain constraints. It builds symbolic computation
+    graphs for distributions and functions, with optional compilation for
+    performance optimization.
+
+    The model handles dependency resolution between parameters, functions,
+    and distributions, ensuring proper evaluation order through topological
+    sorting of the computation graph.
     """
 
     def __init__(
@@ -324,10 +343,10 @@ class Model:
 
         Args:
             name (str): Name of the distribution to evaluate.
-            **parametervalues (dict[str: float]): Values for each distribution parameter.
+            **parametervalues (float): Values for each distribution parameter.
 
         Returns:
-            float: The evaluated PDF value.
+            npt.NDArray[np.float64]: The evaluated PDF value.
         """
         if self.compile:
             # Use compiled function for better performance
@@ -362,10 +381,10 @@ class Model:
 
         Args:
             name (str): Name of the distribution to evaluate.
-            **parametervalues (dict[str: float]): Values for each distribution parameter.
+            **parametervalues (float): Values for each distribution parameter.
 
         Returns:
-            float: The log of the PDF.
+            npt.NDArray[np.float64]: The log of the PDF.
         """
         return np.log(self.pdf(name, **parametervalues))
 
@@ -465,7 +484,14 @@ class Model:
 
 class ParameterCollection:
     """
-    ParameterCollection
+    Collection of named parameter sets for model configuration.
+
+    Manages multiple parameter sets, each containing a collection of
+    parameter points with specific names and values. Provides dict-like
+    access to parameter sets by name or index.
+
+    Attributes:
+        sets (dict[str, ParameterSet]): Mapping from parameter set names to ParameterSet objects.
     """
 
     def __init__(self, parametersets: list[T.ParameterPoint]):
@@ -508,7 +534,15 @@ class ParameterCollection:
 
 class ParameterSet:
     """
-    ParameterSet
+    Named collection of parameter points with specific values.
+
+    Represents a single configuration of parameter values that can be
+    used to evaluate a model. Each parameter set contains multiple
+    parameter points, each with a name and numeric value.
+
+    Attributes:
+        name (str): Name of the parameter set.
+        points (dict[str, ParameterPoint]): Mapping of parameter names to ParameterPoint objects.
     """
 
     def __init__(self, name: str, points: list[T.Parameter]):
@@ -567,7 +601,14 @@ class ParameterPoint:
 
 class DomainCollection:
     """
-    DomainCollection
+    Collection of domain constraints for model parameters.
+
+    Manages domain sets that define valid ranges for model parameters.
+    Each domain set specifies minimum and maximum bounds for parameters,
+    which are used to create bounded tensor variables.
+
+    Attributes:
+        domains (dict[str, DomainSet]): Mapping from domain names to DomainSet objects.
     """
 
     def __init__(self, domainsets: list[T.Domain]):
@@ -638,7 +679,16 @@ class DomainPoint:
 
 class DomainSet:
     """
-    DomainSet
+    Set of parameter domain constraints with bounds.
+
+    Defines valid ranges for multiple parameters, specifying minimum
+    and maximum bounds for each. Used to create bounded tensor variables
+    that are automatically clipped to their valid ranges.
+
+    Attributes:
+        name (str): Name of the domain set.
+        kind (str): Type of the domain set.
+        domains (dict[str, Axis]): Mapping of parameter names to (min, max) tuples.
     """
 
     def __init__(self, axes: list[T.Axis], name: str, kind: str):

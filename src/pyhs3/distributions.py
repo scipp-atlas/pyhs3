@@ -54,7 +54,17 @@ def process_parameter(
 
 class Distribution(Generic[DistConfigT]):
     """
-    Distribution
+    Base class for probability distributions in HS3.
+
+    Provides the foundation for all distribution implementations,
+    handling parameter management, constant generation, and symbolic
+    expression evaluation using PyTensor.
+
+    Attributes:
+        name (str): Name of the distribution.
+        kind (str): Type identifier for the distribution.
+        parameters (list[str]): List of parameter names this distribution depends on.
+        constants (dict[str, T.TensorVar]): Generated constants for numeric parameter values.
     """
 
     def __init__(
@@ -107,7 +117,18 @@ class Distribution(Generic[DistConfigT]):
 
 class GaussianDist(Distribution[TD.GaussianDistribution]):
     """
-    GaussianDist
+    Gaussian (normal) probability distribution.
+
+    Implements the standard Gaussian probability density function:
+
+    .. math::
+
+        f(x; \mu, \sigma) = \frac{1}{\sigma\sqrt{2\pi}} \exp\left(-\frac{(x-\mu)^2}{2\sigma^2}\right)
+
+    Parameters:
+        mean (str): Parameter name for the mean (μ).
+        sigma (str): Parameter name for the standard deviation (sigma).
+        x (str): Input variable name.
     """
 
     # need a way for the distribution to get the scalar function .parameter from parameterset
@@ -199,7 +220,21 @@ class GaussianDist(Distribution[TD.GaussianDistribution]):
 
 class MixtureDist(Distribution[TD.MixtureDistribution]):
     """
-    MixtureDist
+    Mixture of probability distributions.
+
+    Implements a weighted combination of multiple distributions:
+
+    .. math::
+
+        f(x) = \sum_{i=1}^{n-1} c_i \cdot f_i(x) + (1 - \sum_{i=1}^{n-1} c_i) \cdot f_n(x)
+
+    The last component is automatically normalized to ensure the
+    coefficients sum to 1.
+
+    Parameters:
+        coefficients (list[str]): Names of coefficient parameters.
+        summands (list[str]): Names of component distributions.
+        extended (bool): Whether the mixture is extended (affects normalization).
     """
 
     def __init__(
@@ -588,7 +623,14 @@ registered_distributions: dict[str, type[Distribution[Any]]] = {
 
 class DistributionSet:
     """
-    DistributionSet
+    Collection of distributions for a probabilistic model.
+
+    Manages a set of distribution instances, providing dict-like access
+    by distribution name. Handles distribution creation from configuration
+    dictionaries and maintains a registry of available distribution types.
+
+    Attributes:
+        dists (dict[str, Distribution[Any]]): Mapping from distribution names to Distribution instances.
     """
 
     def __init__(self, distributions: list[T.Distribution]) -> None:

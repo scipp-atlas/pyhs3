@@ -51,3 +51,53 @@ pure-python implementation of HS3
    :target: https://github.com/scipp-atlas/pyhs3/actions/workflows/docs.yml?query=branch%3Amain
 .. |GitHub Actions Status: Publish| image:: https://github.com/scipp-atlas/pyhs3/actions/workflows/cd.yml/badge.svg
    :target: https://github.com/scipp-atlas/pyhs3/actions/workflows/cd.yml?query=branch%3Amain
+
+
+Hello World
+-----------
+
+This is how you use the ``pyhs3`` Python API to build a statistical model and evaluate a model:
+
+.. code:: pycon
+
+   >>> import pyhs3
+   >>> workspace_data = {
+   ...     "distributions": [
+   ...         {
+   ...             "name": "model",
+   ...             "type": "gaussian_dist",
+   ...             "x": "x",
+   ...             "mean": "mu",
+   ...             "sigma": "sigma",
+   ...         }
+   ...     ],
+   ...     "parameter_points": [
+   ...         {
+   ...             "name": "default_values",
+   ...             "parameters": [
+   ...                 {"name": "x", "value": 0.0},
+   ...                 {"name": "mu", "value": 0.0},
+   ...                 {"name": "sigma", "value": 1.0},
+   ...             ],
+   ...         }
+   ...     ],
+   ...     "domains": [
+   ...         {
+   ...             "name": "default_domain",
+   ...             "type": "product",
+   ...             "axes": [
+   ...                 {"name": "x", "min": -5.0, "max": 5.0},
+   ...                 {"name": "mu", "min": -2.0, "max": 2.0},
+   ...                 {"name": "sigma", "min": 0.1, "max": 3.0},
+   ...             ],
+   ...         }
+   ...     ],
+   ... }
+   >>> ws = pyhs3.Workspace(workspace_data)
+   >>> model = ws.model()
+   >>> parameters = {par.name: par.value for par in model.parameterset}
+   >>> result = -2 * model.logpdf("model", **parameters)
+   >>> print(f"parameters: {parameters}")
+   parameters: {'x': 0.0, 'mu': 0.0, 'sigma': 1.0}
+   >>> print(f"nll: {result:.8f}")
+   nll: 1.83787707

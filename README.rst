@@ -97,6 +97,7 @@ This is how you use the ``pyhs3`` Python API to build a statistical model and ev
    ... }
    >>> ws = pyhs3.Workspace(workspace_data)
    >>> model = ws.model()
+   <BLANKLINE>
    >>> print(model)
    Model(
        mode: FAST_RUN

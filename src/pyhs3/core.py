@@ -80,7 +80,7 @@ class Workspace:
         domain: int | str | DomainSet = 0,
         parameter_point: int | str | ParameterSet = 0,
         progress: bool = True,
-        jit: bool = True,
+        mode: str = "FAST_RUN",
     ) -> Model:
         """
         Constructs a `Model` object using the provided domain and parameter point.
@@ -89,8 +89,12 @@ class Workspace:
             domain (int | str | DomainSet): Identifier or object specifying the domain to use.
             parameter_point (int | str | ParameterSet): Identifier or object specifying the parameter values to use.
             progress (bool): Whether to show progress bar during dependency graph construction. Defaults to True.
-            jit (bool): Whether to enable PyTensor graph compilation and optimization. Defaults to True.
-                          When True, functions are compiled with FAST_RUN mode and cached for better performance.
+            mode (str): PyTensor compilation mode. Defaults to "FAST_RUN".
+                       Options: "FAST_RUN" (apply all rewrites, use C implementations),
+                       "FAST_COMPILE" (few rewrites, Python implementations),
+                       "NUMBA" (compile using Numba), "JAX" (compile using JAX),
+                       "PYTORCH" (compile using PyTorch), "DebugMode" (debugging),
+                       "NanGuardMode" (NaN detection).
 
         Returns:
             Model: The constructed model object.
@@ -119,7 +123,7 @@ class Workspace:
             domains=domainset,
             functions=self.function_set,
             progress=progress,
-            jit=jit,
+            mode=mode,
         )
 
 
@@ -145,7 +149,7 @@ class Model:
         domains: DomainSet,
         functions: FunctionSet,
         progress: bool = True,
-        jit: bool = True,
+        mode: str = "FAST_RUN",
     ):
         """
         Represents a probabilistic model composed of parameters, domains, distributions, and functions.
@@ -156,21 +160,25 @@ class Model:
             domains (DomainSet): Domain constraints for parameters.
             functions (FunctionSet): Set of functions that compute parameter values.
             progress (bool): Whether to show progress bar during dependency graph construction.
-            jit (bool): Whether to enable PyTensor graph compilation and optimization. Defaults to True.
-                          When True, functions are compiled with FAST_RUN mode and cached for better performance.
+            mode (str): PyTensor compilation mode. Defaults to "FAST_RUN".
+                       Options: "FAST_RUN" (apply all rewrites, use C implementations),
+                       "FAST_COMPILE" (few rewrites, Python implementations),
+                       "NUMBA" (compile using Numba), "JAX" (compile using JAX),
+                       "PYTORCH" (compile using PyTorch), "DebugMode" (debugging),
+                       "NanGuardMode" (NaN detection).
 
         Attributes:
             parameters (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic parameter variables.
             parameterset (ParameterSet): The original set of parameter values.
             distributions (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic distribution expressions.
             functions (dict[str, pytensor.tensor.variable.TensorVariable]): Computed function values.
-            compile (bool): Whether compilation mode is enabled.
+            mode (str): PyTensor compilation mode.
             _compiled_functions (dict[str, Callable[..., npt.NDArray[np.float64]]]): Cache of compiled PyTensor functions.
         """
         self.parameters = {}
         self.parameterset = parameterset
         self.functions: dict[str, T.TensorVar] = {}
-        self.compile = jit
+        self.mode = mode
         self._compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]] = {}
 
         for parameter_point in parameterset:
@@ -326,13 +334,16 @@ class Model:
             dist = self.distributions[name]
             inputs = [var for var in graph_inputs([dist]) if var.name is not None]
 
-            # Use optimized mode when compile=True
-            mode = "FAST_RUN" if self.compile else "FAST_COMPILE"
+            # Use the specified PyTensor mode
+            compilation_mode = self.mode
 
             self._compiled_functions[name] = cast(
                 Callable[..., npt.NDArray[np.float64]],
                 function(
-                    inputs=inputs, outputs=dist, mode=mode, on_unused_input="ignore"
+                    inputs=inputs,
+                    outputs=dist,
+                    mode=compilation_mode,
+                    on_unused_input="ignore",
                 ),  # type: ignore[no-untyped-call]
             )
         return self._compiled_functions[name]
@@ -348,7 +359,7 @@ class Model:
         Returns:
             npt.NDArray[np.float64]: The evaluated PDF value.
         """
-        if self.compile:
+        if self.mode != "FAST_COMPILE":
             # Use compiled function for better performance
             func = self._get_compiled_function(name)
             inputs = [
@@ -441,10 +452,10 @@ class Model:
             "..." if len(func_names) > 3 else ""
         )
 
-        compile_status = "compiled" if self.compile else "interpreted"
+        mode_status = self.mode
 
         return f"""Model(
-    mode: {compile_status}
+    mode: {mode_status}
     parameters: {len(param_names)} ({param_display})
     distributions: {len(dist_names)} ({dist_display})
     functions: {len(func_names)} ({func_display})
@@ -475,7 +486,7 @@ class Model:
             op_name = type(apply.op).__name__
             op_types[op_name] = op_types.get(op_name, 0) + 1
 
-        compile_info = f"\n    Compiled: {'Yes' if self.compile and name in self._compiled_functions else 'No'}"
+        compile_info = f"\n    Mode: {self.mode}\n    Compiled: {'Yes' if self.mode != 'FAST_COMPILE' and name in self._compiled_functions else 'No'}"
 
         return f"""Distribution '{name}':
     Input variables: {len(inputs)}

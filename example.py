@@ -3,10 +3,11 @@
 Example usage of PyHS3 with compilation optimization and visualization features.
 
 This script demonstrates:
-1. Interpreted mode (jit=False)
-2. Compiled mode for better performance (default behavior)
-3. Graph visualization and inspection
-4. Performance comparison between modes
+1. FAST_COMPILE mode (minimal optimization)
+2. FAST_RUN mode for better performance (default behavior)
+3. JAX mode for JAX-compiled execution
+4. Graph visualization and inspection
+5. Performance comparison between modes
 """
 
 import json
@@ -38,13 +39,13 @@ def main():
         ws_json = json.loads(fpath.read_text(encoding="utf-8"))
         ws = hs3.Workspace(ws_json)
 
-    # Example 1: Basic Usage (Interpreted Mode)
-    print("1. Basic Usage (Interpreted Mode)")
+    # Example 1: Basic Usage (FAST_COMPILE Mode)
+    print("1. Basic Usage (FAST_COMPILE Mode)")
     print("=" * 40)
 
-    # Explicitly disable compilation for comparison
-    with time_block("Creating interpreted model"):
-        model_interpreted = ws.model(jit=False)
+    # Use FAST_COMPILE mode for comparison
+    with time_block("Creating FAST_COMPILE model"):
+        model_interpreted = ws.model(mode="FAST_COMPILE")
     print(f"Model created: {model_interpreted}")
 
     # Prepare parameter values
@@ -52,52 +53,92 @@ def main():
         parametervalues = {par.name: par.value for par in model_interpreted.parameterset}
 
     # Evaluate PDF
-    with time_block("Interpreted mode evaluation"):
+    with time_block("FAST_COMPILE mode evaluation"):
         result1 = model_interpreted.logpdf('_model_Run2HM_1', **parametervalues)
 
     print(f"LogPDF result: {result1}")
     print()
 
-    # Example 2: Compiled Mode (Optimized)
-    print("2. Compiled Mode (Optimized)")
+    # Example 2: FAST_RUN Mode (Optimized)
+    print("2. FAST_RUN Mode (Optimized)")
     print("=" * 40)
 
-    # Use default behavior (compilation enabled)
-    with time_block("Creating compiled model"):
-        model_compiled = ws.model()  # jit=True by default
+    # Use default behavior (FAST_RUN mode)
+    with time_block("Creating FAST_RUN model"):
+        model_compiled = ws.model()  # mode="FAST_RUN" by default
     print(f"Model created: {model_compiled}")
 
     # First call compiles the function
-    with time_block("First compiled evaluation (includes compilation)"):
+    with time_block("First FAST_RUN evaluation (includes compilation)"):
         result2 = model_compiled.logpdf('_model_Run2HM_1', **parametervalues)
     print(f"LogPDF result (first call): {result2}")
 
     # Subsequent calls use cached compiled function
-    with time_block("Cached compiled evaluation"):
+    with time_block("Cached FAST_RUN evaluation"):
         result3 = model_compiled.logpdf('_model_Run2HM_1', **parametervalues)
     print(f"LogPDF result (cached): {result3}")
     print()
 
-    # Example 3: Performance Comparison
-    print("3. Performance Comparison")
+    # Example 3: JAX Mode (if available)
+    print("3. JAX Mode (if available)")
+    print("=" * 40)
+    
+    # Check if JAX is available by trying to create a JAX model
+    jax_available = False
+    model_jax = None
+    try:
+        with time_block("Creating JAX model"):
+            model_jax = ws.model(mode="JAX")
+        print(f"JAX model created: {model_jax}")
+        
+        # Test JAX evaluation
+        with time_block("First JAX evaluation (includes compilation)"):
+            result_jax = model_jax.logpdf('_model_Run2HM_1', **parametervalues)
+        print(f"JAX LogPDF result: {result_jax}")
+        
+        # Cached JAX evaluation
+        with time_block("Cached JAX evaluation"):
+            result_jax_cached = model_jax.logpdf('_model_Run2HM_1', **parametervalues)
+        print(f"JAX LogPDF result (cached): {result_jax_cached}")
+        
+        jax_available = True
+        
+    except Exception as e:
+        print(f"JAX mode not available: {e}")
+        print("To enable JAX mode, install: pip install jax jaxlib")
+    
+    print()
+
+    # Example 4: Performance Comparison
+    print("4. Performance Comparison")
     print("=" * 40)
 
     # Test with a different parameter value
     modified_params = {**parametervalues, 'atlas_invMass_Run2HM_1': 110.250}
 
-    # Interpreted mode
-    with time_block("Interpreted mode (different parameters)"):
+    # FAST_COMPILE mode
+    with time_block("FAST_COMPILE mode (different parameters)"):
         result_interpreted = model_interpreted.logpdf('_model_Run2HM_1', **modified_params)
 
-    # Compiled mode (cached)
-    with time_block("Compiled mode (different parameters)"):
+    # FAST_RUN mode (cached)
+    with time_block("FAST_RUN mode (different parameters)"):
         result_compiled = model_compiled.logpdf('_model_Run2HM_1', **modified_params)
 
-    print(f"Interpreted result: {result_interpreted}")
-    print(f"Compiled result:    {result_compiled}")
+    print(f"FAST_COMPILE result: {result_interpreted}")
+    print(f"FAST_RUN result:     {result_compiled}")
+    
+    # JAX mode if available
+    if jax_available:
+        with time_block("JAX mode (different parameters)"):
+            result_jax_diff = model_jax.logpdf('_model_Run2HM_1', **modified_params)
+        print(f"JAX result:          {result_jax_diff}")
 
     # Performance benchmark with multiple evaluations
     print("\nPerformance Benchmark (10 evaluations):")
+    if jax_available:
+        print("Comparing FAST_COMPILE, FAST_RUN, and JAX modes...")
+    else:
+        print("Comparing FAST_COMPILE and FAST_RUN modes...")
     print("-" * 40)
 
     # Generate some parameter variations
@@ -105,29 +146,42 @@ def main():
     base_mass = parametervalues.get('atlas_invMass_Run2HM_1', 125.0)
     mass_variations = [base_mass + i * 0.5 for i in range(10)]
 
-    # Benchmark interpreted mode
+    # Benchmark FAST_COMPILE mode
     interpreted_results = []
-    with time_block("Interpreted mode (10 evaluations)"):
+    with time_block("FAST_COMPILE mode (10 evaluations)"):
         for mass in mass_variations:
             params = {**parametervalues, 'atlas_invMass_Run2HM_1': mass}
             result = model_interpreted.logpdf('_model_Run2HM_1', **params)
             interpreted_results.append(result)
 
-    # Benchmark compiled mode
+    # Benchmark FAST_RUN mode
     compiled_results = []
-    with time_block("Compiled mode (10 evaluations)"):
+    with time_block("FAST_RUN mode (10 evaluations)"):
         for mass in mass_variations:
             params = {**parametervalues, 'atlas_invMass_Run2HM_1': mass}
             result = model_compiled.logpdf('_model_Run2HM_1', **params)
             compiled_results.append(result)
 
+    # Benchmark JAX mode if available
+    jax_results = []
+    if jax_available:
+        with time_block("JAX mode (10 evaluations)"):
+            for mass in mass_variations:
+                params = {**parametervalues, 'atlas_invMass_Run2HM_1': mass}
+                result = model_jax.logpdf('_model_Run2HM_1', **params)
+                jax_results.append(result)
+
     # Verify results are consistent
-    max_diff = max(abs(i - c) for i, c in zip(interpreted_results, compiled_results))
-    print(f"Maximum difference between modes: {max_diff:.2e}")
+    max_diff_fast = max(abs(i - c) for i, c in zip(interpreted_results, compiled_results))
+    print(f"Maximum difference (FAST_COMPILE vs FAST_RUN): {max_diff_fast:.2e}")
+    
+    if jax_available:
+        max_diff_jax = max(abs(c - j) for c, j in zip(compiled_results, jax_results))
+        print(f"Maximum difference (FAST_RUN vs JAX): {max_diff_jax:.2e}")
     print()
 
-    # Example 4: Graph Visualization and Inspection
-    print("4. Graph Visualization and Inspection")
+    # Example 5: Graph Visualization and Inspection
+    print("5. Graph Visualization and Inspection")
     print("=" * 40)
 
     # Get model overview (like numpy arrays)
@@ -157,25 +211,31 @@ def main():
 
     print()
 
-    # Example 5: Multiple Distribution Analysis
-    print("5. Multiple Distribution Analysis")
+    # Example 6: Multiple Distribution Analysis
+    print("6. Multiple Distribution Analysis")
     print("=" * 40)
 
     print("Available distributions:")
     for dist_name in model_compiled.distributions.keys():
         print(f"  - {dist_name}")
 
-    # Analyze the first few distributions
-    for i, dist_name in enumerate(list(model_compiled.distributions.keys())[:3]):
-        print(f"\n{dist_name}:")
-        try:
-            summary = model_compiled.graph_summary(dist_name)
-            # Print just the key metrics
-            lines = summary.strip().split('\n')
-            for line in lines[1:4]:  # Skip the title, show first 3 metrics
-                print(f"  {line.strip()}")
-        except Exception as e:
-            print(f"  Error analyzing {dist_name}: {e}")
+    # Analyze the first few distributions with different modes
+    models_to_analyze = [("FAST_RUN", model_compiled)]
+    if jax_available:
+        models_to_analyze.append(("JAX", model_jax))
+    
+    for mode_name, model in models_to_analyze:
+        print(f"\nAnalyzing with {mode_name} mode:")
+        for i, dist_name in enumerate(list(model.distributions.keys())[:2]):  # Analyze fewer to save space
+            print(f"\n{dist_name} ({mode_name}):")
+            try:
+                summary = model.graph_summary(dist_name)
+                # Print just the key metrics
+                lines = summary.strip().split('\n')
+                for line in lines[1:4]:  # Skip the title, show first 3 metrics
+                    print(f"  {line.strip()}")
+            except Exception as e:
+                print(f"  Error analyzing {dist_name}: {e}")
 
     print("\n=== Example Complete ===")
 

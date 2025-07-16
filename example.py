@@ -133,86 +133,69 @@ def main():
             result_jax_diff = model_jax.logpdf('_model_Run2HM_1', **modified_params)
         print(f"JAX result:          {result_jax_diff}")
 
-    # Performance benchmark with multiple evaluations
-    print("\nPerformance Benchmark (10 evaluations):")
+    # Performance benchmark with different evaluation counts
+    print("\nPerformance Benchmark:")
     if jax_available:
-        print("Comparing FAST_COMPILE, FAST_RUN, and JAX modes...")
+        print("Comparing FAST_COMPILE (10 evals), FAST_RUN (10000 evals), and JAX (10000 evals)...")
     else:
-        print("Comparing FAST_COMPILE and FAST_RUN modes...")
+        print("Comparing FAST_COMPILE (10 evals) and FAST_RUN (10000 evals)...")
     print("-" * 40)
 
-    # Generate some parameter variations
+    # Generate parameter variations for different numbers of evaluations
     import numpy as np
     base_mass = parametervalues.get('atlas_invMass_Run2HM_1', 125.0)
-    mass_variations = [base_mass + i * 0.5 for i in range(10)]
+    
+    # 10 variations for FAST_COMPILE
+    mass_variations_10 = [base_mass + i * 0.5 for i in range(10)]
+    
+    # 10000 variations for FAST_RUN and JAX (reuse same 10 variations in a loop)
+    mass_variations_10000 = mass_variations_10 * 1000
 
-    # Benchmark FAST_COMPILE mode
+    # Benchmark FAST_COMPILE mode (10 evaluations)
     interpreted_results = []
-    with time_block("FAST_COMPILE mode (10 evaluations)"):
-        for mass in mass_variations:
-            params = {**parametervalues, 'atlas_invMass_Run2HM_1': mass}
-            result = model_interpreted.logpdf('_model_Run2HM_1', **params)
-            interpreted_results.append(result)
+    start_time = time.perf_counter()
+    for mass in mass_variations_10:
+        params = {**parametervalues, 'atlas_invMass_Run2HM_1': mass}
+        result = model_interpreted.logpdf('_model_Run2HM_1', **params)
+        interpreted_results.append(result)
+    interpreted_time = time.perf_counter() - start_time
+    avg_interpreted_time = interpreted_time / len(mass_variations_10)
+    print(f"FAST_COMPILE mode: {len(mass_variations_10)} evaluations, avg {avg_interpreted_time:.6f} sec/eval")
 
-    # Benchmark FAST_RUN mode
+    # Benchmark FAST_RUN mode (10000 evaluations)
     compiled_results = []
-    with time_block("FAST_RUN mode (10 evaluations)"):
-        for mass in mass_variations:
-            params = {**parametervalues, 'atlas_invMass_Run2HM_1': mass}
-            result = model_compiled.logpdf('_model_Run2HM_1', **params)
-            compiled_results.append(result)
+    start_time = time.perf_counter()
+    for mass in mass_variations_10000:
+        params = {**parametervalues, 'atlas_invMass_Run2HM_1': mass}
+        result = model_compiled.logpdf('_model_Run2HM_1', **params)
+        compiled_results.append(result)
+    compiled_time = time.perf_counter() - start_time
+    avg_compiled_time = compiled_time / len(mass_variations_10000)
+    print(f"FAST_RUN mode: {len(mass_variations_10000)} evaluations, avg {avg_compiled_time:.6f} sec/eval")
 
-    # Benchmark JAX mode if available
+    # Benchmark JAX mode if available (10000 evaluations)
     jax_results = []
     if jax_available:
-        with time_block("JAX mode (10 evaluations)"):
-            for mass in mass_variations:
-                params = {**parametervalues, 'atlas_invMass_Run2HM_1': mass}
-                result = model_jax.logpdf('_model_Run2HM_1', **params)
-                jax_results.append(result)
+        start_time = time.perf_counter()
+        for mass in mass_variations_10000:
+            params = {**parametervalues, 'atlas_invMass_Run2HM_1': mass}
+            result = model_jax.logpdf('_model_Run2HM_1', **params)
+            jax_results.append(result)
+        jax_time = time.perf_counter() - start_time
+        avg_jax_time = jax_time / len(mass_variations_10000)
+        print(f"JAX mode: {len(mass_variations_10000)} evaluations, avg {avg_jax_time:.6f} sec/eval")
 
-    # Verify results are consistent
-    max_diff_fast = max(abs(i - c) for i, c in zip(interpreted_results, compiled_results))
+    # Verify results are consistent (compare first 10 results)
+    max_diff_fast = max(abs(i - c) for i, c in zip(interpreted_results, compiled_results[:10]))
     print(f"Maximum difference (FAST_COMPILE vs FAST_RUN): {max_diff_fast:.2e}")
     
     if jax_available:
-        max_diff_jax = max(abs(c - j) for c, j in zip(compiled_results, jax_results))
+        max_diff_jax = max(abs(c - j) for c, j in zip(compiled_results[:10], jax_results[:10]))
         print(f"Maximum difference (FAST_RUN vs JAX): {max_diff_jax:.2e}")
     print()
 
-    # Example 5: Graph Visualization and Inspection
-    print("5. Graph Visualization and Inspection")
-    print("=" * 40)
-
-    # Get model overview (like numpy arrays)
-    print("Model Overview:")
-    print(model_compiled)
-    print()
-
-    # Get detailed graph information
-    print("Graph Summary:")
-    print(model_compiled.graph_summary('_model_Run2HM_1'))
-
-    # Visualize the computation graph
-    try:
-        print("Generating graph visualization...")
-        with time_block("Creating SVG graph"):
-            output_file = model_compiled.visualize_graph('_model_Run2HM_1', fmt='svg')
-        print(f"Graph saved to: {output_file}")
-
-        # Also create a PNG version
-        with time_block("Creating PNG graph"):
-            png_file = model_compiled.visualize_graph('_model_Run2HM_1', fmt='png')
-        print(f"PNG graph saved to: {png_file}")
-
-    except ImportError as e:
-        print(f"Graph visualization not available: {e}")
-        print("To enable visualization, install: pip install pydot")
-
-    print()
-
-    # Example 6: Multiple Distribution Analysis
-    print("6. Multiple Distribution Analysis")
+    # Example 5: Multiple Distribution Analysis
+    print("5. Multiple Distribution Analysis")
     print("=" * 40)
 
     print("Available distributions:")

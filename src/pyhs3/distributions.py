@@ -54,7 +54,17 @@ def process_parameter(
 
 class Distribution(Generic[DistConfigT]):
     """
-    Distribution
+    Base class for probability distributions in HS3.
+
+    Provides the foundation for all distribution implementations,
+    handling parameter management, constant generation, and symbolic
+    expression evaluation using PyTensor.
+
+    Attributes:
+        name (str): Name of the distribution.
+        kind (str): Type identifier for the distribution.
+        parameters (list[str]): List of parameter names this distribution depends on.
+        constants (dict[str, T.TensorVar]): Generated constants for numeric parameter values.
     """
 
     def __init__(
@@ -106,8 +116,19 @@ class Distribution(Generic[DistConfigT]):
 
 
 class GaussianDist(Distribution[TD.GaussianDistribution]):
-    """
-    GaussianDist
+    r"""
+    Gaussian (normal) probability distribution.
+
+    Implements the standard Gaussian probability density function:
+
+    .. math::
+
+        f(x; \mu, \sigma) = \frac{1}{\sigma\sqrt{2\pi}} \exp\left(-\frac{(x-\mu)^2}{2\sigma^2}\right)
+
+    Parameters:
+        mean (str): Parameter name for the mean (μ).
+        sigma (str): Parameter name for the standard deviation (sigma).
+        x (str): Input variable name.
     """
 
     # need a way for the distribution to get the scalar function .parameter from parameterset
@@ -198,8 +219,22 @@ class GaussianDist(Distribution[TD.GaussianDistribution]):
 
 
 class MixtureDist(Distribution[TD.MixtureDistribution]):
-    """
-    MixtureDist
+    r"""
+    Mixture of probability distributions.
+
+    Implements a weighted combination of multiple distributions:
+
+    .. math::
+
+        f(x) = \sum_{i=1}^{n-1} c_i \cdot f_i(x) + (1 - \sum_{i=1}^{n-1} c_i) \cdot f_n(x)
+
+    The last component is automatically normalized to ensure the
+    coefficients sum to 1.
+
+    Parameters:
+        coefficients (list[str]): Names of coefficient parameters.
+        summands (list[str]): Names of component distributions.
+        extended (bool): Whether the mixture is extended (affects normalization).
     """
 
     def __init__(
@@ -277,14 +312,16 @@ class MixtureDist(Distribution[TD.MixtureDistribution]):
 
 
 class ProductDist(Distribution[TD.ProductDistribution]):
-    """
+    r"""
     Product distribution implementation.
 
     Implements a product of PDFs as defined in ROOT's RooProdPdf.
 
     The probability density function is defined as:
 
-    $$f(x, \\ldots) = \\prod_{i=1}^{N} \\text{PDF}_i(x, \\ldots)$$
+    .. math::
+
+        f(x, \ldots) = \prod_{i=1}^{N} \text{PDF}_i(x, \ldots)
 
     where each PDF_i is a component distribution that may share observables.
 
@@ -338,8 +375,8 @@ class ProductDist(Distribution[TD.ProductDistribution]):
         return cast(T.TensorVar, pt.prod(pt_factors, axis=0))  # type: ignore[no-untyped-call]
 
 
-class CrystalDist(Distribution[TD.CrystalDistribution]):
-    """
+class CrystalBallDist(Distribution[TD.CrystalBallDistribution]):
+    r"""
     Crystal Ball distribution implementation.
 
     Implements the generalized asymmetrical double-sided Crystal Ball line shape
@@ -347,19 +384,23 @@ class CrystalDist(Distribution[TD.CrystalDistribution]):
 
     The probability density function is defined as:
 
-    $$f(m; m_0, \\sigma_L, \\sigma_R, \\alpha_L, \\alpha_R, n_L, n_R) = \\begin{cases}
-    A_L \\cdot \\left(B_L - \\frac{m - m_0}{\\sigma_L}\\right)^{-n_L}, & \\text{for } \\frac{m - m_0}{\\sigma_L} < -\\alpha_L \\\\
-    \\exp\\left(-\\frac{1}{2} \\cdot \\left[\\frac{m - m_0}{\\sigma_L}\\right]^2\\right), & \\text{for } \\frac{m - m_0}{\\sigma_L} \\leq 0 \\\\
-    \\exp\\left(-\\frac{1}{2} \\cdot \\left[\\frac{m - m_0}{\\sigma_R}\\right]^2\\right), & \\text{for } \\frac{m - m_0}{\\sigma_R} \\leq \\alpha_R \\\\
-    A_R \\cdot \\left(B_R + \\frac{m - m_0}{\\sigma_R}\\right)^{-n_R}, & \\text{otherwise}
-    \\end{cases}$$
+    .. math::
+
+        f(m; m_0, \sigma_L, \sigma_R, \alpha_L, \alpha_R, n_L, n_R) = \begin{cases}
+        A_L \cdot \left(B_L - \frac{m - m_0}{\sigma_L}\right)^{-n_L}, & \text{for } \frac{m - m_0}{\sigma_L} < -\alpha_L \\
+        \exp\left(-\frac{1}{2} \cdot \left[\frac{m - m_0}{\sigma_L}\right]^2\right), & \text{for } \frac{m - m_0}{\sigma_L} \leq 0 \\
+        \exp\left(-\frac{1}{2} \cdot \left[\frac{m - m_0}{\sigma_R}\right]^2\right), & \text{for } \frac{m - m_0}{\sigma_R} \leq \alpha_R \\
+        A_R \cdot \left(B_R + \frac{m - m_0}{\sigma_R}\right)^{-n_R}, & \text{otherwise}
+        \end{cases}
 
     where:
 
-    $$\\begin{align}
-    A_i &= \\left(\\frac{n_i}{\\alpha_i}\\right)^{n_i} \\cdot \\exp\\left(-\\frac{\\alpha_i^2}{2}\\right) \\\\
-    B_i &= \\frac{n_i}{\\alpha_i} - \\alpha_i
-    \\end{align}$$
+    .. math::
+
+        \begin{align}
+        A_i &= \left(\frac{n_i}{\alpha_i}\right)^{n_i} \cdot \exp\left(-\frac{\alpha_i^2}{2}\right) \\
+        B_i &= \frac{n_i}{\alpha_i} - \alpha_i
+        \end{align}
 
     Parameters:
         m: Observable variable
@@ -391,7 +432,7 @@ class CrystalDist(Distribution[TD.CrystalDistribution]):
         sigma_R: str,
     ):
         """
-        Initialize a CrystalDist.
+        Initialize a CrystalBallDist.
 
         Args:
             name: Name of the distribution
@@ -419,15 +460,15 @@ class CrystalDist(Distribution[TD.CrystalDistribution]):
         self.sigma_R = sigma_R
 
     @classmethod
-    def from_dict(cls, config: TD.CrystalDistribution) -> CrystalDist:
+    def from_dict(cls, config: TD.CrystalBallDistribution) -> CrystalBallDist:
         """
-        Create a CrystalDist from a dictionary configuration.
+        Create a CrystalBallDist from a dictionary configuration.
 
         Args:
             config: Configuration dictionary
 
         Returns:
-            The created CrystalDist instance
+            The created CrystalBallDist instance
         """
         return cls(
             name=config["name"],
@@ -509,9 +550,17 @@ class GenericDist(Distribution[TD.GenericDistribution]):
         - Other: sqrt, abs
 
     Examples:
-        - "x**2 + 2*x + 1"
-        - "exp(-x**2/2) * cos(y)"
-        - "sin(x) + log(abs(y))"
+        Create a quadratic distribution:
+
+        >>> dist = GenericDist(name="quadratic", expression="x**2 + 2*x + 1")
+
+        Create a custom exponential with oscillation:
+
+        >>> dist = GenericDist(name="exp_cos", expression="exp(-x**2/2) * cos(y)")
+
+        Create a complex mathematical function:
+
+        >>> dist = GenericDist(name="complex", expression="sin(x) + log(abs(y) + 1)")
     """
 
     def __init__(self, *, name: str, expression: str):
@@ -575,14 +624,21 @@ registered_distributions: dict[str, type[Distribution[Any]]] = {
     "gaussian_dist": GaussianDist,
     "mixture_dist": MixtureDist,
     "product_dist": ProductDist,
-    "crystalball_doublesided_dist": CrystalDist,
+    "crystalball_doublesided_dist": CrystalBallDist,
     "generic_dist": GenericDist,
 }
 
 
 class DistributionSet:
     """
-    DistributionSet
+    Collection of distributions for a probabilistic model.
+
+    Manages a set of distribution instances, providing dict-like access
+    by distribution name. Handles distribution creation from configuration
+    dictionaries and maintains a registry of available distribution types.
+
+    Attributes:
+        dists (dict[str, Distribution[Any]]): Mapping from distribution names to Distribution instances.
     """
 
     def __init__(self, distributions: list[T.Distribution]) -> None:

@@ -47,6 +47,7 @@ test = [
   "pyhf >= 0.7.6",
   "pydocstyle",
   "scikit-hep-testdata >= 0.5.7",
+  "pydot",
 ]
 dev = [
   "pytest >=6",

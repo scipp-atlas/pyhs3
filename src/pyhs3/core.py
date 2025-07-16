@@ -5,6 +5,7 @@ import sys
 from collections import OrderedDict
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, TypeVar, cast
 
 import numpy as np
@@ -12,7 +13,7 @@ import numpy.typing as npt
 import pytensor.tensor as pt
 import rustworkx as rx
 from pytensor.compile.function import function
-from pytensor.graph.basic import graph_inputs
+from pytensor.graph.basic import applys_between, graph_inputs
 from rich.progress import (
     BarColumn,
     Progress,
@@ -40,7 +41,17 @@ else:
 
 class Workspace:
     """
-    Workspace
+    Workspace for managing HS3 model specifications.
+
+    A workspace contains parameter points, distributions, domains, and functions
+    that define a probabilistic model. It provides methods to construct Model
+    objects with specific parameter values and domain constraints.
+
+    Attributes:
+        parameter_collection (ParameterCollection): Named parameter sets.
+        distribution_set (DistributionSet): Available distributions.
+        domain_collection (DomainCollection): Domain constraints for parameters.
+        function_set (FunctionSet): Available functions for parameter computation.
     """
 
     def __init__(self, spec: T.HS3Spec):
@@ -70,6 +81,7 @@ class Workspace:
         domain: int | str | DomainSet = 0,
         parameter_point: int | str | ParameterSet = 0,
         progress: bool = True,
+        mode: str = "FAST_RUN",
     ) -> Model:
         """
         Constructs a `Model` object using the provided domain and parameter point.
@@ -78,6 +90,12 @@ class Workspace:
             domain (int | str | DomainSet): Identifier or object specifying the domain to use.
             parameter_point (int | str | ParameterSet): Identifier or object specifying the parameter values to use.
             progress (bool): Whether to show progress bar during dependency graph construction. Defaults to True.
+            mode (str): PyTensor compilation mode. Defaults to "FAST_RUN".
+                       Options: "FAST_RUN" (apply all rewrites, use C implementations),
+                       "FAST_COMPILE" (few rewrites, Python implementations),
+                       "NUMBA" (compile using Numba), "JAX" (compile using JAX),
+                       "PYTORCH" (compile using PyTorch), "DebugMode" (debugging),
+                       "NanGuardMode" (NaN detection).
 
         Returns:
             Model: The constructed model object.
@@ -106,12 +124,22 @@ class Workspace:
             domains=domainset,
             functions=self.function_set,
             progress=progress,
+            mode=mode,
         )
 
 
 class Model:
     """
-    Model
+    Probabilistic model with compiled tensor operations.
+
+    A model represents a specific instantiation of a workspace with concrete
+    parameter values and domain constraints. It builds symbolic computation
+    graphs for distributions and functions, with optional compilation for
+    performance optimization.
+
+    The model handles dependency resolution between parameters, functions,
+    and distributions, ensuring proper evaluation order through topological
+    sorting of the computation graph.
     """
 
     def __init__(
@@ -122,6 +150,7 @@ class Model:
         domains: DomainSet,
         functions: FunctionSet,
         progress: bool = True,
+        mode: str = "FAST_RUN",
     ):
         """
         Represents a probabilistic model composed of parameters, domains, distributions, and functions.
@@ -132,16 +161,26 @@ class Model:
             domains (DomainSet): Domain constraints for parameters.
             functions (FunctionSet): Set of functions that compute parameter values.
             progress (bool): Whether to show progress bar during dependency graph construction.
+            mode (str): PyTensor compilation mode. Defaults to "FAST_RUN".
+                       Options: "FAST_RUN" (apply all rewrites, use C implementations),
+                       "FAST_COMPILE" (few rewrites, Python implementations),
+                       "NUMBA" (compile using Numba), "JAX" (compile using JAX),
+                       "PYTORCH" (compile using PyTorch), "DebugMode" (debugging),
+                       "NanGuardMode" (NaN detection).
 
         Attributes:
             parameters (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic parameter variables.
             parameterset (ParameterSet): The original set of parameter values.
             distributions (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic distribution expressions.
             functions (dict[str, pytensor.tensor.variable.TensorVariable]): Computed function values.
+            mode (str): PyTensor compilation mode.
+            _compiled_functions (dict[str, Callable[..., npt.NDArray[np.float64]]]): Cache of compiled PyTensor functions.
         """
         self.parameters = {}
         self.parameterset = parameterset
         self.functions: dict[str, T.TensorVar] = {}
+        self.mode = mode
+        self._compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]] = {}
 
         for parameter_point in parameterset:
             # Create scalar parameter with domain bounds applied
@@ -280,30 +319,73 @@ class Model:
                 # Advance progress
                 progress_bar.advance(task)
 
+    def _get_compiled_function(
+        self, name: str
+    ) -> Callable[..., npt.NDArray[np.float64]]:
+        """
+        Get or create a compiled PyTensor function for the specified distribution.
+
+        Args:
+            name (str): Name of the distribution.
+
+        Returns:
+            Callable: Compiled PyTensor function.
+        """
+        if name not in self._compiled_functions:
+            dist = self.distributions[name]
+            inputs = [var for var in graph_inputs([dist]) if var.name is not None]
+
+            # Use the specified PyTensor mode
+            compilation_mode = self.mode
+
+            self._compiled_functions[name] = cast(
+                Callable[..., npt.NDArray[np.float64]],
+                function(
+                    inputs=inputs,
+                    outputs=dist,
+                    mode=compilation_mode,
+                    on_unused_input="ignore",
+                ),  # type: ignore[no-untyped-call]
+            )
+        return self._compiled_functions[name]
+
     def pdf(self, name: str, **parametervalues: float) -> npt.NDArray[np.float64]:
         """
         Evaluates the probability density function of the specified distribution.
 
         Args:
             name (str): Name of the distribution to evaluate.
-            **parametervalues (dict[str: float]): Values for each distribution parameter.
+            **parametervalues (float): Values for each distribution parameter.
 
         Returns:
-            float: The evaluated PDF value.
+            npt.NDArray[np.float64]: The evaluated PDF value.
         """
+        if self.mode != "FAST_COMPILE":
+            # Use compiled function for better performance
+            func = self._get_compiled_function(name)
+            inputs = [
+                var
+                for var in graph_inputs([self.distributions[name]])
+                if var.name is not None
+            ]
+            positional_values = []
+            for var in inputs:
+                assert var.name is not None
+                positional_values.append(parametervalues[var.name])
+            return func(*positional_values)
+        # Use original uncompiled approach
         dist = self.distributions[name]
-
         inputs = [var for var in graph_inputs([dist]) if var.name is not None]
-        values: dict[str, float] = {}
+        keyword_values: dict[str, float] = {}
         for var in inputs:
             assert var.name is not None
-            values[var.name] = parametervalues[var.name]
+            keyword_values[var.name] = parametervalues[var.name]
 
         func = cast(
             Callable[..., npt.NDArray[np.float64]],
             function(inputs=inputs, outputs=dist),  # type: ignore[no-untyped-call]
         )
-        return func(**values)
+        return func(**keyword_values)
 
     def logpdf(self, name: str, **parametervalues: float) -> npt.NDArray[np.float64]:
         """
@@ -311,17 +393,132 @@ class Model:
 
         Args:
             name (str): Name of the distribution to evaluate.
-            **parametervalues (dict[str: float]): Values for each distribution parameter.
+            **parametervalues (float): Values for each distribution parameter.
 
         Returns:
-            float: The log of the PDF.
+            npt.NDArray[np.float64]: The log of the PDF.
         """
         return np.log(self.pdf(name, **parametervalues))
+
+    def visualize_graph(
+        self,
+        name: str,
+        fmt: str = "svg",
+        outfile: str | None = None,
+        path: str | None = None,
+    ) -> str:
+        """
+        Visualize the computation graph for a distribution.
+
+        Args:
+            name (str): Distribution name.
+            fmt (str): Output format ('svg', 'png', 'pdf'). Defaults to 'svg'.
+            outfile (str | None): Output filename. If None, uses '{name}_graph.{fmt}'.
+            path (str | None): Directory path for output. If None, uses current working directory.
+
+        Returns:
+            str: Path to the generated visualization file.
+
+        Raises:
+            ImportError: If pydot is not installed.
+        """
+        try:
+            from pytensor.printing import (  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
+                pydotprint,
+            )
+        except ImportError as e:
+            msg = "Graph visualization requires pydot. Install with: pip install pydot"
+            raise ImportError(msg) from e
+
+        if name not in self.distributions:
+            msg = f"Distribution '{name}' not found in model"
+            raise ValueError(msg)
+
+        dist = self.distributions[name]
+
+        if outfile is not None:
+            filename = outfile
+        else:
+            base_filename = f"{name}_graph.{fmt}"
+            if path is not None:
+                filename = str(Path(path) / base_filename)
+            else:
+                filename = base_filename
+
+        pydotprint(  # type: ignore[no-untyped-call]
+            dist, outfile=filename, format=fmt, with_ids=True, high_contrast=True
+        )
+        return filename
+
+    def __repr__(self) -> str:
+        """Provide a concise overview of the model structure."""
+        param_names = list(self.parameters.keys())
+        dist_names = list(self.distributions.keys())
+        func_names = list(self.functions.keys())
+
+        param_display = ", ".join(param_names[:5]) + (
+            "..." if len(param_names) > 5 else ""
+        )
+        dist_display = ", ".join(dist_names[:3]) + (
+            "..." if len(dist_names) > 3 else ""
+        )
+        func_display = ", ".join(func_names[:3]) + (
+            "..." if len(func_names) > 3 else ""
+        )
+
+        mode_status = self.mode
+
+        return f"""Model(
+    mode: {mode_status}
+    parameters: {len(param_names)} ({param_display})
+    distributions: {len(dist_names)} ({dist_display})
+    functions: {len(func_names)} ({func_display})
+)"""
+
+    def graph_summary(self, name: str) -> str:
+        """
+        Get a summary of the computation graph structure.
+
+        Args:
+            name (str): Distribution name.
+
+        Returns:
+            str: Summary of the graph structure.
+        """
+        if name not in self.distributions:
+            msg = f"Distribution '{name}' not found in model"
+            raise ValueError(msg)
+
+        dist = self.distributions[name]
+        inputs = list(graph_inputs([dist]))
+
+        # Count different types of operations
+        applies = list(applys_between(inputs, [dist]))
+
+        op_types: dict[str, int] = {}
+        for apply in applies:
+            op_name = type(apply.op).__name__
+            op_types[op_name] = op_types.get(op_name, 0) + 1
+
+        compile_info = f"\n    Mode: {self.mode}\n    Compiled: {'Yes' if self.mode != 'FAST_COMPILE' and name in self._compiled_functions else 'No'}"
+
+        return f"""Distribution '{name}':
+    Input variables: {len(inputs)}
+    Graph operations: {len(applies)}
+    Operation types: {dict(sorted(op_types.items()))}{compile_info}
+"""
 
 
 class ParameterCollection:
     """
-    ParameterCollection
+    Collection of named parameter sets for model configuration.
+
+    Manages multiple parameter sets, each containing a collection of
+    parameter points with specific names and values. Provides dict-like
+    access to parameter sets by name or index.
+
+    Attributes:
+        sets (dict[str, ParameterSet]): Mapping from parameter set names to ParameterSet objects.
     """
 
     def __init__(self, parametersets: list[T.ParameterPoint]):
@@ -364,7 +561,15 @@ class ParameterCollection:
 
 class ParameterSet:
     """
-    ParameterSet
+    Named collection of parameter points with specific values.
+
+    Represents a single configuration of parameter values that can be
+    used to evaluate a model. Each parameter set contains multiple
+    parameter points, each with a name and numeric value.
+
+    Attributes:
+        name (str): Name of the parameter set.
+        points (dict[str, ParameterPoint]): Mapping of parameter names to ParameterPoint objects.
     """
 
     def __init__(self, name: str, points: list[T.Parameter]):
@@ -423,7 +628,14 @@ class ParameterPoint:
 
 class DomainCollection:
     """
-    DomainCollection
+    Collection of domain constraints for model parameters.
+
+    Manages domain sets that define valid ranges for model parameters.
+    Each domain set specifies minimum and maximum bounds for parameters,
+    which are used to create bounded tensor variables.
+
+    Attributes:
+        domains (dict[str, DomainSet]): Mapping from domain names to DomainSet objects.
     """
 
     def __init__(self, domainsets: list[T.Domain]):
@@ -494,7 +706,16 @@ class DomainPoint:
 
 class DomainSet:
     """
-    DomainSet
+    Set of parameter domain constraints with bounds.
+
+    Defines valid ranges for multiple parameters, specifying minimum
+    and maximum bounds for each. Used to create bounded tensor variables
+    that are automatically clipped to their valid ranges.
+
+    Attributes:
+        name (str): Name of the domain set.
+        kind (str): Type of the domain set.
+        domains (dict[str, Axis]): Mapping of parameter names to (min, max) tuples.
     """
 
     def __init__(self, axes: list[T.Axis], name: str, kind: str):

@@ -112,5 +112,5 @@ This is how you use the ``pyhs3`` Python API to build a statistical model and ev
    >>> print(f"nll: {result:.8f}")
    nll: 1.83787707
    >>> result_scipy = -2 * math.log(scipy.stats.norm.pdf(0, loc=0, scale=1))
-   >>> print(f"nll: {result:.8f}")
+   >>> print(f"nll: {result_scipy:.8f}")
    nll: 1.83787707

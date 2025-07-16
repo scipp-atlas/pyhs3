@@ -5,6 +5,7 @@ import sys
 from collections import OrderedDict
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, TypeVar, cast
 
 import numpy as np
@@ -400,7 +401,11 @@ class Model:
         return np.log(self.pdf(name, **parametervalues))
 
     def visualize_graph(
-        self, name: str, fmt: str = "svg", outfile: str | None = None
+        self,
+        name: str,
+        fmt: str = "svg",
+        outfile: str | None = None,
+        path: str | None = None,
     ) -> str:
         """
         Visualize the computation graph for a distribution.
@@ -409,6 +414,7 @@ class Model:
             name (str): Distribution name.
             fmt (str): Output format ('svg', 'png', 'pdf'). Defaults to 'svg'.
             outfile (str | None): Output filename. If None, uses '{name}_graph.{fmt}'.
+            path (str | None): Directory path for output. If None, uses current working directory.
 
         Returns:
             str: Path to the generated visualization file.
@@ -429,7 +435,15 @@ class Model:
             raise ValueError(msg)
 
         dist = self.distributions[name]
-        filename = outfile or f"{name}_graph.{fmt}"
+
+        if outfile is not None:
+            filename = outfile
+        else:
+            base_filename = f"{name}_graph.{fmt}"
+            if path is not None:
+                filename = str(Path(path) / base_filename)
+            else:
+                filename = base_filename
 
         pydotprint(  # type: ignore[no-untyped-call]
             dist, outfile=filename, format=fmt, with_ids=True, high_contrast=True

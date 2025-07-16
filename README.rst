@@ -95,6 +95,13 @@ This is how you use the ``pyhs3`` Python API to build a statistical model and ev
    ... }
    >>> ws = pyhs3.Workspace(workspace_data)
    >>> model = ws.model()
+   >>> print(model)
+   Model(
+       mode: FAST_RUN
+       parameters: 3 (x, mu, sigma)
+       distributions: 1 (model)
+       functions: 0 ()
+   )
    >>> parameters = {par.name: par.value for par in model.parameterset}
    >>> result = -2 * model.logpdf("model", **parameters)
    >>> print(f"parameters: {parameters}")

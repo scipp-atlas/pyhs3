@@ -61,6 +61,8 @@ This is how you use the ``pyhs3`` Python API to build a statistical model and ev
 .. code:: pycon
 
    >>> import pyhs3
+   >>> import scipy
+   >>> import math
    >>> workspace_data = {
    ...     "distributions": [
    ...         {
@@ -106,5 +108,8 @@ This is how you use the ``pyhs3`` Python API to build a statistical model and ev
    >>> result = -2 * model.logpdf("model", **parameters)
    >>> print(f"parameters: {parameters}")
    parameters: {'x': 0.0, 'mu': 0.0, 'sigma': 1.0}
+   >>> print(f"nll: {result:.8f}")
+   nll: 1.83787707
+   >>> result_scipy = -2 * math.log(scipy.stats.norm.pdf(0, loc=0, scale=1))
    >>> print(f"nll: {result:.8f}")
    nll: 1.83787707

@@ -70,10 +70,22 @@ class GenericDistribution(TypedDict):
     expression: str
 
 
+class PoissonDistribution(TypedDict):
+    """
+    PoissonDistribution
+    """
+
+    type: Literal["poisson_dist"]
+    name: str
+    mean: str | float | int
+    x: str | float | int
+
+
 Distribution = Union[
     GaussianDistribution,
     MixtureDistribution,
     ProductDistribution,
     CrystalBallDistribution,
     GenericDistribution,
+    PoissonDistribution,
 ]

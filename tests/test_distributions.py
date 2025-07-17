@@ -7,6 +7,8 @@ including validation against expected NLL values from ROOT fits.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytensor.tensor as pt
 import pytest
@@ -14,7 +16,13 @@ from pytensor import function
 
 from pyhs3 import Workspace
 from pyhs3.core import boundedscalar
-from pyhs3.distributions import CrystalBallDist, GaussianDist, GenericDist, ProductDist
+from pyhs3.distributions import (
+    CrystalBallDist,
+    GaussianDist,
+    GenericDist,
+    PoissonDist,
+    ProductDist,
+)
 
 
 class TestProductDist:
@@ -52,6 +60,23 @@ class TestProductDist:
         result_val, expected_val = f()
 
         np.testing.assert_allclose(result_val, expected_val)
+
+    def test_product_dist_empty_factors(self):
+        """Test ProductDist with empty factors returns 1.0 and doesn't crash."""
+        dist = ProductDist(name="empty_product", factors=[])
+
+        # Empty context since no factors to provide
+        params = {}
+
+        result = dist.expression(params)
+        expected = pt.constant(1.0)
+
+        # Compile and evaluate
+        f = function([], [result, expected])
+        result_val, expected_val = f()
+
+        np.testing.assert_allclose(result_val, expected_val)
+        assert result_val == 1.0
 
 
 class TestCrystalBallDist:
@@ -198,6 +223,190 @@ class TestGenericDist:
         assert f(2.0) == 4.0
         assert f(3.0) == 9.0
         assert f(0.0) == 0.0
+
+
+class TestPoissonDist:
+    """Test PoissonDist implementation."""
+
+    def test_poisson_dist_creation(self):
+        """Test PoissonDist can be created and configured."""
+        dist = PoissonDist(name="test_poisson", mean="lambda_param", x="count_var")
+        assert dist.name == "test_poisson"
+        assert dist.mean == "lambda_param"
+        assert dist.x == "count_var"
+        assert dist.parameters == ["lambda_param", "count_var"]
+
+    def test_poisson_dist_from_dict(self):
+        """Test PoissonDist can be created from dictionary."""
+        config = {
+            "type": "poisson_dist",
+            "name": "test_poisson",
+            "mean": "rate_param",
+            "x": "observation",
+        }
+        dist = PoissonDist.from_dict(config)
+        assert dist.name == "test_poisson"
+        assert dist.mean == "rate_param"
+        assert dist.x == "observation"
+
+    def test_poisson_dist_from_dict_with_numeric_parameters(self):
+        """Test PoissonDist handles numeric parameters correctly."""
+        config = {
+            "type": "poisson_dist",
+            "name": "numeric_poisson",
+            "mean": 3.5,  # Numeric rate
+            "x": 2,  # Numeric count
+        }
+        dist = PoissonDist.from_dict(config)
+
+        # Parameters should be converted to constant names
+        assert dist.mean == "constant_numeric_poisson_mean"
+        assert dist.x == "constant_numeric_poisson_x"
+
+        # Constants should be created
+        assert "constant_numeric_poisson_mean" in dist.constants
+        assert "constant_numeric_poisson_x" in dist.constants
+
+        # Verify constant values
+        f_mean = function([], dist.constants["constant_numeric_poisson_mean"])
+        f_x = function([], dist.constants["constant_numeric_poisson_x"])
+        assert np.isclose(f_mean(), 3.5)
+        assert np.isclose(f_x(), 2.0)
+
+    def test_poisson_dist_expression_at_mean(self):
+        """Test PoissonDist PMF evaluation at k=λ."""
+        dist = PoissonDist(name="test_poisson", mean="lambda_param", x="k")
+
+        # Test at λ=3, k=3 (peak of distribution)
+        params = {
+            "lambda_param": pt.constant(3.0),
+            "k": pt.constant(3.0),
+        }
+
+        result = dist.expression(params)
+        f = function([], result)
+        result_val = f()
+
+        # Expected: P(3; 3) = 3^3 * e^(-3) / 3! = 27 * e^(-3) / 6 ≈ 0.224
+        expected = (3.0**3) * math.exp(-3.0) / math.factorial(3)
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    def test_poisson_dist_expression_zero_count(self):
+        """Test PoissonDist PMF evaluation at k=0."""
+        dist = PoissonDist(name="test_poisson", mean="lambda_param", x="k")
+
+        # Test at λ=2, k=0
+        params = {
+            "lambda_param": pt.constant(2.0),
+            "k": pt.constant(0.0),
+        }
+
+        result = dist.expression(params)
+        f = function([], result)
+        result_val = f()
+
+        # Expected: P(0; 2) = 2^0 * e^(-2) / 0! = e^(-2) ≈ 0.135
+        expected = math.exp(-2.0)
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    @pytest.mark.parametrize(
+        ("lambda_val", "k_val", "expected"),
+        [
+            pytest.param(1.0, 0.0, np.exp(-1.0), id="lambda1_k0"),
+            pytest.param(1.0, 1.0, 1.0 * np.exp(-1.0), id="lambda1_k1"),
+            pytest.param(2.0, 2.0, 4.0 * np.exp(-2.0) / 2.0, id="lambda2_k2"),
+            pytest.param(5.0, 3.0, 125.0 * np.exp(-5.0) / 6.0, id="lambda5_k3"),
+        ],
+    )
+    def test_poisson_dist_pmf_values(self, lambda_val, k_val, expected):
+        """Test PoissonDist PMF against known values."""
+        dist = PoissonDist(name="test_poisson", mean="lambda_param", x="k")
+
+        params = {
+            "lambda_param": pt.constant(lambda_val),
+            "k": pt.constant(k_val),
+        }
+
+        result = dist.expression(params)
+        f = function([], result)
+        result_val = f()
+
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    def test_poisson_dist_expression_with_variables(self):
+        """Test PoissonDist with variable parameters."""
+        dist = PoissonDist(name="test_poisson", mean="lambda_param", x="k")
+
+        # Create variables
+        lambda_var = pt.scalar("lambda_param")
+        k_var = pt.scalar("k")
+        params = {"lambda_param": lambda_var, "k": k_var}
+
+        result = dist.expression(params)
+        f = function([lambda_var, k_var], result)
+
+        # Test several points
+        # λ=1, k=1: P(1; 1) = 1 * e^(-1) / 1! = e^(-1)
+        assert np.isclose(f(1.0, 1.0), np.exp(-1.0))
+
+        # λ=4, k=2: P(2; 4) = 16 * e^(-4) / 2! = 8 * e^(-4)
+        assert np.isclose(f(4.0, 2.0), 8.0 * np.exp(-4.0))
+
+    def test_poisson_dist_properties(self):
+        """Test that PoissonDist has correct mathematical properties."""
+        dist = PoissonDist(name="test_poisson", mean="lambda_param", x="k")
+
+        lambda_val = 3.0
+        params = {"lambda_param": pt.constant(lambda_val)}
+
+        # Test that PMF is non-negative for various k values
+        for k_val in [0, 1, 2, 5, 10]:
+            test_params = dict(params)
+            test_params["k"] = pt.constant(float(k_val))
+            result = dist.expression(test_params)
+            f = function([], result)
+            pmf_val = f()
+            assert pmf_val >= 0.0, (
+                f"PMF should be non-negative, got {pmf_val} for k={k_val}"
+            )
+
+    def test_poisson_dist_integration_with_workspace(self):
+        """Test PoissonDist integration in full Workspace workflow."""
+        test_data = {
+            "parameter_points": [
+                {
+                    "name": "test_params",
+                    "parameters": [
+                        {"name": "rate", "value": 2.5},
+                        {"name": "observed", "value": 3.0},
+                    ],
+                }
+            ],
+            "distributions": [
+                {
+                    "type": "poisson_dist",
+                    "name": "count_dist",
+                    "mean": "rate",
+                    "x": "observed",
+                }
+            ],
+            "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
+            "functions": [],
+            "metadata": {"name": "test"},
+        }
+
+        ws = Workspace(test_data)
+        model = ws.model(domain="test_domain", parameter_point="test_params")
+
+        # Verify the distribution was created
+        assert "count_dist" in model.distributions
+        assert "rate" in model.parameters
+        assert "observed" in model.parameters
+
+        # Verify we can evaluate the PMF
+        pdf_value = model.pdf("count_dist", rate=2.5, observed=3.0)
+        assert pdf_value is not None
+        assert pdf_value > 0.0
 
 
 class TestBoundedScalar:

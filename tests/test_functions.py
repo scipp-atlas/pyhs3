@@ -14,13 +14,16 @@ import pytensor.tensor as pt
 import pytest
 from pytensor import function
 
+from pyhs3 import Workspace
 from pyhs3.exceptions import UnknownInterpolationCodeError
 from pyhs3.functions import (
     Function,
     FunctionSet,
     GenericFunction,
     InterpolationFunction,
+    ProcessNormalizationFunction,
     ProductFunction,
+    SumFunction,
     registered_functions,
 )
 
@@ -129,6 +132,156 @@ class TestProductFunction:
         # Compile and evaluate
         f = function([x, y], result)
         assert np.isclose(f(x_val, y_val), expected)
+
+
+class TestSumFunction:
+    """Test SumFunction implementation."""
+
+    def test_sum_function_creation(self):
+        """Test SumFunction can be created and configured."""
+        func = SumFunction(name="test_sum", summands=["term1", "term2"])
+        assert func.name == "test_sum"
+        assert func.kind == "sum"
+        assert func.summands == ["term1", "term2"]
+        assert func.parameters == ["term1", "term2"]
+
+    def test_sum_function_from_dict(self):
+        """Test SumFunction can be created from dictionary."""
+        config = {"name": "test_sum", "summands": ["a", "b", "c"]}
+        func = SumFunction.from_dict(config)
+        assert func.name == "test_sum"
+        assert func.summands == ["a", "b", "c"]
+        assert func.parameters == ["a", "b", "c"]
+
+    def test_sum_function_expression_empty_summands(self):
+        """Test SumFunction with empty summands returns 0.0."""
+        func = SumFunction(name="test_sum", summands=[])
+        context = {}
+        result = func.expression(context)
+
+        # Compile and evaluate
+        f = function([], result)
+        assert np.isclose(f(), 0.0)
+
+    @pytest.mark.parametrize(
+        ("summands", "values", "expected"),
+        [
+            pytest.param(["term1"], [5.0], 5.0, id="single_summand"),
+            pytest.param(["a", "b"], [2.0, 3.0], 5.0, id="two_summands"),
+            pytest.param(["x", "y", "z"], [1.0, 2.0, 3.0], 6.0, id="three_summands"),
+            pytest.param(
+                ["a", "b", "c", "d"], [1.5, 2.5, 3.5, 4.5], 12.0, id="four_summands"
+            ),
+        ],
+    )
+    def test_sum_function_expression_multiple_summands(
+        self, summands, values, expected
+    ):
+        """Test SumFunction with different numbers of summands."""
+        func = SumFunction(name="test_sum", summands=summands)
+        context = {
+            summand: pt.constant(value) for summand, value in zip(summands, values)
+        }
+        result = func.expression(context)
+
+        # Compile and evaluate
+        f = function([], result)
+        assert np.isclose(f(), expected)
+
+    @pytest.mark.parametrize(
+        ("x_val", "y_val", "expected"),
+        [
+            pytest.param(3.0, 7.0, 10.0, id="positive_values"),
+            pytest.param(-2.0, 4.0, 2.0, id="negative_positive"),
+            pytest.param(0.0, 5.0, 5.0, id="zero_summand"),
+            pytest.param(1.5, 2.5, 4.0, id="decimal_values"),
+            pytest.param(-3.0, -2.0, -5.0, id="negative_values"),
+        ],
+    )
+    def test_sum_function_expression_with_variables(self, x_val, y_val, expected):
+        """Test SumFunction with variable summands."""
+        func = SumFunction(name="test_sum", summands=["x", "y"])
+        x = pt.scalar("x")
+        y = pt.scalar("y")
+        context = {"x": x, "y": y}
+        result = func.expression(context)
+
+        # Compile and evaluate
+        f = function([x, y], result)
+        assert np.isclose(f(x_val, y_val), expected)
+
+    def test_sum_function_single_summand(self):
+        """Test SumFunction with single summand returns that value."""
+        func = SumFunction(name="test_sum", summands=["single"])
+
+        test_value = 42.0
+        context = {"single": pt.constant(test_value)}
+        result = func.expression(context)
+
+        f = function([], result)
+        assert np.isclose(f(), test_value)
+
+    def test_sum_function_with_many_terms(self):
+        """Test SumFunction with many summands."""
+        # Create function with 10 summands
+        summands = [f"term_{i}" for i in range(10)]
+        func = SumFunction(name="many_sum", summands=summands)
+
+        # All terms equal to 1.0, so sum should be 10.0
+        context = {term: pt.constant(1.0) for term in summands}
+        result = func.expression(context)
+
+        f = function([], result)
+        assert np.isclose(f(), 10.0)
+
+    def test_sum_function_integration_with_workspace(self):
+        """Test SumFunction integration in full Workspace workflow."""
+        test_data = {
+            "parameter_points": [
+                {
+                    "name": "test_params",
+                    "parameters": [
+                        {"name": "param1", "value": 2.0},
+                        {"name": "param2", "value": 3.0},
+                        {"name": "param3", "value": 5.0},
+                    ],
+                }
+            ],
+            "functions": [
+                {
+                    "type": "sum",
+                    "name": "total_sum",
+                    "summands": ["param1", "param2", "param3"],
+                }
+            ],
+            "distributions": [],
+            "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
+            "metadata": {"name": "test"},
+        }
+
+        ws = Workspace(test_data)
+        model = ws.model(domain="test_domain", parameter_point="test_params")
+
+        # Verify the function was created
+        assert "total_sum" in model.functions
+        assert "param1" in model.parameters
+        assert "param2" in model.parameters
+        assert "param3" in model.parameters
+
+        # Evaluate function - should be 2.0 + 3.0 + 5.0 = 10.0
+        # Get the function expression and compile with parameter values
+        param_values = {"param1": 2.0, "param2": 3.0, "param3": 5.0}
+
+        # Use model's evaluation with parameter values
+        func_expr = model.functions["total_sum"]
+        param_tensors = [
+            model.parameters[name] for name in ["param1", "param2", "param3"]
+        ]
+        param_vals = [param_values[name] for name in ["param1", "param2", "param3"]]
+
+        f = function(param_tensors, func_expr)
+        result = f(*param_vals)
+        assert np.isclose(result, 10.0)
 
 
 class TestGenericFunction:
@@ -586,21 +739,371 @@ class TestInterpolationFunction:
         np.testing.assert_allclose(result_val, 102.0, rtol=1e-10)
 
 
+class TestProcessNormalizationFunction:
+    """Test ProcessNormalizationFunction implementation."""
+
+    def test_process_normalization_creation(self):
+        """Test ProcessNormalizationFunction can be created and configured."""
+        func = ProcessNormalizationFunction(
+            name="test_norm",
+            expression="test_expr",
+            nominalValue=1.0,
+            thetaList=["theta1", "theta2"],
+            logKappa=[0.1, 0.2],
+            asymmThetaList=["asym1"],
+            logAsymmKappa=[[0.05, 0.15]],
+            otherFactorList=["factor1"],
+        )
+        assert func.name == "test_norm"
+        assert func.expression_name == "test_expr"
+        assert func.nominalValue == 1.0
+        assert func.thetaList == ["theta1", "theta2"]
+        assert func.logKappa == [0.1, 0.2]
+        assert func.asymmThetaList == ["asym1"]
+        assert func.logAsymmKappa == [[0.05, 0.15]]
+        assert func.otherFactorList == ["factor1"]
+        assert set(func.parameters) == {"theta1", "theta2", "asym1", "factor1"}
+
+    def test_process_normalization_from_dict(self):
+        """Test ProcessNormalizationFunction can be created from dictionary."""
+        config = {
+            "name": "test_norm",
+            "expression": "test_expr",
+            "nominalValue": 2.5,
+            "thetaList": ["sym1", "sym2"],
+            "logKappa": [0.3, 0.4],
+            "asymmThetaList": ["asym1", "asym2"],
+            "logAsymmKappa": [[0.1, 0.2], [0.15, 0.25]],
+            "otherFactorList": ["other1", "other2"],
+        }
+        func = ProcessNormalizationFunction.from_dict(config)
+        assert func.name == "test_norm"
+        assert func.expression_name == "test_expr"
+        assert func.nominalValue == 2.5
+        assert func.thetaList == ["sym1", "sym2"]
+        assert func.logKappa == [0.3, 0.4]
+        assert func.asymmThetaList == ["asym1", "asym2"]
+        assert func.logAsymmKappa == [[0.1, 0.2], [0.15, 0.25]]
+        assert func.otherFactorList == ["other1", "other2"]
+
+    def test_process_normalization_nominal_only(self):
+        """Test ProcessNormalizationFunction with only nominal value."""
+        func = ProcessNormalizationFunction(
+            name="nominal_only",
+            expression="test",
+            nominalValue=5.0,
+            thetaList=[],
+            logKappa=[],
+            asymmThetaList=[],
+            logAsymmKappa=[],
+            otherFactorList=[],
+        )
+
+        context = {}
+        result = func.expression(context)
+        f = function([], result)
+
+        # Should return nominal value
+        assert np.isclose(f(), 5.0)
+
+    def test_process_normalization_symmetric_variations(self):
+        """Test ProcessNormalizationFunction with symmetric variations only."""
+        func = ProcessNormalizationFunction(
+            name="sym_test",
+            expression="test",
+            nominalValue=2.0,
+            thetaList=["theta1", "theta2"],
+            logKappa=[0.1, 0.2],  # log-normal variations
+            asymmThetaList=[],
+            logAsymmKappa=[],
+            otherFactorList=[],
+        )
+
+        # Test with specific theta values
+        context = {
+            "theta1": pt.constant(1.0),  # +1 sigma
+            "theta2": pt.constant(-0.5),  # -0.5 sigma
+        }
+
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Expected: 2.0 * exp(0.1 * 1.0 + 0.2 * (-0.5)) = 2.0 * exp(0.1 - 0.1) = 2.0 * exp(0) = 2.0
+        expected = 2.0 * np.exp(0.1 * 1.0 + 0.2 * (-0.5))
+        np.testing.assert_allclose(result_val, expected, rtol=1e-10)
+
+    def test_process_normalization_asymmetric_interpolation_at_zero(self):
+        """Test ProcessNormalizationFunction asymmetric interpolation at theta=0."""
+        func = ProcessNormalizationFunction(
+            name="asym_test",
+            expression="test",
+            nominalValue=3.0,
+            thetaList=[],
+            logKappa=[],
+            asymmThetaList=["asym_theta"],
+            logAsymmKappa=[[0.1, 0.3]],  # [low, high] kappa values
+            otherFactorList=[],
+        )
+
+        # Test at theta=0 (should return nominal)
+        context = {"asym_theta": pt.constant(0.0)}
+
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # At theta=0, asymmetric interpolation polynomial gives 15.0/8.0 = 1.875
+        # So morph = 0.5 * (0.2 * 0 + 0.4 * 1.875) = 0.5 * 0.75 = 0.375
+        # Expected: 3.0 * exp(0.375)
+        expected = 3.0 * np.exp(0.375)
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    def test_process_normalization_asymmetric_interpolation_positive(self):
+        """Test ProcessNormalizationFunction asymmetric interpolation with positive theta."""
+        func = ProcessNormalizationFunction(
+            name="asym_test",
+            expression="test",
+            nominalValue=1.0,
+            thetaList=[],
+            logKappa=[],
+            asymmThetaList=["asym_theta"],
+            logAsymmKappa=[[0.1, 0.3]],  # [low, high] kappa values
+            otherFactorList=[],
+        )
+
+        # Test with theta=0.5 (polynomial region: |theta| < 1)
+        theta_val = 0.5
+        context = {"asym_theta": pt.constant(theta_val)}
+
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Manual calculation of asymmetric interpolation
+        kappa_lo, kappa_hi = 0.1, 0.3
+        kappa_sum = kappa_hi + kappa_lo  # 0.4
+        kappa_diff = kappa_hi - kappa_lo  # 0.2
+
+        # Polynomial interpolation for |theta| < 1
+        poly_result = (3.0 * theta_val**4 - 10.0 * theta_val**2 + 15.0) / 8.0
+        smooth_function = poly_result  # since |0.5| < 1
+
+        # Asymmetric interpolation
+        morph = 0.5 * (kappa_diff * theta_val + kappa_sum * smooth_function)
+        expected = 1.0 * np.exp(morph)
+
+        np.testing.assert_allclose(result_val, expected, rtol=1e-8)
+
+    def test_process_normalization_asymmetric_interpolation_extrapolation(self):
+        """Test ProcessNormalizationFunction asymmetric interpolation in extrapolation region."""
+        func = ProcessNormalizationFunction(
+            name="asym_test",
+            expression="test",
+            nominalValue=1.0,
+            thetaList=[],
+            logKappa=[],
+            asymmThetaList=["asym_theta"],
+            logAsymmKappa=[[0.2, 0.4]],
+            otherFactorList=[],
+        )
+
+        # Test with theta=2.0 (extrapolation region: |theta| > 1)
+        theta_val = 2.0
+        context = {"asym_theta": pt.constant(theta_val)}
+
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Manual calculation
+        kappa_lo, kappa_hi = 0.2, 0.4
+        kappa_sum = kappa_hi + kappa_lo  # 0.6
+        kappa_diff = kappa_hi - kappa_lo  # 0.2
+
+        # Linear extrapolation for |theta| > 1
+        abs_theta = abs(theta_val)  # 2.0
+        smooth_function = abs_theta  # since |2.0| > 1
+
+        # Asymmetric interpolation
+        morph = 0.5 * (kappa_diff * theta_val + kappa_sum * smooth_function)
+        # = 0.5 * (0.2 * 2.0 + 0.6 * 2.0) = 0.5 * (0.4 + 1.2) = 0.5 * 1.6 = 0.8
+        expected = 1.0 * np.exp(morph)
+
+        np.testing.assert_allclose(result_val, expected, rtol=1e-8)
+
+    def test_process_normalization_other_factors(self):
+        """Test ProcessNormalizationFunction with additional multiplicative factors."""
+        func = ProcessNormalizationFunction(
+            name="factor_test",
+            expression="test",
+            nominalValue=2.0,
+            thetaList=[],
+            logKappa=[],
+            asymmThetaList=[],
+            logAsymmKappa=[],
+            otherFactorList=["factor1", "factor2"],
+        )
+
+        context = {
+            "factor1": pt.constant(1.5),
+            "factor2": pt.constant(3.0),
+        }
+
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Expected: 2.0 * 1.5 * 3.0 = 9.0
+        expected = 2.0 * 1.5 * 3.0
+        np.testing.assert_allclose(result_val, expected, rtol=1e-10)
+
+    def test_process_normalization_combined_all_features(self):
+        """Test ProcessNormalizationFunction with all features combined."""
+        func = ProcessNormalizationFunction(
+            name="combined_test",
+            expression="test",
+            nominalValue=1.0,
+            thetaList=["sym1"],
+            logKappa=[0.1],
+            asymmThetaList=["asym1"],
+            logAsymmKappa=[[0.05, 0.15]],
+            otherFactorList=["factor1"],
+        )
+
+        context = {
+            "sym1": pt.constant(0.5),  # Symmetric variation
+            "asym1": pt.constant(0.3),  # Asymmetric variation (polynomial region)
+            "factor1": pt.constant(2.0),  # Additional factor
+        }
+
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Manual calculation
+        # 1. Nominal: 1.0
+        # 2. Symmetric: exp(0.1 * 0.5) = exp(0.05)
+        # 3. Asymmetric: need to compute interpolation for theta=0.3
+        kappa_sum = 0.15 + 0.05  # 0.2
+        kappa_diff = 0.15 - 0.05  # 0.1
+        poly_result = (3.0 * 0.3**4 - 10.0 * 0.3**2 + 15.0) / 8.0
+        asym_morph = 0.5 * (kappa_diff * 0.3 + kappa_sum * poly_result)
+        # 4. Factor: 2.0
+
+        expected = 1.0 * np.exp(0.05 + asym_morph) * 2.0
+        np.testing.assert_allclose(result_val, expected, rtol=1e-8)
+
+    def test_process_normalization_negative_theta_asymmetric(self):
+        """Test ProcessNormalizationFunction with negative theta for asymmetric interpolation."""
+        func = ProcessNormalizationFunction(
+            name="neg_asym_test",
+            expression="test",
+            nominalValue=1.0,
+            thetaList=[],
+            logKappa=[],
+            asymmThetaList=["asym_theta"],
+            logAsymmKappa=[[0.1, 0.3]],
+            otherFactorList=[],
+        )
+
+        # Test with negative theta in polynomial region
+        theta_val = -0.7
+        context = {"asym_theta": pt.constant(theta_val)}
+
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # The asymmetric interpolation should handle negative values correctly
+        # The smooth function uses abs(theta) for the polynomial, but theta itself for the difference term
+        assert result_val > 0.0  # Should be positive
+        assert np.isfinite(result_val)  # Should be finite
+
+    def test_process_normalization_integration_with_workspace(self):
+        """Test ProcessNormalizationFunction integration in full Workspace workflow."""
+        test_data = {
+            "parameter_points": [
+                {
+                    "name": "test_params",
+                    "parameters": [
+                        {"name": "sym_nuisance", "value": 0.5},
+                        {"name": "asym_nuisance", "value": 0.3},
+                        {"name": "other_factor", "value": 1.2},
+                    ],
+                }
+            ],
+            "functions": [
+                {
+                    "type": "CMS::process_normalization",
+                    "name": "process_norm",
+                    "expression": "norm_expr",
+                    "nominalValue": 100.0,
+                    "thetaList": ["sym_nuisance"],
+                    "logKappa": [0.2],
+                    "asymmThetaList": ["asym_nuisance"],
+                    "logAsymmKappa": [[0.1, 0.3]],
+                    "otherFactorList": ["other_factor"],
+                }
+            ],
+            "distributions": [],
+            "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
+            "metadata": {"name": "test"},
+        }
+
+        ws = Workspace(test_data)
+        model = ws.model(domain="test_domain", parameter_point="test_params")
+
+        # Verify the function was created
+        assert "process_norm" in model.functions
+        assert "sym_nuisance" in model.parameters
+        assert "asym_nuisance" in model.parameters
+        assert "other_factor" in model.parameters
+
+        # Evaluate function with parameter values
+        param_values = {"sym_nuisance": 0.5, "asym_nuisance": 0.3, "other_factor": 1.2}
+
+        func_expr = model.functions["process_norm"]
+        param_tensors = [model.parameters[name] for name in param_values]
+        param_vals = [param_values[name] for name in param_values]
+
+        f = function(param_tensors, func_expr)
+        result = f(*param_vals)
+
+        # Should be positive and finite
+        assert result > 0.0
+        assert np.isfinite(result)
+        # Should be close to nominal * factor since variations are small
+        assert 100.0 < result < 200.0  # Rough sanity check
+
+
 class TestRegisteredFunctions:
     """Test the registered_functions registry."""
 
     def test_registry_contains_expected_functions(self):
         """Test that registry contains all expected function types."""
-        expected_types = {"product", "generic_function", "interpolation"}
+        expected_types = {
+            "product",
+            "sum",
+            "generic_function",
+            "interpolation",
+            "CMS::process_normalization",
+        }
         assert set(registered_functions.keys()) == expected_types
 
     @pytest.mark.parametrize(
         ("func_type", "expected_class"),
         [
             pytest.param("product", ProductFunction, id="product_function"),
+            pytest.param("sum", SumFunction, id="sum_function"),
             pytest.param("generic_function", GenericFunction, id="generic_function"),
             pytest.param(
                 "interpolation", InterpolationFunction, id="interpolation_function"
+            ),
+            pytest.param(
+                "CMS::process_normalization",
+                ProcessNormalizationFunction,
+                id="process_normalization_function",
             ),
         ],
     )

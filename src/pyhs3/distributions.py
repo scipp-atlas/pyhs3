@@ -369,6 +369,9 @@ class ProductDist(Distribution[TD.ProductDistribution]):
         Returns:
             Symbolic representation of the product PDF
         """
+        if not self.factors:
+            return cast(T.TensorVar, pt.constant(1.0))
+
         pt_factors = pt.stack(
             [distributionsandparameters[factor] for factor in self.factors]
         )
@@ -620,12 +623,98 @@ class GenericDist(Distribution[TD.GenericDistribution]):
         return cast(T.TensorVar, result)
 
 
+class PoissonDist(Distribution[TD.PoissonDistribution]):
+    r"""
+    Poisson probability distribution.
+
+    Implements the Poisson probability mass function:
+
+    .. math::
+
+        P(k; \lambda) = \frac{\lambda^k e^{-\lambda}}{k!}
+
+    Parameters:
+        mean (str): Parameter name for the rate parameter (λ).
+        x (str): Input variable name (discrete count).
+    """
+
+    def __init__(self, *, name: str, mean: str, x: str):
+        """
+        Subclass of Distribution representing a Poisson distribution.
+
+        Args:
+            name (str): Name of the distribution.
+            mean (str): Parameter name for the rate parameter.
+            x (str): Input variable name.
+
+        Attributes:
+            name (str): Name of the distribution.
+            mean (str): Parameter name for the rate parameter.
+            x (str): Input variable name.
+            parameters (list[str]): list containing mean and x.
+        """
+        super().__init__(name=name, kind="poisson_dist", parameters=[mean, x])
+        self.mean = mean
+        self.x = x
+
+    @classmethod
+    def from_dict(cls, config: TD.PoissonDistribution) -> PoissonDist:
+        """
+        Creates an instance of PoissonDist from a dictionary configuration.
+
+        Args:
+            config (dict): Configuration dictionary.
+
+        Returns:
+            PoissonDist: The created PoissonDist instance.
+        """
+        # Process parameters first to get correct string names and constants
+        mean_name, mean_constant = process_parameter(config, "mean")
+        x_name, x_constant = process_parameter(config, "x")
+
+        # Create instance with processed string names
+        instance = cls(
+            name=config["name"],
+            mean=mean_name,
+            x=x_name,
+        )
+
+        # Add any generated constants to the instance
+        if mean_constant is not None:
+            instance.constants[mean_name] = mean_constant
+        if x_constant is not None:
+            instance.constants[x_name] = x_constant
+
+        return instance
+
+    def expression(
+        self, distributionsandparameters: dict[str, T.TensorVar]
+    ) -> T.TensorVar:
+        """
+        Builds a symbolic expression for the Poisson PMF.
+
+        Args:
+            distributionsandparameters (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of the Poisson PMF.
+        """
+        mean = distributionsandparameters[self.mean]
+        x = distributionsandparameters[self.x]
+
+        # Poisson PMF: λ^k * e^(-λ) / k!
+        # Using pt.gammaln for log(k!) = log(Γ(k+1))
+        log_pmf = x * pt.log(mean) - mean - pt.gammaln(x + 1)
+        return cast(T.TensorVar, pt.exp(log_pmf))
+
+
 registered_distributions: dict[str, type[Distribution[Any]]] = {
     "gaussian_dist": GaussianDist,
     "mixture_dist": MixtureDist,
     "product_dist": ProductDist,
     "crystalball_doublesided_dist": CrystalBallDist,
     "generic_dist": GenericDist,
+    "poisson_dist": PoissonDist,
 }
 
 

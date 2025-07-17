@@ -736,7 +736,9 @@ class DomainSet:
 
         for axis_config in axes:
             domain = DomainPoint(
-                axis_config["name"], axis_config["min"], axis_config["max"]
+                axis_config["name"],
+                axis_config.get("min", -np.inf),
+                axis_config.get("max", np.inf),
             )
             self.domains[domain.name] = domain.range
 

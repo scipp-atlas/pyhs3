@@ -185,8 +185,8 @@ class Model:
         for parameter_point in parameterset:
             # Create scalar parameter with domain bounds applied
             domain = domains.domains.get(parameter_point.name, (None, None))
-            self.parameters[parameter_point.name] = boundedscalar(
-                parameter_point.name, domain
+            self.parameters[parameter_point.name] = create_bounded_tensor(
+                parameter_point.name, domain, parameter_point.kind
             )
 
         self.distributions: dict[str, T.TensorVar] = {}
@@ -620,10 +620,12 @@ class ParameterPoint:
     Attributes:
         name (str): Name of the parameter.
         value (float): Value of the parameter.
+        kind (type[T.TensorVar]): The type of tensor to create.
     """
 
     name: str
     value: float
+    kind: Callable[..., T.TensorVar] = pt.scalar
 
 
 class DomainCollection:
@@ -762,33 +764,36 @@ class DomainSet:
         return len(self.domains)
 
 
-def boundedscalar(name: str, domain: Axis) -> T.TensorVar:
+def create_bounded_tensor(
+    name: str, domain: Axis, kind: Callable[..., T.TensorVar] = pt.scalar
+) -> T.TensorVar:
     """
-    Creates a scalar tensor variable with optional domain constraints.
+    Creates a tensor variable with optional domain constraints.
 
     Args:
-        name: Name of the scalar parameter.
+        name: Name of the parameter.
         domain (tuple): Tuple specifying (min, max) range. Use None for unbounded sides.
                        For example: (0.0, None) for lower bound only, (None, 1.0) for upper bound only.
-                       If both bounds are None, returns an unbounded scalar.
+                       If both bounds are None, returns an unbounded tensor.
+        kind: pt.scalar for scalars, pt.vector for vectors (default: pt.scalar).
 
     Returns:
-        pytensor.tensor.variable.TensorVariable: The scalar tensor, clipped to domain if bounds exist.
+        pytensor.tensor.variable.TensorVariable: The tensor variable, clipped to domain if bounds exist.
 
     Examples:
-        >>> boundedscalar("sigma", (0.0, None))  # sigma >= 0
-        >>> boundedscalar("fraction", (0.0, 1.0))  # 0 <= fraction <= 1
-        >>> boundedscalar("temperature", (None, 100.0))  # temperature <= 100
-        >>> boundedscalar("unbounded", (None, None))  # no bounds applied
+        >>> create_bounded_tensor("sigma", (0.0, None))  # sigma >= 0 (scalar)
+        >>> create_bounded_tensor("fraction", (0.0, 1.0))  # 0 <= fraction <= 1 (scalar)
+        >>> create_bounded_tensor("temperatures", (None, 100.0), pt.vector)  # vector <= 100
+        >>> create_bounded_tensor("unbounded", (None, None))  # no bounds applied
     """
     min_bound, max_bound = domain
 
-    # Create the base scalar tensor
-    tensor = pt.scalar(name)
+    # Create the base tensor
+    tensor = kind(name)
 
-    # If both bounds are None, return unbounded scalar
+    # If both bounds are None, return unbounded tensor
     if min_bound is None and max_bound is None:
-        return cast(T.TensorVar, tensor)
+        return tensor
 
     # Use infinity constants for unbounded sides
     min_val = pt.constant(-np.inf) if min_bound is None else pt.constant(min_bound)

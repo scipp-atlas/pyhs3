@@ -8,7 +8,7 @@ import pytensor.tensor as pt
 from pytensor import function
 
 from pyhs3 import Workspace
-from pyhs3.core import boundedscalar
+from pyhs3.core import create_bounded_tensor
 
 
 def test_nondefault_points_domains_access(datadir):
@@ -73,15 +73,15 @@ def test_rf501_manual(datadir):
 
     scalarranges = workspace.domain_collection["default_domain"]
 
-    f = boundedscalar("f", scalarranges["f"])
-    f_ctl = boundedscalar("f_ctl", scalarranges["f_ctl"])
-    mean = boundedscalar("mean", scalarranges["mean"])
-    mean2 = boundedscalar("mean2", scalarranges["mean2"])
-    sigma = boundedscalar("sigma", scalarranges["sigma"])
-    sigma2 = boundedscalar("sigma2", scalarranges["sigma2"])
-    mean_ctl = boundedscalar("mean_ctl", scalarranges["mean_ctl"])
-    mean2_ctl = boundedscalar("mean2_ctl", scalarranges["mean2_ctl"])
-    x = boundedscalar("x", scalarranges["x"])
+    f = create_bounded_tensor("f", scalarranges["f"])
+    f_ctl = create_bounded_tensor("f_ctl", scalarranges["f_ctl"])
+    mean = create_bounded_tensor("mean", scalarranges["mean"])
+    mean2 = create_bounded_tensor("mean2", scalarranges["mean2"])
+    sigma = create_bounded_tensor("sigma", scalarranges["sigma"])
+    sigma2 = create_bounded_tensor("sigma2", scalarranges["sigma2"])
+    mean_ctl = create_bounded_tensor("mean_ctl", scalarranges["mean_ctl"])
+    mean2_ctl = create_bounded_tensor("mean2_ctl", scalarranges["mean2_ctl"])
+    x = create_bounded_tensor("x", scalarranges["x"])
 
     def gaussian_pdf(x, mu, sigma):
         norm_const = 1.0 / (pt.sqrt(2 * math.pi) * sigma)

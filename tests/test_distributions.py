@@ -15,7 +15,7 @@ import pytest
 from pytensor import function
 
 from pyhs3 import Workspace
-from pyhs3.core import boundedscalar
+from pyhs3.core import create_bounded_tensor
 from pyhs3.distributions import (
     CrystalBallDist,
     GaussianDist,
@@ -410,29 +410,29 @@ class TestPoissonDist:
 
 
 class TestBoundedScalar:
-    """Test boundedscalar function improvements."""
+    """Test create_bounded_tensor function improvements."""
 
-    def test_boundedscalar_two_sided(self):
-        """Test boundedscalar with two-sided bounds."""
-        x = boundedscalar("test", (0.0, 1.0))
+    def test_create_bounded_tensor_two_sided(self):
+        """Test create_bounded_tensor with two-sided bounds."""
+        x = create_bounded_tensor("test", (0.0, 1.0))
         assert x is not None
         assert x.name == "test"
 
-    def test_boundedscalar_lower_bound_only(self):
-        """Test boundedscalar with lower bound only."""
-        x = boundedscalar("test", (0.0, None))
+    def test_create_bounded_tensor_lower_bound_only(self):
+        """Test create_bounded_tensor with lower bound only."""
+        x = create_bounded_tensor("test", (0.0, None))
         assert x is not None
         assert x.name == "test"
 
-    def test_boundedscalar_upper_bound_only(self):
-        """Test boundedscalar with upper bound only."""
-        x = boundedscalar("test", (None, 1.0))
+    def test_create_bounded_tensor_upper_bound_only(self):
+        """Test create_bounded_tensor with upper bound only."""
+        x = create_bounded_tensor("test", (None, 1.0))
         assert x is not None
         assert x.name == "test"
 
-    def test_boundedscalar_no_bounds(self):
-        """Test boundedscalar with no bounds."""
-        x = boundedscalar("test", (None, None))
+    def test_create_bounded_tensor_no_bounds(self):
+        """Test create_bounded_tensor with no bounds."""
+        x = create_bounded_tensor("test", (None, None))
         assert x is not None
         assert x.name == "test"
 

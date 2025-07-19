@@ -2,6 +2,7 @@
    :hidden:
    :maxdepth: 2
 
+   broadcasting
    api
 
 .. raw:: html

@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 import sys
 from collections import OrderedDict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, TypeVar, cast
+from typing import TypeVar, cast
 
 import numpy as np
 import numpy.typing as npt

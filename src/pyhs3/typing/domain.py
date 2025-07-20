@@ -4,7 +4,7 @@ typing domain
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict, Union
+from typing import Literal, TypedDict
 
 from pyhs3.typing_compat import TypeAlias
 
@@ -29,4 +29,4 @@ class ProductDomain(TypedDict):
     axes: list[Axis]
 
 
-Domain: TypeAlias = Union[ProductDomain]
+Domain: TypeAlias = ProductDomain

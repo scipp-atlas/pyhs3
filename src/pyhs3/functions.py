@@ -748,13 +748,15 @@ class ProcessNormalizationFunction(Function[TF.ProcessNormalization]):
 
         # Add symmetric variations
         sym_shift = pt.constant(0.0)
-        for theta_name, kappa in zip(self.thetaList, self.logKappa):
+        for theta_name, kappa in zip(self.thetaList, self.logKappa, strict=False):
             theta = context[theta_name]
             sym_shift = sym_shift + kappa * theta
 
         # Add asymmetric variations
         asym_shift = pt.constant(0.0)
-        for theta_name, kappa_pair in zip(self.asymmThetaList, self.logAsymmKappa):
+        for theta_name, kappa_pair in zip(
+            self.asymmThetaList, self.logAsymmKappa, strict=False
+        ):
             theta = context[theta_name]
             kappa_lo, kappa_hi = kappa_pair
             kappa_sum = kappa_hi + kappa_lo

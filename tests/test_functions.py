@@ -105,7 +105,10 @@ class TestProductFunction:
     ):
         """Test ProductFunction with different numbers of factors."""
         func = ProductFunction(name="test_product", factors=factors)
-        context = {factor: pt.constant(value) for factor, value in zip(factors, values)}
+        context = {
+            factor: pt.constant(value)
+            for factor, value in zip(factors, values, strict=False)
+        }
         result = func.expression(context)
 
         # Compile and evaluate
@@ -180,7 +183,8 @@ class TestSumFunction:
         """Test SumFunction with different numbers of summands."""
         func = SumFunction(name="test_sum", summands=summands)
         context = {
-            summand: pt.constant(value) for summand, value in zip(summands, values)
+            summand: pt.constant(value)
+            for summand, value in zip(summands, values, strict=False)
         }
         result = func.expression(context)
 

@@ -4,7 +4,7 @@ typing distribution
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict, Union
+from typing import Literal, TypedDict
 
 from pyhs3.typing_compat import NotRequired
 
@@ -70,10 +70,22 @@ class GenericDistribution(TypedDict):
     expression: str
 
 
-Distribution = Union[
-    GaussianDistribution,
-    MixtureDistribution,
-    ProductDistribution,
-    CrystalBallDistribution,
-    GenericDistribution,
-]
+class PoissonDistribution(TypedDict):
+    """
+    PoissonDistribution
+    """
+
+    type: Literal["poisson_dist"]
+    name: str
+    mean: str | float | int
+    x: str | float | int
+
+
+Distribution = (
+    GaussianDistribution
+    | MixtureDistribution
+    | ProductDistribution
+    | CrystalBallDistribution
+    | GenericDistribution
+    | PoissonDistribution
+)

@@ -8,7 +8,7 @@ import pytensor.tensor as pt
 from pytensor import function
 
 from pyhs3 import Workspace
-from pyhs3.core import boundedscalar
+from pyhs3.core import create_bounded_tensor
 
 
 def test_nondefault_points_domains_access(datadir):
@@ -73,15 +73,15 @@ def test_rf501_manual(datadir):
 
     scalarranges = workspace.domain_collection["default_domain"]
 
-    f = boundedscalar("f", scalarranges["f"])
-    f_ctl = boundedscalar("f_ctl", scalarranges["f_ctl"])
-    mean = boundedscalar("mean", scalarranges["mean"])
-    mean2 = boundedscalar("mean2", scalarranges["mean2"])
-    sigma = boundedscalar("sigma", scalarranges["sigma"])
-    sigma2 = boundedscalar("sigma2", scalarranges["sigma2"])
-    mean_ctl = boundedscalar("mean_ctl", scalarranges["mean_ctl"])
-    mean2_ctl = boundedscalar("mean2_ctl", scalarranges["mean2_ctl"])
-    x = boundedscalar("x", scalarranges["x"])
+    f = create_bounded_tensor("f", scalarranges["f"])
+    f_ctl = create_bounded_tensor("f_ctl", scalarranges["f_ctl"])
+    mean = create_bounded_tensor("mean", scalarranges["mean"])
+    mean2 = create_bounded_tensor("mean2", scalarranges["mean2"])
+    sigma = create_bounded_tensor("sigma", scalarranges["sigma"])
+    sigma2 = create_bounded_tensor("sigma2", scalarranges["sigma2"])
+    mean_ctl = create_bounded_tensor("mean_ctl", scalarranges["mean_ctl"])
+    mean2_ctl = create_bounded_tensor("mean2_ctl", scalarranges["mean2_ctl"])
+    x = create_bounded_tensor("x", scalarranges["x"])
 
     def gaussian_pdf(x, mu, sigma):
         norm_const = 1.0 / (pt.sqrt(2 * math.pi) * sigma)
@@ -164,3 +164,57 @@ def test_rf501_manual(datadir):
     assert np.allclose(val_control, 2.56486621e-22)
     assert np.allclose(val_combined_physics, 1.3298076)
     assert np.allclose(val_combined_control, 2.56486621e-22)
+
+
+def test_combine_long_exercise_logpdf_evaluation(datadir):
+    """Test logPDF evaluation for pdf_binsignal_region from combine long exercise."""
+    workspace = Workspace(
+        json.loads(
+            datadir.joinpath("combine_long_exercise_part1_nosys.json").read_text()
+        )
+    )
+
+    model = workspace.model(
+        parameter_point=workspace.parameter_collection["default_values"],
+        domain=workspace.domain_collection["default_domain"],
+    )
+
+    # Get default parameter values
+    default_params = {par.name: par.value for par in model.parameterset}
+
+    # Test logPDF evaluation at default parameter values
+    default_logpdf_val = model.logpdf("pdf_binsignal_region", **default_params)
+
+    # Verify logPDF is finite
+    assert np.isfinite(default_logpdf_val)
+
+    # Test logPDF evaluation with different r values (parameter of interest)
+    params_r05 = default_params.copy()
+    params_r05["r"] = 0.5  # Signal strength = 0.5
+    logpdf_val_r05 = model.logpdf("pdf_binsignal_region", **params_r05)
+
+    params_r20 = default_params.copy()
+    params_r20["r"] = 2.0  # Signal strength = 2.0
+    logpdf_val_r20 = model.logpdf("pdf_binsignal_region", **params_r20)
+
+    # Verify logPDFs are finite
+    assert np.isfinite(logpdf_val_r05)
+    assert np.isfinite(logpdf_val_r20)
+
+    # LogPDFs should be different for different r values
+    assert not np.allclose(logpdf_val_r05, default_logpdf_val)
+    assert not np.allclose(logpdf_val_r20, default_logpdf_val)
+    assert not np.allclose(logpdf_val_r05, logpdf_val_r20)
+
+    # Test that the distribution follows expected Poisson behavior
+    # With observed count = 10 and varying expected counts through r parameter
+    # Expected count = sum of backgrounds + r * signal = (4.43803 + 3.18309 + 3.7804 + 1.63396) + r * 0.711064
+    # Background total ≈ 13.0355, signal contribution = 0.711064
+
+    # At r=1, expected ≈ 13.747
+    # At r=0.5, expected ≈ 13.391
+    # At r=2, expected ≈ 14.458
+
+    # Since observed = 10 and all expected values > 10, smaller r values should give higher logPDF
+    assert logpdf_val_r05 > default_logpdf_val  # r=0.5 closer to optimum than r=1.0
+    assert default_logpdf_val > logpdf_val_r20  # r=1.0 closer to optimum than r=2.0

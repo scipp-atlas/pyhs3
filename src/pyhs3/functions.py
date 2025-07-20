@@ -60,6 +60,46 @@ class Function(Generic[FuncConfigT]):
         raise NotImplementedError
 
 
+class SumFunction(Function[TF.SumFunction]):
+    """Sum function that adds summands together."""
+
+    def __init__(self, *, name: str, summands: list[str]):
+        """
+        Initialize a SumFunction.
+
+        Args:
+            name: Name of the function
+            summands: List of summand names to add together
+        """
+        # summands become the parameters this function depends on
+        super().__init__(name=name, kind="sum", parameters=summands)
+        self.summands = summands
+
+    @classmethod
+    def from_dict(cls, config: dict[str, Any]) -> SumFunction:
+        """Create a SumFunction from dictionary configuration."""
+        return cls(name=config["name"], summands=config["summands"])
+
+    def expression(self, context: dict[str, T.TensorVar]) -> T.TensorVar:
+        """
+        Evaluate the product function.
+
+        Args:
+            context: Mapping of names to PyTensor variables.
+
+        Returns:
+            T.TensorVar: PyTensor expression representing the sum of all summands.
+        """
+        if not self.summands:
+            return pt.constant(0.0)
+
+        result = context[self.summands[0]]
+        for summand in self.summands[1:]:
+            result = result + context[summand]
+
+        return result
+
+
 class ProductFunction(Function[TF.ProductFunction]):
     """Product function that multiplies factors together."""
 
@@ -570,10 +610,177 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
         return result
 
 
+class ProcessNormalizationFunction(Function[TF.ProcessNormalization]):
+    r"""
+    Process normalization function with systematic variations.
+
+    Implements the CMS Combine ProcessNormalization class which computes
+    a normalization factor based on a nominal value and systematic variations.
+
+    The normalization factor is computed as:
+
+    .. math::
+
+        \text{norm} = \text{nominal} \times \exp\left(\sum_i \kappa_i \theta_i + \sum_j I(\theta_j; \kappa_{j,\text{lo}}, \kappa_{j,\text{hi}})\right) \times \prod_k f_k
+
+    where:
+    - :math:`\text{nominal}` is the base normalization value
+    - :math:`\kappa_i` are symmetric log-normal variation factors
+    - :math:`\theta_i` are symmetric nuisance parameters
+    - :math:`I(\theta_j; \kappa_{j,\text{lo}}, \kappa_{j,\text{hi}})` is asymmetric interpolation
+    - :math:`f_k` are additional multiplicative factors
+
+    The asymmetric interpolation function is:
+
+    .. math::
+
+        I(\theta; \kappa_{\text{lo}}, \kappa_{\text{hi}}) = \begin{cases}
+        \frac{1}{2}[(\kappa_{\text{hi}} - \kappa_{\text{lo}}) \theta + (\kappa_{\text{hi}} + \kappa_{\text{lo}}) S(\theta)] & \\
+        \end{cases}
+
+    where :math:`S(\theta)` is a smooth interpolation function that equals :math:`|\theta|` for :math:`|\theta| \geq 1`
+    and follows a 6th order polynomial for :math:`|\theta| < 1`.
+
+    Parameters:
+        name: Name of the function
+        expression: Expression identifier (typically same as name)
+        nominalValue: Base normalization value
+        thetaList: Names of symmetric variation nuisance parameters
+        logKappa: Symmetric log-normal variation factors
+        asymmThetaList: Names of asymmetric variation nuisance parameters
+        logAsymmKappa: Asymmetric [low, high] log-normal variation factors
+        otherFactorList: Names of additional multiplicative factors
+    """
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        expression: str,
+        nominalValue: float,
+        thetaList: list[str],
+        logKappa: list[float],
+        asymmThetaList: list[str],
+        logAsymmKappa: list[list[float]],
+        otherFactorList: list[str],
+    ):
+        """
+        Initialize a ProcessNormalizationFunction.
+
+        Args:
+            name: Name of the function
+            expression: Expression identifier
+            nominalValue: Base normalization value
+            thetaList: Names of symmetric variation nuisance parameters
+            logKappa: Symmetric log-normal variation factors
+            asymmThetaList: Names of asymmetric variation nuisance parameters
+            logAsymmKappa: Asymmetric [low, high] log-normal variation factors
+            otherFactorList: Names of additional multiplicative factors
+        """
+        # All parameters this function depends on
+        parameters = thetaList + asymmThetaList + otherFactorList
+        super().__init__(name=name, kind="ProcessNormalization", parameters=parameters)
+
+        self.expression_name = expression
+        self.nominalValue = nominalValue
+        self.thetaList = thetaList
+        self.logKappa = logKappa
+        self.asymmThetaList = asymmThetaList
+        self.logAsymmKappa = logAsymmKappa
+        self.otherFactorList = otherFactorList
+
+    @classmethod
+    def from_dict(cls, config: dict[str, Any]) -> ProcessNormalizationFunction:
+        """Create a ProcessNormalizationFunction from dictionary configuration."""
+        return cls(
+            name=config["name"],
+            expression=config["expression"],
+            nominalValue=config["nominalValue"],
+            thetaList=config["thetaList"],
+            logKappa=config["logKappa"],
+            asymmThetaList=config["asymmThetaList"],
+            logAsymmKappa=config["logAsymmKappa"],
+            otherFactorList=config["otherFactorList"],
+        )
+
+    def _asym_interpolation(
+        self, theta: T.TensorVar, kappa_sum: float, kappa_diff: float
+    ) -> T.TensorVar:
+        """
+        Implement asymmetric interpolation function.
+
+        Based on CMS Combine's _asym_interpolation function.
+
+        Args:
+            theta: Nuisance parameter value
+            kappa_sum: Sum of low and high kappa values
+            kappa_diff: Difference of high and low kappa values
+
+        Returns:
+            Interpolated value
+        """
+        abs_theta = pt.abs(theta)
+
+        # Polynomial coefficients for smooth interpolation
+        # Based on _asym_poly = jnp.array([3.0, -10.0, 15.0, 0.0]) / 8.0
+        poly_result = (3.0 * theta**4 - 10.0 * theta**2 + 15.0) / 8.0
+
+        # Choose between linear extrapolation (|theta| > 1) and polynomial interpolation (|theta| <= 1)
+        smooth_function = pt.switch(abs_theta > 1.0, abs_theta, poly_result)
+
+        # Apply asymmetric interpolation formula
+        morph = 0.5 * (kappa_diff * theta + kappa_sum * smooth_function)
+
+        return cast(T.TensorVar, morph)
+
+    def expression(self, context: dict[str, T.TensorVar]) -> T.TensorVar:
+        """
+        Evaluate the process normalization function.
+
+        Args:
+            context: Mapping of names to PyTensor variables.
+
+        Returns:
+            T.TensorVar: PyTensor expression representing the normalization factor.
+        """
+        # Start with the nominal value
+        result = pt.constant(self.nominalValue)
+
+        # Add symmetric variations
+        sym_shift = pt.constant(0.0)
+        for theta_name, kappa in zip(self.thetaList, self.logKappa, strict=False):
+            theta = context[theta_name]
+            sym_shift = sym_shift + kappa * theta
+
+        # Add asymmetric variations
+        asym_shift = pt.constant(0.0)
+        for theta_name, kappa_pair in zip(
+            self.asymmThetaList, self.logAsymmKappa, strict=False
+        ):
+            theta = context[theta_name]
+            kappa_lo, kappa_hi = kappa_pair
+            kappa_sum = kappa_hi + kappa_lo
+            kappa_diff = kappa_hi - kappa_lo
+            asym_contribution = self._asym_interpolation(theta, kappa_sum, kappa_diff)
+            asym_shift = asym_shift + asym_contribution
+
+        # Apply exponential of total shift
+        result = result * pt.exp(sym_shift + asym_shift)
+
+        # Multiply by additional factors
+        for factor_name in self.otherFactorList:
+            factor = context[factor_name]
+            result = result * factor
+
+        return cast(T.TensorVar, result)
+
+
 registered_functions: dict[str, type[Function[Any]]] = {
+    "sum": SumFunction,
     "product": ProductFunction,
     "generic_function": GenericFunction,
     "interpolation": InterpolationFunction,
+    "CMS::process_normalization": ProcessNormalizationFunction,
 }
 
 

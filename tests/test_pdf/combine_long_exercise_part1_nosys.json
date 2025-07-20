@@ -1,0 +1,167 @@
+{
+  "data": [
+    {
+      "axes": [
+        {
+          "const": true,
+          "name": "n_obs_binsignal_region",
+          "value": 10.0
+        }
+      ],
+      "entries": [[10.0]],
+      "name": "data_obs",
+      "type": "unbinned"
+    }
+  ],
+  "distributions": [
+    {
+      "factors": ["pdf_binsignal_region_bonly"],
+      "name": "model_b",
+      "type": "product_dist"
+    },
+    {
+      "integer": false,
+      "mean": "n_exp_binsignal_region_bonly",
+      "name": "pdf_binsignal_region_bonly",
+      "type": "poisson_dist",
+      "x": "n_obs_binsignal_region"
+    },
+    {
+      "factors": ["pdf_binsignal_region"],
+      "name": "model_s",
+      "type": "product_dist"
+    },
+    {
+      "integer": false,
+      "mean": "n_exp_binsignal_region",
+      "name": "pdf_binsignal_region",
+      "type": "poisson_dist",
+      "x": "n_obs_binsignal_region"
+    },
+    {
+      "factors": [],
+      "name": "nuisancePdf",
+      "type": "product_dist"
+    }
+  ],
+  "domains": [
+    {
+      "axes": [
+        {
+          "min": 0.0,
+          "name": "n_obs_binsignal_region"
+        },
+        {
+          "max": 20.0,
+          "min": 0.0,
+          "name": "r"
+        }
+      ],
+      "name": "default_domain",
+      "type": "product_domain"
+    }
+  ],
+  "functions": [
+    {
+      "name": "n_exp_binsignal_region_bonly",
+      "summands": [
+        "n_exp_binsignal_region_proc_ttbar",
+        "n_exp_binsignal_region_proc_diboson",
+        "n_exp_binsignal_region_proc_Ztautau",
+        "n_exp_binsignal_region_proc_jetFakes"
+      ],
+      "type": "sum"
+    },
+    {
+      "name": "n_exp_binsignal_region",
+      "summands": [
+        "n_exp_binsignal_region_proc_ttbar",
+        "n_exp_binsignal_region_proc_diboson",
+        "n_exp_binsignal_region_proc_Ztautau",
+        "n_exp_binsignal_region_proc_jetFakes",
+        "n_exp_binsignal_region_proc_bbHtautau"
+      ],
+      "type": "sum"
+    },
+    {
+      "asymmThetaList": [],
+      "expression": "n_exp_binsignal_region_proc_bbHtautau",
+      "logAsymmKappa": [],
+      "logKappa": [],
+      "name": "n_exp_binsignal_region_proc_bbHtautau",
+      "nominalValue": 0.711064,
+      "otherFactorList": ["r"],
+      "thetaList": [],
+      "type": "CMS::process_normalization"
+    }
+  ],
+  "metadata": {
+    "hs3_version": "0.2",
+    "packages": [
+      {
+        "name": "ROOT",
+        "version": "6.35.01"
+      }
+    ]
+  },
+  "misc": {
+    "ROOT_internal": {
+      "attributes": {
+        "n_exp_binsignal_region_proc_Ztautau": {
+          "tags": ["Constant"]
+        },
+        "n_exp_binsignal_region_proc_diboson": {
+          "tags": ["Constant"]
+        },
+        "n_exp_binsignal_region_proc_jetFakes": {
+          "tags": ["Constant"]
+        },
+        "n_exp_binsignal_region_proc_ttbar": {
+          "tags": ["Constant"]
+        },
+        "n_obs_binsignal_region": {
+          "tags": ["Constant"]
+        },
+        "r": {
+          "tags": ["group_POI"]
+        }
+      }
+    }
+  },
+  "parameter_points": [
+    {
+      "name": "default_values",
+      "parameters": [
+        {
+          "const": true,
+          "name": "n_exp_binsignal_region_proc_ttbar",
+          "value": 4.43803
+        },
+        {
+          "const": true,
+          "name": "n_exp_binsignal_region_proc_diboson",
+          "value": 3.18309
+        },
+        {
+          "const": true,
+          "name": "n_exp_binsignal_region_proc_Ztautau",
+          "value": 3.7804
+        },
+        {
+          "const": true,
+          "name": "n_exp_binsignal_region_proc_jetFakes",
+          "value": 1.63396
+        },
+        {
+          "const": true,
+          "name": "n_obs_binsignal_region",
+          "value": 10.0
+        },
+        {
+          "name": "r",
+          "value": 1.0
+        }
+      ]
+    }
+  ]
+}

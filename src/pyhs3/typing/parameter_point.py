@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
+from pyhs3.typing.aliases import TensorVar
 from pyhs3.typing_compat import NotRequired
 
 
@@ -27,3 +28,4 @@ class ParameterPoint(TypedDict):
 
     name: str
     parameters: list[Parameter]
+    kind: NotRequired[type[TensorVar]]  # defaults to pt.scalar

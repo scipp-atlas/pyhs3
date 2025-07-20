@@ -781,10 +781,10 @@ def create_bounded_tensor(
         pytensor.tensor.variable.TensorVariable: The tensor variable, clipped to domain if bounds exist.
 
     Examples:
-        >>> create_bounded_tensor("sigma", (0.0, None))  # sigma >= 0 (scalar)
-        >>> create_bounded_tensor("fraction", (0.0, 1.0))  # 0 <= fraction <= 1 (scalar)
-        >>> create_bounded_tensor("temperatures", (None, 100.0), pt.vector)  # vector <= 100
-        >>> create_bounded_tensor("unbounded", (None, None))  # no bounds applied
+        >>> sigma = create_bounded_tensor("sigma", (0.0, None))  # sigma >= 0 (scalar)
+        >>> fraction = create_bounded_tensor("fraction", (0.0, 1.0))  # 0 <= fraction <= 1 (scalar)
+        >>> temperatures = create_bounded_tensor("temperatures", (None, 100.0), pt.vector)  # vector <= 100
+        >>> unbounded = create_bounded_tensor("unbounded", (None, None))  # no bounds applied
     """
     min_bound, max_bound = domain
 

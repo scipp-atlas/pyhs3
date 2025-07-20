@@ -4,7 +4,7 @@ typing function
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict, Union
+from typing import Literal, TypedDict
 
 
 class ProductFunction(TypedDict):
@@ -74,10 +74,10 @@ class ProcessNormalization(TypedDict):
     otherFactorList: list[str]  # List of additional multiplicative factors
 
 
-Function = Union[
-    ProductFunction,
-    SumFunction,
-    GenericFunction,
-    InterpolationFunction,
-    ProcessNormalization,
-]
+Function = (
+    ProductFunction
+    | SumFunction
+    | GenericFunction
+    | InterpolationFunction
+    | ProcessNormalization
+)

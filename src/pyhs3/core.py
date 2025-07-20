@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -33,10 +32,7 @@ log = logging.getLogger(__name__)
 
 TDefault = TypeVar("TDefault")
 
-if sys.version_info >= (3, 10):
-    Axis: TypeAlias = tuple[float | None, float | None]
-else:
-    Axis: TypeAlias = tuple["float | None", "float | None"]
+Axis: TypeAlias = tuple[float | None, float | None]
 
 
 class Workspace:

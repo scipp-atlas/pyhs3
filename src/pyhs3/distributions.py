@@ -42,7 +42,7 @@ def process_parameter(
         Tuple of (processed_name, constant_tensor_or_none)
     """
     param_value = config[param_key]  # type: ignore[literal-required]
-    if isinstance(param_value, (float, int)):
+    if isinstance(param_value, float | int):
         # Generate unique constant name
         constant_name = f"constant_{config['name']}_{param_key}"
         # Create the constant tensor

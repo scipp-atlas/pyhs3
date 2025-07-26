@@ -238,7 +238,13 @@ class Model:
             entity_idx = nodes[entity.name]
 
             # Add dependencies (parameters this entity depends on)
-            for param_name in entity.parameters:
+            # entity.parameters is now a dict, so we need the values (actual parameter names)
+            param_names = (
+                entity.parameters.values()
+                if hasattr(entity.parameters, "values")
+                else entity.parameters
+            )
+            for param_name in param_names:
                 try:
                     param_idx = nodes[param_name]
                 except KeyError:

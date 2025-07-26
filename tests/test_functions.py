@@ -12,6 +12,7 @@ import logging
 import numpy as np
 import pytensor.tensor as pt
 import pytest
+from pydantic_core import ValidationError
 from pytensor import function
 
 from pyhs3 import Workspace
@@ -728,7 +729,14 @@ class TestInterpolationFunction:
         assert interp_func.high == ["high_variation"]
         assert interp_func.low == ["low_variation"]
         assert interp_func.interpolationCodes == [0]
-        assert interp_func.parameters == ["shape_param"]
+        # parameters is now a dict containing all dependencies
+        expected_params = {
+            "high_variation",
+            "low_variation",
+            "nominal_shape",
+            "shape_param",
+        }
+        assert set(interp_func.parameters.values()) == expected_params
 
         # Test evaluation
         context = {
@@ -1183,7 +1191,9 @@ class TestFunctionSet:
         func = function_set["interp1"]
         assert isinstance(func, InterpolationFunction)
         assert func.high == ["h1"]
-        assert func.parameters == ["x"]
+        # parameters is now a dict containing all dependencies
+        expected_params = {"h1", "l1", "n1", "x"}
+        assert set(func.parameters.values()) == expected_params
 
     def test_function_set_mixed_types(self):
         """Test FunctionSet with mixed function types."""
@@ -1195,7 +1205,7 @@ class TestFunctionSet:
                 "type": "interpolation",
                 "high": [],
                 "low": [],
-                "nom": [],
+                "nom": "nominal_param",
                 "interpolationCodes": [],
                 "positiveDefinite": False,
                 "vars": [],
@@ -1228,8 +1238,7 @@ class TestFunctionSet:
             {"name": "good2", "type": "generic_function", "expression": "x"},
         ]
 
-        # Should raise KeyError for missing required fields
-        with pytest.raises(KeyError, match="factors"):
+        with pytest.raises(ValidationError):
             FunctionSet(functions_config)
 
     def test_function_set_getitem_keyerror(self):
@@ -1296,4 +1305,5 @@ class TestFunctionIntegration:
             positiveDefinite=True,
             vars=["param1", "param2"],
         )
-        assert set(interp_func.parameters) == {"param1", "param2"}
+        # InterpolationFunction with empty high/low lists but vars should depend on nominal + vars
+        assert set(interp_func.parameters.values()) == {"nominal", "param1", "param2"}

@@ -31,7 +31,7 @@ def pylint(session: nox.Session) -> None:
     """
     # This needs to be installed into the package environment, and is slower
     # than a pre-commit check
-    session.install(".", "pylint>=3.2")
+    session.install(".", "pylint>=3.2", "pylint-pydantic")
     session.run("pylint", "pyhs3", *session.posargs)
 
 

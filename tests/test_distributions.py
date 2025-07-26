@@ -33,7 +33,7 @@ class TestProductDist:
         dist = ProductDist(name="test_product", factors=["factor1", "factor2"])
         assert dist.name == "test_product"
         assert dist.factors == ["factor1", "factor2"]
-        assert dist.parameters == ["factor1", "factor2"]
+        assert list(dist.parameters.values()) == ["factor1", "factor2"]
 
     def test_product_dist_from_dict(self):
         """Test ProductDist can be created from dictionary."""
@@ -234,7 +234,7 @@ class TestPoissonDist:
         assert dist.name == "test_poisson"
         assert dist.mean == "lambda_param"
         assert dist.x == "count_var"
-        assert dist.parameters == ["lambda_param", "count_var"]
+        assert list(dist.parameters.values()) == ["lambda_param", "count_var"]
 
     def test_poisson_dist_from_dict(self):
         """Test PoissonDist can be created from dictionary."""
@@ -259,9 +259,13 @@ class TestPoissonDist:
         }
         dist = PoissonDist.from_dict(config)
 
-        # Parameters should be converted to constant names
-        assert dist.mean == "constant_numeric_poisson_mean"
-        assert dist.x == "constant_numeric_poisson_x"
+        # Field attributes should preserve original values for serialization
+        assert dist.mean == 3.5
+        assert dist.x == 2
+
+        # Parameters dict should contain the constant names for dependency tracking
+        assert dist.parameters["mean"] == "constant_numeric_poisson_mean"
+        assert dist.parameters["x"] == "constant_numeric_poisson_x"
 
         # Constants should be created
         assert "constant_numeric_poisson_mean" in dist.constants
@@ -451,17 +455,16 @@ class TestNumericParameters:
 
         dist = GaussianDist.from_dict(config)
 
-        # Check that sigma parameter was converted to a constant name
-        assert dist.sigma == "constant_test_gauss_sigma"
+        # Field attributes should preserve original values for serialization
+        assert dist.sigma == 1.5  # Original numeric value preserved
         assert dist.mean == "mu_param"  # String reference unchanged
         assert dist.x == "obs_var"  # String reference unchanged
 
-        # Check that all parameters (including constants) are in parameters list
-        assert "mu_param" in dist.parameters
-        assert "obs_var" in dist.parameters
-        assert (
-            "constant_test_gauss_sigma" in dist.parameters
-        )  # Constants are dependencies
+        # Check that all parameters (including constants) are in parameters dict values
+        param_values = list(dist.parameters.values())
+        assert "mu_param" in param_values
+        assert "obs_var" in param_values
+        assert "constant_test_gauss_sigma" in param_values  # Constants are dependencies
 
         # Check that the constant was created
         assert "constant_test_gauss_sigma" in dist.constants
@@ -477,18 +480,18 @@ class TestNumericParameters:
 
         dist = GaussianDist.from_dict(config)
 
-        # All should be converted to constant names
-        assert dist.mean == "constant_numeric_gauss_mean"
-        assert dist.sigma == "constant_numeric_gauss_sigma"
-        assert dist.x == "constant_numeric_gauss_x"
+        # Field attributes should preserve original values for serialization
+        assert dist.mean == 2.0
+        assert dist.sigma == 0.5
+        assert dist.x == 1.0
 
-        # All constants, so parameters list contains all constant names
+        # All constants, so parameters dict values contain all constant names
         expected_params = [
             "constant_numeric_gauss_mean",
             "constant_numeric_gauss_sigma",
             "constant_numeric_gauss_x",
         ]
-        assert set(dist.parameters) == set(expected_params)
+        assert set(dist.parameters.values()) == set(expected_params)
 
         # All constants should be created
         assert len(dist.constants) == 3
@@ -507,12 +510,13 @@ class TestNumericParameters:
 
         dist = GaussianDist.from_dict(config)
 
+        # Field attributes should preserve original values for serialization
         assert dist.mean == "mu_param"
-        assert dist.sigma == "constant_mixed_gauss_sigma"
+        assert dist.sigma == 2.0  # Original numeric value preserved
         assert dist.x == "obs_var"
 
         # String references and constants in parameters
-        assert set(dist.parameters) == {
+        assert set(dist.parameters.values()) == {
             "mu_param",
             "obs_var",
             "constant_mixed_gauss_sigma",

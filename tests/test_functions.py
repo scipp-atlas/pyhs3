@@ -12,6 +12,7 @@ import logging
 import numpy as np
 import pytensor.tensor as pt
 import pytest
+from pydantic_core import ValidationError
 from pytensor import function
 
 from pyhs3 import Workspace
@@ -35,19 +36,17 @@ class TestFunction:
         """Test Function base class initialization."""
         func = Function(
             name="test_func",
-            kind="test",
-            parameters=["param1", "param2"],
+            type="test",
         )
         assert func.name == "test_func"
-        assert func.kind == "test"
-        assert func.parameters == ["param1", "param2"]
+        assert func.type == "test"
+        assert isinstance(func.parameters, dict)
 
     def test_function_expression_not_implemented(self):
         """Test that base Function expression raises NotImplementedError."""
         func = Function(
             name="test_func",
-            kind="test",
-            parameters=["param1"],
+            type="test",
         )
         with pytest.raises(
             NotImplementedError, match="Function type test not implemented"
@@ -67,9 +66,9 @@ class TestProductFunction:
         """Test ProductFunction can be created and configured."""
         func = ProductFunction(name="test_product", factors=["factor1", "factor2"])
         assert func.name == "test_product"
-        assert func.kind == "product"
+        assert func.type == "product"
         assert func.factors == ["factor1", "factor2"]
-        assert func.parameters == ["factor1", "factor2"]
+        assert list(func.parameters.values()) == ["factor1", "factor2"]
 
     def test_product_function_from_dict(self):
         """Test ProductFunction can be created from dictionary."""
@@ -77,7 +76,7 @@ class TestProductFunction:
         func = ProductFunction.from_dict(config)
         assert func.name == "test_product"
         assert func.factors == ["f1", "f2", "f3"]
-        assert func.parameters == ["f1", "f2", "f3"]
+        assert list(func.parameters.values()) == ["f1", "f2", "f3"]
 
     def test_product_function_expression_empty_factors(self):
         """Test ProductFunction with empty factors returns 1.0."""
@@ -144,9 +143,9 @@ class TestSumFunction:
         """Test SumFunction can be created and configured."""
         func = SumFunction(name="test_sum", summands=["term1", "term2"])
         assert func.name == "test_sum"
-        assert func.kind == "sum"
+        assert func.type == "sum"
         assert func.summands == ["term1", "term2"]
-        assert func.parameters == ["term1", "term2"]
+        assert list(func.parameters.values()) == ["term1", "term2"]
 
     def test_sum_function_from_dict(self):
         """Test SumFunction can be created from dictionary."""
@@ -154,7 +153,7 @@ class TestSumFunction:
         func = SumFunction.from_dict(config)
         assert func.name == "test_sum"
         assert func.summands == ["a", "b", "c"]
-        assert func.parameters == ["a", "b", "c"]
+        assert list(func.parameters.values()) == ["a", "b", "c"]
 
     def test_sum_function_expression_empty_summands(self):
         """Test SumFunction with empty summands returns 0.0."""
@@ -295,9 +294,9 @@ class TestGenericFunction:
         """Test GenericFunction can be created and configured."""
         func = GenericFunction(name="test_generic", expression="x + y")
         assert func.name == "test_generic"
-        assert func.kind == "generic_function"
+        assert func.type == "generic_function"
         assert func.expression_str == "x + y"
-        assert set(func.parameters) == {"x", "y"}
+        assert set(func.parameters.values()) == {"x", "y"}
 
     def test_generic_function_from_dict(self):
         """Test GenericFunction can be created from dictionary."""
@@ -409,16 +408,17 @@ class TestInterpolationFunction:
             nom="nominal",
             interpolationCodes=[0, 1],
             positiveDefinite=True,
-            parameters=["var1", "var2"],
+            vars=["var1", "var2"],
         )
         assert func.name == "test_interp"
-        assert func.kind == "interpolation"
+        assert func.type == "interpolation"
         assert func.high == ["high1", "high2"]
         assert func.low == ["low1", "low2"]
         assert func.nom == "nominal"
         assert func.interpolationCodes == [0, 1]
         assert func.positiveDefinite is True
-        assert func.parameters == ["var1", "var2"]
+        expected_params = ["high1", "high2", "low1", "low2", "nominal", "var1", "var2"]
+        assert set(func.parameters.values()) == set(expected_params)
 
     @pytest.mark.parametrize(
         "config",
@@ -470,7 +470,11 @@ class TestInterpolationFunction:
         assert func.nom == config["nom"]
         assert func.interpolationCodes == config["interpolationCodes"]
         assert func.positiveDefinite == config["positiveDefinite"]
-        assert func.parameters == config["vars"]
+        # Parameters include all dependencies: high, low, nom, and vars
+        expected_params = (
+            config["high"] + config["low"] + [config["nom"]] + config["vars"]
+        )
+        assert set(func.parameters.values()) == set(expected_params)
 
     def test_interpolation_function_expression_nominal_only(self):
         """Test InterpolationFunction returns nominal value when no parameters."""
@@ -481,7 +485,7 @@ class TestInterpolationFunction:
             nom="nominal",
             interpolationCodes=[],
             positiveDefinite=True,
-            parameters=[],
+            vars=[],
         )
         context = {"nominal": pt.constant(5.0)}
 
@@ -498,7 +502,7 @@ class TestInterpolationFunction:
             nom="nominal",
             interpolationCodes=[0],
             positiveDefinite=False,
-            parameters=["nuisance_param"],
+            vars=["nuisance_param"],
         )
 
         # Test with positive parameter value
@@ -525,7 +529,7 @@ class TestInterpolationFunction:
             nom="nominal",
             interpolationCodes=[1],
             positiveDefinite=False,
-            parameters=["nuisance_param"],
+            vars=["nuisance_param"],
         )
 
         # Test with positive parameter value
@@ -553,7 +557,7 @@ class TestInterpolationFunction:
             nom="nominal",
             interpolationCodes=[0],
             positiveDefinite=True,
-            parameters=["nuisance_param"],
+            vars=["nuisance_param"],
         )
 
         # Create context that would give negative result without constraint
@@ -582,7 +586,7 @@ class TestInterpolationFunction:
             nom="nominal",
             interpolationCodes=[interp_code],
             positiveDefinite=False,
-            parameters=["nuisance_param"],
+            vars=["nuisance_param"],
         )
 
         context = {
@@ -608,7 +612,7 @@ class TestInterpolationFunction:
             nom="nominal",
             interpolationCodes=[6],
             positiveDefinite=False,
-            parameters=["nuisance_param"],
+            vars=["nuisance_param"],
         )
 
         # Test with positive parameter value in polynomial region (|theta| < 1)
@@ -641,7 +645,7 @@ class TestInterpolationFunction:
             nom="nominal",
             interpolationCodes=[0],  # Only one element
             positiveDefinite=False,
-            parameters=["param1", "param2"],  # Two parameters - exceeds lists!
+            vars=["param1", "param2"],  # Two parameters - exceeds lists!
         )
 
         context = {
@@ -681,7 +685,7 @@ class TestInterpolationFunction:
                 nom="nominal",
                 interpolationCodes=[99],  # Invalid code
                 positiveDefinite=False,
-                parameters=["param"],
+                vars=["param"],
             )
 
         # Test mix of valid and invalid codes
@@ -696,7 +700,7 @@ class TestInterpolationFunction:
                 nom="nominal",
                 interpolationCodes=[0, -1],  # Mix of valid and invalid
                 positiveDefinite=False,
-                parameters=["param1", "param2"],
+                vars=["param1", "param2"],
             )
 
     def test_interpolation_function_integration(self):
@@ -725,7 +729,14 @@ class TestInterpolationFunction:
         assert interp_func.high == ["high_variation"]
         assert interp_func.low == ["low_variation"]
         assert interp_func.interpolationCodes == [0]
-        assert interp_func.parameters == ["shape_param"]
+        # parameters is now a dict containing all dependencies
+        expected_params = {
+            "high_variation",
+            "low_variation",
+            "nominal_shape",
+            "shape_param",
+        }
+        assert set(interp_func.parameters.values()) == expected_params
 
         # Test evaluation
         context = {
@@ -1180,7 +1191,9 @@ class TestFunctionSet:
         func = function_set["interp1"]
         assert isinstance(func, InterpolationFunction)
         assert func.high == ["h1"]
-        assert func.parameters == ["x"]
+        # parameters is now a dict containing all dependencies
+        expected_params = {"h1", "l1", "n1", "x"}
+        assert set(func.parameters.values()) == expected_params
 
     def test_function_set_mixed_types(self):
         """Test FunctionSet with mixed function types."""
@@ -1192,7 +1205,7 @@ class TestFunctionSet:
                 "type": "interpolation",
                 "high": [],
                 "low": [],
-                "nom": [],
+                "nom": "nominal_param",
                 "interpolationCodes": [],
                 "positiveDefinite": False,
                 "vars": [],
@@ -1225,8 +1238,7 @@ class TestFunctionSet:
             {"name": "good2", "type": "generic_function", "expression": "x"},
         ]
 
-        # Should raise KeyError for missing required fields
-        with pytest.raises(KeyError, match="factors"):
+        with pytest.raises(ValidationError):
             FunctionSet(functions_config)
 
     def test_function_set_getitem_keyerror(self):
@@ -1291,6 +1303,7 @@ class TestFunctionIntegration:
             nom="nominal",
             interpolationCodes=[],
             positiveDefinite=True,
-            parameters=["param1", "param2"],
+            vars=["param1", "param2"],
         )
-        assert set(interp_func.parameters) == {"param1", "param2"}
+        # InterpolationFunction with empty high/low lists but vars should depend on nominal + vars
+        assert set(interp_func.parameters.values()) == {"nominal", "param1", "param2"}

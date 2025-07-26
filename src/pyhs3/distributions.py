@@ -10,49 +10,47 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Iterator
-from typing import Any, Generic, TypeVar, cast
+from typing import Any, Literal, TypeVar, cast
 
 import pytensor.tensor as pt
+import sympy as sp
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from pyhs3 import typing as T
 from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor
-from pyhs3.typing import distribution as TD
+from pyhs3.typing.aliases import TensorVar
 
 log = logging.getLogger(__name__)
 
 
-DistT = TypeVar("DistT", bound="Distribution[T.Distribution]")
-DistConfigT = TypeVar("DistConfigT", bound=T.Distribution)
+DistT = TypeVar("DistT", bound="Distribution")
 
 
 def process_parameter(
-    config: T.Distribution, param_key: str
-) -> tuple[str, T.TensorVar | None]:
+    config: Distribution, param_key: str
+) -> tuple[str, float | int | None]:
     """
     Process a parameter that can be either a string reference or a numeric value.
 
-    For numeric values, creates a pt.constant and generates a unique name.
-    For string values, returns the value as-is with None for the constant.
+    For numeric values, generates a unique name and returns the numeric value.
+    For string values, returns the value as-is with None for the numeric value.
 
     Args:
         config: The distribution configuration
         param_key: The parameter key to process (e.g., "mean", "sigma")
 
     Returns:
-        Tuple of (processed_name, constant_tensor_or_none)
+        Tuple of (processed_name, numeric_value_or_none)
     """
-    param_value = config[param_key]  # type: ignore[literal-required]
+    param_value = getattr(config, param_key)
     if isinstance(param_value, float | int):
         # Generate unique constant name
-        constant_name = f"constant_{config['name']}_{param_key}"
-        # Create the constant tensor
-        constant_tensor = cast(T.TensorVar, pt.constant(param_value))
-        return constant_name, constant_tensor
-    # It's a string reference - return as-is with no constant
+        constant_name = f"constant_{config.name}_{param_key}"
+        return constant_name, param_value
+    # It's a string reference - return as-is with no numeric value
     return param_value, None
 
 
-class Distribution(Generic[DistConfigT]):
+class Distribution(BaseModel):
     """
     Base class for probability distributions in HS3.
 
@@ -62,47 +60,35 @@ class Distribution(Generic[DistConfigT]):
 
     Attributes:
         name (str): Name of the distribution.
-        kind (str): Type identifier for the distribution.
+        type (str): Type identifier for the distribution.
         parameters (list[str]): List of parameter names this distribution depends on.
-        constants (dict[str, T.TensorVar]): Generated constants for numeric parameter values.
+        constants (dict[str, float | int]): Generated constants for numeric parameter values.
     """
 
-    def __init__(
-        self,
-        *,
-        name: str,
-        kind: str = "Distribution",
-        parameters: list[str] | None = None,
-    ):
-        """
-        Base class for distributions.
+    model_config = ConfigDict(serialize_by_alias=True)
 
-        Args:
-            name (str): Name of the distribution.
-            kind (str): Type identifier.
+    name: str
+    type: str
+    parameters: dict[str, str] = Field(default_factory=dict, exclude=True)
+    constants_values: dict[str, float | int] = Field(default_factory=dict, exclude=True)
 
-        Attributes:
-            name (str): Name of the distribution.
-            kind (str): Type identifier.
-            parameters (list[str]): initially empty list to be filled with parameter names.
-            constants (dict[str, pt.TensorVar]): Generated constants for numeric parameter values.
-        """
-        self.name = name
-        self.kind = kind
-        self.parameters = parameters or []
-        self.constants: dict[str, T.TensorVar] = {}
+    @property
+    def constants(self) -> dict[str, TensorVar]:
+        """Convert stored numeric constants to PyTensor constants."""
+        return {
+            name: cast(TensorVar, pt.constant(value))
+            for name, value in self.constants_values.items()
+        }
 
-    def expression(self, _: dict[str, T.TensorVar]) -> T.TensorVar:
+    def expression(self, _: dict[str, TensorVar]) -> TensorVar:
         """
         Unimplemented
         """
-        msg = f"Distribution type={self.kind} is not implemented."
+        msg = f"Distribution type={self.type} is not implemented."
         raise NotImplementedError(msg)
 
     @classmethod
-    def from_dict(
-        cls: type[Distribution[DistConfigT]], config: DistConfigT
-    ) -> Distribution[DistConfigT]:
+    def from_dict(cls, config: dict[str, Any]) -> Distribution:
         """
         Factory method to create a distribution instance from a dictionary.
 
@@ -115,7 +101,7 @@ class Distribution(Generic[DistConfigT]):
         raise NotImplementedError
 
 
-class GaussianDist(Distribution[TD.GaussianDistribution]):
+class GaussianDist(Distribution):
     r"""
     Gaussian (normal) probability distribution.
 
@@ -131,31 +117,33 @@ class GaussianDist(Distribution[TD.GaussianDistribution]):
         x (str): Input variable name.
     """
 
-    # need a way for the distribution to get the scalar function .parameter from parameterset
-    def __init__(self, *, name: str, mean: str, sigma: str, x: str):
-        """
-        Subclass of Distribution representing a Gaussian distribution.
+    type: Literal["gaussian_dist"] = "gaussian_dist"
+    mean: str | float | int
+    sigma: str | float | int
+    x: str | float | int
 
-        Args:
-            name (str): Name of the distribution.
-            mean (str): Parameter name for the mean.
-            sigma (str): Parameter name for the standard deviation.
-            x (str): Input variable name.
+    @model_validator(mode="after")
+    def process_parameters(self) -> GaussianDist:
+        """Process parameters and build the parameters dict with constants."""
+        # Process parameters and build the parameters dict
+        mean_name, mean_value = process_parameter(self, "mean")
+        sigma_name, sigma_value = process_parameter(self, "sigma")
+        x_name, x_value = process_parameter(self, "x")
 
-        Attributes:
-            name (str): Name of the distribution.
-            mean (str): Parameter name for the mean.
-            sigma (str): Parameter name for the standard deviation.
-            x (str): Input variable name.
-            parameters (list[str]): list containing mean, sigma, and x.
-        """
-        super().__init__(name=name, kind="gaussian_dist", parameters=[mean, sigma, x])
-        self.mean = mean
-        self.sigma = sigma
-        self.x = x
+        self.parameters = {"mean": mean_name, "sigma": sigma_name, "x": x_name}
+
+        # Add any generated constants
+        if mean_value is not None:
+            self.constants_values[mean_name] = mean_value
+        if sigma_value is not None:
+            self.constants_values[sigma_name] = sigma_value
+        if x_value is not None:
+            self.constants_values[x_name] = x_value
+
+        return self
 
     @classmethod
-    def from_dict(cls, config: TD.GaussianDistribution) -> GaussianDist:
+    def from_dict(cls, config: dict[str, Any]) -> GaussianDist:
         """
         Creates an instance of GaussianDist from a dictionary configuration.
 
@@ -165,32 +153,9 @@ class GaussianDist(Distribution[TD.GaussianDistribution]):
         Returns:
             GaussianDist: The created GaussianDist instance.
         """
-        # Process parameters first to get correct string names and constants
-        mean_name, mean_constant = process_parameter(config, "mean")
-        sigma_name, sigma_constant = process_parameter(config, "sigma")
-        x_name, x_constant = process_parameter(config, "x")
+        return cls(**config)
 
-        # Create instance with processed string names
-        instance = cls(
-            name=config["name"],
-            mean=mean_name,
-            sigma=sigma_name,
-            x=x_name,
-        )
-
-        # Add any generated constants to the instance
-        if mean_constant is not None:
-            instance.constants[mean_name] = mean_constant
-        if sigma_constant is not None:
-            instance.constants[sigma_name] = sigma_constant
-        if x_constant is not None:
-            instance.constants[x_name] = x_constant
-
-        return instance
-
-    def expression(
-        self, distributionsandparameters: dict[str, T.TensorVar]
-    ) -> T.TensorVar:
+    def expression(self, distributionsandparameters: dict[str, TensorVar]) -> TensorVar:
         """
         Builds a symbolic expression for the Gaussian PDF.
 
@@ -202,23 +167,23 @@ class GaussianDist(Distribution[TD.GaussianDistribution]):
         """
         # log.info("parameters: ", parameters)
         norm_const = 1.0 / (
-            pt.sqrt(2 * math.pi) * distributionsandparameters[self.sigma]
+            pt.sqrt(2 * math.pi) * distributionsandparameters[self.parameters["sigma"]]
         )
         exponent = pt.exp(
             -0.5
             * (
                 (
-                    distributionsandparameters[self.x]
-                    - distributionsandparameters[self.mean]
+                    distributionsandparameters[self.parameters["x"]]
+                    - distributionsandparameters[self.parameters["mean"]]
                 )
-                / distributionsandparameters[self.sigma]
+                / distributionsandparameters[self.parameters["sigma"]]
             )
             ** 2
         )
-        return cast(T.TensorVar, norm_const * exponent)
+        return cast(TensorVar, norm_const * exponent)
 
 
-class MixtureDist(Distribution[TD.MixtureDistribution]):
+class MixtureDist(Distribution):
     r"""
     Mixture of probability distributions.
 
@@ -237,35 +202,19 @@ class MixtureDist(Distribution[TD.MixtureDistribution]):
         extended (bool): Whether the mixture is extended (affects normalization).
     """
 
-    def __init__(
-        self, *, name: str, coefficients: list[str], extended: bool, summands: list[str]
-    ):
-        """
-        Subclass of Distribution representing a mixture of distributions
+    type: Literal["mixture_dist"] = "mixture_dist"
+    summands: list[str]
+    coefficients: list[str]
+    extended: bool = False
 
-        Args:
-            name (str): Name of the distribution.
-            coefficients (list): Coefficient parameter names.
-            extended (bool): Whether the distribution is extended.
-            summands (list): List of component distribution names.
-
-        Attributes:
-            name (str): Name of the distribution.
-            coefficients (list[str]): Coefficient parameter names.
-            extended (bool): Whether the distribution is extended.
-            summands (list[str]): List of component distribution names.
-            parameters (list[str]): List of coefficients and summands
-        """
-        super().__init__(
-            name=name, kind="mixture_dist", parameters=[*coefficients, *summands]
-        )
-        self.name = name
-        self.coefficients = coefficients
-        self.extended = extended
-        self.summands = summands
+    @model_validator(mode="after")
+    def process_parameters(self) -> MixtureDist:
+        """Build the parameters dict from coefficients and summands."""
+        self.parameters = {name: name for name in [*self.coefficients, *self.summands]}
+        return self
 
     @classmethod
-    def from_dict(cls, config: TD.MixtureDistribution) -> MixtureDist:
+    def from_dict(cls, config: dict[str, Any]) -> MixtureDist:
         """
         Creates an instance of MixtureDist from a dictionary configuration.
 
@@ -275,16 +224,9 @@ class MixtureDist(Distribution[TD.MixtureDistribution]):
         Returns:
             MixtureDist: The created MixtureDist instance.
         """
-        return cls(
-            name=config["name"],
-            coefficients=config["coefficients"],
-            extended=config["extended"],
-            summands=config["summands"],
-        )
+        return cls(**config)
 
-    def expression(
-        self, distributionsandparameters: dict[str, T.TensorVar]
-    ) -> T.TensorVar:
+    def expression(self, distributionsandparameters: dict[str, TensorVar]) -> TensorVar:
         """
         Builds a symbolic expression for the mixture distribution.
 
@@ -308,10 +250,10 @@ class MixtureDist(Distribution[TD.MixtureDistribution]):
         last_index = len(self.summands) - 1
         f_last = distributionsandparameters[self.summands[last_index]]
         mixturesum = mixturesum + (1 - coeffsum) * f_last
-        return cast(T.TensorVar, mixturesum)
+        return cast(TensorVar, mixturesum)
 
 
-class ProductDist(Distribution[TD.ProductDistribution]):
+class ProductDist(Distribution):
     r"""
     Product distribution implementation.
 
@@ -333,19 +275,17 @@ class ProductDist(Distribution[TD.ProductDistribution]):
         an elementwise product of all factor distributions.
     """
 
-    def __init__(self, *, name: str, factors: list[str]):
-        """
-        Initialize a ProductDist.
+    type: Literal["product_dist"] = "product_dist"
+    factors: list[str]
 
-        Args:
-            name: Name of the distribution
-            factors: List of component distribution names to multiply together
-        """
-        super().__init__(name=name, kind="product_dist", parameters=factors)
-        self.factors = factors
+    @model_validator(mode="after")
+    def process_parameters(self) -> ProductDist:
+        """Build the parameters dict from factors."""
+        self.parameters = {name: name for name in self.factors}
+        return self
 
     @classmethod
-    def from_dict(cls, config: TD.ProductDistribution) -> ProductDist:
+    def from_dict(cls, config: dict[str, Any]) -> ProductDist:
         """
         Creates an instance of ProductDist from a dictionary configuration.
 
@@ -355,11 +295,9 @@ class ProductDist(Distribution[TD.ProductDistribution]):
         Returns:
             ProductDist: The created ProductDist instance.
         """
-        return cls(name=config["name"], factors=config["factors"])
+        return cls(**config)
 
-    def expression(
-        self, distributionsandparameters: dict[str, T.TensorVar]
-    ) -> T.TensorVar:
+    def expression(self, distributionsandparameters: dict[str, TensorVar]) -> TensorVar:
         """
         Evaluate the product distribution.
 
@@ -370,15 +308,15 @@ class ProductDist(Distribution[TD.ProductDistribution]):
             Symbolic representation of the product PDF
         """
         if not self.factors:
-            return cast(T.TensorVar, pt.constant(1.0))
+            return cast(TensorVar, pt.constant(1.0))
 
         pt_factors = pt.stack(
             [distributionsandparameters[factor] for factor in self.factors]
         )
-        return cast(T.TensorVar, pt.prod(pt_factors, axis=0))  # type: ignore[no-untyped-call]
+        return cast(TensorVar, pt.prod(pt_factors, axis=0))  # type: ignore[no-untyped-call]
 
 
-class CrystalBallDist(Distribution[TD.CrystalBallDistribution]):
+class CrystalBallDist(Distribution):
     r"""
     Crystal Ball distribution implementation.
 
@@ -421,49 +359,34 @@ class CrystalBallDist(Distribution[TD.CrystalBallDistribution]):
         is set to zero.
     """
 
-    def __init__(
-        self,
-        *,
-        name: str,
-        alpha_L: str,
-        alpha_R: str,
-        m: str,
-        m0: str,
-        n_R: str,
-        n_L: str,
-        sigma_L: str,
-        sigma_R: str,
-    ):
-        """
-        Initialize a CrystalBallDist.
+    type: Literal["crystalball_doublesided_dist"] = "crystalball_doublesided_dist"
+    alpha_L: str
+    alpha_R: str
+    m: str
+    m0: str
+    n_L: str
+    n_R: str
+    sigma_R: str
+    sigma_L: str
 
-        Args:
-            name: Name of the distribution
-            alpha_L: Left-side transition point parameter name
-            alpha_R: Right-side transition point parameter name
-            m: Observable variable name
-            m0: Peak position parameter name
-            n_L: Left-side power law exponent parameter name
-            n_R: Right-side power law exponent parameter name
-            sigma_L: Left-side width parameter name
-            sigma_R: Right-side width parameter name
-        """
-        super().__init__(
-            name=name,
-            kind="crystal_dist",
-            parameters=[alpha_L, alpha_R, m, m0, n_R, n_L, sigma_L, sigma_R],
-        )
-        self.alpha_L = alpha_L
-        self.alpha_R = alpha_R
-        self.m = m
-        self.m0 = m0
-        self.n_R = n_R
-        self.n_L = n_L
-        self.sigma_L = sigma_L
-        self.sigma_R = sigma_R
+    @model_validator(mode="after")
+    def process_parameters(self) -> CrystalBallDist:
+        """Build the parameters dict from crystal ball parameters."""
+        params = [
+            self.alpha_L,
+            self.alpha_R,
+            self.m,
+            self.m0,
+            self.n_R,
+            self.n_L,
+            self.sigma_L,
+            self.sigma_R,
+        ]
+        self.parameters = {name: name for name in params}
+        return self
 
     @classmethod
-    def from_dict(cls, config: TD.CrystalBallDistribution) -> CrystalBallDist:
+    def from_dict(cls, config: dict[str, Any]) -> CrystalBallDist:
         """
         Create a CrystalBallDist from a dictionary configuration.
 
@@ -473,21 +396,9 @@ class CrystalBallDist(Distribution[TD.CrystalBallDistribution]):
         Returns:
             The created CrystalBallDist instance
         """
-        return cls(
-            name=config["name"],
-            alpha_L=config["alpha_L"],
-            alpha_R=config["alpha_R"],
-            m=config["m"],
-            m0=config["m0"],
-            n_R=config["n_R"],
-            n_L=config["n_L"],
-            sigma_L=config["sigma_L"],
-            sigma_R=config["sigma_R"],
-        )
+        return cls(**config)
 
-    def expression(
-        self, distributionsandparameters: dict[str, T.TensorVar]
-    ) -> T.TensorVar:
+    def expression(self, distributionsandparameters: dict[str, TensorVar]) -> TensorVar:
         """
         Evaluate the Crystal Ball distribution.
 
@@ -522,7 +433,7 @@ class CrystalBallDist(Distribution[TD.CrystalBallDistribution]):
 
         # Apply ROOT conditions
         return cast(
-            T.TensorVar,
+            TensorVar,
             pt.switch(
                 t_L < -alpha_L,
                 left_tail,
@@ -535,7 +446,7 @@ class CrystalBallDist(Distribution[TD.CrystalBallDistribution]):
         )
 
 
-class GenericDist(Distribution[TD.GenericDistribution]):
+class GenericDist(Distribution):
     """
     Generic distribution implementation.
 
@@ -566,28 +477,30 @@ class GenericDist(Distribution[TD.GenericDistribution]):
         >>> dist = GenericDist(name="complex", expression="sin(x) + log(abs(y) + 1)")
     """
 
-    def __init__(self, *, name: str, expression: str):
-        """
-        Initialize a GenericDist.
+    model_config = ConfigDict(arbitrary_types_allowed=True, serialize_by_alias=True)
 
-        Args:
-            name: Name of the distribution
-            expression: Mathematical expression string
-        """
+    type: Literal["generic_dist"] = "generic_dist"
+    expression_str: str = Field(alias="expression")
+    sympy_expr: sp.Expr = Field(default=None, exclude=True)
+    dependent_vars: list[str] = Field(default_factory=list, exclude=True)
+
+    @model_validator(mode="after")
+    def setup_expression(self) -> GenericDist:
+        """Parse and analyze the expression during initialization."""
         # Parse and analyze the expression during initialization
-        self.expression_str = expression
-        self.sympy_expr = parse_expression(expression)
+        self.sympy_expr = parse_expression(self.expression_str)
 
         # Analyze the expression to determine dependencies
         analysis = analyze_sympy_expr(self.sympy_expr)
         independent_vars = [str(symbol) for symbol in analysis["independent_vars"]]
         self.dependent_vars = [str(symbol) for symbol in analysis["dependent_vars"]]
 
-        # Initialize the parent with the independent variables as parameters
-        super().__init__(name=name, kind="generic_dist", parameters=independent_vars)
+        # Set parameters based on the analyzed expression
+        self.parameters = {var: var for var in independent_vars}
+        return self
 
     @classmethod
-    def from_dict(cls, config: TD.GenericDistribution) -> GenericDist:
+    def from_dict(cls, config: dict[str, Any]) -> GenericDist:
         """
         Create a GenericDist from a dictionary configuration.
 
@@ -597,11 +510,9 @@ class GenericDist(Distribution[TD.GenericDistribution]):
         Returns:
             The created GenericDist instance
         """
-        return cls(name=config["name"], expression=config["expression"])
+        return cls(**config)
 
-    def expression(
-        self, distributionsandparameters: dict[str, T.TensorVar]
-    ) -> T.TensorVar:
+    def expression(self, distributionsandparameters: dict[str, TensorVar]) -> TensorVar:
         """
         Evaluate the generic distribution using expression parsing.
 
@@ -615,15 +526,17 @@ class GenericDist(Distribution[TD.GenericDistribution]):
             ValueError: If the expression cannot be parsed or contains undefined variables
         """
         # Get the required variables using the parameters determined during initialization
-        variables = [distributionsandparameters[name] for name in self.parameters]
+        variables = [
+            distributionsandparameters[name] for name in self.parameters.values()
+        ]
 
         # Convert using the pre-parsed sympy expression
         result = sympy_to_pytensor(self.sympy_expr, variables)
 
-        return cast(T.TensorVar, result)
+        return cast(TensorVar, result)
 
 
-class PoissonDist(Distribution[TD.PoissonDistribution]):
+class PoissonDist(Distribution):
     r"""
     Poisson probability distribution.
 
@@ -638,27 +551,29 @@ class PoissonDist(Distribution[TD.PoissonDistribution]):
         x (str): Input variable name (discrete count).
     """
 
-    def __init__(self, *, name: str, mean: str, x: str):
-        """
-        Subclass of Distribution representing a Poisson distribution.
+    type: Literal["poisson_dist"] = "poisson_dist"
+    mean: str | float | int
+    x: str | float | int
 
-        Args:
-            name (str): Name of the distribution.
-            mean (str): Parameter name for the rate parameter.
-            x (str): Input variable name.
+    @model_validator(mode="after")
+    def process_parameters(self) -> PoissonDist:
+        """Process parameters and build the parameters dict with constants."""
+        # Process parameters and build the parameters dict
+        mean_name, mean_value = process_parameter(self, "mean")
+        x_name, x_value = process_parameter(self, "x")
 
-        Attributes:
-            name (str): Name of the distribution.
-            mean (str): Parameter name for the rate parameter.
-            x (str): Input variable name.
-            parameters (list[str]): list containing mean and x.
-        """
-        super().__init__(name=name, kind="poisson_dist", parameters=[mean, x])
-        self.mean = mean
-        self.x = x
+        self.parameters = {"mean": mean_name, "x": x_name}
+
+        # Add any generated constants
+        if mean_value is not None:
+            self.constants_values[mean_name] = mean_value
+        if x_value is not None:
+            self.constants_values[x_name] = x_value
+
+        return self
 
     @classmethod
-    def from_dict(cls, config: TD.PoissonDistribution) -> PoissonDist:
+    def from_dict(cls, config: dict[str, Any]) -> PoissonDist:
         """
         Creates an instance of PoissonDist from a dictionary configuration.
 
@@ -668,28 +583,9 @@ class PoissonDist(Distribution[TD.PoissonDistribution]):
         Returns:
             PoissonDist: The created PoissonDist instance.
         """
-        # Process parameters first to get correct string names and constants
-        mean_name, mean_constant = process_parameter(config, "mean")
-        x_name, x_constant = process_parameter(config, "x")
+        return cls(**config)
 
-        # Create instance with processed string names
-        instance = cls(
-            name=config["name"],
-            mean=mean_name,
-            x=x_name,
-        )
-
-        # Add any generated constants to the instance
-        if mean_constant is not None:
-            instance.constants[mean_name] = mean_constant
-        if x_constant is not None:
-            instance.constants[x_name] = x_constant
-
-        return instance
-
-    def expression(
-        self, distributionsandparameters: dict[str, T.TensorVar]
-    ) -> T.TensorVar:
+    def expression(self, distributionsandparameters: dict[str, TensorVar]) -> TensorVar:
         """
         Builds a symbolic expression for the Poisson PMF.
 
@@ -699,16 +595,26 @@ class PoissonDist(Distribution[TD.PoissonDistribution]):
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of the Poisson PMF.
         """
-        mean = distributionsandparameters[self.mean]
-        x = distributionsandparameters[self.x]
+        mean = distributionsandparameters[self.parameters["mean"]]
+        x = distributionsandparameters[self.parameters["x"]]
 
         # Poisson PMF: λ^k * e^(-λ) / k!
         # Using pt.gammaln for log(k!) = log(Γ(k+1))
         log_pmf = x * pt.log(mean) - mean - pt.gammaln(x + 1)
-        return cast(T.TensorVar, pt.exp(log_pmf))
+        return cast(TensorVar, pt.exp(log_pmf))
 
 
-registered_distributions: dict[str, type[Distribution[Any]]] = {
+# Define the union type for all distribution configurations
+DistributionConfig = (
+    GaussianDist
+    | MixtureDist
+    | ProductDist
+    | CrystalBallDist
+    | GenericDist
+    | PoissonDist
+)
+
+registered_distributions: dict[str, type[Distribution]] = {
     "gaussian_dist": GaussianDist,
     "mixture_dist": MixtureDist,
     "product_dist": ProductDist,
@@ -727,38 +633,36 @@ class DistributionSet:
     dictionaries and maintains a registry of available distribution types.
 
     Attributes:
-        dists (dict[str, Distribution[Any]]): Mapping from distribution names to Distribution instances.
+        dists (dict[str, Distribution]): Mapping from distribution names to Distribution instances.
     """
 
-    def __init__(self, distributions: list[T.Distribution]) -> None:
+    def __init__(self, distributions: list[dict[str, Any]]) -> None:
         """
         Collection of distributions.
 
         Args:
-            distributions (list[dict[str, str]]): List of distribution configurations.
+            distributions (list[dict[str, Any]]): List of distribution configurations.
 
         Attributes:
             dists (dict): Mapping of distribution names to Distribution objects.
         """
-        self.dists: dict[str, Distribution[Any]] = {}
+        self.dists: dict[str, Distribution] = {}
         for dist_config in distributions:
             dist_type = dist_config["type"]
-            the_dist = registered_distributions.get(dist_type, Distribution)
-            if the_dist is Distribution:
+            the_dist = registered_distributions.get(dist_type)
+            if the_dist is None:
                 msg = f"Unknown distribution type: {dist_type}"
                 raise ValueError(msg)
-            dist = the_dist.from_dict(
-                {k: v for k, v in dist_config.items() if k != "type"}
-            )
+            dist = the_dist.from_dict(dist_config)
             self.dists[dist.name] = dist
 
-    def __getitem__(self, item: str) -> Distribution[Any]:
+    def __getitem__(self, item: str) -> Distribution:
         return self.dists[item]
 
     def __contains__(self, item: str) -> bool:
         return item in self.dists
 
-    def __iter__(self) -> Iterator[Distribution[Any]]:
+    def __iter__(self) -> Iterator[Distribution]:
         return iter(self.dists.values())
 
     def __len__(self) -> int:

@@ -33,7 +33,7 @@ class TestProductDist:
         dist = ProductDist(name="test_product", factors=["factor1", "factor2"])
         assert dist.name == "test_product"
         assert dist.factors == ["factor1", "factor2"]
-        assert dist.parameters == ["factor1", "factor2"]
+        assert list(dist.parameters.values()) == ["factor1", "factor2"]
 
     def test_product_dist_from_dict(self):
         """Test ProductDist can be created from dictionary."""
@@ -234,7 +234,7 @@ class TestPoissonDist:
         assert dist.name == "test_poisson"
         assert dist.mean == "lambda_param"
         assert dist.x == "count_var"
-        assert dist.parameters == ["lambda_param", "count_var"]
+        assert list(dist.parameters.values()) == ["lambda_param", "count_var"]
 
     def test_poisson_dist_from_dict(self):
         """Test PoissonDist can be created from dictionary."""
@@ -488,7 +488,7 @@ class TestNumericParameters:
             "constant_numeric_gauss_sigma",
             "constant_numeric_gauss_x",
         ]
-        assert set(dist.parameters) == set(expected_params)
+        assert set(dist.parameters.values()) == set(expected_params)
 
         # All constants should be created
         assert len(dist.constants) == 3
@@ -512,7 +512,7 @@ class TestNumericParameters:
         assert dist.x == "obs_var"
 
         # String references and constants in parameters
-        assert set(dist.parameters) == {
+        assert set(dist.parameters.values()) == {
             "mu_param",
             "obs_var",
             "constant_mixed_gauss_sigma",

@@ -21,11 +21,12 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from pyhs3 import typing as T
+import pyhs3.typing as T
 from pyhs3.distributions import DistributionSet
 from pyhs3.domains import Domain, DomainSet
 from pyhs3.functions import FunctionSet
 from pyhs3.parameter_points import ParameterCollection, ParameterSet
+from pyhs3.typing.aliases import TensorVar
 from pyhs3.typing_compat import TypeAlias
 
 log = logging.getLogger(__name__)
@@ -174,7 +175,7 @@ class Model:
         """
         self.parameters = {}
         self.parameterset = parameterset
-        self.functions: dict[str, T.TensorVar] = {}
+        self.functions: dict[str, TensorVar] = {}
         self.mode = mode
         self._compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]] = {}
 
@@ -185,7 +186,7 @@ class Model:
                 parameter.name, domain_bounds, pt.scalar
             )
 
-        self.distributions: dict[str, T.TensorVar] = {}
+        self.distributions: dict[str, TensorVar] = {}
 
         # Build dependency graph with proper entity identification
         self._build_dependency_graph(functions, distributions, progress)
@@ -209,7 +210,7 @@ class Model:
         # Build entity type mapping for O(1) lookup
         entity_types: dict[str, str] = {}
         # Build constants mapping for O(1) lookup
-        constants_map: dict[str, T.TensorVar] = {}
+        constants_map: dict[str, TensorVar] = {}
 
         # Map all parameter names
         for param in self.parameterset.parameters:
@@ -512,8 +513,8 @@ class Model:
 
 
 def create_bounded_tensor(
-    name: str, domain: Axis, kind: Callable[..., T.TensorVar] = pt.scalar
-) -> T.TensorVar:
+    name: str, domain: Axis, kind: Callable[..., TensorVar] = pt.scalar
+) -> TensorVar:
     """
     Creates a tensor variable with optional domain constraints.
 
@@ -548,4 +549,4 @@ def create_bounded_tensor(
 
     clipped = pt.clip(tensor, min_val, max_val)
     clipped.name = tensor.name  # Preserve the original name
-    return cast(T.TensorVar, clipped)
+    return cast(TensorVar, clipped)

@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import json
 import logging
+import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import TypeVar, cast
+from typing import Any, TypeAlias, TypeVar, cast
 
 import numpy as np
 import numpy.typing as npt
 import pytensor.tensor as pt
 import rustworkx as rx
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from pytensor.compile.function import function
 from pytensor.graph.basic import applys_between, graph_inputs
 from rich.progress import (
@@ -21,13 +24,12 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-import pyhs3.typing as T
-from pyhs3.distributions import DistributionSet
-from pyhs3.domains import Domain, DomainSet
-from pyhs3.functions import FunctionSet
+from pyhs3.distributions import DistributionSet, DistributionType
+from pyhs3.domains import Domain, DomainSet, DomainType
+from pyhs3.functions import FunctionSet, FunctionType
+from pyhs3.metadata import Metadata
 from pyhs3.parameter_points import ParameterCollection, ParameterSet
 from pyhs3.typing.aliases import TensorVar
-from pyhs3.typing_compat import TypeAlias
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +38,7 @@ TDefault = TypeVar("TDefault")
 Axis: TypeAlias = tuple[float | None, float | None]
 
 
-class Workspace:
+class Workspace(BaseModel):
     """
     Workspace for managing HS3 model specifications.
 
@@ -45,32 +47,71 @@ class Workspace:
     objects with specific parameter values and domain constraints.
 
     Attributes:
+        metadata: Required metadata containing HS3 version and optional attribution
+        distributions: List of distribution configurations
+        functions: List of function configurations
+        domains: List of domain configurations
+        parameter_points: List of parameter point configurations
+        data: List of data configurations
+        likelihoods: List of likelihood configurations
+        analyses: List of analysis configurations
+        misc: Arbitrary user-created information
         parameter_collection (ParameterCollection): Named parameter sets.
         distribution_set (DistributionSet): Available distributions.
         domain_collection (DomainSet): Domain constraints for parameters.
         function_set (FunctionSet): Available functions for parameter computation.
     """
 
-    def __init__(self, spec: T.HS3Spec):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    # Required field
+    metadata: Metadata
+
+    # Optional fields using discriminated unions
+    distributions: list[DistributionType] | None = Field(default_factory=list)
+    functions: list[FunctionType] | None = Field(default_factory=list)
+    domains: list[DomainType] | None = Field(default_factory=list)
+    parameter_points: list[ParameterSet] | None = Field(default_factory=list)
+    data: list[dict[str, Any]] | None = Field(default_factory=list)
+    likelihoods: list[dict[str, Any]] | None = Field(default_factory=list)
+    analyses: list[dict[str, Any]] | None = Field(default_factory=list)
+    misc: dict[str, Any] | None = Field(default_factory=dict)
+
+    # Private attributes (computed in model_post_init)
+    _parameter_collection: ParameterCollection = PrivateAttr()
+    _distribution_set: DistributionSet = PrivateAttr()
+    _domain_collection: DomainSet = PrivateAttr()
+    _function_set: FunctionSet = PrivateAttr()
+
+    def model_post_init(self, __context: Any, /) -> None:
+        """Initialize computed collections after Pydantic validation."""
+        # Now collections accept Pydantic objects directly
+        self._parameter_collection = ParameterCollection(self.parameter_points or [])
+        self._domain_collection = DomainSet(self.domains or [])
+
+        # For distribution_set and function_set, we now have the Pydantic objects directly
+        # But the sets still expect dicts, so convert back for now
+        distributions_dicts = [d.model_dump() for d in (self.distributions or [])]
+        functions_dicts = [f.model_dump() for f in (self.functions or [])]
+
+        self._distribution_set = DistributionSet(distributions_dicts)
+        self._function_set = FunctionSet(functions_dicts)
+
+    @classmethod
+    def load(cls, path: str | os.PathLike[str]) -> Workspace:
         """
-        Manages the overall structure of the model including parameters, domains, and distributions.
+        Load workspace from a JSON file.
 
         Args:
-            spec (dict): A dictionary containing model definitions including parameter points, distributions,
-                and domains.
+            path: Path to the JSON file containing the HS3 specification
 
-        Attributes:
-            parameter_collection (ParameterCollection): Set of named parameter points.
-            distribution_set (DistributionSet): All distributions used in the workspace.
-            domain_collection (DomainSet): Domain definitions for all parameters.
+        Returns:
+            Workspace: The loaded workspace instance
         """
-
-        self.parameter_collection = ParameterCollection(
-            spec.get("parameter_points", [])
-        )
-        self.distribution_set = DistributionSet(spec.get("distributions", []))
-        self.domain_collection = DomainSet(spec.get("domains", []))
-        self.function_set = FunctionSet(spec.get("functions", []))
+        path_obj = Path(path)
+        with path_obj.open("r", encoding="utf-8") as f:
+            spec_dict = json.load(f)
+        return cls(**spec_dict)
 
     def model(
         self,
@@ -99,12 +140,12 @@ class Workspace:
         """
 
         selected_domain = (
-            domain if isinstance(domain, Domain) else self.domain_collection[domain]
+            domain if isinstance(domain, Domain) else self._domain_collection[domain]
         )
         parameterset = (
             parameter_set
             if isinstance(parameter_set, ParameterSet)
-            else self.parameter_collection[parameter_set]
+            else self._parameter_collection[parameter_set]
         )
 
         # Verify that domain axis names are a subset of parameters (not all parameters need bounds)
@@ -117,9 +158,9 @@ class Workspace:
 
         return Model(
             parameterset=parameterset,
-            distributions=self.distribution_set,
+            distributions=self._distribution_set,
             domain=selected_domain,
-            functions=self.function_set,
+            functions=self._function_set,
             progress=progress,
             mode=mode,
         )

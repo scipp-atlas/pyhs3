@@ -11,6 +11,7 @@ import pyhs3 as hs3
 def simple_workspace():
     """Create a simple workspace for testing Model functionality."""
     workspace_data = {
+        "metadata": {"hs3_version": "0.2"},
         "distributions": [
             {
                 "name": "gauss",
@@ -42,7 +43,7 @@ def simple_workspace():
             }
         ],
     }
-    return hs3.Workspace(workspace_data)
+    return hs3.Workspace(**workspace_data)
 
 
 class TestModelModes:

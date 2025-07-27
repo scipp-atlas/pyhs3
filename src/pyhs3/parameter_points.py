@@ -130,16 +130,15 @@ class ParameterCollection:
         parameter_sets: Mapping from parameter set names to ParameterSet instances.
     """
 
-    def __init__(self, parameter_points: list[dict[str, Any]]) -> None:
+    def __init__(self, parameter_points: list[ParameterSet]) -> None:
         """
         Collection of parameter sets that define parameter values.
 
         Args:
-            parameter_points: List of parameter set configurations from HS3 spec (called parameter_points in spec)
+            parameter_points: List of ParameterSet objects
         """
         self.parameter_sets: dict[str, ParameterSet] = {}
-        for set_config in parameter_points:
-            param_set = ParameterSet.from_dict(set_config)
+        for param_set in parameter_points:
             self.parameter_sets[param_set.name] = param_set
 
     def __getitem__(self, item: str | int) -> ParameterSet:

@@ -259,10 +259,10 @@ class TestSumFunction:
             ],
             "distributions": [],
             "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
+        ws = Workspace(**test_data)
         model = ws.model(domain="test_domain", parameter_set="test_params")
 
         # Verify the function was created
@@ -1063,10 +1063,10 @@ class TestProcessNormalizationFunction:
             ],
             "distributions": [],
             "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
+        ws = Workspace(**test_data)
         model = ws.model(domain="test_domain", parameter_set="test_params")
 
         # Verify the function was created

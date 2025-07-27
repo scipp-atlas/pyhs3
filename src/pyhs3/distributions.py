@@ -10,11 +10,11 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Iterator
-from typing import Any, Literal, TypeVar, cast
+from typing import Annotated, Any, Literal, TypeVar, cast
 
 import pytensor.tensor as pt
 import sympy as sp
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor
 from pyhs3.typing.aliases import TensorVar
@@ -69,15 +69,20 @@ class Distribution(BaseModel):
 
     name: str
     type: str
-    parameters: dict[str, str] = Field(default_factory=dict, exclude=True)
-    constants_values: dict[str, float | int] = Field(default_factory=dict, exclude=True)
+    _parameters: dict[str, str] = PrivateAttr(default_factory=dict)
+    _constants_values: dict[str, float | int] = PrivateAttr(default_factory=dict)
+
+    @property
+    def parameters(self) -> dict[str, str]:
+        """Access to parameter mapping."""
+        return self._parameters
 
     @property
     def constants(self) -> dict[str, TensorVar]:
         """Convert stored numeric constants to PyTensor constants."""
         return {
             name: cast(TensorVar, pt.constant(value))
-            for name, value in self.constants_values.items()
+            for name, value in self._constants_values.items()
         }
 
     def expression(self, _: dict[str, TensorVar]) -> TensorVar:
@@ -130,15 +135,15 @@ class GaussianDist(Distribution):
         sigma_name, sigma_value = process_parameter(self, "sigma")
         x_name, x_value = process_parameter(self, "x")
 
-        self.parameters = {"mean": mean_name, "sigma": sigma_name, "x": x_name}
+        self._parameters = {"mean": mean_name, "sigma": sigma_name, "x": x_name}
 
         # Add any generated constants
         if mean_value is not None:
-            self.constants_values[mean_name] = mean_value
+            self._constants_values[mean_name] = mean_value
         if sigma_value is not None:
-            self.constants_values[sigma_name] = sigma_value
+            self._constants_values[sigma_name] = sigma_value
         if x_value is not None:
-            self.constants_values[x_name] = x_value
+            self._constants_values[x_name] = x_value
 
         return self
 
@@ -167,16 +172,16 @@ class GaussianDist(Distribution):
         """
         # log.info("parameters: ", parameters)
         norm_const = 1.0 / (
-            pt.sqrt(2 * math.pi) * distributionsandparameters[self.parameters["sigma"]]
+            pt.sqrt(2 * math.pi) * distributionsandparameters[self._parameters["sigma"]]
         )
         exponent = pt.exp(
             -0.5
             * (
                 (
-                    distributionsandparameters[self.parameters["x"]]
-                    - distributionsandparameters[self.parameters["mean"]]
+                    distributionsandparameters[self._parameters["x"]]
+                    - distributionsandparameters[self._parameters["mean"]]
                 )
-                / distributionsandparameters[self.parameters["sigma"]]
+                / distributionsandparameters[self._parameters["sigma"]]
             )
             ** 2
         )
@@ -210,7 +215,7 @@ class MixtureDist(Distribution):
     @model_validator(mode="after")
     def process_parameters(self) -> MixtureDist:
         """Build the parameters dict from coefficients and summands."""
-        self.parameters = {name: name for name in [*self.coefficients, *self.summands]}
+        self._parameters = {name: name for name in [*self.coefficients, *self.summands]}
         return self
 
     @classmethod
@@ -281,7 +286,7 @@ class ProductDist(Distribution):
     @model_validator(mode="after")
     def process_parameters(self) -> ProductDist:
         """Build the parameters dict from factors."""
-        self.parameters = {name: name for name in self.factors}
+        self._parameters = {name: name for name in self.factors}
         return self
 
     @classmethod
@@ -382,7 +387,7 @@ class CrystalBallDist(Distribution):
             self.sigma_L,
             self.sigma_R,
         ]
-        self.parameters = {name: name for name in params}
+        self._parameters = {name: name for name in params}
         return self
 
     @classmethod
@@ -481,22 +486,22 @@ class GenericDist(Distribution):
 
     type: Literal["generic_dist"] = "generic_dist"
     expression_str: str = Field(alias="expression")
-    sympy_expr: sp.Expr = Field(default=None, exclude=True)
-    dependent_vars: list[str] = Field(default_factory=list, exclude=True)
+    _sympy_expr: sp.Expr = PrivateAttr(default=None)
+    _dependent_vars: list[str] = PrivateAttr(default_factory=list)
 
     @model_validator(mode="after")
     def setup_expression(self) -> GenericDist:
         """Parse and analyze the expression during initialization."""
         # Parse and analyze the expression during initialization
-        self.sympy_expr = parse_expression(self.expression_str)
+        self._sympy_expr = parse_expression(self.expression_str)
 
         # Analyze the expression to determine dependencies
-        analysis = analyze_sympy_expr(self.sympy_expr)
+        analysis = analyze_sympy_expr(self._sympy_expr)
         independent_vars = [str(symbol) for symbol in analysis["independent_vars"]]
-        self.dependent_vars = [str(symbol) for symbol in analysis["dependent_vars"]]
+        self._dependent_vars = [str(symbol) for symbol in analysis["dependent_vars"]]
 
         # Set parameters based on the analyzed expression
-        self.parameters = {var: var for var in independent_vars}
+        self._parameters = {var: var for var in independent_vars}
         return self
 
     @classmethod
@@ -527,11 +532,11 @@ class GenericDist(Distribution):
         """
         # Get the required variables using the parameters determined during initialization
         variables = [
-            distributionsandparameters[name] for name in self.parameters.values()
+            distributionsandparameters[name] for name in self._parameters.values()
         ]
 
         # Convert using the pre-parsed sympy expression
-        result = sympy_to_pytensor(self.sympy_expr, variables)
+        result = sympy_to_pytensor(self._sympy_expr, variables)
 
         return cast(TensorVar, result)
 
@@ -562,13 +567,13 @@ class PoissonDist(Distribution):
         mean_name, mean_value = process_parameter(self, "mean")
         x_name, x_value = process_parameter(self, "x")
 
-        self.parameters = {"mean": mean_name, "x": x_name}
+        self._parameters = {"mean": mean_name, "x": x_name}
 
         # Add any generated constants
         if mean_value is not None:
-            self.constants_values[mean_name] = mean_value
+            self._constants_values[mean_name] = mean_value
         if x_value is not None:
-            self.constants_values[x_name] = x_value
+            self._constants_values[x_name] = x_value
 
         return self
 
@@ -595,8 +600,8 @@ class PoissonDist(Distribution):
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of the Poisson PMF.
         """
-        mean = distributionsandparameters[self.parameters["mean"]]
-        x = distributionsandparameters[self.parameters["x"]]
+        mean = distributionsandparameters[self._parameters["mean"]]
+        x = distributionsandparameters[self._parameters["x"]]
 
         # Poisson PMF: λ^k * e^(-λ) / k!
         # Using pt.gammaln for log(k!) = log(Γ(k+1))
@@ -667,3 +672,15 @@ class DistributionSet:
 
     def __len__(self) -> int:
         return len(self.dists)
+
+
+# Type alias for all distribution types using discriminated union
+DistributionType = Annotated[
+    GaussianDist
+    | MixtureDist
+    | ProductDist
+    | CrystalBallDist
+    | GenericDist
+    | PoissonDist,
+    Field(discriminator="type"),
+]

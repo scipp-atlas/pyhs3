@@ -396,10 +396,10 @@ class TestPoissonDist:
             ],
             "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
             "functions": [],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
+        ws = Workspace(**test_data)
         model = ws.model(domain="test_domain", parameter_set="test_params")
 
         # Verify the distribution was created
@@ -545,11 +545,11 @@ class TestNumericParameters:
             ],
             "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
             "functions": [],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
         # This should not raise "Unknown entity referenced: '1.0'" error
-        ws = Workspace(test_data)
+        ws = Workspace(**test_data)
         model = ws.model(domain="test_domain", parameter_set="test_params")
 
         # Verify the model was created successfully
@@ -585,10 +585,10 @@ class TestDependencyGraphErrors:
             ],
             "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
             "functions": [],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
+        ws = Workspace(**test_data)
 
         # This should raise ValueError with specific message about unknown entity
         with pytest.raises(
@@ -619,10 +619,10 @@ class TestDependencyGraphErrors:
             ],
             "distributions": [],
             "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
+        ws = Workspace(**test_data)
 
         # This should raise ValueError about circular dependency
         with pytest.raises(ValueError, match="Circular dependency detected in model"):
@@ -658,10 +658,10 @@ class TestDependencyGraphErrors:
                 }
             ],
             "functions": [],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
+        ws = Workspace(**test_data)
         model = ws.model(domain="test_domain", parameter_set="test_params")
 
         # Verify the parameter is bounded
@@ -690,11 +690,11 @@ class TestCollectionMethods:
             "distributions": [],
             "domains": [],
             "functions": [],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
-        param_collection = ws.parameter_collection
+        ws = Workspace(**test_data)
+        param_collection = ws._parameter_collection
 
         # Test __len__
         assert len(param_collection) == 2
@@ -732,11 +732,11 @@ class TestCollectionMethods:
             "distributions": [],
             "domains": [],
             "functions": [],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
-        param_set = ws.parameter_collection["test_params"]
+        ws = Workspace(**test_data)
+        param_set = ws._parameter_collection["test_params"]
 
         # Test __len__
         assert len(param_set) == 2
@@ -776,11 +776,11 @@ class TestCollectionMethods:
                 },
             ],
             "functions": [],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
-        domain_collection = ws.domain_collection
+        ws = Workspace(**test_data)
+        domain_collection = ws._domain_collection
 
         # Test __len__
         assert len(domain_collection) == 2
@@ -817,11 +817,11 @@ class TestCollectionMethods:
                 }
             ],
             "functions": [],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
-        domain_set = ws.domain_collection["test_domain"]
+        ws = Workspace(**test_data)
+        domain_set = ws._domain_collection["test_domain"]
 
         # Test __len__
         assert len(domain_set) == 2
@@ -870,10 +870,10 @@ class TestCrossDependencies:
                 }
             ],
             "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
+        ws = Workspace(**test_data)
         model = ws.model(domain="test_domain", parameter_set="test_params")
 
         # Verify both function and distribution were created
@@ -910,10 +910,10 @@ class TestCrossDependencies:
                 }
             ],
             "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
+        ws = Workspace(**test_data)
         model = ws.model(domain="test_domain", parameter_set="test_params")
 
         # Verify both distribution and function were created
@@ -962,10 +962,10 @@ class TestCrossDependencies:
                 },
             ],
             "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
+        ws = Workspace(**test_data)
         model = ws.model(domain="test_domain", parameter_set="test_params")
 
         # Verify all entities were created

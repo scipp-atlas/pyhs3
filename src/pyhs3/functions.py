@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
-from typing import Any, Literal, TypeVar, cast
+from typing import Annotated, Any, Literal, TypeVar, cast
 
 import pytensor.tensor as pt
 import sympy as sp
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from pyhs3.exceptions import UnknownInterpolationCodeError
 from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor
@@ -32,15 +32,20 @@ class Function(BaseModel):
 
     name: str
     type: str
-    parameters: dict[str, str] = Field(default_factory=dict, exclude=True)
-    constants_values: dict[str, float | int] = Field(default_factory=dict, exclude=True)
+    _parameters: dict[str, str] = PrivateAttr(default_factory=dict)
+    _constants_values: dict[str, float | int] = PrivateAttr(default_factory=dict)
+
+    @property
+    def parameters(self) -> dict[str, str]:
+        """Access to parameter mapping."""
+        return self._parameters
 
     @property
     def constants(self) -> dict[str, TensorVar]:
         """Convert stored numeric constants to PyTensor constants."""
         return {
             name: cast(TensorVar, pt.constant(value))
-            for name, value in self.constants_values.items()
+            for name, value in self._constants_values.items()
         }
 
     def expression(self, _: dict[str, TensorVar]) -> TensorVar:
@@ -71,7 +76,7 @@ class SumFunction(Function):
     @model_validator(mode="after")
     def process_parameters(self) -> SumFunction:
         """Build the parameters dict from summands."""
-        self.parameters = {name: name for name in self.summands}
+        self._parameters = {name: name for name in self.summands}
         return self
 
     @classmethod
@@ -108,7 +113,7 @@ class ProductFunction(Function):
     @model_validator(mode="after")
     def process_parameters(self) -> ProductFunction:
         """Build the parameters dict from factors."""
-        self.parameters = {name: name for name in self.factors}
+        self._parameters = {name: name for name in self.factors}
         return self
 
     @classmethod
@@ -160,22 +165,22 @@ class GenericFunction(Function):
 
     type: Literal["generic_function"] = "generic_function"
     expression_str: str = Field(alias="expression")
-    sympy_expr: sp.Expr = Field(default=None, exclude=True)
-    dependent_vars: list[str] = Field(default_factory=list, exclude=True)
+    _sympy_expr: sp.Expr = PrivateAttr(default=None)
+    _dependent_vars: list[str] = PrivateAttr(default_factory=list)
 
     @model_validator(mode="after")
     def setup_expression(self) -> GenericFunction:
         """Parse and analyze the expression during initialization."""
         # Parse and analyze the expression during initialization
-        self.sympy_expr = parse_expression(self.expression_str)
+        self._sympy_expr = parse_expression(self.expression_str)
 
         # Analyze the expression to determine dependencies
-        analysis = analyze_sympy_expr(self.sympy_expr)
+        analysis = analyze_sympy_expr(self._sympy_expr)
         independent_vars = [str(symbol) for symbol in analysis["independent_vars"]]
-        self.dependent_vars = [str(symbol) for symbol in analysis["dependent_vars"]]
+        self._dependent_vars = [str(symbol) for symbol in analysis["dependent_vars"]]
 
         # Set parameters based on the analyzed expression
-        self.parameters = {var: var for var in independent_vars}
+        self._parameters = {var: var for var in independent_vars}
         return self
 
     @classmethod
@@ -194,10 +199,10 @@ class GenericFunction(Function):
             TensorVar: PyTensor expression representing the parsed mathematical expression.
         """
         # Get required variables using the parameters determined during initialization
-        variables = [context[name] for name in self.parameters.values()]
+        variables = [context[name] for name in self._parameters.values()]
 
         # Convert using the pre-parsed sympy expression
-        return sympy_to_pytensor(self.sympy_expr, variables)
+        return sympy_to_pytensor(self._sympy_expr, variables)
 
 
 class InterpolationFunction(Function):
@@ -252,7 +257,7 @@ class InterpolationFunction(Function):
 
         # Build parameters dict - all high, low, nom, and vars parameters
         all_params = [*self.high, *self.low, self.nom, *self.vars]
-        self.parameters = {name: name for name in all_params}
+        self._parameters = {name: name for name in all_params}
         return self
 
     @classmethod
@@ -567,7 +572,7 @@ class ProcessNormalizationFunction(Function):
         """Build the parameters dict from all parameter lists."""
         # All parameters this function depends on
         all_params = [*self.thetaList, *self.asymmThetaList, *self.otherFactorList]
-        self.parameters = {name: name for name in all_params}
+        self._parameters = {name: name for name in all_params}
         return self
 
     @classmethod
@@ -708,3 +713,14 @@ class FunctionSet:
 
     def __len__(self) -> int:
         return len(self.funcs)
+
+
+# Type alias for all function types using discriminated union
+FunctionType = Annotated[
+    SumFunction
+    | ProductFunction
+    | GenericFunction
+    | InterpolationFunction
+    | ProcessNormalizationFunction,
+    Field(discriminator="type"),
+]

@@ -8,9 +8,9 @@ axes and product domains for defining parameter spaces and integration regions.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 
 class Axis(BaseModel):
@@ -111,12 +111,12 @@ class ProductDomain(Domain):
 
     type: Literal["product_domain"] = "product_domain"
     axes: list[Axis]
-    axes_map: dict[str, Axis] = Field(default_factory=dict, exclude=True)
+    _axes_map: dict[str, Axis] = PrivateAttr(default_factory=dict)
 
     @model_validator(mode="after")
     def initialize_axes_map(self) -> ProductDomain:
         """Initialize the internal axes mapping for fast lookup."""
-        self.axes_map = {axis.name: axis for axis in self.axes}
+        self._axes_map = {axis.name: axis for axis in self.axes}
         return self
 
     @model_validator(mode="after")
@@ -167,7 +167,7 @@ class ProductDomain(Domain):
 
     def __contains__(self, axis_name: str) -> bool:
         """Check if an axis with the given name exists in this domain."""
-        return axis_name in self.axes_map
+        return axis_name in self._axes_map
 
     def get(
         self, axis_name: str, default: tuple[float | None, float | None] = (None, None)
@@ -182,12 +182,12 @@ class ProductDomain(Domain):
         Returns:
             Tuple of (min, max) bounds if axis exists, otherwise default.
         """
-        axis = self.axes_map.get(axis_name)
+        axis = self._axes_map.get(axis_name)
         return (axis.min, axis.max) if axis is not None else default
 
     def __getitem__(self, axis_name: str) -> tuple[float | None, float | None]:
         """Get axis bounds for a parameter name (dict-like access)."""
-        axis = self.axes_map.get(axis_name)
+        axis = self._axes_map.get(axis_name)
         if axis is not None:
             return (axis.min, axis.max)
         msg = f"No axis named '{axis_name}' found in domain '{self.name}'"
@@ -216,21 +216,15 @@ class DomainSet:
         domains: Mapping from domain names to Domain instances.
     """
 
-    def __init__(self, domains: list[dict[str, Any]]) -> None:
+    def __init__(self, domains: list[DomainType]) -> None:
         """
         Collection of domains that define parameter spaces.
 
         Args:
-            domains: List of domain configurations from HS3 spec
+            domains: List of DomainType objects
         """
         self.domains: dict[str, Domain] = {}
-        for domain_config in domains:
-            domain_type = domain_config.get("type", "product_domain")
-            domain_class = registered_domains.get(domain_type)
-            if domain_class is None:
-                msg = f"Unknown domain type: {domain_type}"
-                raise ValueError(msg)
-            domain = domain_class.from_dict(domain_config)
+        for domain in domains:
             self.domains[domain.name] = domain
 
     def __getitem__(self, item: str | int) -> Domain:
@@ -251,3 +245,8 @@ class DomainSet:
 
     def __len__(self) -> int:
         return len(self.domains)
+
+
+# Type alias for all domain types using discriminated union
+# Currently only ProductDomain exists, but this allows for future domain types
+DomainType = Annotated[ProductDomain, Field(discriminator="type")]

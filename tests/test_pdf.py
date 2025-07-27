@@ -13,30 +13,30 @@ from pyhs3.core import create_bounded_tensor
 
 def test_nondefault_points_domains_access(datadir):
     workspace = Workspace(
-        json.loads(datadir.joinpath("nondefault_points_domains.json").read_text())
+        **json.loads(datadir.joinpath("nondefault_points_domains.json").read_text())
     )
 
-    assert workspace.parameter_collection[0].name == "default_values"
-    assert workspace.parameter_collection[1].name == "nondefault_values"
-    assert workspace.parameter_collection["default_values"].name == "default_values"
+    assert workspace._parameter_collection[0].name == "default_values"
+    assert workspace._parameter_collection[1].name == "nondefault_values"
+    assert workspace._parameter_collection["default_values"].name == "default_values"
     assert (
-        workspace.parameter_collection["nondefault_values"].name == "nondefault_values"
+        workspace._parameter_collection["nondefault_values"].name == "nondefault_values"
     )
 
-    assert workspace.domain_collection[0].name == "default_domain"
-    assert workspace.domain_collection[1].name == "nondefault_domain"
-    assert workspace.domain_collection["default_domain"].name == "default_domain"
-    assert workspace.domain_collection["nondefault_domain"].name == "nondefault_domain"
+    assert workspace._domain_collection[0].name == "default_domain"
+    assert workspace._domain_collection[1].name == "nondefault_domain"
+    assert workspace._domain_collection["default_domain"].name == "default_domain"
+    assert workspace._domain_collection["nondefault_domain"].name == "nondefault_domain"
 
 
 def test_rf501_simultaneouspdf(datadir):
     workspace = Workspace(
-        json.loads(datadir.joinpath("rf501_simultaneouspdf.json").read_text())
+        **json.loads(datadir.joinpath("rf501_simultaneouspdf.json").read_text())
     )
 
     model = workspace.model(
-        parameter_set=workspace.parameter_collection["default_values"],
-        domain=workspace.domain_collection["default_domain"],
+        parameter_set=workspace._parameter_collection["default_values"],
+        domain=workspace._domain_collection["default_domain"],
     )
 
     physicspdfval = model.pdf(
@@ -63,15 +63,15 @@ def test_rf501_simultaneouspdf(datadir):
 
 def test_rf501_manual(datadir):
     workspace = Workspace(
-        json.loads(datadir.joinpath("rf501_simultaneouspdf.json").read_text())
+        **json.loads(datadir.joinpath("rf501_simultaneouspdf.json").read_text())
     )
 
     model = workspace.model(
-        parameter_set=workspace.parameter_collection["default_values"],
-        domain=workspace.domain_collection["default_domain"],
+        parameter_set=workspace._parameter_collection["default_values"],
+        domain=workspace._domain_collection["default_domain"],
     )
 
-    scalarranges = workspace.domain_collection["default_domain"]
+    scalarranges = workspace._domain_collection["default_domain"]
 
     f = create_bounded_tensor("f", scalarranges["f"])
     f_ctl = create_bounded_tensor("f_ctl", scalarranges["f_ctl"])
@@ -169,14 +169,14 @@ def test_rf501_manual(datadir):
 def test_combine_long_exercise_logpdf_evaluation(datadir):
     """Test logPDF evaluation for pdf_binsignal_region from combine long exercise."""
     workspace = Workspace(
-        json.loads(
+        **json.loads(
             datadir.joinpath("combine_long_exercise_part1_nosys.json").read_text()
         )
     )
 
     model = workspace.model(
-        parameter_set=workspace.parameter_collection["default_values"],
-        domain=workspace.domain_collection["default_domain"],
+        parameter_set=workspace._parameter_collection["default_values"],
+        domain=workspace._domain_collection["default_domain"],
     )
 
     # Get default parameter values

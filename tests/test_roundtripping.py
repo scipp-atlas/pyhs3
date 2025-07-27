@@ -75,8 +75,8 @@ class TestDistributionRoundtripping:
         assert serialized == config
 
         # Check that constants were generated correctly
-        assert len(dist1.constants_values) == 2
-        assert len(dist2.constants_values) == 2
+        assert len(dist1._constants_values) == 2
+        assert len(dist2._constants_values) == 2
 
     def test_poisson_dist_roundtrip(self):
         """Test PoissonDist roundtripping."""

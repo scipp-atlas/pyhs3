@@ -187,11 +187,11 @@ The workspace follows a hierarchical structure:
            +parameters: list[ParameterPoint]
        }
 
-       Workspace ||--|| Metadata : contains
-       Workspace ||--o{ Distribution : contains
-       Workspace ||--o{ Function : contains
-       Workspace ||--o{ Domain : contains
-       Workspace ||--o{ ParameterSet : contains
+       Workspace --> Metadata : contains
+       Workspace --> Distribution : contains
+       Workspace --> Function : contains
+       Workspace --> Domain : contains
+       Workspace --> ParameterSet : contains
 
 Creating Models from Workspaces
 ------------------------------

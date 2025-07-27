@@ -68,6 +68,9 @@ LOGGING_CONFIG = {
 
 
 def setup() -> None:
+    """
+    Initialize logging based on the configuration dictionary in this file.
+    """
     logging.config.dictConfig(LOGGING_CONFIG)
 
 

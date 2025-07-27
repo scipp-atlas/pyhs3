@@ -11,11 +11,22 @@ Overview
 PyHS3 follows a hierarchical structure:
 
 .. mermaid::
+   :config: {"theme": "forest", "darkMode": "true"}
+
+   %%{
+     init: {
+       'theme': 'forest',
+       'themeVariables': {
+         'primaryColor': '#fefefe',
+         'lineColor': '#aaa'
+       }
+     }
+   }%%
 
    flowchart TD
-       A[HS3 JSON File] <--> B[Workspace<br/>container]
-       B --> C[Model<br/>computational representation]
-       C --> D[PDF Evaluation / Analysis]
+       A[HS3 JSON File] <--> B["**Workspace** <br>container"]
+       B --> C["**Model** <br>computational representation"]
+       C --> D["PDF Evaluation / Analysis"]
 
 The data flows from JSON specification → Workspace → Model → Results, with each level adding computational capabilities.
 
@@ -114,11 +125,28 @@ Dependency Resolution
 PyHS3 automatically builds a dependency graph to determine evaluation order:
 
 .. mermaid::
+   :config: {"theme": "forest", "darkMode": "true"}
+
+   %%{
+     init: {
+       'theme': 'forest',
+       'themeVariables': {
+         'primaryColor': '#fefefe',
+         'lineColor': '#aaa'
+       }
+     }
+   }%%
 
    flowchart TD
-       A[Parameters<br/>leaves] --> B[Functions<br/>intermediate nodes]
-       A --> C[Distributions]
-       B --> C[Distributions<br/>can depend on parameters or functions]
+       Parameters["Parameters"]
+       Functions["Functions"]
+       Distributions["Distributions"]
+       Parameters --> Functions
+       Functions --> Functions
+       Functions --> Distributions
+       Distributions --> Parameters
+       Distributions --> Functions
+       Distributions --> Distributions
 
 For example:
 

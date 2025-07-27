@@ -145,6 +145,17 @@ Understanding Workspace Structure
 The workspace follows a hierarchical structure:
 
 .. mermaid::
+   :config: {"theme": "forest", "darkMode": "true"}
+
+   %%{
+     init: {
+       'theme': 'forest',
+       'themeVariables': {
+         'primaryColor': '#fefefe',
+         'lineColor': '#aaa'
+       }
+     }
+   }%%
 
    classDiagram
        class Workspace {

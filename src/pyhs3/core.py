@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar, cast
 
@@ -25,6 +25,7 @@ from rich.progress import (
 
 from pyhs3 import typing as T
 from pyhs3.distributions import DistributionSet
+from pyhs3.domains import Domain, DomainSet
 from pyhs3.functions import FunctionSet
 from pyhs3.typing_compat import TypeAlias
 
@@ -46,7 +47,7 @@ class Workspace:
     Attributes:
         parameter_collection (ParameterCollection): Named parameter sets.
         distribution_set (DistributionSet): Available distributions.
-        domain_collection (DomainCollection): Domain constraints for parameters.
+        domain_collection (DomainSet): Domain constraints for parameters.
         function_set (FunctionSet): Available functions for parameter computation.
     """
 
@@ -61,20 +62,20 @@ class Workspace:
         Attributes:
             parameter_collection (ParameterCollection): Set of named parameter points.
             distribution_set (DistributionSet): All distributions used in the workspace.
-            domain_collection (DomainCollection): Domain definitions for all parameters.
+            domain_collection (DomainSet): Domain definitions for all parameters.
         """
 
         self.parameter_collection = ParameterCollection(
             spec.get("parameter_points", [])
         )
         self.distribution_set = DistributionSet(spec.get("distributions", []))
-        self.domain_collection = DomainCollection(spec.get("domains", []))
+        self.domain_collection = DomainSet(spec.get("domains", []))
         self.function_set = FunctionSet(spec.get("functions", []))
 
     def model(
         self,
         *,
-        domain: int | str | DomainSet = 0,
+        domain: int | str | Domain = 0,
         parameter_point: int | str | ParameterSet = 0,
         progress: bool = True,
         mode: str = "FAST_RUN",
@@ -83,7 +84,7 @@ class Workspace:
         Constructs a `Model` object using the provided domain and parameter point.
 
         Args:
-            domain (int | str | DomainSet): Identifier or object specifying the domain to use.
+            domain (int | str | Domain): Identifier or object specifying the domain to use.
             parameter_point (int | str | ParameterSet): Identifier or object specifying the parameter values to use.
             progress (bool): Whether to show progress bar during dependency graph construction. Defaults to True.
             mode (str): PyTensor compilation mode. Defaults to "FAST_RUN".
@@ -97,8 +98,8 @@ class Workspace:
             Model: The constructed model object.
         """
 
-        domainset = (
-            domain if isinstance(domain, DomainSet) else self.domain_collection[domain]
+        selected_domain = (
+            domain if isinstance(domain, Domain) else self.domain_collection[domain]
         )
         parameterset = (
             parameter_point
@@ -106,18 +107,18 @@ class Workspace:
             else self.parameter_collection[parameter_point]
         )
 
-        # Verify that domains are a subset of parameters (not all parameters need bounds)
+        # Verify that domain axis names are a subset of parameters (not all parameters need bounds)
         param_names = set(parameterset.points.keys())
-        domain_names = set(domainset.domains.keys())
-        assert domain_names.issubset(param_names), (
-            f"Domain names must be a subset of parameter names. "
-            f"Extra domains: {domain_names - param_names}"
+        axis_names = set(selected_domain.axis_names)
+        assert axis_names.issubset(param_names), (
+            f"Domain axis names must be a subset of parameter names. "
+            f"Extra domain axes: {axis_names - param_names}"
         )
 
         return Model(
             parameterset=parameterset,
             distributions=self.distribution_set,
-            domains=domainset,
+            domain=selected_domain,
             functions=self.function_set,
             progress=progress,
             mode=mode,
@@ -143,7 +144,7 @@ class Model:
         *,
         parameterset: ParameterSet,
         distributions: DistributionSet,
-        domains: DomainSet,
+        domain: Domain,
         functions: FunctionSet,
         progress: bool = True,
         mode: str = "FAST_RUN",
@@ -154,7 +155,7 @@ class Model:
         Args:
             parameterset (ParameterSet): The parameter set used in the model.
             distributions (DistributionSet): Set of distributions to include.
-            domains (DomainSet): Domain constraints for parameters.
+            domain (Domain): Domain constraints for parameters.
             functions (FunctionSet): Set of functions that compute parameter values.
             progress (bool): Whether to show progress bar during dependency graph construction.
             mode (str): PyTensor compilation mode. Defaults to "FAST_RUN".
@@ -180,9 +181,9 @@ class Model:
 
         for parameter_point in parameterset:
             # Create scalar parameter with domain bounds applied
-            domain = domains.domains.get(parameter_point.name, (None, None))
+            domain_bounds = domain.get(parameter_point.name, (None, None))
             self.parameters[parameter_point.name] = create_bounded_tensor(
-                parameter_point.name, domain, parameter_point.kind
+                parameter_point.name, domain_bounds, parameter_point.kind
             )
 
         self.distributions: dict[str, T.TensorVar] = {}
@@ -628,142 +629,6 @@ class ParameterPoint:
     name: str
     value: float
     kind: Callable[..., T.TensorVar] = pt.scalar
-
-
-class DomainCollection:
-    """
-    Collection of domain constraints for model parameters.
-
-    Manages domain sets that define valid ranges for model parameters.
-    Each domain set specifies minimum and maximum bounds for parameters,
-    which are used to create bounded tensor variables.
-
-    Attributes:
-        domains (dict[str, DomainSet]): Mapping from domain names to DomainSet objects.
-    """
-
-    def __init__(self, domainsets: list[T.Domain]):
-        """
-        Collection of named domain sets.
-
-        Args:
-            domainsets (list): List of domain set configurations.
-
-        Attributes:
-            domains (OrderedDict): Mapping of domain names to DomainSet objects.
-        """
-
-        self.domains: dict[str, DomainSet] = OrderedDict()
-
-        for domain_config in domainsets:
-            domain = DomainSet(
-                domain_config["axes"], domain_config["name"], domain_config["type"]
-            )
-            self.domains[domain.name] = domain
-
-    def __getitem__(self, item: str | int) -> DomainSet:
-        key = list(self.domains.keys())[item] if isinstance(item, int) else item
-        return self.domains[key]
-
-    def get(
-        self, item: str, default: TDefault | None = None
-    ) -> DomainSet | TDefault | None:
-        """Get a domain set by name, returning default if not found."""
-        return self.domains.get(item, default)
-
-    def __contains__(self, item: str) -> bool:
-        return item in self.domains
-
-    def __iter__(self) -> Iterator[DomainSet]:
-        return iter(self.domains.values())
-
-    def __len__(self) -> int:
-        return len(self.domains)
-
-
-@dataclass
-class DomainPoint:
-    """
-    Represents a valid domain (axis) for a single parameter.
-
-    Attributes:
-        name (str): Name of the parameter.
-        min (float): Minimum value.
-        max (float): Maximum value.
-        range (tuple): Computed range as (min, max), not included in serialization.
-    """
-
-    name: str
-    min: float
-    max: float
-    range: tuple[float, float] = field(init=False, repr=False)
-
-    def __post_init__(self) -> None:
-        self.range = (self.min, self.max)
-
-    def to_dict(self) -> T.Axis:
-        """
-        to dictionary
-        """
-        return {"name": self.name, "min": self.min, "max": self.max}
-
-
-class DomainSet:
-    """
-    Set of parameter domain constraints with bounds.
-
-    Defines valid ranges for multiple parameters, specifying minimum
-    and maximum bounds for each. Used to create bounded tensor variables
-    that are automatically clipped to their valid ranges.
-
-    Attributes:
-        name (str): Name of the domain set.
-        kind (str): Type of the domain set.
-        domains (dict[str, Axis]): Mapping of parameter names to (min, max) tuples.
-    """
-
-    def __init__(self, axes: list[T.Axis], name: str, kind: str):
-        """
-        Represents a set of valid domains for parameters.
-
-        Args:
-            axes (list): List of domain configurations.
-            name (str): Name of the domain set.
-            kind (str): Type of the domain.
-
-        Attributes:
-            domains (OrderedDict): Mapping of parameter names to allowed ranges.
-        """
-        self.name = name
-        self.kind = kind
-        self.domains: dict[str, Axis] = OrderedDict()
-
-        for axis_config in axes:
-            domain = DomainPoint(
-                axis_config["name"],
-                axis_config.get("min", -np.inf),
-                axis_config.get("max", np.inf),
-            )
-            self.domains[domain.name] = domain.range
-
-    def __getitem__(self, item: int | str) -> Axis:
-        key = list(self.domains.keys())[item] if isinstance(item, int) else item
-        return self.domains[key]
-
-    def get(
-        self, item: str, default: TDefault | Axis = (None, None)
-    ) -> Axis | TDefault:
-        """Get domain bounds for a parameter, returning default if not found."""
-        return self.domains.get(item, default)
-
-    def __contains__(self, item: str) -> bool:
-        return item in self.domains
-
-    def __iter__(self) -> Iterator[Axis]:
-        return iter(self.domains.values())
-
-    def __len__(self) -> int:
-        return len(self.domains)
 
 
 def create_bounded_tensor(

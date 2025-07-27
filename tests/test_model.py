@@ -33,7 +33,7 @@ def simple_workspace():
         "domains": [
             {
                 "name": "default_domain",
-                "type": "product",
+                "type": "product_domain",
                 "axes": [
                     {"name": "x", "min": -5.0, "max": 5.0},
                     {"name": "mu", "min": -2.0, "max": 2.0},

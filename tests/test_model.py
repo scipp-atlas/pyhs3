@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+import numpy as np
 import pytest
 
 import pyhs3 as hs3
@@ -283,3 +284,139 @@ class TestModelGraphVisualization:
 
         with pytest.raises(ImportError, match="Graph visualization requires pydot"):
             model.visualize_graph("gauss")
+
+
+class TestModelWithoutParameterPoints:
+    """Test Model creation and functionality without parameter_points defined."""
+
+    @pytest.fixture
+    def workspace_no_params(self):
+        """Create a workspace without parameter_points for testing parameter discovery."""
+        workspace_data = {
+            "metadata": {"hs3_version": "0.2"},
+            "distributions": [
+                {
+                    "name": "gauss",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "mu",
+                    "sigma": "sigma",
+                }
+            ],
+            "domains": [
+                {
+                    "name": "default_domain",
+                    "type": "product_domain",
+                    "axes": [
+                        {"name": "x", "min": -5.0, "max": 5.0},
+                        {"name": "mu", "min": -2.0, "max": 2.0},
+                        {"name": "sigma", "min": 0.1, "max": 3.0},
+                    ],
+                }
+            ],
+            # Note: no parameter_points defined
+        }
+        return hs3.Workspace(**workspace_data)
+
+    def test_model_creation_without_parameter_points(self, workspace_no_params):
+        """Test that a model can be created successfully without parameter_points."""
+        # This should not raise an error
+        model = workspace_no_params.model()
+
+        # Verify model was created successfully
+        assert model is not None
+        assert hasattr(model, "parameters")
+        assert hasattr(model, "distributions")
+
+        # Should discover parameters from the distribution
+        assert "x" in model.parameters
+        assert "mu" in model.parameters
+        assert "sigma" in model.parameters
+
+        # Should have the distribution
+        assert "gauss" in model.distributions
+
+    def test_parameters_use_domain_bounds(self, workspace_no_params):
+        """Test that discovered parameters use domain bounds when available."""
+        model = workspace_no_params.model()
+
+        # We can't directly inspect bounds, but we can verify the parameters exist
+        # and that the model can evaluate successfully
+        result = model.pdf("gauss", x=0.0, mu=0.0, sigma=1.0)
+
+        # Should get a reasonable Gaussian PDF value
+        assert 0.35 < result < 0.45
+
+    def test_parameters_default_to_scalar_kind(self, workspace_no_params):
+        """Test that discovered parameters default to scalar kind when no parameterset provided."""
+        model = workspace_no_params.model()
+
+        # All discovered parameters should be scalars (pt.scalar)
+        # We can verify this by checking they accept scalar values in pdf evaluation
+        result = model.pdf("gauss", x=1.5, mu=-0.5, sigma=2.0)
+
+        # Should compute successfully with scalar inputs
+        assert isinstance(result, int | float | np.ndarray)
+        assert float(result) > 0  # PDF should be positive
+
+    def test_repr_shows_discovered_parameters(self, workspace_no_params):
+        """Test that __repr__ correctly shows discovered parameters."""
+        model = workspace_no_params.model()
+        repr_str = repr(model)
+
+        # Should show 3 discovered parameters
+        assert "parameters: 3" in repr_str
+
+        # Should contain discovered parameter names
+        assert "x" in repr_str
+        assert "mu" in repr_str
+        assert "sigma" in repr_str
+
+    def test_mixed_parameter_sources(self):
+        """Test model with some parameters in parameterset and others discovered."""
+        workspace_data = {
+            "metadata": {"hs3_version": "0.2"},
+            "distributions": [
+                {
+                    "name": "gauss",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "mu",
+                    "sigma": "sigma",
+                }
+            ],
+            "parameter_points": [
+                {
+                    "name": "partial_params",
+                    "parameters": [
+                        # Only define mu and sigma, let x be discovered
+                        {"name": "mu", "value": 0.0},
+                        {"name": "sigma", "value": 1.0},
+                    ],
+                }
+            ],
+            "domains": [
+                {
+                    "name": "default_domain",
+                    "type": "product_domain",
+                    "axes": [
+                        {"name": "x", "min": -5.0, "max": 5.0},
+                        {"name": "mu", "min": -2.0, "max": 2.0},
+                        {"name": "sigma", "min": 0.1, "max": 3.0},
+                    ],
+                }
+            ],
+        }
+        workspace = hs3.Workspace(**workspace_data)
+
+        # Should successfully create model with mixed parameter sources
+        model = workspace.model()
+
+        # All parameters should be available
+        assert "x" in model.parameters
+        assert "mu" in model.parameters  # from parameterset
+        assert "sigma" in model.parameters  # from parameterset
+
+        # Should evaluate successfully
+        result = model.pdf("gauss", x=0.0, mu=0.0, sigma=1.0)
+        assert 0.35 < result < 0.45

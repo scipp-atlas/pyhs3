@@ -566,37 +566,6 @@ class TestNumericParameters:
 class TestDependencyGraphErrors:
     """Test dependency graph error conditions in core.py for code coverage."""
 
-    def test_unknown_entity_referenced_error(self):
-        """Test that referencing an unknown entity raises ValueError."""
-
-        # Create a workspace with a distribution that references a non-existent parameter
-        test_data = {
-            "parameter_points": [
-                {"name": "test_params", "parameters": [{"name": "mu", "value": 0.0}]}
-            ],
-            "distributions": [
-                {
-                    "type": "gaussian_dist",
-                    "name": "test_gauss",
-                    "mean": "mu",
-                    "sigma": 1.0,
-                    "x": "nonexistent_param",  # This parameter doesn't exist
-                }
-            ],
-            "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
-            "functions": [],
-            "metadata": {"hs3_version": "0.2"},
-        }
-
-        ws = Workspace(**test_data)
-
-        # This should raise ValueError with specific message about unknown entity
-        with pytest.raises(
-            ValueError,
-            match="Unknown entity referenced: 'nonexistent_param' from 'test_gauss'",
-        ):
-            ws.model(domain="test_domain", parameter_set="test_params")
-
     def test_circular_dependency_error(self):
         """Test that circular dependencies raise ValueError."""
 

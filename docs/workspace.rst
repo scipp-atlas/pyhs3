@@ -144,26 +144,54 @@ Understanding Workspace Structure
 
 The workspace follows a hierarchical structure:
 
-.. code-block:: text
+.. mermaid::
 
-   Workspace
-   ├── metadata (required)
-   │   ├── hs3_version
-   │   ├── authors (optional)
-   │   └── description (optional)
-   ├── distributions (list of probability distributions)
-   │   ├── name, type
-   │   └── parameters (what the distribution depends on)
-   ├── functions (list of mathematical functions, optional)
-   │   ├── name, type
-   │   └── parameters (what the function depends on)
-   ├── domains (parameter space constraints, optional)
-   │   ├── name, type
-   │   └── axes (parameter bounds)
-   ├── parameter_points (named parameter sets, optional)
-   │   ├── name
-   │   └── parameters (list of name-value pairs)
-   └── data, likelihoods, analyses (optional, for future use)
+   classDiagram
+       class Workspace {
+           +metadata: Metadata
+           +distributions: list[Distribution]
+           +functions: list[Function]
+           +domains: list[Domain]
+           +parameter_points: list[ParameterSet]
+           +data: optional
+           +likelihoods: optional
+           +analyses: optional
+       }
+
+       class Metadata {
+           +hs3_version: str
+           +authors: optional[list]
+           +description: optional[str]
+       }
+
+       class Distribution {
+           +name: str
+           +type: str
+           +parameters: dict
+       }
+
+       class Function {
+           +name: str
+           +type: str
+           +parameters: dict
+       }
+
+       class Domain {
+           +name: str
+           +type: str
+           +axes: list[Axis]
+       }
+
+       class ParameterSet {
+           +name: str
+           +parameters: list[ParameterPoint]
+       }
+
+       Workspace ||--|| Metadata : contains
+       Workspace ||--o{ Distribution : contains
+       Workspace ||--o{ Function : contains
+       Workspace ||--o{ Domain : contains
+       Workspace ||--o{ ParameterSet : contains
 
 Creating Models from Workspaces
 ------------------------------

@@ -10,15 +10,12 @@ Overview
 
 PyHS3 follows a hierarchical structure:
 
-.. code-block:: text
+.. mermaid::
 
-   HS3 JSON File
-        ↓
-   Workspace (container)
-        ↓
-   Model (computational representation)
-        ↓
-   PDF Evaluation / Analysis
+   flowchart TD
+       A[HS3 JSON File] <--> B[Workspace<br/>container]
+       B --> C[Model<br/>computational representation]
+       C --> D[PDF Evaluation / Analysis]
 
 The data flows from JSON specification → Workspace → Model → Results, with each level adding computational capabilities.
 
@@ -116,13 +113,12 @@ Dependency Resolution
 
 PyHS3 automatically builds a dependency graph to determine evaluation order:
 
-.. code-block:: text
+.. mermaid::
 
-   Parameters (leaves)
-        ↓
-   Functions (intermediate nodes)
-        ↓
-   Distributions (can depend on parameters or functions)
+   flowchart TD
+       A[Parameters<br/>leaves] --> B[Functions<br/>intermediate nodes]
+       A --> C[Distributions]
+       B --> C[Distributions<br/>can depend on parameters or functions]
 
 For example:
 

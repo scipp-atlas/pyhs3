@@ -199,27 +199,21 @@ class Model:
                        "NanGuardMode" (NaN detection).
 
         Attributes:
-            parameters (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic parameter variables.
+            domain (Domain): The original domain with constraints for parameters.
             parameterset (ParameterSet): The original parameter set with parameter values.
             distributions (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic distribution expressions.
+            parameters (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic parameter variables.
             functions (dict[str, pytensor.tensor.variable.TensorVariable]): Computed function values.
             mode (str): PyTensor compilation mode.
             _compiled_functions (dict[str, Callable[..., npt.NDArray[np.float64]]]): Cache of compiled PyTensor functions.
         """
-        self.parameters = {}
         self.parameterset = parameterset
+        self.domain = domain
+        self.parameters: dict[str, TensorVar] = {}
         self.functions: dict[str, TensorVar] = {}
+        self.distributions: dict[str, TensorVar] = {}
         self.mode = mode
         self._compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]] = {}
-
-        for parameter in parameterset:
-            # Create scalar parameter with domain bounds applied
-            domain_bounds = domain.get(parameter.name, (None, None))
-            self.parameters[parameter.name] = create_bounded_tensor(
-                parameter.name, domain_bounds, parameter.kind
-            )
-
-        self.distributions: dict[str, TensorVar] = {}
 
         # Build dependency graph with proper entity identification
         self._build_dependency_graph(functions, distributions, progress)
@@ -335,8 +329,19 @@ class Model:
                 context = {**self.parameters, **self.functions, **self.distributions}
 
                 if node_type == "parameter":
-                    # Parameters are already created with bounds applied, nothing to do
-                    pass
+                    # Create parameter tensor with domain bounds applied
+                    domain_bounds = (
+                        self.domain.get(node_name, (None, None))
+                        if self.domain
+                        else (None, None)
+                    )
+                    param_point = (
+                        self.parameterset.get(node_name) if self.parameterset else None
+                    )
+                    param_kind = param_point.kind if param_point else pt.scalar
+                    self.parameters[node_name] = create_bounded_tensor(
+                        node_name, domain_bounds, param_kind
+                    )
 
                 elif node_type == "constant":
                     # Constants are pre-created by distributions - add to parameters

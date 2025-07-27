@@ -8,6 +8,9 @@ from shutil import copytree as _copytree
 
 import pytest
 
+# ignore specific files from being collected
+collect_ignore = ["test_pdf/rf501_simultaneouspdf.py"]
+
 copytree = partial(_copytree, dirs_exist_ok=True)
 
 

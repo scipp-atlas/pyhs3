@@ -8,5 +8,8 @@ from __future__ import annotations
 
 from pyhs3._version import version as __version__
 from pyhs3.core import Model, Workspace
+from pyhs3.logging import setup
+
+setup()
 
 __all__ = ["Model", "Workspace", "__version__"]

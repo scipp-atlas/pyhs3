@@ -80,12 +80,11 @@ build.hooks.vcs.version-file = "src/pyhs3/_version.py"
 [tool.hatch.envs.default]
 features = ["test"]
 scripts.test = "pytest {args}"
-scripts.doctest = "pytest --doctest-modules src/pyhs3 {args}"
 installer = "uv"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config", "--doctest-glob=docs/*.rst"]
+addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config", "--doctest-glob=*.rst", "--doctest-modules"]
 xfail_strict = true
 filterwarnings = [
     "error",
@@ -93,6 +92,8 @@ filterwarnings = [
 log_cli_level = "INFO"
 testpaths = [
   "tests",
+  "docs",
+  "src",
 ]
 markers = [
     "slow: marks tests as slow (skipped by default, use --runslow to run)",

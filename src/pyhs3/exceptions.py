@@ -64,16 +64,22 @@ def custom_error_msg(custom_messages: dict[str, str]) -> Any:
 
     Example:
 
+    >>> from typing import Annotated
+    >>> from pydantic import BaseModel
+    >>> from pydantic.types import StringConstraints
     >>> NameString = Annotated[
     ...     str,
-    ...     StringConstraints(pattern=r"^[0-9~`!@#$%^&*()_+={\[}\]|\:;\"<>\/?]*$"),
-    ...     custom_error_msg({"str_error", "The field {field_name} can not contain special symbols."}),
+    ...     StringConstraints(pattern=r"^[a-zA-Z0-9]*$"),
+    ...     custom_error_msg({"string_pattern_mismatch": "The field {field_name} can only contain letters and numbers."}),
     ... ]
-    ...
     >>> class Model(BaseModel):
     ...     name: NameString
+    >>> Model(name="dog@123")  # doctest: +IGNORE_EXCEPTION_DETAIL
+    Traceback (most recent call last):
     ...
-    >>> dog = Model(name="dog123")
+    pydantic_core._pydantic_core.ValidationError: 1 validation error for Model
+    name
+      The field name can only contain letters and numbers. ...
     """
 
     def _validator(v: Any, next_: Any, ctx: ValidationInfo) -> Any:

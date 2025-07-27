@@ -609,16 +609,6 @@ class PoissonDist(Distribution):
         return cast(TensorVar, pt.exp(log_pmf))
 
 
-# Define the union type for all distribution configurations
-DistributionConfig = (
-    GaussianDist
-    | MixtureDist
-    | ProductDist
-    | CrystalBallDist
-    | GenericDist
-    | PoissonDist
-)
-
 registered_distributions: dict[str, type[Distribution]] = {
     "gaussian_dist": GaussianDist,
     "mixture_dist": MixtureDist,
@@ -641,25 +631,19 @@ class DistributionSet:
         dists (dict[str, Distribution]): Mapping from distribution names to Distribution instances.
     """
 
-    def __init__(self, distributions: list[dict[str, Any]]) -> None:
+    def __init__(self, distributions: list[DistributionType]) -> None:
         """
         Collection of distributions.
 
         Args:
-            distributions (list[dict[str, Any]]): List of distribution configurations.
+            distributions: List of DistributionType objects
 
         Attributes:
-            dists (dict): Mapping of distribution names to Distribution objects.
+            dists: Mapping of distribution names to Distribution objects.
         """
-        self.dists: dict[str, Distribution] = {}
-        for dist_config in distributions:
-            dist_type = dist_config["type"]
-            the_dist = registered_distributions.get(dist_type)
-            if the_dist is None:
-                msg = f"Unknown distribution type: {dist_type}"
-                raise ValueError(msg)
-            dist = the_dist.from_dict(dist_config)
-            self.dists[dist.name] = dist
+        self.dists: dict[str, Distribution] = {
+            dist.name: dist for dist in distributions
+        }
 
     def __getitem__(self, item: str) -> Distribution:
         return self.dists[item]

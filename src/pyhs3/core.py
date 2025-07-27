@@ -26,7 +26,7 @@ from rich.progress import (
 
 from pyhs3.distributions import DistributionSet, DistributionType
 from pyhs3.domains import Domain, DomainSet, DomainType
-from pyhs3.functions import FunctionSet, FunctionType
+from pyhs3.functions import Functions
 from pyhs3.metadata import Metadata
 from pyhs3.parameter_points import ParameterCollection, ParameterSet
 from pyhs3.typing.aliases import TensorVar
@@ -59,7 +59,7 @@ class Workspace(BaseModel):
         parameter_collection (ParameterCollection): Named parameter sets.
         distribution_set (DistributionSet): Available distributions.
         domain_collection (DomainSet): Domain constraints for parameters.
-        function_set (FunctionSet): Available functions for parameter computation.
+        function_set (Functions): Available functions for parameter computation.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -69,7 +69,7 @@ class Workspace(BaseModel):
 
     # Optional fields using discriminated unions
     distributions: list[DistributionType] | None = Field(default_factory=list)
-    functions: list[FunctionType] | None = Field(default_factory=list)
+    functions: Functions | None = None
     domains: list[DomainType] | None = Field(default_factory=list)
     parameter_points: list[ParameterSet] | None = Field(default_factory=list)
     data: list[dict[str, Any]] | None = Field(default_factory=list)
@@ -81,21 +81,13 @@ class Workspace(BaseModel):
     _parameter_collection: ParameterCollection = PrivateAttr()
     _distribution_set: DistributionSet = PrivateAttr()
     _domain_collection: DomainSet = PrivateAttr()
-    _function_set: FunctionSet = PrivateAttr()
 
     def model_post_init(self, __context: Any, /) -> None:
         """Initialize computed collections after Pydantic validation."""
         # Now collections accept Pydantic objects directly
         self._parameter_collection = ParameterCollection(self.parameter_points or [])
         self._domain_collection = DomainSet(self.domains or [])
-
-        # For distribution_set and function_set, we now have the Pydantic objects directly
-        # But the sets still expect dicts, so convert back for now
-        distributions_dicts = [d.model_dump() for d in (self.distributions or [])]
-        functions_dicts = [f.model_dump() for f in (self.functions or [])]
-
-        self._distribution_set = DistributionSet(distributions_dicts)
-        self._function_set = FunctionSet(functions_dicts)
+        self._distribution_set = DistributionSet(self.distributions or [])
 
     @classmethod
     def load(cls, path: str | os.PathLike[str]) -> Workspace:
@@ -160,7 +152,7 @@ class Workspace(BaseModel):
             parameterset=parameterset,
             distributions=self._distribution_set,
             domain=selected_domain,
-            functions=self._function_set,
+            functions=self.functions or Functions([]),
             progress=progress,
             mode=mode,
         )
@@ -186,7 +178,7 @@ class Model:
         parameterset: ParameterSet,
         distributions: DistributionSet,
         domain: Domain,
-        functions: FunctionSet,
+        functions: Functions,
         progress: bool = True,
         mode: str = "FAST_RUN",
     ):
@@ -197,7 +189,7 @@ class Model:
             parameterset (ParameterSet): The parameter set used in the model.
             distributions (DistributionSet): Set of distributions to include.
             domain (Domain): Domain constraints for parameters.
-            functions (FunctionSet): Set of functions that compute parameter values.
+            functions (Functions): Set of functions that compute parameter values.
             progress (bool): Whether to show progress bar during dependency graph construction.
             mode (str): PyTensor compilation mode. Defaults to "FAST_RUN".
                        Options: "FAST_RUN" (apply all rewrites, use C implementations),
@@ -234,7 +226,7 @@ class Model:
 
     def _build_dependency_graph(
         self,
-        functions: FunctionSet,
+        functions: Functions,
         distributions: DistributionSet,
         progress: bool = True,
     ) -> None:

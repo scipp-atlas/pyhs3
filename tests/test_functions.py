@@ -2,7 +2,7 @@
 Unit tests for the functions module.
 
 Tests for ProductFunction, GenericFunction, InterpolationFunction,
-and FunctionSet implementations.
+and Functions implementations.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from pyhs3 import Workspace
 from pyhs3.exceptions import UnknownInterpolationCodeError
 from pyhs3.functions import (
     Function,
-    FunctionSet,
+    Functions,
     GenericFunction,
     InterpolationFunction,
     ProcessNormalizationFunction,
@@ -704,7 +704,7 @@ class TestInterpolationFunction:
             )
 
     def test_interpolation_function_integration(self):
-        """Test InterpolationFunction integration with FunctionSet."""
+        """Test InterpolationFunction integration with Functions."""
 
         # Create function configuration matching your example structure
         functions_config = [
@@ -720,7 +720,7 @@ class TestInterpolationFunction:
             }
         ]
 
-        function_set = FunctionSet(functions_config)
+        function_set = Functions(functions_config)
         assert len(function_set) == 1
 
         interp_func = function_set["test_shape_interp"]
@@ -1127,21 +1127,21 @@ class TestRegisteredFunctions:
         assert registered_functions[func_type] is expected_class
 
 
-class TestFunctionSet:
-    """Test FunctionSet collection."""
+class TestFunctions:
+    """Test Functions collection."""
 
     def test_function_set_empty(self):
-        """Test FunctionSet with empty function list."""
-        function_set = FunctionSet([])
+        """Test Functions with empty function list."""
+        function_set = Functions([])
         assert len(function_set) == 0
 
     def test_function_set_product_functions(self):
-        """Test FunctionSet with product functions."""
+        """Test Functions with product functions."""
         functions_config = [
             {"name": "prod1", "type": "product", "factors": ["a", "b"]},
             {"name": "prod2", "type": "product", "factors": ["x", "y", "z"]},
         ]
-        function_set = FunctionSet(functions_config)
+        function_set = Functions(functions_config)
         assert len(function_set) == 2
         assert "prod1" in function_set
         assert "prod2" in function_set
@@ -1155,12 +1155,12 @@ class TestFunctionSet:
         assert func2.factors == ["x", "y", "z"]
 
     def test_function_set_generic_functions(self):
-        """Test FunctionSet with generic functions."""
+        """Test Functions with generic functions."""
         functions_config = [
             {"name": "gen1", "type": "generic_function", "expression": "x + y"},
             {"name": "gen2", "type": "generic_function", "expression": "sin(t)"},
         ]
-        function_set = FunctionSet(functions_config)
+        function_set = Functions(functions_config)
         assert len(function_set) == 2
 
         func1 = function_set["gen1"]
@@ -1172,7 +1172,7 @@ class TestFunctionSet:
         assert func2.expression_str == "sin(t)"
 
     def test_function_set_interpolation_functions(self):
-        """Test FunctionSet with interpolation functions."""
+        """Test Functions with interpolation functions."""
         functions_config = [
             {
                 "name": "interp1",
@@ -1185,7 +1185,7 @@ class TestFunctionSet:
                 "vars": ["x"],
             }
         ]
-        function_set = FunctionSet(functions_config)
+        function_set = Functions(functions_config)
         assert len(function_set) == 1
 
         func = function_set["interp1"]
@@ -1196,7 +1196,7 @@ class TestFunctionSet:
         assert set(func.parameters.values()) == expected_params
 
     def test_function_set_mixed_types(self):
-        """Test FunctionSet with mixed function types."""
+        """Test Functions with mixed function types."""
         functions_config = [
             {"name": "prod", "type": "product", "factors": ["a", "b"]},
             {"name": "gen", "type": "generic_function", "expression": "x**2"},
@@ -1211,7 +1211,7 @@ class TestFunctionSet:
                 "vars": [],
             },
         ]
-        function_set = FunctionSet(functions_config)
+        function_set = Functions(functions_config)
         assert len(function_set) == 3
 
         assert isinstance(function_set["prod"], ProductFunction)
@@ -1219,19 +1219,20 @@ class TestFunctionSet:
         assert isinstance(function_set["interp"], InterpolationFunction)
 
     def test_function_set_unknown_type(self):
-        """Test FunctionSet raises error for unknown function types."""
+        """Test Functions raises error for unknown function types."""
         functions_config = [
             {"name": "good", "type": "product", "factors": ["a"]},
             {"name": "bad", "type": "unknown_type", "param": "value"},
             {"name": "good2", "type": "generic_function", "expression": "x"},
         ]
 
-        # Should raise ValueError for unknown types
-        with pytest.raises(ValueError, match="Unknown function type: unknown_type"):
-            FunctionSet(functions_config)
+        with pytest.raises(
+            ValidationError, match="Unknown function type 'unknown_type'"
+        ):
+            Functions(functions_config)
 
     def test_function_set_malformed_config(self):
-        """Test FunctionSet raises error for malformed function configs."""
+        """Test Functions raises error for malformed function configs."""
         functions_config = [
             {"name": "good", "type": "product", "factors": ["a"]},
             {"name": "bad", "type": "product"},  # Missing factors
@@ -1239,20 +1240,20 @@ class TestFunctionSet:
         ]
 
         with pytest.raises(ValidationError):
-            FunctionSet(functions_config)
+            Functions(functions_config)
 
     def test_function_set_getitem_keyerror(self):
-        """Test FunctionSet raises KeyError for missing functions."""
-        function_set = FunctionSet([])
+        """Test Functions raises KeyError for missing functions."""
+        function_set = Functions([])
         with pytest.raises(KeyError):
             _ = function_set["nonexistent"]
 
     def test_function_set_contains(self):
-        """Test FunctionSet __contains__ method."""
+        """Test Functions __contains__ method."""
         functions_config = [
             {"name": "test_func", "type": "product", "factors": ["a"]},
         ]
-        function_set = FunctionSet(functions_config)
+        function_set = Functions(functions_config)
 
         assert "test_func" in function_set
         assert "nonexistent" not in function_set

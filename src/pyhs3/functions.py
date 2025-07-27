@@ -13,9 +13,16 @@ from typing import Annotated, Any, Literal, TypeVar, cast
 
 import pytensor.tensor as pt
 import sympy as sp
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    RootModel,
+    model_validator,
+)
 
-from pyhs3.exceptions import UnknownInterpolationCodeError
+from pyhs3.exceptions import UnknownInterpolationCodeError, custom_error_msg
 from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor
 from pyhs3.typing.aliases import TensorVar
 
@@ -669,8 +676,18 @@ registered_functions: dict[str, type[Function]] = {
     "CMS::process_normalization": ProcessNormalizationFunction,
 }
 
+# Type alias for all function types using discriminated union
+FunctionType = Annotated[
+    SumFunction
+    | ProductFunction
+    | GenericFunction
+    | InterpolationFunction
+    | ProcessNormalizationFunction,
+    Field(discriminator="type"),
+]
 
-class FunctionSet:
+
+class Functions(RootModel[list[FunctionType]]):
     """
     Collection of HS3 functions for parameter computation.
 
@@ -682,45 +699,31 @@ class FunctionSet:
     function creation from configuration dictionaries.
 
     Attributes:
-        funcs (dict[str, Function[Any]]): Mapping from function names to Function instances.
+        funcs: Mapping from function names to Function instances.
     """
 
-    def __init__(self, funcs: list[dict[str, Any]]) -> None:
-        """
-        Collection of functions that compute parameter values.
+    root: Annotated[
+        list[FunctionType],
+        custom_error_msg(
+            {
+                "union_tag_invalid": "Unknown function type '{tag}' does not match any of the expected functions: {expected_tags}"
+            }
+        ),
+    ]
+    _map: dict[str, Function] = PrivateAttr(default_factory=dict)
 
-        Args:
-            funcs: List of function configurations from HS3 spec
-        """
-        self.funcs: dict[str, Function] = {}
-        for func_config in funcs:
-            func_type = func_config["type"]
-            the_func = registered_functions.get(func_type)
-            if the_func is None:
-                msg = f"Unknown function type: {func_type}"
-                raise ValueError(msg)
-            func = the_func.from_dict(func_config)
-            self.funcs[func.name] = func
+    def model_post_init(self, __context: Any, /) -> None:
+        """Initialize computed collections after Pydantic validation."""
+        self._map = {func.name: func for func in self.root}
 
     def __getitem__(self, item: str) -> Function:
-        return self.funcs[item]
+        return self._map[item]
 
     def __contains__(self, item: str) -> bool:
-        return item in self.funcs
+        return item in self._map
 
-    def __iter__(self) -> Iterator[Function]:
-        return iter(self.funcs.values())
+    def __iter__(self) -> Iterator[Function]:  # type: ignore[override]  # https://github.com/pydantic/pydantic/issues/8872
+        return iter(self.root)
 
     def __len__(self) -> int:
-        return len(self.funcs)
-
-
-# Type alias for all function types using discriminated union
-FunctionType = Annotated[
-    SumFunction
-    | ProductFunction
-    | GenericFunction
-    | InterpolationFunction
-    | ProcessNormalizationFunction,
-    Field(discriminator="type"),
-]
+        return len(self.root)

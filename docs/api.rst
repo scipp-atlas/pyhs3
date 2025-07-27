@@ -22,6 +22,8 @@ Modules
 
    distributions
    functions
+   domains
+   parameter_points
    generic_parse
    exceptions
 
@@ -34,10 +36,13 @@ Functions
    :toctree: _generated/
    :nosignatures:
 
+   Functions
    Function
    ProductFunction
+   SumFunction
    GenericFunction
    InterpolationFunction
+   ProcessNormalizationFunction
 
 Distributions
 -------------
@@ -48,12 +53,41 @@ Distributions
    :toctree: _generated/
    :nosignatures:
 
+   Distributions
    Distribution
    GaussianDist
    MixtureDist
    ProductDist
    CrystalBallDist
    GenericDist
+   PoissonDist
+
+Domains
+-------
+
+.. currentmodule:: pyhs3.domains
+
+.. autosummary::
+   :toctree: _generated/
+   :nosignatures:
+
+   Domains
+   Domain
+   ProductDomain
+   Axis
+
+Parameter Points
+----------------
+
+.. currentmodule:: pyhs3.parameter_points
+
+.. autosummary::
+   :toctree: _generated/
+   :nosignatures:
+
+   ParameterPoints
+   ParameterSet
+   ParameterPoint
 
 Parsing
 -------

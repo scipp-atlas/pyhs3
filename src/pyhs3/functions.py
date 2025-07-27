@@ -709,7 +709,7 @@ class Functions(RootModel[list[FunctionType]]):
                 "union_tag_invalid": "Unknown function type '{tag}' does not match any of the expected functions: {expected_tags}"
             }
         ),
-    ]
+    ] = Field(default_factory=list)
     _map: dict[str, Function] = PrivateAttr(default_factory=dict)
 
     def model_post_init(self, __context: Any, /) -> None:

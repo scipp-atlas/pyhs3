@@ -16,17 +16,15 @@ def test_nondefault_points_domains_access(datadir):
         **json.loads(datadir.joinpath("nondefault_points_domains.json").read_text())
     )
 
-    assert workspace._parameter_collection[0].name == "default_values"
-    assert workspace._parameter_collection[1].name == "nondefault_values"
-    assert workspace._parameter_collection["default_values"].name == "default_values"
-    assert (
-        workspace._parameter_collection["nondefault_values"].name == "nondefault_values"
-    )
+    assert workspace.parameter_points[0].name == "default_values"
+    assert workspace.parameter_points[1].name == "nondefault_values"
+    assert workspace.parameter_points["default_values"].name == "default_values"
+    assert workspace.parameter_points["nondefault_values"].name == "nondefault_values"
 
-    assert workspace._domain_collection[0].name == "default_domain"
-    assert workspace._domain_collection[1].name == "nondefault_domain"
-    assert workspace._domain_collection["default_domain"].name == "default_domain"
-    assert workspace._domain_collection["nondefault_domain"].name == "nondefault_domain"
+    assert workspace.domains[0].name == "default_domain"
+    assert workspace.domains[1].name == "nondefault_domain"
+    assert workspace.domains["default_domain"].name == "default_domain"
+    assert workspace.domains["nondefault_domain"].name == "nondefault_domain"
 
 
 def test_rf501_simultaneouspdf(datadir):
@@ -35,8 +33,8 @@ def test_rf501_simultaneouspdf(datadir):
     )
 
     model = workspace.model(
-        parameter_set=workspace._parameter_collection["default_values"],
-        domain=workspace._domain_collection["default_domain"],
+        parameter_set=workspace.parameter_points["default_values"],
+        domain=workspace.domains["default_domain"],
     )
 
     physicspdfval = model.pdf(
@@ -67,11 +65,11 @@ def test_rf501_manual(datadir):
     )
 
     model = workspace.model(
-        parameter_set=workspace._parameter_collection["default_values"],
-        domain=workspace._domain_collection["default_domain"],
+        parameter_set=workspace.parameter_points["default_values"],
+        domain=workspace.domains["default_domain"],
     )
 
-    scalarranges = workspace._domain_collection["default_domain"]
+    scalarranges = workspace.domains["default_domain"]
 
     f = create_bounded_tensor("f", scalarranges["f"])
     f_ctl = create_bounded_tensor("f_ctl", scalarranges["f_ctl"])
@@ -175,8 +173,8 @@ def test_combine_long_exercise_logpdf_evaluation(datadir):
     )
 
     model = workspace.model(
-        parameter_set=workspace._parameter_collection["default_values"],
-        domain=workspace._domain_collection["default_domain"],
+        parameter_set=workspace.parameter_points["default_values"],
+        domain=workspace.domains["default_domain"],
     )
 
     # Get default parameter values

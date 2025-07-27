@@ -680,8 +680,8 @@ class TestDependencyGraphErrors:
 class TestCollectionMethods:
     """Test collection methods for code coverage."""
 
-    def test_parameter_collection_methods(self):
-        """Test ParameterCollection get(), __contains__, and __len__ methods."""
+    def testparameter_points_methods(self):
+        """Test ParameterPoints get(), __contains__, and __len__ methods."""
         test_data = {
             "parameter_points": [
                 {"name": "params1", "parameters": [{"name": "mu", "value": 0.0}]},
@@ -694,7 +694,7 @@ class TestCollectionMethods:
         }
 
         ws = Workspace(**test_data)
-        param_collection = ws._parameter_collection
+        param_collection = ws.parameter_points
 
         # Test __len__
         assert len(param_collection) == 2
@@ -736,7 +736,7 @@ class TestCollectionMethods:
         }
 
         ws = Workspace(**test_data)
-        param_set = ws._parameter_collection["test_params"]
+        param_set = ws.parameter_points["test_params"]
 
         # Test __len__
         assert len(param_set) == 2
@@ -756,7 +756,7 @@ class TestCollectionMethods:
         default_result = param_set.get("nonexistent", "default")
         assert default_result == "default"
 
-    def test_domain_collection_methods(self):
+    def testdomains_methods(self):
         """Test DomainCollection get(), __contains__, and __len__ methods."""
         test_data = {
             "parameter_points": [
@@ -780,7 +780,7 @@ class TestCollectionMethods:
         }
 
         ws = Workspace(**test_data)
-        domain_collection = ws._domain_collection
+        domain_collection = ws.domains
 
         # Test __len__
         assert len(domain_collection) == 2
@@ -800,7 +800,7 @@ class TestCollectionMethods:
         assert default_result == "default"
 
     def test_domain_set_methods(self):
-        """Test DomainSet get(), __contains__, and __len__ methods."""
+        """Test Domains get(), __contains__, and __len__ methods."""
         test_data = {
             "parameter_points": [
                 {"name": "test_params", "parameters": [{"name": "mu", "value": 0.0}]}
@@ -821,7 +821,7 @@ class TestCollectionMethods:
         }
 
         ws = Workspace(**test_data)
-        domain_set = ws._domain_collection["test_domain"]
+        domain_set = ws.domains["test_domain"]
 
         # Test __len__
         assert len(domain_set) == 2

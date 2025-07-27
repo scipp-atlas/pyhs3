@@ -64,8 +64,8 @@ class TestDiHiggsIssue41Workspace:
         expected_nll_values = expected_nll_data["nll"]
 
         # Find parameters and model
-        param_collection = ws_workspace._parameter_collection[0]  # default_values
-        domain_collection = ws_workspace._domain_collection[0]  # default_domain
+        param_collection = ws_workspace.parameter_points[0]  # default_values
+        domain_collection = ws_workspace.domains[0]  # default_domain
 
         # Create model with mu_HH set to specific value
         # Note: This will fail due to dependency graph issues
@@ -88,12 +88,12 @@ class TestDiHiggsIssue41Workspace:
 
     def test_workspace_parameter_structure(self, ws_workspace):
         """Test that workspace has expected parameter structure."""
-        assert len(ws_workspace._parameter_collection) > 0
-        assert len(ws_workspace._domain_collection) > 0
+        assert len(ws_workspace.parameter_points) > 0
+        assert len(ws_workspace.domains) > 0
 
         # Check that we have default collections
-        param_names = [p.name for p in ws_workspace._parameter_collection]
-        domain_names = [d.name for d in ws_workspace._domain_collection]
+        param_names = [p.name for p in ws_workspace.parameter_points]
+        domain_names = [d.name for d in ws_workspace.domains]
 
         # Should have at least default values
         assert len(param_names) > 0
@@ -103,8 +103,8 @@ class TestDiHiggsIssue41Workspace:
     def test_workspace_model_creation(self, ws_workspace):
         """Test that we can create a model from the workspace."""
         # This tests basic model creation without full evaluation
-        param_collection = ws_workspace._parameter_collection[0]
-        domain_collection = ws_workspace._domain_collection[0]
+        param_collection = ws_workspace.parameter_points[0]
+        domain_collection = ws_workspace.domains[0]
 
         # Should be able to create model without errors
         model = ws_workspace.model(

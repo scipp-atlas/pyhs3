@@ -11,7 +11,7 @@ import numpy as np
 import numpy.typing as npt
 import pytensor.tensor as pt
 import rustworkx as rx
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field
 from pytensor.compile.function import function
 from pytensor.graph.basic import applys_between, graph_inputs
 from rich.progress import (
@@ -24,11 +24,11 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from pyhs3.distributions import DistributionSet, DistributionType
-from pyhs3.domains import Domain, DomainSet, DomainType
+from pyhs3.distributions import Distributions
+from pyhs3.domains import Domain, Domains, ProductDomain
 from pyhs3.functions import Functions
 from pyhs3.metadata import Metadata
-from pyhs3.parameter_points import ParameterCollection, ParameterSet
+from pyhs3.parameter_points import ParameterPoints, ParameterSet
 from pyhs3.typing.aliases import TensorVar
 
 log = logging.getLogger(__name__)
@@ -56,9 +56,9 @@ class Workspace(BaseModel):
         likelihoods: List of likelihood configurations
         analyses: List of analysis configurations
         misc: Arbitrary user-created information
-        parameter_collection (ParameterCollection): Named parameter sets.
-        distribution_set (DistributionSet): Available distributions.
-        domain_collection (DomainSet): Domain constraints for parameters.
+        parameter_collection (ParameterPoints): Named parameter sets.
+        distribution_set (Distributions): Available distributions.
+        domain_collection (Domains): Domain constraints for parameters.
         function_set (Functions): Available functions for parameter computation.
     """
 
@@ -68,26 +68,18 @@ class Workspace(BaseModel):
     metadata: Metadata
 
     # Optional fields using discriminated unions
-    distributions: list[DistributionType] | None = Field(default_factory=list)
-    functions: Functions | None = None
-    domains: list[DomainType] | None = Field(default_factory=list)
-    parameter_points: list[ParameterSet] | None = Field(default_factory=list)
+    distributions: Distributions | None = Field(
+        default_factory=lambda: Distributions([])
+    )
+    functions: Functions | None = Field(default_factory=lambda: Functions([]))
+    domains: Domains | None = Field(default_factory=lambda: Domains([]))
+    parameter_points: ParameterPoints | None = Field(
+        default_factory=lambda: ParameterPoints([])
+    )
     data: list[dict[str, Any]] | None = Field(default_factory=list)
     likelihoods: list[dict[str, Any]] | None = Field(default_factory=list)
     analyses: list[dict[str, Any]] | None = Field(default_factory=list)
     misc: dict[str, Any] | None = Field(default_factory=dict)
-
-    # Private attributes (computed in model_post_init)
-    _parameter_collection: ParameterCollection = PrivateAttr()
-    _distribution_set: DistributionSet = PrivateAttr()
-    _domain_collection: DomainSet = PrivateAttr()
-
-    def model_post_init(self, __context: Any, /) -> None:
-        """Initialize computed collections after Pydantic validation."""
-        # Now collections accept Pydantic objects directly
-        self._parameter_collection = ParameterCollection(self.parameter_points or [])
-        self._domain_collection = DomainSet(self.domains or [])
-        self._distribution_set = DistributionSet(self.distributions or [])
 
     @classmethod
     def load(cls, path: str | os.PathLike[str]) -> Workspace:
@@ -132,27 +124,35 @@ class Workspace(BaseModel):
         """
 
         selected_domain = (
-            domain if isinstance(domain, Domain) else self._domain_collection[domain]
+            domain
+            if isinstance(domain, Domain)
+            else self.domains[domain]
+            if self.domains
+            else ProductDomain(name="default")
         )
         parameterset = (
             parameter_set
             if isinstance(parameter_set, ParameterSet)
-            else self._parameter_collection[parameter_set]
+            else self.parameter_points[parameter_set]
+            if self.parameter_points
+            else ParameterSet(name="default", parameters=[])
         )
 
         # Verify that domain axis names are a subset of parameters (not all parameters need bounds)
-        param_names = set(parameterset.points.keys())
-        axis_names = set(selected_domain.axis_names)
-        assert axis_names.issubset(param_names), (
-            f"Domain axis names must be a subset of parameter names. "
-            f"Extra domain axes: {axis_names - param_names}"
-        )
+        if parameterset is not None:
+            param_names = set(parameterset.points.keys())
+            if selected_domain is not None:
+                axis_names = set(selected_domain.axis_names)
+                assert axis_names.issubset(param_names), (
+                    f"Domain axis names must be a subset of parameter names. "
+                    f"Extra domain axes: {axis_names - param_names}"
+                )
 
         return Model(
-            parameterset=parameterset,
-            distributions=self._distribution_set,
-            domain=selected_domain,
-            functions=self.functions or Functions([]),
+            parameterset=parameterset or ParameterSet(name="default"),
+            distributions=self.distributions or Distributions(),
+            domain=selected_domain or Domain(name="default", type="unknown"),
+            functions=self.functions or Functions(),
             progress=progress,
             mode=mode,
         )
@@ -176,7 +176,7 @@ class Model:
         self,
         *,
         parameterset: ParameterSet,
-        distributions: DistributionSet,
+        distributions: Distributions,
         domain: Domain,
         functions: Functions,
         progress: bool = True,
@@ -187,7 +187,7 @@ class Model:
 
         Args:
             parameterset (ParameterSet): The parameter set used in the model.
-            distributions (DistributionSet): Set of distributions to include.
+            distributions (Distributions): Set of distributions to include.
             domain (Domain): Domain constraints for parameters.
             functions (Functions): Set of functions that compute parameter values.
             progress (bool): Whether to show progress bar during dependency graph construction.
@@ -212,11 +212,11 @@ class Model:
         self.mode = mode
         self._compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]] = {}
 
-        for parameter in parameterset.parameters:
+        for parameter in parameterset:
             # Create scalar parameter with domain bounds applied
             domain_bounds = domain.get(parameter.name, (None, None))
             self.parameters[parameter.name] = create_bounded_tensor(
-                parameter.name, domain_bounds, pt.scalar
+                parameter.name, domain_bounds, parameter.kind
             )
 
         self.distributions: dict[str, TensorVar] = {}
@@ -227,7 +227,7 @@ class Model:
     def _build_dependency_graph(
         self,
         functions: Functions,
-        distributions: DistributionSet,
+        distributions: Distributions,
         progress: bool = True,
     ) -> None:
         """
@@ -246,7 +246,7 @@ class Model:
         constants_map: dict[str, TensorVar] = {}
 
         # Map all parameter names
-        for param in self.parameterset.parameters:
+        for param in self.parameterset:
             entity_types[param.name] = "parameter"
 
         # Map all function names

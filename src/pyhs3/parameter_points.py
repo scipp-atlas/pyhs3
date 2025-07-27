@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 import pytensor.tensor as pt
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr, RootModel
 
 from pyhs3.typing.aliases import TensorVar
 
@@ -29,12 +29,14 @@ class ParameterPoint(BaseModel):
         value: Numeric value of the parameter
         const: Whether parameter is constant (optional, defaults to False)
         nbins: Number of bins for binned parameters (optional)
+        kind: Type of tensor to create (optional, defaults to pt.scalar)
     """
 
     name: str
     value: float
     const: bool = False
     nbins: int | None = None
+    kind: Callable[..., TensorVar] = Field(default=pt.scalar, exclude=True)
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> ParameterPoint:
@@ -61,12 +63,10 @@ class ParameterSet(BaseModel):
     Parameters:
         name: Name identifier for the parameter set
         parameters: List of ParameterPoint specifications
-        kind: Type of tensor to create (optional, defaults to pt.scalar)
     """
 
     name: str
-    parameters: list[ParameterPoint]
-    kind: Callable[..., TensorVar] = Field(default=pt.scalar, exclude=True)
+    parameters: list[ParameterPoint] = Field(default_factory=list)
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> ParameterSet:
@@ -118,7 +118,7 @@ class ParameterSet(BaseModel):
         return iter(self.parameters)
 
 
-class ParameterCollection:
+class ParameterPoints(RootModel[list[ParameterSet]]):
     """
     Collection of HS3 parameter sets for model configuration.
 
@@ -130,34 +130,29 @@ class ParameterCollection:
         parameter_sets: Mapping from parameter set names to ParameterSet instances.
     """
 
-    def __init__(self, parameter_points: list[ParameterSet]) -> None:
-        """
-        Collection of parameter sets that define parameter values.
+    root: list[ParameterSet] = Field(default_factory=list)
+    _map: dict[str, ParameterSet] = PrivateAttr(default_factory=dict)
 
-        Args:
-            parameter_points: List of ParameterSet objects
-        """
-        self.parameter_sets: dict[str, ParameterSet] = {}
-        for param_set in parameter_points:
-            self.parameter_sets[param_set.name] = param_set
+    def model_post_init(self, __context: Any, /) -> None:
+        """Initialize computed collections after Pydantic validation."""
+        self._map = {param_set.name: param_set for param_set in self.root}
 
     def __getitem__(self, item: str | int) -> ParameterSet:
         if isinstance(item, int):
-            key = list(self.parameter_sets.keys())[item]
-            return self.parameter_sets[key]
-        return self.parameter_sets[item]
+            return self.root[item]
+        return self._map[item]
 
     def get(
         self, item: str, default: ParameterSet | None = None
     ) -> ParameterSet | None:
         """Get a parameter set by name, returning default if not found."""
-        return self.parameter_sets.get(item, default)
+        return self._map.get(item, default)
 
     def __contains__(self, item: str) -> bool:
-        return item in self.parameter_sets
+        return item in self._map
 
-    def __iter__(self) -> Iterator[ParameterSet]:
-        return iter(self.parameter_sets.values())
+    def __iter__(self) -> Iterator[ParameterSet]:  # type: ignore[override]  # https://github.com/pydantic/pydantic/issues/8872
+        return iter(self.root)
 
     def __len__(self) -> int:
-        return len(self.parameter_sets)
+        return len(self.root)

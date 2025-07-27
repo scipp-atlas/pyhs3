@@ -14,8 +14,16 @@ from typing import Annotated, Any, Literal, TypeVar, cast
 
 import pytensor.tensor as pt
 import sympy as sp
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    RootModel,
+    model_validator,
+)
 
+from pyhs3.exceptions import custom_error_msg
 from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor
 from pyhs3.typing.aliases import TensorVar
 
@@ -618,46 +626,6 @@ registered_distributions: dict[str, type[Distribution]] = {
     "poisson_dist": PoissonDist,
 }
 
-
-class DistributionSet:
-    """
-    Collection of distributions for a probabilistic model.
-
-    Manages a set of distribution instances, providing dict-like access
-    by distribution name. Handles distribution creation from configuration
-    dictionaries and maintains a registry of available distribution types.
-
-    Attributes:
-        dists (dict[str, Distribution]): Mapping from distribution names to Distribution instances.
-    """
-
-    def __init__(self, distributions: list[DistributionType]) -> None:
-        """
-        Collection of distributions.
-
-        Args:
-            distributions: List of DistributionType objects
-
-        Attributes:
-            dists: Mapping of distribution names to Distribution objects.
-        """
-        self.dists: dict[str, Distribution] = {
-            dist.name: dist for dist in distributions
-        }
-
-    def __getitem__(self, item: str) -> Distribution:
-        return self.dists[item]
-
-    def __contains__(self, item: str) -> bool:
-        return item in self.dists
-
-    def __iter__(self) -> Iterator[Distribution]:
-        return iter(self.dists.values())
-
-    def __len__(self) -> int:
-        return len(self.dists)
-
-
 # Type alias for all distribution types using discriminated union
 DistributionType = Annotated[
     GaussianDist
@@ -668,3 +636,42 @@ DistributionType = Annotated[
     | PoissonDist,
     Field(discriminator="type"),
 ]
+
+
+class Distributions(RootModel[list[DistributionType]]):
+    """
+    Collection of distributions for a probabilistic model.
+
+    Manages a set of distribution instances, providing dict-like access
+    by distribution name. Handles distribution creation from configuration
+    dictionaries and maintains a registry of available distribution types.
+
+    Attributes:
+        dists: Mapping from distribution names to Distribution instances.
+    """
+
+    root: Annotated[
+        list[DistributionType],
+        custom_error_msg(
+            {
+                "union_tag_invalid": "Unknown distribution type '{tag}' does not match any of the expected distributions: {expected_tags}"
+            }
+        ),
+    ] = Field(default_factory=list)
+    _map: dict[str, Distribution] = PrivateAttr(default_factory=dict)
+
+    def model_post_init(self, __context: Any, /) -> None:
+        """Initialize computed collections after Pydantic validation."""
+        self._map = {dist.name: dist for dist in self.root}
+
+    def __getitem__(self, item: str) -> Distribution:
+        return self._map[item]
+
+    def __contains__(self, item: str) -> bool:
+        return item in self._map
+
+    def __iter__(self) -> Iterator[Distribution]:  # type: ignore[override]  # https://github.com/pydantic/pydantic/issues/8872
+        return iter(self.root)
+
+    def __len__(self) -> int:
+        return len(self.root)

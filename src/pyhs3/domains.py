@@ -10,7 +10,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, RootModel, model_validator
+
+from pyhs3.exceptions import custom_error_msg
 
 
 class Axis(BaseModel):
@@ -85,11 +87,21 @@ class Domain(BaseModel):
         """List of axis names in this domain. Note: may not be implemented for all domain types."""
         raise NotImplementedError
 
-    def get(
-        self, axis_name: str, default: tuple[float | None, float | None] = (None, None)
-    ) -> tuple[float | None, float | None]:
+    def __len__(self) -> int:
+        """Number of axes in this domain."""
+        return 0
+
+    def __contains__(self, _axis_name: str) -> bool:
+        """Check if an axis with the given name exists in this domain."""
+        return False
+
+    def get(self, _axis_name: str, default: Any = None) -> Any:
         """Get axis bounds for a parameter name. Note: may not be implemented for all domain types."""
-        raise NotImplementedError
+        return default
+
+    def __getitem__(self, axis_name: str) -> Any:
+        """Get axis bounds for a parameter name (dict-like access)."""
+        raise KeyError(axis_name)
 
 
 class ProductDomain(Domain):
@@ -110,7 +122,7 @@ class ProductDomain(Domain):
     """
 
     type: Literal["product_domain"] = "product_domain"
-    axes: list[Axis]
+    axes: list[Axis] = Field(default_factory=list)
     _axes_map: dict[str, Axis] = PrivateAttr(default_factory=dict)
 
     @model_validator(mode="after")
@@ -202,8 +214,12 @@ registered_domains: dict[str, type[Domain]] = {
     "product_domain": ProductDomain,
 }
 
+# Type alias for all domain types using discriminated union
+# Currently only ProductDomain exists, but this allows for future domain types
+DomainType = Annotated[ProductDomain, Field(discriminator="type")]
 
-class DomainSet:
+
+class Domains(RootModel[list[DomainType]]):
     """
     Collection of HS3 domains for parameter space definitions.
 
@@ -216,37 +232,34 @@ class DomainSet:
         domains: Mapping from domain names to Domain instances.
     """
 
-    def __init__(self, domains: list[DomainType]) -> None:
-        """
-        Collection of domains that define parameter spaces.
+    root: Annotated[
+        list[DomainType],
+        custom_error_msg(
+            {
+                "union_tag_invalid": "Unknown domain type '{tag}' does not match any of the expected domains: {expected_tags}"
+            }
+        ),
+    ]
+    _map: dict[str, Domain] = PrivateAttr(default_factory=dict)
 
-        Args:
-            domains: List of DomainType objects
-        """
-        self.domains: dict[str, Domain] = {}
-        for domain in domains:
-            self.domains[domain.name] = domain
+    def model_post_init(self, __context: Any, /) -> None:
+        """Initialize computed collections after Pydantic validation."""
+        self._map = {domain.name: domain for domain in self.root}
 
     def __getitem__(self, item: str | int) -> Domain:
         if isinstance(item, int):
-            key = list(self.domains.keys())[item]
-            return self.domains[key]
-        return self.domains[item]
+            return self.root[item]
+        return self._map[item]
 
     def get(self, item: str, default: Domain | None = None) -> Domain | None:
         """Get a domain by name, returning default if not found."""
-        return self.domains.get(item, default)
+        return self._map.get(item, default)
 
     def __contains__(self, item: str) -> bool:
-        return item in self.domains
+        return item in self._map
 
-    def __iter__(self) -> Iterator[Domain]:
-        return iter(self.domains.values())
+    def __iter__(self) -> Iterator[Domain]:  # type: ignore[override]  # https://github.com/pydantic/pydantic/issues/8872
+        return iter(self.root)
 
     def __len__(self) -> int:
-        return len(self.domains)
-
-
-# Type alias for all domain types using discriminated union
-# Currently only ProductDomain exists, but this allows for future domain types
-DomainType = Annotated[ProductDomain, Field(discriminator="type")]
+        return len(self.root)

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections import OrderedDict
-from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar, cast
 
@@ -27,6 +25,7 @@ from pyhs3 import typing as T
 from pyhs3.distributions import DistributionSet
 from pyhs3.domains import Domain, DomainSet
 from pyhs3.functions import FunctionSet
+from pyhs3.parameter_points import ParameterCollection, ParameterSet
 from pyhs3.typing_compat import TypeAlias
 
 log = logging.getLogger(__name__)
@@ -76,16 +75,16 @@ class Workspace:
         self,
         *,
         domain: int | str | Domain = 0,
-        parameter_point: int | str | ParameterSet = 0,
+        parameter_set: int | str | ParameterSet = 0,
         progress: bool = True,
         mode: str = "FAST_RUN",
     ) -> Model:
         """
-        Constructs a `Model` object using the provided domain and parameter point.
+        Constructs a `Model` object using the provided domain and parameter set.
 
         Args:
             domain (int | str | Domain): Identifier or object specifying the domain to use.
-            parameter_point (int | str | ParameterSet): Identifier or object specifying the parameter values to use.
+            parameter_set (int | str | ParameterSet): Identifier or object specifying the parameter values to use.
             progress (bool): Whether to show progress bar during dependency graph construction. Defaults to True.
             mode (str): PyTensor compilation mode. Defaults to "FAST_RUN".
                        Options: "FAST_RUN" (apply all rewrites, use C implementations),
@@ -102,9 +101,9 @@ class Workspace:
             domain if isinstance(domain, Domain) else self.domain_collection[domain]
         )
         parameterset = (
-            parameter_point
-            if isinstance(parameter_point, ParameterSet)
-            else self.parameter_collection[parameter_point]
+            parameter_set
+            if isinstance(parameter_set, ParameterSet)
+            else self.parameter_collection[parameter_set]
         )
 
         # Verify that domain axis names are a subset of parameters (not all parameters need bounds)
@@ -167,7 +166,7 @@ class Model:
 
         Attributes:
             parameters (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic parameter variables.
-            parameterset (ParameterSet): The original set of parameter values.
+            parameterset (ParameterSet): The original parameter set with parameter values.
             distributions (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic distribution expressions.
             functions (dict[str, pytensor.tensor.variable.TensorVariable]): Computed function values.
             mode (str): PyTensor compilation mode.
@@ -179,11 +178,11 @@ class Model:
         self.mode = mode
         self._compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]] = {}
 
-        for parameter_point in parameterset:
+        for parameter in parameterset.parameters:
             # Create scalar parameter with domain bounds applied
-            domain_bounds = domain.get(parameter_point.name, (None, None))
-            self.parameters[parameter_point.name] = create_bounded_tensor(
-                parameter_point.name, domain_bounds, parameter_point.kind
+            domain_bounds = domain.get(parameter.name, (None, None))
+            self.parameters[parameter.name] = create_bounded_tensor(
+                parameter.name, domain_bounds, pt.scalar
             )
 
         self.distributions: dict[str, T.TensorVar] = {}
@@ -213,7 +212,7 @@ class Model:
         constants_map: dict[str, T.TensorVar] = {}
 
         # Map all parameter names
-        for param in self.parameterset:
+        for param in self.parameterset.parameters:
             entity_types[param.name] = "parameter"
 
         # Map all function names
@@ -510,125 +509,6 @@ class Model:
     Graph operations: {len(applies)}
     Operation types: {dict(sorted(op_types.items()))}{compile_info}
 """
-
-
-class ParameterCollection:
-    """
-    Collection of named parameter sets for model configuration.
-
-    Manages multiple parameter sets, each containing a collection of
-    parameter points with specific names and values. Provides dict-like
-    access to parameter sets by name or index.
-
-    Attributes:
-        sets (dict[str, ParameterSet]): Mapping from parameter set names to ParameterSet objects.
-    """
-
-    def __init__(self, parametersets: list[T.ParameterPoint]):
-        """
-        A collection of named parameter sets.
-
-        Args:
-            parametersets (list): List of parameterset configurations.
-
-        Attributes:
-            sets (OrderedDict): Mapping from parameter set names to ParameterSet objects.
-        """
-        self.sets: dict[str, ParameterSet] = OrderedDict()
-
-        for parameterset_config in parametersets:
-            parameterset = ParameterSet(
-                parameterset_config["name"], parameterset_config["parameters"]
-            )
-            self.sets[parameterset.name] = parameterset
-
-    def __getitem__(self, item: str | int) -> ParameterSet:
-        key = list(self.sets.keys())[item] if isinstance(item, int) else item
-        return self.sets[key]
-
-    def get(
-        self, item: str, default: TDefault | None = None
-    ) -> ParameterSet | TDefault | None:
-        """Get a parameter set by name, returning default if not found."""
-        return self.sets.get(item, default)
-
-    def __contains__(self, item: str) -> bool:
-        return item in self.sets
-
-    def __iter__(self) -> Iterator[ParameterSet]:
-        return iter(self.sets.values())
-
-    def __len__(self) -> int:
-        return len(self.sets)
-
-
-class ParameterSet:
-    """
-    Named collection of parameter points with specific values.
-
-    Represents a single configuration of parameter values that can be
-    used to evaluate a model. Each parameter set contains multiple
-    parameter points, each with a name and numeric value.
-
-    Attributes:
-        name (str): Name of the parameter set.
-        points (dict[str, ParameterPoint]): Mapping of parameter names to ParameterPoint objects.
-    """
-
-    def __init__(self, name: str, points: list[T.Parameter]):
-        """
-        Represents a single named set of parameter values.
-
-        Args:
-            name (str): Name of the parameter set.
-            points (list): List of parameter point configurations.
-
-        Attributes:
-            name (str): Name of the parameter set.
-            points (dict[str, ParameterPoint]): Mapping of parameter names to ParameterPoint objects.
-        """
-        self.name = name
-
-        self.points: dict[str, ParameterPoint] = OrderedDict()
-
-        for points_config in points:
-            point = ParameterPoint(points_config["name"], points_config["value"])
-            self.points[point.name] = point
-
-    def __getitem__(self, item: str | int) -> ParameterPoint:
-        key = list(self.points.keys())[item] if isinstance(item, int) else item
-        return self.points[key]
-
-    def get(
-        self, item: str, default: TDefault | None = None
-    ) -> ParameterPoint | TDefault | None:
-        """Get a parameter point by name, returning default if not found."""
-        return self.points.get(item, default)
-
-    def __contains__(self, item: str) -> bool:
-        return item in self.points
-
-    def __iter__(self) -> Iterator[ParameterPoint]:
-        return iter(self.points.values())
-
-    def __len__(self) -> int:
-        return len(self.points)
-
-
-@dataclass
-class ParameterPoint:
-    """
-    Represents a single parameter point.
-
-    Attributes:
-        name (str): Name of the parameter.
-        value (float): Value of the parameter.
-        kind (type[T.TensorVar]): The type of tensor to create.
-    """
-
-    name: str
-    value: float
-    kind: Callable[..., T.TensorVar] = pt.scalar
 
 
 def create_bounded_tensor(

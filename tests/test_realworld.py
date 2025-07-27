@@ -70,7 +70,7 @@ class TestDiHiggsIssue41Workspace:
         # Create model with mu_HH set to specific value
         # Note: This will fail due to dependency graph issues
         model = ws_workspace.model(
-            parameter_point=param_collection, domain=domain_collection
+            parameter_set=param_collection, domain=domain_collection
         )
 
         # Evaluate NLL at this mu_HH value
@@ -108,6 +108,6 @@ class TestDiHiggsIssue41Workspace:
 
         # Should be able to create model without errors
         model = ws_workspace.model(
-            parameter_point=param_collection, domain=domain_collection
+            parameter_set=param_collection, domain=domain_collection
         )
         assert model is not None

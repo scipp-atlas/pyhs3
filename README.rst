@@ -64,6 +64,7 @@ This is how you use the ``pyhs3`` Python API to build a statistical model and ev
    >>> import scipy
    >>> import math
    >>> workspace_data = {
+   ...     "metadata": {"hs3_version": "0.2"},
    ...     "distributions": [
    ...         {
    ...             "name": "model",
@@ -86,7 +87,7 @@ This is how you use the ``pyhs3`` Python API to build a statistical model and ev
    ...     "domains": [
    ...         {
    ...             "name": "default_domain",
-   ...             "type": "product",
+   ...             "type": "product_domain",
    ...             "axes": [
    ...                 {"name": "x", "min": -5.0, "max": 5.0},
    ...                 {"name": "mu", "min": -2.0, "max": 2.0},
@@ -95,13 +96,13 @@ This is how you use the ``pyhs3`` Python API to build a statistical model and ev
    ...         }
    ...     ],
    ... }
-   >>> ws = pyhs3.Workspace(workspace_data)
+   >>> ws = pyhs3.Workspace(**workspace_data)
    >>> model = ws.model()
    <BLANKLINE>
    >>> print(model)
    Model(
        mode: FAST_RUN
-       parameters: 3 (x, mu, sigma)
+       parameters: 3 (sigma, mu, x)
        distributions: 1 (model)
        functions: 0 ()
    )

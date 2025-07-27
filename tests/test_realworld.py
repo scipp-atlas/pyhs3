@@ -43,13 +43,13 @@ class TestDiHiggsIssue41Workspace:
     def test_workspace_loads_successfully(self, ws_workspace):
         """Test that the workspace loads without errors."""
         assert ws_workspace is not None
-        assert len(ws_workspace._distribution_set) > 0
+        assert len(ws_workspace.distributions) > 0
 
     def test_workspace_has_expected_distributions(self, ws_workspace):
         """Test that workspace contains the expected distribution types."""
         # Check that we have the distributions we expect
         dist_types = set()
-        for dist in ws_workspace._distribution_set:
+        for dist in ws_workspace.distributions:
             dist_types.add(type(dist).__name__)
 
         # Should have various distribution types

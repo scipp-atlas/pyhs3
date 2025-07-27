@@ -2,6 +2,9 @@
    :hidden:
    :maxdepth: 2
 
+   structure
+   workspace
+   model
    broadcasting
    api
 

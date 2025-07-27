@@ -40,14 +40,7 @@ Distributions
        "sigma": "sigma",
    }
 
-Available distribution types:
-
-- ``gaussian_dist``: Normal distribution
-- ``mixture_dist``: Weighted mixture of other distributions
-- ``product_dist``: Product of independent distributions
-- ``crystal_ball_dist``: Crystal Ball function (physics)
-- ``generic_dist``: Custom distributions with SymPy expressions
-- ``poisson_dist``: Poisson distribution
+For available distribution types, see the :doc:`api` documentation under :mod:`pyhs3.distributions`.
 
 Functions
 ~~~~~~~~~
@@ -58,12 +51,7 @@ Functions
 
    {"name": "total_rate", "type": "sum", "summands": ["signal_rate", "background_rate"]}
 
-Available function types:
-
-- ``sum``: Add multiple parameters
-- ``product``: Multiply multiple parameters
-- ``generic_function``: Custom expressions using SymPy
-- ``interpolation``: Linear interpolation between points
+For available function types, see the :doc:`api` documentation under :mod:`pyhs3.functions`.
 
 Domains
 ~~~~~~~

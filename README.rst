@@ -56,7 +56,76 @@ pure-python implementation of HS3
 Hello World
 -----------
 
-This is how you use the ``pyhs3`` Python API to build a statistical model and evaluate a model:
+This section shows two ways to build the same statistical model and evaluate it: using PyHS3 Python objects directly, and using HS3 JSON-like dictionaries.
+
+Hello World (Python)
+~~~~~~~~~~~~~~~~~~~~~
+
+This is how you use the ``pyhs3`` Python API to build a statistical model directly with objects:
+
+.. code:: pycon
+
+   >>> import pyhs3
+   >>> import scipy
+   >>> import math
+   >>> from pyhs3.distributions import GaussianDist
+   >>> from pyhs3.parameter_points import ParameterPoint, ParameterSet
+   >>> from pyhs3.domains import ProductDomain, Axis
+   >>> from pyhs3.metadata import Metadata
+   >>>
+   >>> # Create metadata
+   >>> metadata = Metadata(hs3_version="0.2")
+   >>>
+   >>> # Create a Gaussian distribution
+   >>> gaussian_dist = GaussianDist(name="model", x="x", mean="mu", sigma="sigma")
+   >>>
+   >>> # Create parameter points with values
+   >>> param_points = ParameterSet(
+   ...     name="default_values",
+   ...     parameters=[
+   ...         ParameterPoint(name="x", value=0.0),
+   ...         ParameterPoint(name="mu", value=0.0),
+   ...         ParameterPoint(name="sigma", value=1.0),
+   ...     ],
+   ... )
+   >>>
+   >>> # Create domain with parameter bounds
+   >>> domain = ProductDomain(
+   ...     name="default_domain",
+   ...     axes=[
+   ...         Axis(name="x", min=-5.0, max=5.0),
+   ...         Axis(name="mu", min=-2.0, max=2.0),
+   ...         Axis(name="sigma", min=0.1, max=3.0),
+   ...     ],
+   ... )
+   >>>
+   >>> # Build workspace from objects
+   >>> ws = pyhs3.Workspace(
+   ...     metadata=metadata,
+   ...     distributions=[gaussian_dist],
+   ...     parameter_points=[param_points],
+   ...     domains=[domain],
+   ... )
+   >>> model = ws.model()
+   <BLANKLINE>
+   >>> print(model)
+   Model(
+       mode: FAST_RUN
+       parameters: 3 (sigma, mu, x)
+       distributions: 1 (model)
+       functions: 0 ()
+   )
+   >>> parameters = {par.name: par.value for par in model.parameterset}
+   >>> result = -2 * model.logpdf("model", **parameters)
+   >>> print(f"parameters: {parameters}")
+   parameters: {'x': 0.0, 'mu': 0.0, 'sigma': 1.0}
+   >>> print(f"nll: {result:.8f}")
+   nll: 1.83787707
+
+Hello World (HS3)
+~~~~~~~~~~~~~~~~~~
+
+This is the same model built using HS3 JSON-like dictionary format:
 
 .. code:: pycon
 

@@ -40,20 +40,11 @@ class Function(BaseModel):
     name: str
     type: str
     _parameters: dict[str, str] = PrivateAttr(default_factory=dict)
-    _constants_values: dict[str, float | int] = PrivateAttr(default_factory=dict)
 
     @property
     def parameters(self) -> dict[str, str]:
         """Access to parameter mapping."""
         return self._parameters
-
-    @property
-    def constants(self) -> dict[str, TensorVar]:
-        """Convert stored numeric constants to PyTensor constants."""
-        return {
-            name: cast(TensorVar, pt.constant(value))
-            for name, value in self._constants_values.items()
-        }
 
     def expression(self, _: dict[str, TensorVar]) -> TensorVar:
         """

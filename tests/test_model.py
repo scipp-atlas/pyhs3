@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -270,6 +271,21 @@ class TestModelGraphVisualization:
 
         with pytest.raises(ValueError, match="Distribution 'nonexistent' not found"):
             model.visualize_graph("nonexistent")
+
+    def test_visualize_graph_no_path_parameter(self, simple_workspace):
+        """Test visualize_graph without path parameter (uses current directory)."""
+        model = simple_workspace.model()
+
+        # Call without path parameter - should use current working directory
+        output_file = model.visualize_graph("gauss")
+
+        # Should return just the base filename (no path prefix)
+        assert output_file == "gauss_graph.svg"
+
+        # Clean up the generated file in current directory
+        output_path = Path(output_file)
+        if output_path.exists():
+            output_path.unlink()
 
     def test_visualize_graph_import_error_handling(self, simple_workspace, monkeypatch):
         """Test that visualize_graph handles ImportError appropriately."""

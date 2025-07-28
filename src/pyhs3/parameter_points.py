@@ -38,19 +38,6 @@ class ParameterPoint(BaseModel):
     nbins: int | None = None
     kind: Callable[..., TensorVar] = Field(default=pt.scalar, exclude=True)
 
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> ParameterPoint:
-        """
-        Creates a ParameterPoint from a dictionary configuration.
-
-        Args:
-            config: Configuration dictionary.
-
-        Returns:
-            ParameterPoint: The created ParameterPoint instance.
-        """
-        return cls(**config)
-
 
 class ParameterSet(BaseModel):
     """
@@ -67,26 +54,6 @@ class ParameterSet(BaseModel):
 
     name: str
     parameters: list[ParameterPoint] = Field(default_factory=list)
-
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> ParameterSet:
-        """
-        Creates a ParameterSet from a dictionary configuration.
-
-        Args:
-            config: Configuration dictionary.
-
-        Returns:
-            ParameterSet: The created ParameterSet instance.
-        """
-        # Convert parameter dicts to ParameterPoint objects
-        if "parameters" in config:
-            config = config.copy()
-            config["parameters"] = [
-                ParameterPoint.from_dict(param) if isinstance(param, dict) else param
-                for param in config["parameters"]
-            ]
-        return cls(**config)
 
     @property
     def points(self) -> dict[str, ParameterPoint]:

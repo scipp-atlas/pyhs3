@@ -43,20 +43,12 @@ class TestFunction:
         assert isinstance(func.parameters, dict)
 
     def test_function_expression_not_implemented(self):
-        """Test that base Function expression raises NotImplementedError."""
-        func = Function(
-            name="test_func",
-            type="test",
-        )
+        """Test that base Function expression method raises NotImplementedError."""
+        func = Function(name="test", type="unknown")
         with pytest.raises(
-            NotImplementedError, match="Function type test not implemented"
+            NotImplementedError, match="Function type unknown not implemented"
         ):
             func.expression({})
-
-    def test_function_from_dict_not_implemented(self):
-        """Test that base Function from_dict raises NotImplementedError."""
-        with pytest.raises(NotImplementedError):
-            Function.from_dict({})
 
 
 class TestProductFunction:
@@ -73,7 +65,7 @@ class TestProductFunction:
     def test_product_function_from_dict(self):
         """Test ProductFunction can be created from dictionary."""
         config = {"name": "test_product", "factors": ["f1", "f2", "f3"]}
-        func = ProductFunction.from_dict(config)
+        func = ProductFunction(**config)
         assert func.name == "test_product"
         assert func.factors == ["f1", "f2", "f3"]
         assert list(func.parameters.values()) == ["f1", "f2", "f3"]
@@ -150,7 +142,7 @@ class TestSumFunction:
     def test_sum_function_from_dict(self):
         """Test SumFunction can be created from dictionary."""
         config = {"name": "test_sum", "summands": ["a", "b", "c"]}
-        func = SumFunction.from_dict(config)
+        func = SumFunction(**config)
         assert func.name == "test_sum"
         assert func.summands == ["a", "b", "c"]
         assert list(func.parameters.values()) == ["a", "b", "c"]
@@ -301,7 +293,7 @@ class TestGenericFunction:
     def test_generic_function_from_dict(self):
         """Test GenericFunction can be created from dictionary."""
         config = {"name": "test_generic", "expression": "sin(x) * cos(y)"}
-        func = GenericFunction.from_dict(config)
+        func = GenericFunction(**config)
         assert func.name == "test_generic"
         assert func.expression_str == "sin(x) * cos(y)"
         assert set(func.parameters) == {"x", "y"}
@@ -463,7 +455,7 @@ class TestInterpolationFunction:
     )
     def test_interpolation_function_from_dict(self, config):
         """Test InterpolationFunction can be created from various dictionaries."""
-        func = InterpolationFunction.from_dict(config)
+        func = InterpolationFunction(**config)
         assert func.name == config["name"]
         assert func.high == config["high"]
         assert func.low == config["low"]
@@ -791,7 +783,7 @@ class TestProcessNormalizationFunction:
             "logAsymmKappa": [[0.1, 0.2], [0.15, 0.25]],
             "otherFactorList": ["other1", "other2"],
         }
-        func = ProcessNormalizationFunction.from_dict(config)
+        func = ProcessNormalizationFunction(**config)
         assert func.name == "test_norm"
         assert func.expression_name == "test_expr"
         assert func.nominalValue == 2.5

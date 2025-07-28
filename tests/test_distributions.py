@@ -38,7 +38,7 @@ class TestProductDist:
     def test_product_dist_from_dict(self):
         """Test ProductDist can be created from dictionary."""
         config = {"name": "test_product", "factors": ["pdf1", "pdf2", "pdf3"]}
-        dist = ProductDist.from_dict(config)
+        dist = ProductDist(**config)
         assert dist.name == "test_product"
         assert dist.factors == ["pdf1", "pdf2", "pdf3"]
 
@@ -113,7 +113,7 @@ class TestCrystalBallDist:
             "sigma_L": "sL",
             "sigma_R": "sR",
         }
-        dist = CrystalBallDist.from_dict(config)
+        dist = CrystalBallDist(**config)
         assert dist.name == "test_crystal"
         assert dist.m == "mass"
         assert dist.m0 == "mean"
@@ -201,7 +201,7 @@ class TestGenericDist:
     def test_generic_dist_from_dict(self):
         """Test GenericDist can be created from dictionary."""
         config = {"name": "test_generic", "expression": "sin(x) + cos(y)"}
-        dist = GenericDist.from_dict(config)
+        dist = GenericDist(**config)
         assert dist.name == "test_generic"
         assert dist.expression_str == "sin(x) + cos(y)"
 
@@ -244,7 +244,7 @@ class TestPoissonDist:
             "mean": "rate_param",
             "x": "observation",
         }
-        dist = PoissonDist.from_dict(config)
+        dist = PoissonDist(**config)
         assert dist.name == "test_poisson"
         assert dist.mean == "rate_param"
         assert dist.x == "observation"
@@ -257,7 +257,7 @@ class TestPoissonDist:
             "mean": 3.5,  # Numeric rate
             "x": 2,  # Numeric count
         }
-        dist = PoissonDist.from_dict(config)
+        dist = PoissonDist(**config)
 
         # Field attributes should preserve original values for serialization
         assert dist.mean == 3.5
@@ -453,7 +453,7 @@ class TestNumericParameters:
             "x": "obs_var",
         }
 
-        dist = GaussianDist.from_dict(config)
+        dist = GaussianDist(**config)
 
         # Field attributes should preserve original values for serialization
         assert dist.sigma == 1.5  # Original numeric value preserved
@@ -478,7 +478,7 @@ class TestNumericParameters:
         """Test GaussianDist handles all numeric parameters."""
         config = {"name": "numeric_gauss", "mean": 2.0, "sigma": 0.5, "x": 1.0}
 
-        dist = GaussianDist.from_dict(config)
+        dist = GaussianDist(**config)
 
         # Field attributes should preserve original values for serialization
         assert dist.mean == 2.0
@@ -508,7 +508,7 @@ class TestNumericParameters:
             "x": "obs_var",  # String reference
         }
 
-        dist = GaussianDist.from_dict(config)
+        dist = GaussianDist(**config)
 
         # Field attributes should preserve original values for serialization
         assert dist.mean == "mu_param"

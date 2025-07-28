@@ -59,11 +59,6 @@ class Function(BaseModel):
         msg = f"Function type {self.type} not implemented"
         raise NotImplementedError(msg)
 
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> Function:
-        """Create a Function instance from dictionary configuration."""
-        raise NotImplementedError
-
 
 class SumFunction(Function):
     """Sum function that adds summands together."""
@@ -76,11 +71,6 @@ class SumFunction(Function):
         """Build the parameters dict from summands."""
         self._parameters = {name: name for name in self.summands}
         return self
-
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> SumFunction:
-        """Create a SumFunction from dictionary configuration."""
-        return cls(**config)
 
     def expression(self, context: dict[str, TensorVar]) -> TensorVar:
         """
@@ -113,11 +103,6 @@ class ProductFunction(Function):
         """Build the parameters dict from factors."""
         self._parameters = {name: name for name in self.factors}
         return self
-
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> ProductFunction:
-        """Create a ProductFunction from dictionary configuration."""
-        return cls(**config)
 
     def expression(self, context: dict[str, TensorVar]) -> TensorVar:
         """
@@ -180,11 +165,6 @@ class GenericFunction(Function):
         # Set parameters based on the analyzed expression
         self._parameters = {var: var for var in independent_vars}
         return self
-
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> GenericFunction:
-        """Create a GenericFunction from dictionary configuration."""
-        return cls(**config)
 
     def expression(self, context: dict[str, TensorVar]) -> TensorVar:
         """
@@ -257,11 +237,6 @@ class InterpolationFunction(Function):
         all_params = [*self.high, *self.low, self.nom, *self.vars]
         self._parameters = {name: name for name in all_params}
         return self
-
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> InterpolationFunction:
-        """Create an InterpolationFunction from dictionary configuration."""
-        return cls(**config)
 
     def _flexible_interp_single(
         self,
@@ -572,11 +547,6 @@ class ProcessNormalizationFunction(Function):
         all_params = [*self.thetaList, *self.asymmThetaList, *self.otherFactorList]
         self._parameters = {name: name for name in all_params}
         return self
-
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> ProcessNormalizationFunction:
-        """Create a ProcessNormalizationFunction from dictionary configuration."""
-        return cls(**config)
 
     def _asym_interpolation(
         self, theta: TensorVar, kappa_sum: float, kappa_diff: float

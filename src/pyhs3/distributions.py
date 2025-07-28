@@ -100,19 +100,6 @@ class Distribution(BaseModel):
         msg = f"Distribution type={self.type} is not implemented."
         raise NotImplementedError(msg)
 
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> Distribution:
-        """
-        Factory method to create a distribution instance from a dictionary.
-
-        Args:
-            config (dict): Dictionary containing configuration for the distribution.
-
-        Returns:
-            Distribution: A new instance of the appropriate distribution subclass.
-        """
-        raise NotImplementedError
-
 
 class GaussianDist(Distribution):
     r"""
@@ -154,19 +141,6 @@ class GaussianDist(Distribution):
             self._constants_values[x_name] = x_value
 
         return self
-
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> GaussianDist:
-        """
-        Creates an instance of GaussianDist from a dictionary configuration.
-
-        Args:
-            config (dict): Configuration dictionary.
-
-        Returns:
-            GaussianDist: The created GaussianDist instance.
-        """
-        return cls(**config)
 
     def expression(self, distributionsandparameters: dict[str, TensorVar]) -> TensorVar:
         """
@@ -226,19 +200,6 @@ class MixtureDist(Distribution):
         self._parameters = {name: name for name in [*self.coefficients, *self.summands]}
         return self
 
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> MixtureDist:
-        """
-        Creates an instance of MixtureDist from a dictionary configuration.
-
-        Args:
-            config (dict): Configuration dictionary.
-
-        Returns:
-            MixtureDist: The created MixtureDist instance.
-        """
-        return cls(**config)
-
     def expression(self, distributionsandparameters: dict[str, TensorVar]) -> TensorVar:
         """
         Builds a symbolic expression for the mixture distribution.
@@ -296,19 +257,6 @@ class ProductDist(Distribution):
         """Build the parameters dict from factors."""
         self._parameters = {name: name for name in self.factors}
         return self
-
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> ProductDist:
-        """
-        Creates an instance of ProductDist from a dictionary configuration.
-
-        Args:
-            config (dict): Configuration dictionary.
-
-        Returns:
-            ProductDist: The created ProductDist instance.
-        """
-        return cls(**config)
 
     def expression(self, distributionsandparameters: dict[str, TensorVar]) -> TensorVar:
         """
@@ -397,19 +345,6 @@ class CrystalBallDist(Distribution):
         ]
         self._parameters = {name: name for name in params}
         return self
-
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> CrystalBallDist:
-        """
-        Create a CrystalBallDist from a dictionary configuration.
-
-        Args:
-            config: Configuration dictionary
-
-        Returns:
-            The created CrystalBallDist instance
-        """
-        return cls(**config)
 
     def expression(self, distributionsandparameters: dict[str, TensorVar]) -> TensorVar:
         """
@@ -512,19 +447,6 @@ class GenericDist(Distribution):
         self._parameters = {var: var for var in independent_vars}
         return self
 
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> GenericDist:
-        """
-        Create a GenericDist from a dictionary configuration.
-
-        Args:
-            config: Configuration dictionary
-
-        Returns:
-            The created GenericDist instance
-        """
-        return cls(**config)
-
     def expression(self, distributionsandparameters: dict[str, TensorVar]) -> TensorVar:
         """
         Evaluate the generic distribution using expression parsing.
@@ -584,19 +506,6 @@ class PoissonDist(Distribution):
             self._constants_values[x_name] = x_value
 
         return self
-
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> PoissonDist:
-        """
-        Creates an instance of PoissonDist from a dictionary configuration.
-
-        Args:
-            config (dict): Configuration dictionary.
-
-        Returns:
-            PoissonDist: The created PoissonDist instance.
-        """
-        return cls(**config)
 
     def expression(self, distributionsandparameters: dict[str, TensorVar]) -> TensorVar:
         """

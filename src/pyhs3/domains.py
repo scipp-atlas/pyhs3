@@ -41,19 +41,6 @@ class Axis(BaseModel):
             raise ValueError(msg)
         return self
 
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> Axis:
-        """
-        Creates an Axis from a dictionary configuration.
-
-        Args:
-            config: Configuration dictionary.
-
-        Returns:
-            Axis: The created Axis instance.
-        """
-        return cls(**config)
-
 
 class Domain(BaseModel):
     """
@@ -71,11 +58,6 @@ class Domain(BaseModel):
 
     name: str
     type: str
-
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> Domain:
-        """Create a Domain instance from dictionary configuration."""
-        raise NotImplementedError
 
     @property
     def dimension(self) -> int:
@@ -142,26 +124,6 @@ class ProductDomain(Domain):
             )
             raise ValueError(msg)
         return self
-
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> ProductDomain:
-        """
-        Creates a ProductDomain from a dictionary configuration.
-
-        Args:
-            config: Configuration dictionary.
-
-        Returns:
-            ProductDomain: The created ProductDomain instance.
-        """
-        # Convert axis dicts to Axis objects
-        if "axes" in config:
-            config = config.copy()
-            config["axes"] = [
-                Axis.from_dict(axis) if isinstance(axis, dict) else axis
-                for axis in config["axes"]
-            ]
-        return cls(**config)
 
     @property
     def dimension(self) -> int:

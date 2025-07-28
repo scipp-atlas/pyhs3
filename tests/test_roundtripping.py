@@ -34,13 +34,13 @@ class TestDistributionRoundtripping:
         }
 
         # Create from dict
-        dist1 = GaussianDist.from_dict(config)
+        dist1 = GaussianDist(**config)
 
         # Serialize back to dict
         serialized = dist1.model_dump()
 
         # Create again from serialized dict
-        dist2 = GaussianDist.from_dict(serialized)
+        dist2 = GaussianDist(**serialized)
 
         # Should be equivalent
         assert dist1.name == dist2.name
@@ -61,13 +61,13 @@ class TestDistributionRoundtripping:
         }
 
         # Create from dict
-        dist1 = GaussianDist.from_dict(config)
+        dist1 = GaussianDist(**config)
 
         # Serialize back to dict
         serialized = dist1.model_dump()
 
         # Create again from serialized dict
-        dist2 = GaussianDist.from_dict(serialized)
+        dist2 = GaussianDist(**serialized)
 
         # Should be equivalent
         assert dist1.name == dist2.name
@@ -88,13 +88,13 @@ class TestDistributionRoundtripping:
         }
 
         # Create from dict
-        dist1 = PoissonDist.from_dict(config)
+        dist1 = PoissonDist(**config)
 
         # Serialize back to dict
         serialized = dist1.model_dump()
 
         # Create again from serialized dict
-        dist2 = PoissonDist.from_dict(serialized)
+        dist2 = PoissonDist(**serialized)
 
         # Should be equivalent
         assert dist1.name == dist2.name
@@ -112,13 +112,13 @@ class TestDistributionRoundtripping:
         }
 
         # Create from dict
-        dist1 = MixtureDist.from_dict(config)
+        dist1 = MixtureDist(**config)
 
         # Serialize back to dict
         serialized = dist1.model_dump()
 
         # Create again from serialized dict
-        dist2 = MixtureDist.from_dict(serialized)
+        dist2 = MixtureDist(**serialized)
 
         # Should be equivalent
         assert dist1.name == dist2.name
@@ -137,13 +137,13 @@ class TestDistributionRoundtripping:
         }
 
         # Create from dict
-        dist1 = ProductDist.from_dict(config)
+        dist1 = ProductDist(**config)
 
         # Serialize back to dict
         serialized = dist1.model_dump()
 
         # Create again from serialized dict
-        dist2 = ProductDist.from_dict(serialized)
+        dist2 = ProductDist(**serialized)
 
         # Should be equivalent
         assert dist1.name == dist2.name
@@ -167,13 +167,13 @@ class TestDistributionRoundtripping:
         }
 
         # Create from dict
-        dist1 = CrystalBallDist.from_dict(config)
+        dist1 = CrystalBallDist(**config)
 
         # Serialize back to dict
         serialized = dist1.model_dump()
 
         # Create again from serialized dict
-        dist2 = CrystalBallDist.from_dict(serialized)
+        dist2 = CrystalBallDist(**serialized)
 
         # Should be equivalent
         assert dist1.name == dist2.name
@@ -197,13 +197,13 @@ class TestDistributionRoundtripping:
         }
 
         # Create from dict
-        dist1 = GenericDist.from_dict(config)
+        dist1 = GenericDist(**config)
 
         # Serialize back to dict
         serialized = dist1.model_dump()
 
         # Create again from serialized dict
-        dist2 = GenericDist.from_dict(serialized)
+        dist2 = GenericDist(**serialized)
 
         # Should be equivalent
         assert dist1.name == dist2.name
@@ -224,13 +224,13 @@ class TestFunctionRoundtripping:
         }
 
         # Create from dict
-        func1 = SumFunction.from_dict(config)
+        func1 = SumFunction(**config)
 
         # Serialize back to dict
         serialized = func1.model_dump()
 
         # Create again from serialized dict
-        func2 = SumFunction.from_dict(serialized)
+        func2 = SumFunction(**serialized)
 
         # Should be equivalent
         assert func1.name == func2.name
@@ -247,13 +247,13 @@ class TestFunctionRoundtripping:
         }
 
         # Create from dict
-        func1 = ProductFunction.from_dict(config)
+        func1 = ProductFunction(**config)
 
         # Serialize back to dict
         serialized = func1.model_dump()
 
         # Create again from serialized dict
-        func2 = ProductFunction.from_dict(serialized)
+        func2 = ProductFunction(**serialized)
 
         # Should be equivalent
         assert func1.name == func2.name
@@ -270,13 +270,13 @@ class TestFunctionRoundtripping:
         }
 
         # Create from dict
-        func1 = GenericFunction.from_dict(config)
+        func1 = GenericFunction(**config)
 
         # Serialize back to dict
         serialized = func1.model_dump()
 
         # Create again from serialized dict
-        func2 = GenericFunction.from_dict(serialized)
+        func2 = GenericFunction(**serialized)
 
         # Should be equivalent
         assert func1.name == func2.name
@@ -298,7 +298,7 @@ class TestParametersHandling:
             "x": "obs",
         }
 
-        dist = GaussianDist.from_dict(config)
+        dist = GaussianDist(**config)
 
         # Parameters should be a dict mapping logical names to actual parameter names
         assert isinstance(dist.parameters, dict)
@@ -323,7 +323,7 @@ class TestParametersHandling:
             "extended": False,
         }
 
-        dist = MixtureDist.from_dict(config)
+        dist = MixtureDist(**config)
 
         # Parameters should map each summand and coefficient to itself
         assert isinstance(dist.parameters, dict)
@@ -340,7 +340,7 @@ class TestParametersHandling:
             "expression": "x*y + sin(z)",
         }
 
-        func = GenericFunction.from_dict(config)
+        func = GenericFunction(**config)
 
         # Should extract x, y, z as parameters
         param_values = list(func.parameters.values())

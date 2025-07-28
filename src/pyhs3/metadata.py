@@ -7,8 +7,6 @@ package information, authorship, and publication details following the HS3 speci
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel
 
 
@@ -26,19 +24,6 @@ class PackageInfo(BaseModel):
 
     name: str
     version: str
-
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> PackageInfo:
-        """
-        Creates a PackageInfo instance from a dictionary configuration.
-
-        Args:
-            config: Configuration dictionary.
-
-        Returns:
-            PackageInfo: The created PackageInfo instance.
-        """
-        return cls(**config)
 
 
 class Metadata(BaseModel):
@@ -62,23 +47,3 @@ class Metadata(BaseModel):
     authors: list[str] | None = None
     publications: list[str] | None = None
     description: str | None = None
-
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> Metadata:
-        """
-        Creates a Metadata instance from a dictionary configuration.
-
-        Args:
-            config: Configuration dictionary.
-
-        Returns:
-            Metadata: The created Metadata instance.
-        """
-        # Convert package dicts to PackageInfo objects if present
-        if "packages" in config and config["packages"] is not None:
-            config = config.copy()
-            config["packages"] = [
-                PackageInfo.from_dict(pkg) if isinstance(pkg, dict) else pkg
-                for pkg in config["packages"]
-            ]
-        return cls(**config)

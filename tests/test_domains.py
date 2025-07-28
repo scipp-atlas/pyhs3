@@ -84,7 +84,7 @@ class TestAxis:
     def test_axis_from_dict(self):
         """Test Axis creation from dictionary."""
         config = {"name": "test_param", "min": 0.0, "max": 10.0}
-        axis = Axis.from_dict(config)
+        axis = Axis(**config)
         assert axis.name == "test_param"
         assert axis.min == 0.0
         assert axis.max == 10.0
@@ -96,7 +96,7 @@ class TestAxis:
             ValueError,
             match=r"Axis 'test_param': max \(5\.0\) must be >= min \(10\.0\)",
         ):
-            Axis.from_dict(config)
+            Axis(**config)
 
 
 class TestProductDomain:
@@ -130,7 +130,7 @@ class TestProductDomain:
                 {"name": "param2", "min": -5.0, "max": 5.0},
             ],
         }
-        domain = ProductDomain.from_dict(config)
+        domain = ProductDomain(**config)
         assert domain.name == "test_domain"
         assert len(domain.axes) == 2
         assert domain.axes[0].name == "param1"
@@ -149,7 +149,7 @@ class TestProductDomain:
         with pytest.raises(
             ValueError, match=r"Axis 'param2': max \(5\.0\) must be >= min \(10\.0\)"
         ):
-            ProductDomain.from_dict(config)
+            ProductDomain(**config)
 
 
 class TestDomains:

@@ -165,7 +165,7 @@ ignore = [
   "ISC001",   # Conflicts with formatter
 ]
 isort.required-imports = ["from __future__ import annotations"]
-typing-modules = ["pyhs3.typing_compat"]
+#typing-modules = ["pyhs3.typing_compat"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["T20"]

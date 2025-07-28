@@ -121,6 +121,11 @@ This is how you use the ``pyhs3`` Python API to build a statistical model direct
    parameters: {'x': 0.0, 'mu': 0.0, 'sigma': 1.0}
    >>> print(f"nll: {result:.8f}")
    nll: 1.83787707
+   >>>
+   >>> # Serialize workspace back to dictionary for saving/sharing
+   >>> workspace_dict = ws.model_dump()
+   >>> print("Serialized workspace keys:", list(workspace_dict.keys()))
+   Serialized workspace keys: ['metadata', 'distributions', 'functions', 'domains', 'parameter_points', 'data', 'likelihoods', 'analyses', 'misc']
 
 Hello World (HS3)
 ~~~~~~~~~~~~~~~~~~
@@ -184,3 +189,15 @@ This is the same model built using HS3 JSON-like dictionary format:
    >>> result_scipy = -2 * math.log(scipy.stats.norm.pdf(0, loc=0, scale=1))
    >>> print(f"nll: {result_scipy:.8f}")
    nll: 1.83787707
+   >>>
+   >>> # Round-trip: serialize workspace back to dictionary
+   >>> serialized_dict = ws.model_dump()
+   >>> print("Round-trip successful:", serialized_dict["metadata"]["hs3_version"])
+   Round-trip successful: 0.2
+   >>>
+   >>> # Can recreate workspace from serialized dictionary
+   >>> ws_roundtrip = pyhs3.Workspace(**serialized_dict)
+   >>> model_roundtrip = ws_roundtrip.model()
+   <BLANKLINE>
+   >>> print("Round-trip model:", model_roundtrip.parameterset.name)
+   Round-trip model: default_values

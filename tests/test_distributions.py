@@ -594,7 +594,7 @@ class TestDependencyGraphErrors:
         ws = Workspace(**test_data)
 
         # This should raise ValueError about circular dependency
-        with pytest.raises(ValueError, match="Circular dependency detected in model"):
+        with pytest.raises(ValueError, match="Circular dependency detected in graph"):
             ws.model(domain="test_domain", parameter_set="test_params")
 
     def test_bounded_scalar_applied_to_parameters(self):

@@ -228,6 +228,7 @@ def build_dependency_graph(
 
     Creates a directed graph representing dependencies between parameters,
     functions, and distributions. Also returns constants mapping for later use.
+    Unknown parameter references are automatically created as parameter nodes.
 
     Args:
         parameterset: Collection of parameter points
@@ -238,7 +239,7 @@ def build_dependency_graph(
         Tuple of (dependency graph, constants mapping)
 
     Raises:
-        ValueError: If unknown entities are referenced or circular dependencies exist
+        ValueError: If circular dependencies exist during topological sort
     """
     # Build entity mappings
     entity_types, constants_map = build_entity_mappings(
@@ -260,13 +261,6 @@ def build_dependency_graph(
         )
 
         for param_name in param_names:
-            if param_name not in graph:
-                msg = (
-                    f"Unknown entity referenced: '{param_name}' from '{entity.name}'. "
-                    f"Not found in parameters, functions, or distributions."
-                )
-                raise ValueError(msg)
-
             # Add edge: dependency -> entity (param/func/dist feeds into entity)
             graph.add_named_edge(param_name, entity.name, None)
 

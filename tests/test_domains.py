@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from pyhs3.domains import Axis, Domains, ProductDomain
+from pyhs3.domains import Axis, Domain, Domains, ProductDomain
 
 
 class TestAxis:
@@ -99,6 +99,48 @@ class TestAxis:
             Axis(**config)
 
 
+class TestDomain:
+    """Tests for the Domain base class."""
+
+    def test_domain_dimension_not_implemented(self):
+        """Test that Domain.dimension raises NotImplementedError."""
+        domain = Domain(name="test_domain", type="test_type")
+        with pytest.raises(NotImplementedError):
+            _ = domain.dimension
+
+    def test_domain_axis_names_not_implemented(self):
+        """Test that Domain.axis_names raises NotImplementedError."""
+        domain = Domain(name="test_domain", type="test_type")
+        with pytest.raises(NotImplementedError):
+            _ = domain.axis_names
+
+    def test_domain_len_returns_zero(self):
+        """Test that Domain.__len__ returns 0."""
+        domain = Domain(name="test_domain", type="test_type")
+        assert len(domain) == 0
+
+    def test_domain_contains_returns_false(self):
+        """Test that Domain.__contains__ always returns False."""
+        domain = Domain(name="test_domain", type="test_type")
+        assert "any_axis" not in domain
+        assert "test_param" not in domain
+
+    def test_domain_get_returns_default(self):
+        """Test that Domain.get always returns the default value."""
+        domain = Domain(name="test_domain", type="test_type")
+        assert domain.get("any_axis") is None
+        assert domain.get("any_axis", "default_value") == "default_value"
+        assert domain.get("test_param", (0.0, 1.0)) == (0.0, 1.0)
+
+    def test_domain_getitem_raises_keyerror(self):
+        """Test that Domain.__getitem__ always raises KeyError."""
+        domain = Domain(name="test_domain", type="test_type")
+        with pytest.raises(KeyError, match="any_axis"):
+            _ = domain["any_axis"]
+        with pytest.raises(KeyError, match="test_param"):
+            _ = domain["test_param"]
+
+
 class TestProductDomain:
     """Tests for the ProductDomain class."""
 
@@ -150,6 +192,160 @@ class TestProductDomain:
             ValueError, match=r"Axis 'param2': max \(5\.0\) must be >= min \(10\.0\)"
         ):
             ProductDomain(**config)
+
+    def test_product_domain_duplicate_axis_names_raises_error(self):
+        """Test that ProductDomain raises ValueError for duplicate axis names."""
+        axes = [
+            Axis(name="param1", min=0.0, max=1.0),
+            Axis(name="param2", min=-5.0, max=5.0),
+            Axis(name="param1", min=2.0, max=3.0),  # Duplicate name
+        ]
+        with pytest.raises(
+            ValueError,
+            match=r"Domain 'test_domain' contains duplicate axis names: \{'param1'\}",
+        ):
+            ProductDomain(name="test_domain", axes=axes)
+
+    def test_product_domain_multiple_duplicate_axis_names_raises_error(self):
+        """Test that ProductDomain raises ValueError for multiple duplicate axis names."""
+        axes = [
+            Axis(name="param1", min=0.0, max=1.0),
+            Axis(name="param2", min=-5.0, max=5.0),
+            Axis(name="param1", min=2.0, max=3.0),  # Duplicate param1
+            Axis(name="param3", min=0.0, max=10.0),
+            Axis(name="param2", min=0.0, max=1.0),  # Duplicate param2
+        ]
+        with pytest.raises(
+            ValueError,
+            match=r"Domain 'test_domain' contains duplicate axis names:",
+        ):
+            ProductDomain(name="test_domain", axes=axes)
+
+    def test_product_domain_dimension_property(self):
+        """Test ProductDomain.dimension property."""
+        # Empty domain
+        empty_domain = ProductDomain(name="empty", axes=[])
+        assert empty_domain.dimension == 0
+
+        # Single axis domain
+        single_axis_domain = ProductDomain(
+            name="single", axes=[Axis(name="param1", min=0.0, max=1.0)]
+        )
+        assert single_axis_domain.dimension == 1
+
+        # Multi-axis domain
+        multi_axis_domain = ProductDomain(
+            name="multi",
+            axes=[
+                Axis(name="param1", min=0.0, max=1.0),
+                Axis(name="param2", min=-5.0, max=5.0),
+                Axis(name="param3", min=0.0, max=10.0),
+            ],
+        )
+        assert multi_axis_domain.dimension == 3
+
+    def test_product_domain_axis_names_property(self):
+        """Test ProductDomain.axis_names property."""
+        # Empty domain
+        empty_domain = ProductDomain(name="empty", axes=[])
+        assert empty_domain.axis_names == []
+
+        # Single axis domain
+        single_axis_domain = ProductDomain(
+            name="single", axes=[Axis(name="param1", min=0.0, max=1.0)]
+        )
+        assert single_axis_domain.axis_names == ["param1"]
+
+        # Multi-axis domain
+        multi_axis_domain = ProductDomain(
+            name="multi",
+            axes=[
+                Axis(name="param1", min=0.0, max=1.0),
+                Axis(name="param2", min=-5.0, max=5.0),
+                Axis(name="param3", min=0.0, max=10.0),
+            ],
+        )
+        assert multi_axis_domain.axis_names == ["param1", "param2", "param3"]
+
+    def test_product_domain_len(self):
+        """Test ProductDomain.__len__ method."""
+        # Empty domain
+        empty_domain = ProductDomain(name="empty", axes=[])
+        assert len(empty_domain) == 0
+
+        # Non-empty domain
+        domain = ProductDomain(
+            name="test",
+            axes=[
+                Axis(name="param1", min=0.0, max=1.0),
+                Axis(name="param2", min=-5.0, max=5.0),
+            ],
+        )
+        assert len(domain) == 2
+
+    def test_product_domain_contains(self):
+        """Test ProductDomain.__contains__ method."""
+        domain = ProductDomain(
+            name="test",
+            axes=[
+                Axis(name="param1", min=0.0, max=1.0),
+                Axis(name="param2", min=-5.0, max=5.0),
+            ],
+        )
+
+        # Existing axes
+        assert "param1" in domain
+        assert "param2" in domain
+
+        # Non-existing axes
+        assert "param3" not in domain
+        assert "nonexistent" not in domain
+
+    def test_product_domain_get_method(self):
+        """Test ProductDomain.get method."""
+        domain = ProductDomain(
+            name="test",
+            axes=[
+                Axis(name="param1", min=0.0, max=1.0),
+                Axis(name="param2", min=-5.0, max=5.0),
+                Axis(name="param3"),  # No bounds
+            ],
+        )
+
+        # Existing axes with bounds
+        assert domain.get("param1") == (0.0, 1.0)
+        assert domain.get("param2") == (-5.0, 5.0)
+
+        # Existing axis without bounds
+        assert domain.get("param3") == (None, None)
+
+        # Non-existing axis with default
+        assert domain.get("nonexistent") == (None, None)
+        assert domain.get("nonexistent", (0.0, 10.0)) == (0.0, 10.0)
+
+    def test_product_domain_getitem_method(self):
+        """Test ProductDomain.__getitem__ method."""
+        domain = ProductDomain(
+            name="test",
+            axes=[
+                Axis(name="param1", min=0.0, max=1.0),
+                Axis(name="param2", min=-5.0, max=5.0),
+                Axis(name="param3"),  # No bounds
+            ],
+        )
+
+        # Existing axes with bounds
+        assert domain["param1"] == (0.0, 1.0)
+        assert domain["param2"] == (-5.0, 5.0)
+
+        # Existing axis without bounds
+        assert domain["param3"] == (None, None)
+
+        # Non-existing axis should raise KeyError
+        with pytest.raises(
+            KeyError, match=r"No axis named 'nonexistent' found in domain 'test'"
+        ):
+            _ = domain["nonexistent"]
 
 
 class TestDomains:

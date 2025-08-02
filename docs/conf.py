@@ -25,7 +25,7 @@ extensions = [
     "sphinx_copybutton",
     "sphinx_click.ext",
     "sphinx_issues",
-    "sphinx_copybutton",
+    "sphinxcontrib.mermaid",
 ]
 
 # GitHub repo

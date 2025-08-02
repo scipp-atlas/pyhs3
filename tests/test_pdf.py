@@ -11,32 +11,49 @@ from pyhs3 import Workspace
 from pyhs3.core import create_bounded_tensor
 
 
+def test_workspace_load_from_file(datadir):
+    """Test Workspace.load() method loads JSON files correctly."""
+    workspace_path = datadir.joinpath("nondefault_points_domains.json")
+    workspace = Workspace.load(workspace_path)
+
+    # Verify the workspace loaded correctly
+    assert workspace is not None
+    assert workspace.metadata.hs3_version == "0.2"
+    assert len(workspace.domains) == 2
+    assert len(workspace.parameter_points) == 2
+
+    # Compare with direct JSON loading to ensure equivalence
+    workspace_from_dict = Workspace(**json.loads(workspace_path.read_text()))
+
+    # Should have same structure
+    assert len(workspace.domains) == len(workspace_from_dict.domains)
+    assert len(workspace.parameter_points) == len(workspace_from_dict.parameter_points)
+
+
 def test_nondefault_points_domains_access(datadir):
     workspace = Workspace(
-        json.loads(datadir.joinpath("nondefault_points_domains.json").read_text())
+        **json.loads(datadir.joinpath("nondefault_points_domains.json").read_text())
     )
 
-    assert workspace.parameter_collection[0].name == "default_values"
-    assert workspace.parameter_collection[1].name == "nondefault_values"
-    assert workspace.parameter_collection["default_values"].name == "default_values"
-    assert (
-        workspace.parameter_collection["nondefault_values"].name == "nondefault_values"
-    )
+    assert workspace.parameter_points[0].name == "default_values"
+    assert workspace.parameter_points[1].name == "nondefault_values"
+    assert workspace.parameter_points["default_values"].name == "default_values"
+    assert workspace.parameter_points["nondefault_values"].name == "nondefault_values"
 
-    assert workspace.domain_collection[0].name == "default_domain"
-    assert workspace.domain_collection[1].name == "nondefault_domain"
-    assert workspace.domain_collection["default_domain"].name == "default_domain"
-    assert workspace.domain_collection["nondefault_domain"].name == "nondefault_domain"
+    assert workspace.domains[0].name == "default_domain"
+    assert workspace.domains[1].name == "nondefault_domain"
+    assert workspace.domains["default_domain"].name == "default_domain"
+    assert workspace.domains["nondefault_domain"].name == "nondefault_domain"
 
 
 def test_rf501_simultaneouspdf(datadir):
     workspace = Workspace(
-        json.loads(datadir.joinpath("rf501_simultaneouspdf.json").read_text())
+        **json.loads(datadir.joinpath("rf501_simultaneouspdf.json").read_text())
     )
 
     model = workspace.model(
-        parameter_point=workspace.parameter_collection["default_values"],
-        domain=workspace.domain_collection["default_domain"],
+        parameter_set=workspace.parameter_points["default_values"],
+        domain=workspace.domains["default_domain"],
     )
 
     physicspdfval = model.pdf(
@@ -63,15 +80,15 @@ def test_rf501_simultaneouspdf(datadir):
 
 def test_rf501_manual(datadir):
     workspace = Workspace(
-        json.loads(datadir.joinpath("rf501_simultaneouspdf.json").read_text())
+        **json.loads(datadir.joinpath("rf501_simultaneouspdf.json").read_text())
     )
 
     model = workspace.model(
-        parameter_point=workspace.parameter_collection["default_values"],
-        domain=workspace.domain_collection["default_domain"],
+        parameter_set=workspace.parameter_points["default_values"],
+        domain=workspace.domains["default_domain"],
     )
 
-    scalarranges = workspace.domain_collection["default_domain"]
+    scalarranges = workspace.domains["default_domain"]
 
     f = create_bounded_tensor("f", scalarranges["f"])
     f_ctl = create_bounded_tensor("f_ctl", scalarranges["f_ctl"])
@@ -169,14 +186,14 @@ def test_rf501_manual(datadir):
 def test_combine_long_exercise_logpdf_evaluation(datadir):
     """Test logPDF evaluation for pdf_binsignal_region from combine long exercise."""
     workspace = Workspace(
-        json.loads(
+        **json.loads(
             datadir.joinpath("combine_long_exercise_part1_nosys.json").read_text()
         )
     )
 
     model = workspace.model(
-        parameter_point=workspace.parameter_collection["default_values"],
-        domain=workspace.domain_collection["default_domain"],
+        parameter_set=workspace.parameter_points["default_values"],
+        domain=workspace.domains["default_domain"],
     )
 
     # Get default parameter values

@@ -54,18 +54,24 @@ LOGGING_CONFIG = {
     },
     "loggers": {
         "": {
-            "handlers": ["default"],
+            "handlers": ["default", "rich"],
             "level": "WARNING",
             "propagate": False,
         },
         "pyhs3": {
-            "handlers": ["rich"],
+            "handlers": [],
             "level": "INFO",
-            "propagate": False,
+            "propagate": True,
         },
     },
 }
 
-logging.config.dictConfig(LOGGING_CONFIG)
 
-__all__ = ()
+def setup() -> None:
+    """
+    Initialize logging based on the configuration dictionary in this file.
+    """
+    logging.config.dictConfig(LOGGING_CONFIG)
+
+
+__all__ = ("setup",)

@@ -31,9 +31,7 @@ jobs:
         with:
           extra_args: --hook-stage manual --all-files
       - name: Run PyLint
-        run:
-          pipx run nox -s pylint -- --output-format=github
-          --extension-pkg-allow-list=rustworkx
+        run: pipx run nox -s pylint -- --output-format=github
 
   checks:
     name: Check Python ${{ matrix.python-version }} on ${{ matrix.runs-on }}
@@ -74,7 +72,7 @@ jobs:
         run: >-
           python -m pytest -ra --cov --cov-branch --cov-report=xml
           --cov-report=term --junitxml=junit.xml -o junit_family=legacy
-          --durations=20 --runslow
+          --durations=20 --runslow --runpydot
 
       - name: Test doctests
         run: python -m pytest --doctest-modules src/pyhs3

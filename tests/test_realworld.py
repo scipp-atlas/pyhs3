@@ -23,7 +23,7 @@ def ws_json():
 @pytest.fixture
 def ws_workspace(ws_json):
     """Create workspace from WS.json content."""
-    return hs3.Workspace(ws_json)
+    return hs3.Workspace(**ws_json)
 
 
 def test_workspace_loading(ws_workspace):
@@ -43,13 +43,13 @@ class TestDiHiggsIssue41Workspace:
     def test_workspace_loads_successfully(self, ws_workspace):
         """Test that the workspace loads without errors."""
         assert ws_workspace is not None
-        assert len(ws_workspace.distribution_set) > 0
+        assert len(ws_workspace.distributions) > 0
 
     def test_workspace_has_expected_distributions(self, ws_workspace):
         """Test that workspace contains the expected distribution types."""
         # Check that we have the distributions we expect
         dist_types = set()
-        for dist in ws_workspace.distribution_set:
+        for dist in ws_workspace.distributions:
             dist_types.add(type(dist).__name__)
 
         # Should have various distribution types
@@ -64,13 +64,13 @@ class TestDiHiggsIssue41Workspace:
         expected_nll_values = expected_nll_data["nll"]
 
         # Find parameters and model
-        param_collection = ws_workspace.parameter_collection[0]  # default_values
-        domain_collection = ws_workspace.domain_collection[0]  # default_domain
+        param_collection = ws_workspace.parameter_points[0]  # default_values
+        domain_collection = ws_workspace.domains[0]  # default_domain
 
         # Create model with mu_HH set to specific value
         # Note: This will fail due to dependency graph issues
         model = ws_workspace.model(
-            parameter_point=param_collection, domain=domain_collection
+            parameter_set=param_collection, domain=domain_collection
         )
 
         # Evaluate NLL at this mu_HH value
@@ -88,12 +88,12 @@ class TestDiHiggsIssue41Workspace:
 
     def test_workspace_parameter_structure(self, ws_workspace):
         """Test that workspace has expected parameter structure."""
-        assert len(ws_workspace.parameter_collection) > 0
-        assert len(ws_workspace.domain_collection) > 0
+        assert len(ws_workspace.parameter_points) > 0
+        assert len(ws_workspace.domains) > 0
 
         # Check that we have default collections
-        param_names = [p.name for p in ws_workspace.parameter_collection]
-        domain_names = [d.name for d in ws_workspace.domain_collection]
+        param_names = [p.name for p in ws_workspace.parameter_points]
+        domain_names = [d.name for d in ws_workspace.domains]
 
         # Should have at least default values
         assert len(param_names) > 0
@@ -103,11 +103,11 @@ class TestDiHiggsIssue41Workspace:
     def test_workspace_model_creation(self, ws_workspace):
         """Test that we can create a model from the workspace."""
         # This tests basic model creation without full evaluation
-        param_collection = ws_workspace.parameter_collection[0]
-        domain_collection = ws_workspace.domain_collection[0]
+        param_collection = ws_workspace.parameter_points[0]
+        domain_collection = ws_workspace.domains[0]
 
         # Should be able to create model without errors
         model = ws_workspace.model(
-            parameter_point=param_collection, domain=domain_collection
+            parameter_set=param_collection, domain=domain_collection
         )
         assert model is not None

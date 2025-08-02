@@ -18,11 +18,34 @@ from pyhs3 import Workspace
 from pyhs3.core import create_bounded_tensor
 from pyhs3.distributions import (
     CrystalBallDist,
+    Distribution,
     GaussianDist,
     GenericDist,
     PoissonDist,
     ProductDist,
 )
+
+
+class TestDistribution:
+    """Test the base Distribution class."""
+
+    def test_distribution_base_class(self):
+        """Test Distribution base class initialization."""
+        dist = Distribution(
+            name="test_dist",
+            type="test",
+        )
+        assert dist.name == "test_dist"
+        assert dist.type == "test"
+        assert isinstance(dist.parameters, dict)
+
+    def test_distribution_expression_not_implemented(self):
+        """Test that base distribution expression method raises NotImplementedError."""
+        dist = Distribution(name="test", type="unknown")
+        with pytest.raises(
+            NotImplementedError, match="Distribution type=unknown is not implemented."
+        ):
+            dist.expression({})
 
 
 class TestProductDist:
@@ -33,12 +56,12 @@ class TestProductDist:
         dist = ProductDist(name="test_product", factors=["factor1", "factor2"])
         assert dist.name == "test_product"
         assert dist.factors == ["factor1", "factor2"]
-        assert dist.parameters == ["factor1", "factor2"]
+        assert list(dist.parameters.values()) == ["factor1", "factor2"]
 
     def test_product_dist_from_dict(self):
         """Test ProductDist can be created from dictionary."""
         config = {"name": "test_product", "factors": ["pdf1", "pdf2", "pdf3"]}
-        dist = ProductDist.from_dict(config)
+        dist = ProductDist(**config)
         assert dist.name == "test_product"
         assert dist.factors == ["pdf1", "pdf2", "pdf3"]
 
@@ -113,7 +136,7 @@ class TestCrystalBallDist:
             "sigma_L": "sL",
             "sigma_R": "sR",
         }
-        dist = CrystalBallDist.from_dict(config)
+        dist = CrystalBallDist(**config)
         assert dist.name == "test_crystal"
         assert dist.m == "mass"
         assert dist.m0 == "mean"
@@ -201,7 +224,7 @@ class TestGenericDist:
     def test_generic_dist_from_dict(self):
         """Test GenericDist can be created from dictionary."""
         config = {"name": "test_generic", "expression": "sin(x) + cos(y)"}
-        dist = GenericDist.from_dict(config)
+        dist = GenericDist(**config)
         assert dist.name == "test_generic"
         assert dist.expression_str == "sin(x) + cos(y)"
 
@@ -234,7 +257,7 @@ class TestPoissonDist:
         assert dist.name == "test_poisson"
         assert dist.mean == "lambda_param"
         assert dist.x == "count_var"
-        assert dist.parameters == ["lambda_param", "count_var"]
+        assert list(dist.parameters.values()) == ["lambda_param", "count_var"]
 
     def test_poisson_dist_from_dict(self):
         """Test PoissonDist can be created from dictionary."""
@@ -244,7 +267,7 @@ class TestPoissonDist:
             "mean": "rate_param",
             "x": "observation",
         }
-        dist = PoissonDist.from_dict(config)
+        dist = PoissonDist(**config)
         assert dist.name == "test_poisson"
         assert dist.mean == "rate_param"
         assert dist.x == "observation"
@@ -257,11 +280,15 @@ class TestPoissonDist:
             "mean": 3.5,  # Numeric rate
             "x": 2,  # Numeric count
         }
-        dist = PoissonDist.from_dict(config)
+        dist = PoissonDist(**config)
 
-        # Parameters should be converted to constant names
-        assert dist.mean == "constant_numeric_poisson_mean"
-        assert dist.x == "constant_numeric_poisson_x"
+        # Field attributes should preserve original values for serialization
+        assert dist.mean == 3.5
+        assert dist.x == 2
+
+        # Parameters dict should contain the constant names for dependency tracking
+        assert dist.parameters["mean"] == "constant_numeric_poisson_mean"
+        assert dist.parameters["x"] == "constant_numeric_poisson_x"
 
         # Constants should be created
         assert "constant_numeric_poisson_mean" in dist.constants
@@ -392,11 +419,11 @@ class TestPoissonDist:
             ],
             "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
             "functions": [],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
-        model = ws.model(domain="test_domain", parameter_point="test_params")
+        ws = Workspace(**test_data)
+        model = ws.model(domain="test_domain", parameter_set="test_params")
 
         # Verify the distribution was created
         assert "count_dist" in model.distributions
@@ -449,19 +476,18 @@ class TestNumericParameters:
             "x": "obs_var",
         }
 
-        dist = GaussianDist.from_dict(config)
+        dist = GaussianDist(**config)
 
-        # Check that sigma parameter was converted to a constant name
-        assert dist.sigma == "constant_test_gauss_sigma"
+        # Field attributes should preserve original values for serialization
+        assert dist.sigma == 1.5  # Original numeric value preserved
         assert dist.mean == "mu_param"  # String reference unchanged
         assert dist.x == "obs_var"  # String reference unchanged
 
-        # Check that all parameters (including constants) are in parameters list
-        assert "mu_param" in dist.parameters
-        assert "obs_var" in dist.parameters
-        assert (
-            "constant_test_gauss_sigma" in dist.parameters
-        )  # Constants are dependencies
+        # Check that all parameters (including constants) are in parameters dict values
+        param_values = list(dist.parameters.values())
+        assert "mu_param" in param_values
+        assert "obs_var" in param_values
+        assert "constant_test_gauss_sigma" in param_values  # Constants are dependencies
 
         # Check that the constant was created
         assert "constant_test_gauss_sigma" in dist.constants
@@ -475,20 +501,20 @@ class TestNumericParameters:
         """Test GaussianDist handles all numeric parameters."""
         config = {"name": "numeric_gauss", "mean": 2.0, "sigma": 0.5, "x": 1.0}
 
-        dist = GaussianDist.from_dict(config)
+        dist = GaussianDist(**config)
 
-        # All should be converted to constant names
-        assert dist.mean == "constant_numeric_gauss_mean"
-        assert dist.sigma == "constant_numeric_gauss_sigma"
-        assert dist.x == "constant_numeric_gauss_x"
+        # Field attributes should preserve original values for serialization
+        assert dist.mean == 2.0
+        assert dist.sigma == 0.5
+        assert dist.x == 1.0
 
-        # All constants, so parameters list contains all constant names
+        # All constants, so parameters dict values contain all constant names
         expected_params = [
             "constant_numeric_gauss_mean",
             "constant_numeric_gauss_sigma",
             "constant_numeric_gauss_x",
         ]
-        assert set(dist.parameters) == set(expected_params)
+        assert set(dist.parameters.values()) == set(expected_params)
 
         # All constants should be created
         assert len(dist.constants) == 3
@@ -505,14 +531,15 @@ class TestNumericParameters:
             "x": "obs_var",  # String reference
         }
 
-        dist = GaussianDist.from_dict(config)
+        dist = GaussianDist(**config)
 
+        # Field attributes should preserve original values for serialization
         assert dist.mean == "mu_param"
-        assert dist.sigma == "constant_mixed_gauss_sigma"
+        assert dist.sigma == 2.0  # Original numeric value preserved
         assert dist.x == "obs_var"
 
         # String references and constants in parameters
-        assert set(dist.parameters) == {
+        assert set(dist.parameters.values()) == {
             "mu_param",
             "obs_var",
             "constant_mixed_gauss_sigma",
@@ -541,12 +568,12 @@ class TestNumericParameters:
             ],
             "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
             "functions": [],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
         # This should not raise "Unknown entity referenced: '1.0'" error
-        ws = Workspace(test_data)
-        model = ws.model(domain="test_domain", parameter_point="test_params")
+        ws = Workspace(**test_data)
+        model = ws.model(domain="test_domain", parameter_set="test_params")
 
         # Verify the model was created successfully
         assert "mu" in model.parameters
@@ -561,37 +588,6 @@ class TestNumericParameters:
 
 class TestDependencyGraphErrors:
     """Test dependency graph error conditions in core.py for code coverage."""
-
-    def test_unknown_entity_referenced_error(self):
-        """Test that referencing an unknown entity raises ValueError."""
-
-        # Create a workspace with a distribution that references a non-existent parameter
-        test_data = {
-            "parameter_points": [
-                {"name": "test_params", "parameters": [{"name": "mu", "value": 0.0}]}
-            ],
-            "distributions": [
-                {
-                    "type": "gaussian_dist",
-                    "name": "test_gauss",
-                    "mean": "mu",
-                    "sigma": 1.0,
-                    "x": "nonexistent_param",  # This parameter doesn't exist
-                }
-            ],
-            "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
-            "functions": [],
-            "metadata": {"name": "test"},
-        }
-
-        ws = Workspace(test_data)
-
-        # This should raise ValueError with specific message about unknown entity
-        with pytest.raises(
-            ValueError,
-            match="Unknown entity referenced: 'nonexistent_param' from 'test_gauss'",
-        ):
-            ws.model(domain="test_domain", parameter_point="test_params")
 
     def test_circular_dependency_error(self):
         """Test that circular dependencies raise ValueError."""
@@ -615,14 +611,14 @@ class TestDependencyGraphErrors:
             ],
             "distributions": [],
             "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
+        ws = Workspace(**test_data)
 
         # This should raise ValueError about circular dependency
-        with pytest.raises(ValueError, match="Circular dependency detected in model"):
-            ws.model(domain="test_domain", parameter_point="test_params")
+        with pytest.raises(ValueError, match="Circular dependency detected in graph"):
+            ws.model(domain="test_domain", parameter_set="test_params")
 
     def test_bounded_scalar_applied_to_parameters(self):
         """Test that parameters get bounded scalar applied when domains exist."""
@@ -654,11 +650,11 @@ class TestDependencyGraphErrors:
                 }
             ],
             "functions": [],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
-        model = ws.model(domain="test_domain", parameter_point="test_params")
+        ws = Workspace(**test_data)
+        model = ws.model(domain="test_domain", parameter_set="test_params")
 
         # Verify the parameter is bounded
         assert "mu" in model.parameters
@@ -676,8 +672,8 @@ class TestDependencyGraphErrors:
 class TestCollectionMethods:
     """Test collection methods for code coverage."""
 
-    def test_parameter_collection_methods(self):
-        """Test ParameterCollection get(), __contains__, and __len__ methods."""
+    def testparameter_points_methods(self):
+        """Test ParameterPoints get(), __contains__, and __len__ methods."""
         test_data = {
             "parameter_points": [
                 {"name": "params1", "parameters": [{"name": "mu", "value": 0.0}]},
@@ -686,11 +682,11 @@ class TestCollectionMethods:
             "distributions": [],
             "domains": [],
             "functions": [],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
-        param_collection = ws.parameter_collection
+        ws = Workspace(**test_data)
+        param_collection = ws.parameter_points
 
         # Test __len__
         assert len(param_collection) == 2
@@ -728,11 +724,11 @@ class TestCollectionMethods:
             "distributions": [],
             "domains": [],
             "functions": [],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
-        param_set = ws.parameter_collection["test_params"]
+        ws = Workspace(**test_data)
+        param_set = ws.parameter_points["test_params"]
 
         # Test __len__
         assert len(param_set) == 2
@@ -752,7 +748,7 @@ class TestCollectionMethods:
         default_result = param_set.get("nonexistent", "default")
         assert default_result == "default"
 
-    def test_domain_collection_methods(self):
+    def testdomains_methods(self):
         """Test DomainCollection get(), __contains__, and __len__ methods."""
         test_data = {
             "parameter_points": [
@@ -772,11 +768,11 @@ class TestCollectionMethods:
                 },
             ],
             "functions": [],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
-        domain_collection = ws.domain_collection
+        ws = Workspace(**test_data)
+        domain_collection = ws.domains
 
         # Test __len__
         assert len(domain_collection) == 2
@@ -796,7 +792,7 @@ class TestCollectionMethods:
         assert default_result == "default"
 
     def test_domain_set_methods(self):
-        """Test DomainSet get(), __contains__, and __len__ methods."""
+        """Test Domains get(), __contains__, and __len__ methods."""
         test_data = {
             "parameter_points": [
                 {"name": "test_params", "parameters": [{"name": "mu", "value": 0.0}]}
@@ -813,11 +809,11 @@ class TestCollectionMethods:
                 }
             ],
             "functions": [],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
-        domain_set = ws.domain_collection["test_domain"]
+        ws = Workspace(**test_data)
+        domain_set = ws.domains["test_domain"]
 
         # Test __len__
         assert len(domain_set) == 2
@@ -866,11 +862,11 @@ class TestCrossDependencies:
                 }
             ],
             "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
-        model = ws.model(domain="test_domain", parameter_point="test_params")
+        ws = Workspace(**test_data)
+        model = ws.model(domain="test_domain", parameter_set="test_params")
 
         # Verify both function and distribution were created
         assert "computed_mean" in model.functions
@@ -906,11 +902,11 @@ class TestCrossDependencies:
                 }
             ],
             "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
-        model = ws.model(domain="test_domain", parameter_point="test_params")
+        ws = Workspace(**test_data)
+        model = ws.model(domain="test_domain", parameter_set="test_params")
 
         # Verify both distribution and function were created
         assert "base_dist" in model.distributions
@@ -958,11 +954,11 @@ class TestCrossDependencies:
                 },
             ],
             "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
-            "metadata": {"name": "test"},
+            "metadata": {"hs3_version": "0.2"},
         }
 
-        ws = Workspace(test_data)
-        model = ws.model(domain="test_domain", parameter_point="test_params")
+        ws = Workspace(**test_data)
+        model = ws.model(domain="test_domain", parameter_set="test_params")
 
         # Verify all entities were created
         assert "func1" in model.functions

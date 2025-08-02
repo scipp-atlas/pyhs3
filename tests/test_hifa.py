@@ -38,7 +38,7 @@ def test_simplemodel_pyhf(pars, datadir):
     data_pyhf = ws_pyhf.data(model_pyhf)
 
     ws_pyhs3 = pyhs3.Workspace(
-        json.loads(
+        **json.loads(
             datadir.joinpath("simplemodel_uncorrelated-background_hs3.json").read_text()
         )
     )

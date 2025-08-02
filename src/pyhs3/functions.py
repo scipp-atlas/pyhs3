@@ -9,39 +9,44 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
-from typing import Any, Generic, TypeVar, cast
+from typing import Annotated, Any, Literal, TypeVar, cast
 
 import pytensor.tensor as pt
+import sympy as sp
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    RootModel,
+    model_validator,
+)
 
-from pyhs3 import typing as T
-from pyhs3.exceptions import UnknownInterpolationCodeError
+from pyhs3.exceptions import UnknownInterpolationCodeError, custom_error_msg
 from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor
-from pyhs3.typing import function as TF
+from pyhs3.typing.aliases import TensorVar
 
 log = logging.getLogger(__name__)
 
 
-FuncT = TypeVar("FuncT", bound="Function[T.Function]")
-FuncConfigT = TypeVar("FuncConfigT", bound=T.Function)
+FuncT = TypeVar("FuncT", bound="Function")
 
 
-class Function(Generic[FuncConfigT]):
+class Function(BaseModel):
     """Base class for HS3 functions."""
 
-    def __init__(self, *, name: str, kind: str, parameters: list[str]):
-        """
-        Base class for functions that compute parameter values.
+    model_config = ConfigDict(serialize_by_alias=True)
 
-        Args:
-            name: Name of the function
-            kind: Type of the function (product, generic_function, interpolation)
-            parameters: List of parameter/function names this function depends on
-        """
-        self.name = name
-        self.kind = kind
-        self.parameters = parameters
+    name: str
+    type: str
+    _parameters: dict[str, str] = PrivateAttr(default_factory=dict)
 
-    def expression(self, _: dict[str, T.TensorVar]) -> T.TensorVar:
+    @property
+    def parameters(self) -> dict[str, str]:
+        """Access to parameter mapping."""
+        return self._parameters
+
+    def expression(self, _: dict[str, TensorVar]) -> TensorVar:
         """
         Evaluate the function expression.
 
@@ -51,44 +56,31 @@ class Function(Generic[FuncConfigT]):
         Returns:
             PyTensor expression representing the function result
         """
-        msg = f"Function type {self.kind} not implemented"
+        msg = f"Function type {self.type} not implemented"
         raise NotImplementedError(msg)
 
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> Function[FuncConfigT]:
-        """Create a Function instance from dictionary configuration."""
-        raise NotImplementedError
 
-
-class SumFunction(Function[TF.SumFunction]):
+class SumFunction(Function):
     """Sum function that adds summands together."""
 
-    def __init__(self, *, name: str, summands: list[str]):
-        """
-        Initialize a SumFunction.
+    type: Literal["sum"] = "sum"
+    summands: list[str]
 
-        Args:
-            name: Name of the function
-            summands: List of summand names to add together
-        """
-        # summands become the parameters this function depends on
-        super().__init__(name=name, kind="sum", parameters=summands)
-        self.summands = summands
+    @model_validator(mode="after")
+    def process_parameters(self) -> SumFunction:
+        """Build the parameters dict from summands."""
+        self._parameters = {name: name for name in self.summands}
+        return self
 
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> SumFunction:
-        """Create a SumFunction from dictionary configuration."""
-        return cls(name=config["name"], summands=config["summands"])
-
-    def expression(self, context: dict[str, T.TensorVar]) -> T.TensorVar:
+    def expression(self, context: dict[str, TensorVar]) -> TensorVar:
         """
-        Evaluate the product function.
+        Evaluate the sum function.
 
         Args:
             context: Mapping of names to PyTensor variables.
 
         Returns:
-            T.TensorVar: PyTensor expression representing the sum of all summands.
+            TensorVar: PyTensor expression representing the sum of all summands.
         """
         if not self.summands:
             return pt.constant(0.0)
@@ -100,27 +92,19 @@ class SumFunction(Function[TF.SumFunction]):
         return result
 
 
-class ProductFunction(Function[TF.ProductFunction]):
+class ProductFunction(Function):
     """Product function that multiplies factors together."""
 
-    def __init__(self, *, name: str, factors: list[str]):
-        """
-        Initialize a ProductFunction.
+    type: Literal["product"] = "product"
+    factors: list[str]
 
-        Args:
-            name: Name of the function
-            factors: List of factor names to multiply together
-        """
-        # factors become the parameters this function depends on
-        super().__init__(name=name, kind="product", parameters=factors)
-        self.factors = factors
+    @model_validator(mode="after")
+    def process_parameters(self) -> ProductFunction:
+        """Build the parameters dict from factors."""
+        self._parameters = {name: name for name in self.factors}
+        return self
 
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> ProductFunction:
-        """Create a ProductFunction from dictionary configuration."""
-        return cls(name=config["name"], factors=config["factors"])
-
-    def expression(self, context: dict[str, T.TensorVar]) -> T.TensorVar:
+    def expression(self, context: dict[str, TensorVar]) -> TensorVar:
         """
         Evaluate the product function.
 
@@ -128,7 +112,7 @@ class ProductFunction(Function[TF.ProductFunction]):
             context: Mapping of names to PyTensor variables.
 
         Returns:
-            T.TensorVar: PyTensor expression representing the product of all factors.
+            TensorVar: PyTensor expression representing the product of all factors.
         """
         if not self.factors:
             return pt.constant(1.0)
@@ -140,7 +124,7 @@ class ProductFunction(Function[TF.ProductFunction]):
         return result
 
 
-class GenericFunction(Function[TF.GenericFunction]):
+class GenericFunction(Function):
     """
     Generic function with custom mathematical expression.
 
@@ -160,30 +144,29 @@ class GenericFunction(Function[TF.GenericFunction]):
         >>> func = GenericFunction(name="sinusoid", expression="sin(x) * exp(-t)")
     """
 
-    def __init__(self, *, name: str, expression: str):
-        """
-        Initialize a GenericFunction.
+    model_config = ConfigDict(arbitrary_types_allowed=True, serialize_by_alias=True)
 
-        Args:
-            name: Name of the function
-            expression: Mathematical expression string
-        """
-        self.expression_str = expression
-        # Parse expression during initialization like GenericDist
+    type: Literal["generic_function"] = "generic_function"
+    expression_str: str = Field(alias="expression")
+    _sympy_expr: sp.Expr = PrivateAttr(default=None)
+    _dependent_vars: list[str] = PrivateAttr(default_factory=list)
 
-        self.sympy_expr = parse_expression(expression)
-        analysis = analyze_sympy_expr(self.sympy_expr)
-        parameters = [str(symbol) for symbol in analysis["independent_vars"]]
+    @model_validator(mode="after")
+    def setup_expression(self) -> GenericFunction:
+        """Parse and analyze the expression during initialization."""
+        # Parse and analyze the expression during initialization
+        self._sympy_expr = parse_expression(self.expression_str)
 
-        # Initialize parent with the parsed parameters
-        super().__init__(name=name, kind="generic_function", parameters=parameters)
+        # Analyze the expression to determine dependencies
+        analysis = analyze_sympy_expr(self._sympy_expr)
+        independent_vars = [str(symbol) for symbol in analysis["independent_vars"]]
+        self._dependent_vars = [str(symbol) for symbol in analysis["dependent_vars"]]
 
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> GenericFunction:
-        """Create a GenericFunction from dictionary configuration."""
-        return cls(name=config["name"], expression=config["expression"])
+        # Set parameters based on the analyzed expression
+        self._parameters = {var: var for var in independent_vars}
+        return self
 
-    def expression(self, context: dict[str, T.TensorVar]) -> T.TensorVar:
+    def expression(self, context: dict[str, TensorVar]) -> TensorVar:
         """
         Evaluate the generic function expression.
 
@@ -191,17 +174,16 @@ class GenericFunction(Function[TF.GenericFunction]):
             context: Mapping of names to PyTensor variables.
 
         Returns:
-            T.TensorVar: PyTensor expression representing the parsed mathematical expression.
+            TensorVar: PyTensor expression representing the parsed mathematical expression.
         """
-
-        # Get required variables
-        variables = [context[name] for name in self.parameters]
+        # Get required variables using the parameters determined during initialization
+        variables = [context[name] for name in self._parameters.values()]
 
         # Convert using the pre-parsed sympy expression
-        return sympy_to_pytensor(self.sympy_expr, variables)
+        return sympy_to_pytensor(self._sympy_expr, variables)
 
 
-class InterpolationFunction(Function[TF.InterpolationFunction]):
+class InterpolationFunction(Function):
     r"""
     Piecewise interpolation function implementation.
 
@@ -222,128 +204,49 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
 
             \text{result} = \text{nominal} \times \prod_i [1 + I_i(\theta_i; \text{low}_i/\text{nominal}, 1, \text{high}_i/\text{nominal})]
 
-    Interpolation Code Definitions:
-        **Code 0** - Linear Interpolation/Extrapolation (Additive):
-
-        .. math::
-
-            I_0(\theta) = \begin{cases}
-            \theta(\text{high} - \text{nom}) & \text{if } \theta \geq 0 \\
-            \theta(\text{nom} - \text{low}) & \text{if } \theta < 0
-            \end{cases}
-
-        **Code 1** - Exponential Interpolation/Extrapolation (Multiplicative):
-
-        .. math::
-
-            I_1(\theta) = \begin{cases}
-            \left(\frac{\text{high}}{\text{nom}}\right)^{\theta} - 1 & \text{if } \theta \geq 0 \\
-            \left(\frac{\text{low}}{\text{nom}}\right)^{-\theta} - 1 & \text{if } \theta < 0
-            \end{cases}
-
-        **Code 2** - Exponential Interpolation + Linear Extrapolation (Additive):
-        Uses :math:`\exp(\theta)` behavior for :math:`|\theta| \leq 1`, linear extrapolation for :math:`|\theta| > 1`
-        with smooth transition at :math:`\theta = \pm 1`.
-
-        **Code 3** - Exponential Interpolation + Different Linear Extrapolation (Additive):
-        Uses :math:`\exp(\theta)` behavior for :math:`|\theta| \leq 1`, different linear extrapolation
-        for :math:`|\theta| > 1` compared to code 2.
-
-        **Code 4** - 6th Order Polynomial Interpolation + Linear Extrapolation (Additive):
-
-        .. math::
-
-            I_4(\theta) = \begin{cases}
-            \text{linear extrapolation} & \text{if } |\theta| \geq 1 \\
-            \theta \times (1 + \theta^2(-3 + \theta^2)/16) \times (\text{high} - \text{nom}) & \text{if } \theta \geq 0, |\theta| < 1
-            \end{cases}
-
-        **Code 5** - 6th Order Polynomial Interpolation + Exponential Extrapolation (Multiplicative):
-        Uses exponential extrapolation for :math:`|\theta| \geq 1`, 6th order polynomial for :math:`|\theta| < 1`.
-        Recommended for normalization factors.
-
-        **Code 6** - 6th Order Polynomial Interpolation + Linear Extrapolation (Multiplicative):
-        Uses linear extrapolation for :math:`|\theta| \geq 1`, 6th order polynomial for :math:`|\theta| < 1`.
-        Recommended for normalization factors (no roots outside :math:`|\theta| < 1`).
-
-    Args:
+    Parameters:
         name: Name of the function
         high: High variation parameter names
         low: Low variation parameter names
         nom: Nominal parameter name
         interpolationCodes: Interpolation method codes (0-6)
         positiveDefinite: Whether function should be positive definite
-        parameters: Variable names this function depends on (nuisance parameters)
-
-    Note:
-        - At :math:`\theta_i = 0`, all codes return the nominal value
-        - At :math:`\theta_i = \pm 1`, variations should match high/low values for appropriate codes
-        - Polynomial codes (4,5,6) provide smoother interpolation with matching derivatives
-        - Based on A.Bukin, Budker INP, Novosibirsk and ROOT's RooFit implementation
+        vars: Variable names this function depends on (nuisance parameters)
     """
 
-    def __init__(
-        self,
-        *,
-        name: str,
-        high: list[str],
-        low: list[str],
-        nom: str,
-        interpolationCodes: list[int],
-        positiveDefinite: bool,
-        parameters: list[str],
-    ):
-        """
-        Initialize an InterpolationFunction.
+    type: Literal["interpolation"] = "interpolation"
+    high: list[str]
+    low: list[str]
+    nom: str
+    interpolationCodes: list[int]
+    positiveDefinite: bool
+    vars: list[str]
 
-        Args:
-            name: Name of the function
-            high: High variation parameter names
-            low: Low variation parameter names
-            nom: Nominal parameter name
-            interpolationCodes: Interpolation method codes (0-6)
-            positiveDefinite: Whether function should be positive definite
-            parameters: Variable names this function depends on (nuisance parameters)
+    @model_validator(mode="after")
+    def process_parameters(self) -> InterpolationFunction:
+        """Build the parameters dict and validate interpolation codes."""
 
-        Raises:
-            UnknownInterpolationCodeError: If any interpolation code is not in range 0-6
-        """
-        super().__init__(name=name, kind="interpolation", parameters=parameters)
-
-        # Validate interpolation codes at initialization
+        # Validate interpolation codes
         valid_codes = {0, 1, 2, 3, 4, 5, 6}
-        for code in interpolationCodes:
+        for code in self.interpolationCodes:
             if code not in valid_codes:
-                msg = f"Unknown interpolation code {code} in function '{name}'. Valid codes are 0-6."
+                msg = f"Unknown interpolation code {code} in function '{self.name}'. Valid codes are 0-6."
                 raise UnknownInterpolationCodeError(msg)
-        self.high = high
-        self.low = low
-        self.nom = nom
-        self.interpolationCodes = interpolationCodes
-        self.positiveDefinite = positiveDefinite
 
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> InterpolationFunction:
-        """Create an InterpolationFunction from dictionary configuration."""
-        return cls(
-            name=config["name"],
-            high=config["high"],
-            low=config["low"],
-            nom=config["nom"],
-            interpolationCodes=config["interpolationCodes"],
-            positiveDefinite=config["positiveDefinite"],
-            parameters=config["vars"],
-        )
+        # Build parameters dict - all high, low, nom, and vars parameters
+        all_params = [*self.high, *self.low, self.nom, *self.vars]
+        self._parameters = {name: name for name in all_params}
+        return self
 
     def _flexible_interp_single(
         self,
         interp_code: int,
-        low_val: T.TensorVar,
-        high_val: T.TensorVar,
+        low_val: TensorVar,
+        high_val: TensorVar,
         boundary: float,
-        nominal: T.TensorVar,
-        param_val: T.TensorVar,
-    ) -> T.TensorVar:
+        nominal: TensorVar,
+        param_val: TensorVar,
+    ) -> TensorVar:
         r"""
         Implement flexible interpolation for a single parameter.
 
@@ -374,7 +277,7 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
         if interp_code == 0:
             # Linear interpolation/extrapolation (additive)
             return cast(
-                T.TensorVar,
+                TensorVar,
                 pt.switch(
                     param_val >= 0,
                     param_val * (high_val - nominal),
@@ -387,18 +290,18 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
             ratio_high = high_val / nominal
             ratio_low = low_val / nominal
             return cast(
-                T.TensorVar,
+                TensorVar,
                 pt.switch(
                     param_val >= 0,
-                    cast(T.TensorVar, pt.power(ratio_high, param_val)) - 1.0,  # type: ignore[no-untyped-call]
-                    cast(T.TensorVar, pt.power(ratio_low, -param_val)) - 1.0,  # type: ignore[no-untyped-call]
+                    cast(TensorVar, pt.power(ratio_high, param_val)) - 1.0,  # type: ignore[no-untyped-call]
+                    cast(TensorVar, pt.power(ratio_low, -param_val)) - 1.0,  # type: ignore[no-untyped-call]
                 ),
             )
 
         if interp_code == 2:
             # Exponential interpolation, linear extrapolation (additive)
             return cast(
-                T.TensorVar,
+                TensorVar,
                 pt.switch(
                     pt.abs(param_val) <= boundary,
                     # Exponential interpolation for |theta| <= 1
@@ -429,7 +332,7 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
         if interp_code == 3:
             # Similar to code 2 but with different extrapolation
             return cast(
-                T.TensorVar,
+                TensorVar,
                 pt.switch(
                     pt.abs(param_val) <= boundary,
                     # Exponential interpolation for |theta| <= 1
@@ -450,7 +353,7 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
         if interp_code == 4:
             # Polynomial interpolation + linear extrapolation (additive)
             return cast(
-                T.TensorVar,
+                TensorVar,
                 pt.switch(
                     pt.abs(param_val) >= boundary,
                     # Linear extrapolation for |theta| >= 1
@@ -483,14 +386,14 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
             ratio_high = high_val / nominal
             ratio_low = low_val / nominal
             return cast(
-                T.TensorVar,
+                TensorVar,
                 pt.switch(
                     pt.abs(param_val) >= boundary,
                     # Exponential extrapolation for |theta| >= 1
                     pt.switch(
                         param_val >= 0,
-                        cast(T.TensorVar, pt.power(ratio_high, param_val)) - 1.0,  # type: ignore[no-untyped-call]
-                        cast(T.TensorVar, pt.power(ratio_low, -param_val)) - 1.0,  # type: ignore[no-untyped-call]
+                        cast(TensorVar, pt.power(ratio_high, param_val)) - 1.0,  # type: ignore[no-untyped-call]
+                        cast(TensorVar, pt.power(ratio_low, -param_val)) - 1.0,  # type: ignore[no-untyped-call]
                     ),
                     # 6th order polynomial interpolation for |theta| < 1
                     pt.switch(
@@ -515,7 +418,7 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
         ratio_high = high_val / nominal
         ratio_low = low_val / nominal
         return cast(
-            T.TensorVar,
+            TensorVar,
             pt.switch(
                 pt.abs(param_val) >= boundary,
                 # Linear extrapolation for |theta| >= 1
@@ -537,7 +440,7 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
             ),
         )
 
-    def expression(self, context: dict[str, T.TensorVar]) -> T.TensorVar:
+    def expression(self, context: dict[str, TensorVar]) -> TensorVar:
         r"""
         Evaluate the interpolation function.
 
@@ -555,7 +458,7 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
             context: Mapping of names to pytensor variables containing:
                 - Nominal parameter (referenced by `nom`)
                 - High/low variation parameters (referenced by `high`/`low` lists)
-                - Nuisance parameters (referenced by `parameters` list)
+                - Nuisance parameters (referenced by `vars` list)
 
         Returns:
             PyTensor expression representing the interpolated result
@@ -569,7 +472,7 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
         result = nominal
 
         # Apply interpolation for each nuisance parameter
-        for i, var_name in enumerate(self.parameters):
+        for i, var_name in enumerate(self.vars):
             if (
                 i >= len(self.high)
                 or i >= len(self.low)
@@ -610,36 +513,12 @@ class InterpolationFunction(Function[TF.InterpolationFunction]):
         return result
 
 
-class ProcessNormalizationFunction(Function[TF.ProcessNormalization]):
+class ProcessNormalizationFunction(Function):
     r"""
     Process normalization function with systematic variations.
 
     Implements the CMS Combine ProcessNormalization class which computes
     a normalization factor based on a nominal value and systematic variations.
-
-    The normalization factor is computed as:
-
-    .. math::
-
-        \text{norm} = \text{nominal} \times \exp\left(\sum_i \kappa_i \theta_i + \sum_j I(\theta_j; \kappa_{j,\text{lo}}, \kappa_{j,\text{hi}})\right) \times \prod_k f_k
-
-    where:
-    - :math:`\text{nominal}` is the base normalization value
-    - :math:`\kappa_i` are symmetric log-normal variation factors
-    - :math:`\theta_i` are symmetric nuisance parameters
-    - :math:`I(\theta_j; \kappa_{j,\text{lo}}, \kappa_{j,\text{hi}})` is asymmetric interpolation
-    - :math:`f_k` are additional multiplicative factors
-
-    The asymmetric interpolation function is:
-
-    .. math::
-
-        I(\theta; \kappa_{\text{lo}}, \kappa_{\text{hi}}) = \begin{cases}
-        \frac{1}{2}[(\kappa_{\text{hi}} - \kappa_{\text{lo}}) \theta + (\kappa_{\text{hi}} + \kappa_{\text{lo}}) S(\theta)] & \\
-        \end{cases}
-
-    where :math:`S(\theta)` is a smooth interpolation function that equals :math:`|\theta|` for :math:`|\theta| \geq 1`
-    and follows a 6th order polynomial for :math:`|\theta| < 1`.
 
     Parameters:
         name: Name of the function
@@ -652,60 +531,26 @@ class ProcessNormalizationFunction(Function[TF.ProcessNormalization]):
         otherFactorList: Names of additional multiplicative factors
     """
 
-    def __init__(
-        self,
-        *,
-        name: str,
-        expression: str,
-        nominalValue: float,
-        thetaList: list[str],
-        logKappa: list[float],
-        asymmThetaList: list[str],
-        logAsymmKappa: list[list[float]],
-        otherFactorList: list[str],
-    ):
-        """
-        Initialize a ProcessNormalizationFunction.
+    type: Literal["CMS::process_normalization"] = "CMS::process_normalization"
+    expression_name: str = Field(alias="expression")
+    nominalValue: float
+    thetaList: list[str]
+    logKappa: list[float]
+    asymmThetaList: list[str]
+    logAsymmKappa: list[list[float]]
+    otherFactorList: list[str]
 
-        Args:
-            name: Name of the function
-            expression: Expression identifier
-            nominalValue: Base normalization value
-            thetaList: Names of symmetric variation nuisance parameters
-            logKappa: Symmetric log-normal variation factors
-            asymmThetaList: Names of asymmetric variation nuisance parameters
-            logAsymmKappa: Asymmetric [low, high] log-normal variation factors
-            otherFactorList: Names of additional multiplicative factors
-        """
+    @model_validator(mode="after")
+    def process_parameters(self) -> ProcessNormalizationFunction:
+        """Build the parameters dict from all parameter lists."""
         # All parameters this function depends on
-        parameters = thetaList + asymmThetaList + otherFactorList
-        super().__init__(name=name, kind="ProcessNormalization", parameters=parameters)
-
-        self.expression_name = expression
-        self.nominalValue = nominalValue
-        self.thetaList = thetaList
-        self.logKappa = logKappa
-        self.asymmThetaList = asymmThetaList
-        self.logAsymmKappa = logAsymmKappa
-        self.otherFactorList = otherFactorList
-
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> ProcessNormalizationFunction:
-        """Create a ProcessNormalizationFunction from dictionary configuration."""
-        return cls(
-            name=config["name"],
-            expression=config["expression"],
-            nominalValue=config["nominalValue"],
-            thetaList=config["thetaList"],
-            logKappa=config["logKappa"],
-            asymmThetaList=config["asymmThetaList"],
-            logAsymmKappa=config["logAsymmKappa"],
-            otherFactorList=config["otherFactorList"],
-        )
+        all_params = [*self.thetaList, *self.asymmThetaList, *self.otherFactorList]
+        self._parameters = {name: name for name in all_params}
+        return self
 
     def _asym_interpolation(
-        self, theta: T.TensorVar, kappa_sum: float, kappa_diff: float
-    ) -> T.TensorVar:
+        self, theta: TensorVar, kappa_sum: float, kappa_diff: float
+    ) -> TensorVar:
         """
         Implement asymmetric interpolation function.
 
@@ -731,9 +576,9 @@ class ProcessNormalizationFunction(Function[TF.ProcessNormalization]):
         # Apply asymmetric interpolation formula
         morph = 0.5 * (kappa_diff * theta + kappa_sum * smooth_function)
 
-        return cast(T.TensorVar, morph)
+        return cast(TensorVar, morph)
 
-    def expression(self, context: dict[str, T.TensorVar]) -> T.TensorVar:
+    def expression(self, context: dict[str, TensorVar]) -> TensorVar:
         """
         Evaluate the process normalization function.
 
@@ -741,7 +586,7 @@ class ProcessNormalizationFunction(Function[TF.ProcessNormalization]):
             context: Mapping of names to PyTensor variables.
 
         Returns:
-            T.TensorVar: PyTensor expression representing the normalization factor.
+            TensorVar: PyTensor expression representing the normalization factor.
         """
         # Start with the nominal value
         result = pt.constant(self.nominalValue)
@@ -772,10 +617,19 @@ class ProcessNormalizationFunction(Function[TF.ProcessNormalization]):
             factor = context[factor_name]
             result = result * factor
 
-        return cast(T.TensorVar, result)
+        return cast(TensorVar, result)
 
 
-registered_functions: dict[str, type[Function[Any]]] = {
+# Define the union type for all function configurations
+FunctionConfig = (
+    SumFunction
+    | ProductFunction
+    | GenericFunction
+    | InterpolationFunction
+    | ProcessNormalizationFunction
+)
+
+registered_functions: dict[str, type[Function]] = {
     "sum": SumFunction,
     "product": ProductFunction,
     "generic_function": GenericFunction,
@@ -783,8 +637,18 @@ registered_functions: dict[str, type[Function[Any]]] = {
     "CMS::process_normalization": ProcessNormalizationFunction,
 }
 
+# Type alias for all function types using discriminated union
+FunctionType = Annotated[
+    SumFunction
+    | ProductFunction
+    | GenericFunction
+    | InterpolationFunction
+    | ProcessNormalizationFunction,
+    Field(discriminator="type"),
+]
 
-class FunctionSet:
+
+class Functions(RootModel[list[FunctionType]]):
     """
     Collection of HS3 functions for parameter computation.
 
@@ -796,36 +660,31 @@ class FunctionSet:
     function creation from configuration dictionaries.
 
     Attributes:
-        funcs (dict[str, Function[Any]]): Mapping from function names to Function instances.
+        funcs: Mapping from function names to Function instances.
     """
 
-    def __init__(self, funcs: list[T.Function]) -> None:
-        """
-        Collection of functions that compute parameter values.
+    root: Annotated[
+        list[FunctionType],
+        custom_error_msg(
+            {
+                "union_tag_invalid": "Unknown function type '{tag}' does not match any of the expected functions: {expected_tags}"
+            }
+        ),
+    ] = Field(default_factory=list)
+    _map: dict[str, Function] = PrivateAttr(default_factory=dict)
 
-        Args:
-            funcs: List of function configurations from HS3 spec
-        """
-        self.funcs: dict[str, Function[Any]] = {}
-        for func_config in funcs:
-            func_type = func_config["type"]
-            the_func = registered_functions.get(func_type, Function)
-            if the_func is Function:
-                msg = f"Unknown function type: {func_type}"
-                raise ValueError(msg)
-            func = the_func.from_dict(
-                {k: v for k, v in func_config.items() if k != "type"}
-            )
-            self.funcs[func.name] = func
+    def model_post_init(self, __context: Any, /) -> None:
+        """Initialize computed collections after Pydantic validation."""
+        self._map = {func.name: func for func in self.root}
 
-    def __getitem__(self, item: str) -> Function[Any]:
-        return self.funcs[item]
+    def __getitem__(self, item: str) -> Function:
+        return self._map[item]
 
     def __contains__(self, item: str) -> bool:
-        return item in self.funcs
+        return item in self._map
 
-    def __iter__(self) -> Iterator[Function[Any]]:
-        return iter(self.funcs.values())
+    def __iter__(self) -> Iterator[Function]:  # type: ignore[override]  # https://github.com/pydantic/pydantic/issues/8872
+        return iter(self.root)
 
     def __len__(self) -> int:
-        return len(self.funcs)
+        return len(self.root)

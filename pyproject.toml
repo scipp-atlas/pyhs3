@@ -37,6 +37,7 @@ dependencies = [
     'setuptools >= 59', # https://github.com/pymc-devs/pytensor/issues/481
     'numpy < 2; python_version < "3.10"', # https://github.com/pymc-devs/pytensor/issues/827
     'sympy',
+    'pydantic',
 ]
 
 [project.optional-dependencies]
@@ -63,6 +64,7 @@ docs = [
   "ipywidgets",
   "intersphinx_registry>=0.2411.17",
   "sphinx-issues",
+  "sphinxcontrib-mermaid",
 ]
 
 [project.urls]
@@ -95,6 +97,7 @@ testpaths = [
 ]
 markers = [
     "slow: marks tests as slow (skipped by default, use --runslow to run)",
+    "pydot: marks tests as requiring pydot (skipped by default, use --runpydot to run)",
 ]
 
 
@@ -163,7 +166,7 @@ ignore = [
   "ISC001",   # Conflicts with formatter
 ]
 isort.required-imports = ["from __future__ import annotations"]
-typing-modules = ["pyhs3.typing_compat"]
+#typing-modules = ["pyhs3.typing_compat"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["T20"]
@@ -173,6 +176,8 @@ typing-modules = ["pyhs3.typing_compat"]
 
 [tool.pylint]
 py-version = "3.10"
+load-plugins = ["pylint_pydantic"]
+extension-pkg-allow-list = ["rustworkx"]
 ignore-paths = [".*/_version.py"]
 reports.output-format = "colorized"
 similarities.ignore-imports = "yes"
@@ -184,6 +189,7 @@ messages_control.disable = [
   "missing-function-docstring",
   "wrong-import-position",
   "invalid-name",
+  "duplicate-code",
 ]
 
 

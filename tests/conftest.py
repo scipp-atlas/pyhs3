@@ -15,21 +15,33 @@ copytree = partial(_copytree, dirs_exist_ok=True)
 
 
 def pytest_addoption(parser):
-    """Add command line option to run slow tests."""
+    """Add command line options for test categories."""
     parser.addoption(
         "--runslow", action="store_true", default=False, help="run slow tests"
+    )
+    parser.addoption(
+        "--runpydot",
+        action="store_true",
+        default=False,
+        help="run tests requiring pydot",
     )
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip slow tests unless --runslow option is given."""
-    if config.getoption("--runslow"):
-        # --runslow given in cli: do not skip slow tests
-        return
-    skip_slow = pytest.mark.skip(reason="need --runslow option to run")
-    for item in items:
-        if "slow" in item.keywords:
-            item.add_marker(skip_slow)
+    """Skip tests based on command line options."""
+    # Skip slow tests unless --runslow option is given
+    if not config.getoption("--runslow"):
+        skip_slow = pytest.mark.skip(reason="need --runslow option to run")
+        for item in items:
+            if "slow" in item.keywords:
+                item.add_marker(skip_slow)
+
+    # Skip pydot tests unless --runpydot option is given
+    if not config.getoption("--runpydot"):
+        skip_pydot = pytest.mark.skip(reason="need --runpydot option to run")
+        for item in items:
+            if "pydot" in item.keywords:
+                item.add_marker(skip_pydot)
 
 
 @pytest.fixture

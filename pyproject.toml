@@ -97,6 +97,7 @@ testpaths = [
 ]
 markers = [
     "slow: marks tests as slow (skipped by default, use --runslow to run)",
+    "pydot: marks tests as requiring pydot (skipped by default, use --runpydot to run)",
 ]
 
 

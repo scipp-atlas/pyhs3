@@ -221,6 +221,7 @@ class TestModelGraphSummary:
 class TestModelGraphVisualization:
     """Test Model.visualize_graph() method."""
 
+    @pytest.mark.pydot
     def test_visualize_graph_basic_functionality(self, simple_workspace, tmp_path):
         """Test that visualize_graph creates output file."""
         model = simple_workspace.model()
@@ -237,6 +238,7 @@ class TestModelGraphVisualization:
         expected_path = tmp_path / "gauss_graph.svg"
         assert expected_path.exists()
 
+    @pytest.mark.pydot
     @pytest.mark.parametrize("fmt", ["svg", "png", "pdf"])
     def test_visualize_graph_different_formats(self, simple_workspace, tmp_path, fmt):
         """Test visualize_graph with different output formats."""
@@ -252,6 +254,7 @@ class TestModelGraphVisualization:
         expected_path = tmp_path / f"gauss_graph.{fmt}"
         assert expected_path.exists()
 
+    @pytest.mark.pydot
     def test_visualize_graph_custom_output_file(self, simple_workspace, tmp_path):
         """Test visualize_graph with custom output filename."""
         model = simple_workspace.model()
@@ -265,6 +268,7 @@ class TestModelGraphVisualization:
         # File should exist at the specified location
         assert custom_file.exists()
 
+    @pytest.mark.pydot
     def test_visualize_graph_nonexistent_distribution(self, simple_workspace):
         """Test that visualize_graph raises error for nonexistent distribution."""
         model = simple_workspace.model()
@@ -272,6 +276,7 @@ class TestModelGraphVisualization:
         with pytest.raises(ValueError, match="Distribution 'nonexistent' not found"):
             model.visualize_graph("nonexistent")
 
+    @pytest.mark.pydot
     def test_visualize_graph_no_path_parameter(self, simple_workspace):
         """Test visualize_graph without path parameter (uses current directory)."""
         model = simple_workspace.model()

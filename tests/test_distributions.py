@@ -18,11 +18,34 @@ from pyhs3 import Workspace
 from pyhs3.core import create_bounded_tensor
 from pyhs3.distributions import (
     CrystalBallDist,
+    Distribution,
     GaussianDist,
     GenericDist,
     PoissonDist,
     ProductDist,
 )
+
+
+class TestDistribution:
+    """Test the base Distribution class."""
+
+    def test_distribution_base_class(self):
+        """Test Distribution base class initialization."""
+        dist = Distribution(
+            name="test_dist",
+            type="test",
+        )
+        assert dist.name == "test_dist"
+        assert dist.type == "test"
+        assert isinstance(dist.parameters, dict)
+
+    def test_distribution_expression_not_implemented(self):
+        """Test that base distribution expression method raises NotImplementedError."""
+        dist = Distribution(name="test", type="unknown")
+        with pytest.raises(
+            NotImplementedError, match="Distribution type=unknown is not implemented."
+        ):
+            dist.expression({})
 
 
 class TestProductDist:

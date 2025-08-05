@@ -488,7 +488,7 @@ class TestWorkspaceWithLikelihoodsAndAnalyses:
                     ],
                 }
             ],
-            "data": [{"name": "observed_data", "value": 1.2}],
+            "data": [{"name": "observed_data", "type": "point", "value": 1.2}],
             "likelihoods": [
                 {
                     "name": "signal_likelihood",

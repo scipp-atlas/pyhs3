@@ -12,6 +12,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, RootModel, model_validator
 
+from pyhs3.exceptions import custom_error_msg
+
 
 class Axis(BaseModel):
     """
@@ -241,12 +243,20 @@ class BinnedData(Datum):
         return self
 
 
+# Type alias for all data types using discriminated union
+DataType = Annotated[PointData | UnbinnedData | BinnedData, Field(discriminator="type")]
+
+
 class Data(
     RootModel[
-        list[
-            Annotated[
-                PointData | UnbinnedData | BinnedData, Field(discriminator="type")
-            ]
+        Annotated[
+            list[DataType],
+            custom_error_msg(
+                {
+                    "union_tag_not_found": "Data entry missing required 'type' field. Expected one of: 'point', 'unbinned', 'binned'",
+                    "union_tag_invalid": "Unknown data type '{tag}' does not match any of the expected types: {expected_tags}",
+                }
+            ),
         ]
     ]
 ):
@@ -257,8 +267,14 @@ class Data(
     for likelihood evaluations. Provides dict-like access to data by name.
     """
 
-    root: list[
-        Annotated[PointData | UnbinnedData | BinnedData, Field(discriminator="type")]
+    root: Annotated[
+        list[DataType],
+        custom_error_msg(
+            {
+                "union_tag_not_found": "Data entry missing required 'type' field. Expected one of: 'point', 'unbinned', 'binned'",
+                "union_tag_invalid": "Unknown data type '{tag}' does not match any of the expected types: {expected_tags}",
+            }
+        ),
     ] = Field(default_factory=list)
 
     @property

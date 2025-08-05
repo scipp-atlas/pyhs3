@@ -102,6 +102,49 @@ Parameter Points
 
 Parameter points are optional - parameters can be automatically discovered from distributions and functions.
 
+Likelihoods
+~~~~~~~~~~~
+
+**Likelihoods** map distributions to observed data to create likelihood functions:
+
+.. code-block:: python
+
+   {
+       "name": "signal_likelihood",
+       "distributions": ["signal_model", "background_model"],
+       "data": ["observed_data", "sideband_data"],
+       "aux_distributions": ["nuisance_constraint"],  # Optional regularization
+   }
+
+Likelihoods represent the mathematical construct: :math:`\mathcal{L}(\theta) = \prod_i \text{PDF}(m_i(\theta_i), x_i)`
+
+Where:
+- ``distributions`` are the parameterized models :math:`m_i(\theta_i)`
+- ``data`` are the observations :math:`x_i`
+- ``aux_distributions`` are penalty terms for regularization
+
+Analyses
+~~~~~~~~
+
+**Analyses** define complete analysis configurations linking likelihoods with parameter domains:
+
+.. code-block:: python
+
+   {
+       "name": "higgs_analysis",
+       "likelihood": "signal_likelihood",
+       "domains": ["nuisance_parameters", "parameters_of_interest"],
+       "parameters_of_interest": ["mu_higgs"],
+       "init": "starting_values",  # Optional initial parameter point
+       "prior": "bayesian_prior",  # Optional for Bayesian analyses
+   }
+
+Analyses specify:
+- Which likelihood to use for inference
+- Parameter domains for optimization/integration
+- Parameters of primary interest for the analysis
+- Initial values and priors (both optional)
+
 Metadata
 ~~~~~~~~
 
@@ -282,6 +325,22 @@ Here's how data flows through a complete PyHS3 model:
                    {"name": "mass", "min": 110.0, "max": 140.0},
                    {"name": "higgs_mass", "min": 120.0, "max": 130.0},
                ],
+           }
+       ],
+       "data": [{"name": "observed_mass_data", "bins": [...], "values": [...]}],
+       "likelihoods": [
+           {
+               "name": "higgs_likelihood",
+               "distributions": ["signal", "background"],
+               "data": ["observed_mass_data", "observed_mass_data"],
+           }
+       ],
+       "analyses": [
+           {
+               "name": "higgs_discovery",
+               "likelihood": "higgs_likelihood",
+               "domains": ["search_region"],
+               "parameters_of_interest": ["higgs_mass", "signal_yield"],
            }
        ],
    }

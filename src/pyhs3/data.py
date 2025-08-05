@@ -54,8 +54,8 @@ class Axis(BaseModel):
                 msg = "Edges array must have at least 2 elements"
                 raise ValueError(msg)
             if not all(
-                self.edges[i] <= self.edges[i + 1]
-                for i in range(len(self.edges) - 1)  # pylint: disable=unsubscriptable-object
+                self.edges[i] <= self.edges[i + 1]  # pylint: disable=unsubscriptable-object
+                for i in range(len(self.edges) - 1)
             ):
                 msg = "Edges must be in non-decreasing order"
                 raise ValueError(msg)

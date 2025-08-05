@@ -12,4 +12,8 @@ from pyhs3.logging import setup
 
 setup()
 
-__all__ = ["Model", "Workspace", "__version__"]
+__all__ = [
+    "Model",
+    "Workspace",
+    "__version__",
+]

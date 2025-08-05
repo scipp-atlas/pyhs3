@@ -441,3 +441,190 @@ class TestModelWithoutParameterPoints:
         # Should evaluate successfully
         result = model.pdf("gauss", x=0.0, mu=0.0, sigma=1.0)
         assert 0.35 < result < 0.45
+
+
+class TestWorkspaceWithLikelihoodsAndAnalyses:
+    """Test Workspace functionality with likelihoods and analyses components."""
+
+    @pytest.fixture
+    def workspace_with_likelihoods_analyses(self):
+        """Create a workspace with likelihoods and analyses for testing."""
+        workspace_data = {
+            "metadata": {"hs3_version": "0.2"},
+            "distributions": [
+                {
+                    "name": "signal_dist",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "mu",
+                    "sigma": "sigma",
+                },
+                {
+                    "name": "background_dist",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": 0.0,
+                    "sigma": 2.0,
+                },
+            ],
+            "parameter_points": [
+                {
+                    "name": "nominal_values",
+                    "parameters": [
+                        {"name": "x", "value": 1.0},
+                        {"name": "mu", "value": 1.0},
+                        {"name": "sigma", "value": 0.5},
+                    ],
+                }
+            ],
+            "domains": [
+                {
+                    "name": "poi_domain",
+                    "type": "product_domain",
+                    "axes": [
+                        {"name": "x", "min": -10.0, "max": 10.0},
+                        {"name": "mu", "min": 0.0, "max": 2.0},
+                        {"name": "sigma", "min": 0.1, "max": 1.0},
+                    ],
+                }
+            ],
+            "data": [{"name": "observed_data", "value": 1.2}],
+            "likelihoods": [
+                {
+                    "name": "signal_likelihood",
+                    "distributions": ["signal_dist"],
+                    "data": ["observed_data"],
+                },
+                {
+                    "name": "combined_likelihood",
+                    "distributions": ["signal_dist", "background_dist"],
+                    "data": ["observed_data", "observed_data"],
+                    "aux_distributions": ["background_dist"],
+                },
+            ],
+            "analyses": [
+                {
+                    "name": "signal_analysis",
+                    "likelihood": "signal_likelihood",
+                    "parameters_of_interest": ["mu"],
+                    "domains": ["poi_domain"],
+                    "init": "nominal_values",
+                },
+                {
+                    "name": "combined_analysis",
+                    "likelihood": "combined_likelihood",
+                    "parameters_of_interest": ["mu", "sigma"],
+                    "domains": ["poi_domain"],
+                    "init": "nominal_values",
+                },
+            ],
+        }
+        return hs3.Workspace(**workspace_data)
+
+    def test_workspace_loads_likelihoods_correctly(
+        self, workspace_with_likelihoods_analyses
+    ):
+        """Test that workspace correctly loads and parses likelihood specifications."""
+        workspace = workspace_with_likelihoods_analyses
+
+        # Should have likelihoods attribute
+        assert hasattr(workspace, "likelihoods")
+        assert workspace.likelihoods is not None
+        assert len(workspace.likelihoods) == 2
+
+        # Check first likelihood
+        signal_likelihood = workspace.likelihoods["signal_likelihood"]
+        assert signal_likelihood.name == "signal_likelihood"
+        assert signal_likelihood.distributions == ["signal_dist"]
+        assert signal_likelihood.data == ["observed_data"]
+        assert signal_likelihood.aux_distributions is None
+
+        # Check second likelihood with aux_distributions
+        combined_likelihood = workspace.likelihoods["combined_likelihood"]
+        assert combined_likelihood.name == "combined_likelihood"
+        assert combined_likelihood.distributions == ["signal_dist", "background_dist"]
+        assert combined_likelihood.data == ["observed_data", "observed_data"]
+        assert combined_likelihood.aux_distributions == ["background_dist"]
+
+    def test_workspace_loads_analyses_correctly(
+        self, workspace_with_likelihoods_analyses
+    ):
+        """Test that workspace correctly loads and parses analysis specifications."""
+        workspace = workspace_with_likelihoods_analyses
+
+        # Should have analyses attribute
+        assert hasattr(workspace, "analyses")
+        assert workspace.analyses is not None
+        assert len(workspace.analyses) == 2
+
+        # Check first analysis
+        signal_analysis = workspace.analyses["signal_analysis"]
+        assert signal_analysis.name == "signal_analysis"
+        assert signal_analysis.likelihood == "signal_likelihood"
+        assert signal_analysis.parameters_of_interest == ["mu"]
+        assert signal_analysis.domains == ["poi_domain"]
+        assert signal_analysis.init == "nominal_values"
+        assert signal_analysis.prior is None
+
+        # Check second analysis
+        combined_analysis = workspace.analyses["combined_analysis"]
+        assert combined_analysis.name == "combined_analysis"
+        assert combined_analysis.likelihood == "combined_likelihood"
+        assert combined_analysis.parameters_of_interest == ["mu", "sigma"]
+        assert combined_analysis.domains == ["poi_domain"]
+        assert combined_analysis.init == "nominal_values"
+        assert combined_analysis.prior is None
+
+    def test_workspace_model_creation_still_works(
+        self, workspace_with_likelihoods_analyses
+    ):
+        """Test that model creation still works with the extended workspace."""
+        workspace = workspace_with_likelihoods_analyses
+
+        # Should successfully create model
+        model = workspace.model()
+
+        # Should have distributions
+        assert "signal_dist" in model.distributions
+        assert "background_dist" in model.distributions
+
+        # Should have parameters
+        assert "x" in model.parameters
+        assert "mu" in model.parameters
+        assert "sigma" in model.parameters
+
+        # Should be able to evaluate PDFs
+        signal_result = model.pdf("signal_dist", x=1.0, mu=1.0, sigma=0.5)
+        assert signal_result > 0
+
+        background_result = model.pdf("background_dist", x=1.0, mu=1.0, sigma=0.5)
+        assert background_result > 0
+
+    def test_workspace_json_roundtrip_with_likelihoods_analyses(
+        self, workspace_with_likelihoods_analyses, tmp_path
+    ):
+        """Test that workspace with likelihoods and analyses can roundtrip through JSON."""
+        workspace = workspace_with_likelihoods_analyses
+
+        # Save to JSON
+        json_path = tmp_path / "test_workspace.json"
+        with json_path.open("w") as f:
+            f.write(workspace.model_dump_json(indent=2))
+
+        # Load from JSON
+        loaded_workspace = hs3.Workspace.load(json_path)
+
+        # Verify likelihoods are preserved
+        assert len(loaded_workspace.likelihoods) == 2
+        assert "signal_likelihood" in loaded_workspace.likelihoods
+        assert "combined_likelihood" in loaded_workspace.likelihoods
+
+        # Verify analyses are preserved
+        assert len(loaded_workspace.analyses) == 2
+        assert "signal_analysis" in loaded_workspace.analyses
+        assert "combined_analysis" in loaded_workspace.analyses
+
+        # Verify model creation still works
+        model = loaded_workspace.model()
+        assert "signal_dist" in model.distributions
+        assert "background_dist" in model.distributions

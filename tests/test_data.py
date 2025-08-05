@@ -257,6 +257,53 @@ class TestUnbinnedData:
                 entries_uncertainties=uncertainties,
             )
 
+    def test_unbinned_data_empty_entries_with_weights(self):
+        """Test that empty entries with weights validates correctly."""
+        entries = []  # Empty entries (n_entries = 0)
+        axes = [Axis(name="x"), Axis(name="y")]
+        weights = []  # Empty weights to match
+
+        # Should not raise any validation errors
+        data = UnbinnedData(
+            name="empty_data",
+            type="unbinned",
+            entries=entries,
+            axes=axes,
+            weights=weights,
+        )
+        assert data.entries == []
+        assert data.weights == []
+
+    def test_unbinned_data_empty_entries_with_uncertainties(self):
+        """Test that empty entries with uncertainties validates correctly."""
+        entries = []  # Empty entries (n_entries = 0)
+        axes = [Axis(name="x"), Axis(name="y")]
+        uncertainties = []  # Empty uncertainties to match
+
+        # Should not raise any validation errors
+        data = UnbinnedData(
+            name="empty_data_with_unc",
+            type="unbinned",
+            entries=entries,
+            axes=axes,
+            entries_uncertainties=uncertainties,
+        )
+        assert data.entries == []
+        assert data.entries_uncertainties == []
+
+    def test_unbinned_data_empty_entries_basic(self):
+        """Test that empty entries validates correctly without weights or uncertainties."""
+        entries = []  # Empty entries (n_entries = 0)
+        axes = [Axis(name="x"), Axis(name="y")]
+
+        # Should not raise any validation errors
+        data = UnbinnedData(
+            name="empty_basic", type="unbinned", entries=entries, axes=axes
+        )
+        assert data.entries == []
+        assert data.weights is None
+        assert data.entries_uncertainties is None
+
 
 class TestBinnedData:
     """Tests for the BinnedData class."""

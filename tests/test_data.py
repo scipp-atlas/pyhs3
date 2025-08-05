@@ -240,6 +240,23 @@ class TestUnbinnedData:
         with pytest.raises(ValueError, match="Entry.*has.*dimensions, expected"):
             UnbinnedData(name="test", type="unbinned", entries=entries, axes=axes)
 
+    def test_unbinned_data_validation_inconsistent_uncertainty_dimensions(self):
+        """Test that uncertainty entries must have same dimensionality as data entries."""
+        entries = [[1.0, 2.0], [3.0, 4.0]]  # 2D entries
+        axes = [Axis(name="x"), Axis(name="y")]
+        uncertainties = [[0.1, 0.2], [0.3]]  # Inconsistent uncertainty dimensions
+
+        with pytest.raises(
+            ValueError, match="Entry uncertainties\\[1\\] has 1 dimensions, expected 2"
+        ):
+            UnbinnedData(
+                name="test",
+                type="unbinned",
+                entries=entries,
+                axes=axes,
+                entries_uncertainties=uncertainties,
+            )
+
 
 class TestBinnedData:
     """Tests for the BinnedData class."""

@@ -24,6 +24,7 @@ Modules
    functions
    domains
    parameter_points
+   data
    likelihoods
    analyses
    generic_parse
@@ -90,6 +91,23 @@ Parameter Points
    ParameterPoints
    ParameterSet
    ParameterPoint
+
+Data
+----
+
+.. currentmodule:: pyhs3.data
+
+.. autosummary::
+   :toctree: _generated/
+   :nosignatures:
+
+   Data
+   Datum
+   PointData
+   UnbinnedData
+   BinnedData
+   Axis
+   GaussianUncertainty
 
 Parsing
 -------

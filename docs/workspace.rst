@@ -14,7 +14,7 @@ A **Workspace** is the main container in PyHS3 that holds all the components nee
 - **Functions**: Mathematical functions that compute parameter values
 - **Domains**: Parameter space constraints and bounds
 - **Parameter Points**: Named sets of parameter values
-- **Data**: Observed data for likelihood evaluations
+- **Data**: Observed data specifications (point data, unbinned data, binned/histogram data)
 - **Likelihoods**: Mappings between distributions and data
 - **Analyses**: Complete analysis configurations
 - **Metadata**: Version information and documentation
@@ -121,6 +121,8 @@ Once you have a workspace, you can explore its contents:
    - 1 domains
    >>> print(f"- {len(ws.parameter_points)} parameter sets")
    - 1 parameter sets
+   >>> print(f"- {len(ws.data)} data components")
+   - 0 data components
    >>> print(f"- {len(ws.likelihoods)} likelihoods")
    - 0 likelihoods
    >>> print(f"- {len(ws.analyses)} analyses")
@@ -221,13 +223,46 @@ The workspace follows a hierarchical structure:
            +prior: optional[str]
        }
 
+       class Datum {
+           +name: str
+           +type: str
+       }
+
+       class PointData {
+           +name: str
+           +type: "point"
+           +value: float
+           +uncertainty: optional[float]
+       }
+
+       class UnbinnedData {
+           +name: str
+           +type: "unbinned"
+           +entries: list[list[float]]
+           +axes: list[Axis]
+           +weights: optional[list[float]]
+           +entries_uncertainties: optional[list[list[float]]]
+       }
+
+       class BinnedData {
+           +name: str
+           +type: "binned"
+           +contents: list[float]
+           +axes: list[Axis]
+           +uncertainty: optional[GaussianUncertainty]
+       }
+
        Workspace --> Metadata : contains
        Workspace --> Distribution : contains
        Workspace --> Function : contains
        Workspace --> Domain : contains
        Workspace --> ParameterSet : contains
+       Workspace --> Datum : contains
        Workspace --> Likelihood : contains
        Workspace --> Analysis : contains
+       Datum <|-- PointData : inherits
+       Datum <|-- UnbinnedData : inherits
+       Datum <|-- BinnedData : inherits
 
 Creating Models from Workspaces
 ------------------------------
@@ -310,8 +345,10 @@ Here's a more realistic example of a workspace for a physics analysis:
        "data": [
            {
                "name": "observed_mass_spectrum",
-               "bins": [120, 125, 130],
-               "values": [50, 75, 45],
+               "type": "binned",
+               "contents": [50, 75, 45],
+               "axes": [{"name": "mass", "edges": [110.0, 120.0, 125.0, 130.0, 140.0]}],
+               "uncertainty": {"type": "gaussian_uncertainty", "sigma": [7.1, 8.7, 6.7]},
            }
        ],
        "likelihoods": [
@@ -374,3 +411,104 @@ Likelihoods and analyses are optional but important components for statistical i
 
    # These components provide structured access to the complete statistical model
    # for use with fitting and inference tools
+
+Working with Data Components
+----------------------------
+
+The data component in PyHS3 provides structured specifications for observed data used in likelihood evaluations. There are three types of data supported:
+
+**Point Data**: Single measurements with optional uncertainties
+
+.. code-block:: python
+
+   point_data_example = {
+       "name": "higgs_mass_measurement",
+       "type": "point",
+       "value": 125.09,
+       "uncertainty": 0.24,
+   }
+
+**Unbinned Data**: Individual data points in multi-dimensional space
+
+.. code-block:: python
+
+   unbinned_data_example = {
+       "name": "particle_tracks",
+       "type": "unbinned",
+       "entries": [
+           [120.5, 0.8],  # [mass, momentum] for event 1
+           [125.1, 1.2],  # [mass, momentum] for event 2
+           [122.3, 0.9],  # [mass, momentum] for event 3
+       ],
+       "axes": [
+           {"name": "mass", "min": 100.0, "max": 150.0},
+           {"name": "momentum", "min": 0.0, "max": 5.0},
+       ],
+       "weights": [0.8, 1.0, 0.9],  # optional event weights
+       "entries_uncertainties": [  # optional uncertainties for each coordinate
+           [0.1, 0.05],
+           [0.2, 0.08],
+           [0.15, 0.06],
+       ],
+   }
+
+**Binned Data**: Histogram data with bin contents and optional uncertainties
+
+.. code-block:: python
+
+   binned_data_example = {
+       "name": "mass_spectrum",
+       "type": "binned",
+       "contents": [45.0, 67.0, 52.0, 38.0],  # bin contents
+       "axes": [
+           {
+               "name": "mass",
+               "edges": [110.0, 120.0, 130.0, 140.0, 150.0],  # irregular binning
+           }
+       ],
+       "uncertainty": {
+           "type": "gaussian_uncertainty",
+           "sigma": [6.7, 8.2, 7.2, 6.2],  # uncertainties for each bin
+           "correlation": 0,  # or correlation matrix for correlated uncertainties
+       },
+   }
+
+   # Regular binning alternative
+   regular_binned_example = {
+       "name": "pt_spectrum",
+       "type": "binned",
+       "contents": [100.0, 80.0, 60.0, 40.0, 20.0],
+       "axes": [
+           {
+               "name": "pt",
+               "min": 0.0,
+               "max": 100.0,
+               "nbins": 5,  # regular binning: 5 bins from 0 to 100
+           }
+       ],
+   }
+
+**Accessing Data in Workspaces**
+
+.. code-block:: python
+
+   # Access data components
+   print(f"\\nData components ({len(physics_ws.data)}):")
+   for datum in physics_ws.data:
+       print(f"  {datum.name} ({datum.type})")
+       if hasattr(datum, "value"):
+           print(f"    Value: {datum.value}")
+       elif hasattr(datum, "contents"):
+           print(f"    Bins: {len(datum.contents)}")
+       elif hasattr(datum, "entries"):
+           print(f"    Events: {len(datum.entries)}")
+
+   # Get specific data by name
+   mass_data = physics_ws.data["observed_mass_spectrum"]
+   print(f"Data '{mass_data.name}' has {len(mass_data.contents)} bins")
+
+   # Check if data exists
+   if "observed_mass_spectrum" in physics_ws.data:
+       print("Mass spectrum data is available")
+
+Data components integrate with likelihoods to define the complete statistical model for parameter estimation and hypothesis testing.

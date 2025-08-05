@@ -24,6 +24,7 @@ from rich.progress import (
 )
 
 from pyhs3.analyses import Analyses
+from pyhs3.data import Data
 from pyhs3.distributions import Distributions
 from pyhs3.domains import Domain, Domains, ProductDomain
 from pyhs3.functions import Functions
@@ -54,7 +55,7 @@ class Workspace(BaseModel):
         functions: List of function configurations
         domains: List of domain configurations
         parameter_points: List of parameter point configurations
-        data: List of data configurations
+        data: Data specifications for observations
         likelihoods: Likelihood specifications mapping distributions to data
         analyses: Analysis configurations for automated analyses
         misc: Arbitrary user-created information
@@ -78,7 +79,7 @@ class Workspace(BaseModel):
     parameter_points: ParameterPoints | None = Field(
         default_factory=lambda: ParameterPoints([])
     )
-    data: list[dict[str, Any]] | None = Field(default_factory=list)
+    data: Data | None = Field(default_factory=lambda: Data([]))
     likelihoods: Likelihoods | None = Field(default_factory=lambda: Likelihoods([]))
     analyses: Analyses | None = Field(default_factory=lambda: Analyses([]))
     misc: dict[str, Any] | None = Field(default_factory=dict)

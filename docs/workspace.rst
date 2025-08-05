@@ -14,6 +14,9 @@ A **Workspace** is the main container in PyHS3 that holds all the components nee
 - **Functions**: Mathematical functions that compute parameter values
 - **Domains**: Parameter space constraints and bounds
 - **Parameter Points**: Named sets of parameter values
+- **Data**: Observed data for likelihood evaluations
+- **Likelihoods**: Mappings between distributions and data
+- **Analyses**: Complete analysis configurations
 - **Metadata**: Version information and documentation
 
 Loading a Workspace
@@ -118,6 +121,10 @@ Once you have a workspace, you can explore its contents:
    - 1 domains
    >>> print(f"- {len(ws.parameter_points)} parameter sets")
    - 1 parameter sets
+   >>> print(f"- {len(ws.likelihoods)} likelihoods")
+   - 0 likelihoods
+   >>> print(f"- {len(ws.analyses)} analyses")
+   - 0 analyses
 
    # Access distributions
    print("\\nDistributions:")
@@ -164,9 +171,9 @@ The workspace follows a hierarchical structure:
            +functions: list[Function]
            +domains: list[Domain]
            +parameter_points: list[ParameterSet]
-           +data: optional
-           +likelihoods: optional
-           +analyses: optional
+           +data: list[Data]
+           +likelihoods: Likelihoods
+           +analyses: Analyses
        }
 
        class Metadata {
@@ -198,11 +205,29 @@ The workspace follows a hierarchical structure:
            +parameters: list[ParameterPoint]
        }
 
+       class Likelihood {
+           +name: str
+           +distributions: list[str]
+           +data: list[str|float|int]
+           +aux_distributions: optional[list[str]]
+       }
+
+       class Analysis {
+           +name: str
+           +likelihood: str
+           +domains: list[str]
+           +parameters_of_interest: optional[list[str]]
+           +init: optional[str]
+           +prior: optional[str]
+       }
+
        Workspace --> Metadata : contains
        Workspace --> Distribution : contains
        Workspace --> Function : contains
        Workspace --> Domain : contains
        Workspace --> ParameterSet : contains
+       Workspace --> Likelihood : contains
+       Workspace --> Analysis : contains
 
 Creating Models from Workspaces
 ------------------------------
@@ -282,9 +307,41 @@ Here's a more realistic example of a workspace for a physics analysis:
                ],
            }
        ],
+       "data": [
+           {
+               "name": "observed_mass_spectrum",
+               "bins": [120, 125, 130],
+               "values": [50, 75, 45],
+           }
+       ],
+       "likelihoods": [
+           {
+               "name": "higgs_likelihood",
+               "distributions": ["signal", "background"],
+               "data": ["observed_mass_spectrum", "observed_mass_spectrum"],
+           }
+       ],
+       "analyses": [
+           {
+               "name": "higgs_discovery",
+               "likelihood": "higgs_likelihood",
+               "domains": ["search_window"],
+               "parameters_of_interest": ["higgs_mass", "signal_yield"],
+               "init": "best_fit",
+           }
+       ],
    }
 
    physics_ws = pyhs3.Workspace(**physics_model)
+
+   # Explore the workspace
+   print(
+       f"Workspace contains {len(physics_ws.likelihoods)} likelihoods and {len(physics_ws.analyses)} analyses"
+   )
+   print(
+       f"Analysis '{physics_ws.analyses[0].name}' uses likelihood '{physics_ws.analyses[0].likelihood}'"
+   )
+
    physics_model = physics_ws.model()
 
    # Evaluate signal and background separately
@@ -293,3 +350,27 @@ Here's a more realistic example of a workspace for a physics analysis:
 
    print(f"Signal PDF at 125 GeV: {signal_pdf}")
    print(f"Background PDF at 125 GeV: {background_pdf}")
+
+Working with Likelihoods and Analyses
+-------------------------------------
+
+Likelihoods and analyses are optional but important components for statistical inference:
+
+.. code-block:: python
+
+   # Access likelihood information
+   likelihood = physics_ws.likelihoods["higgs_likelihood"]
+   print(f"Likelihood '{likelihood.name}' connects:")
+   print(f"  - Distributions: {likelihood.distributions}")
+   print(f"  - To data: {likelihood.data}")
+
+   # Access analysis configuration
+   analysis = physics_ws.analyses["higgs_discovery"]
+   print(f"Analysis '{analysis.name}' configuration:")
+   print(f"  - Uses likelihood: {analysis.likelihood}")
+   print(f"  - Parameter domains: {analysis.domains}")
+   print(f"  - Parameters of interest: {analysis.parameters_of_interest}")
+   print(f"  - Initial values from: {analysis.init}")
+
+   # These components provide structured access to the complete statistical model
+   # for use with fitting and inference tools

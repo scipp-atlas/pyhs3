@@ -24,6 +24,8 @@ Modules
    functions
    domains
    parameter_points
+   likelihoods
+   analyses
    generic_parse
    exceptions
 
@@ -101,6 +103,30 @@ Parsing
    parse_expression
    sympy_to_pytensor
    analyze_sympy_expr
+
+Likelihoods
+-----------
+
+.. currentmodule:: pyhs3.likelihoods
+
+.. autosummary::
+   :toctree: _generated/
+   :nosignatures:
+
+   Likelihoods
+   Likelihood
+
+Analyses
+--------
+
+.. currentmodule:: pyhs3.analyses
+
+.. autosummary::
+   :toctree: _generated/
+   :nosignatures:
+
+   Analyses
+   Analysis
 
 Exceptions
 ----------

@@ -12,7 +12,6 @@ import logging
 from typing import Literal, cast
 
 import pytensor.tensor as pt
-from pydantic import model_validator
 
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
@@ -41,23 +40,6 @@ class FastVerticalInterpHistPdf2Dist(Distribution):
     type: Literal["CMS::fastverticalinterphistpdf2"] = "CMS::fastverticalinterphistpdf2"
     x: str | float | int
     coefList: list[str]
-
-    @model_validator(mode="after")
-    def process_parameters(self) -> FastVerticalInterpHistPdf2Dist:
-        """Process parameters and build the parameters dict."""
-        x_name, x_value = self.process_parameter("x")
-
-        self._parameters = {"x": x_name}
-
-        # Add any generated constants for x
-        if x_value is not None:
-            self._constants_values[x_name] = x_value
-
-        # Add all coefficient parameters
-        for coef_name in self.coefList:
-            self._parameters[coef_name] = coef_name
-
-        return self
 
     def expression(self, distributionsandparameters: Context) -> TensorVar:
         """
@@ -115,33 +97,6 @@ class GGZZBackgroundDist(Distribution):
     a2: str | float | int
     a3: str | float | int
 
-    @model_validator(mode="after")
-    def process_parameters(self) -> GGZZBackgroundDist:
-        """Process parameters and build the parameters dict with constants."""
-        m4l_name, m4l_value = self.process_parameter("m4l")
-        a1_name, a1_value = self.process_parameter("a1")
-        a2_name, a2_value = self.process_parameter("a2")
-        a3_name, a3_value = self.process_parameter("a3")
-
-        self._parameters = {
-            "m4l": m4l_name,
-            "a1": a1_name,
-            "a2": a2_name,
-            "a3": a3_name,
-        }
-
-        # Add any generated constants
-        if m4l_value is not None:
-            self._constants_values[m4l_name] = m4l_value
-        if a1_value is not None:
-            self._constants_values[a1_name] = a1_value
-        if a2_value is not None:
-            self._constants_values[a2_name] = a2_value
-        if a3_value is not None:
-            self._constants_values[a3_name] = a3_value
-
-        return self
-
     def expression(self, distributionsandparameters: Context) -> TensorVar:
         """
         Builds a symbolic expression for the ggZZ background PDF.
@@ -193,37 +148,6 @@ class QQZZBackgroundDist(Distribution):
     a3: str | float | int
     a4: str | float | int
 
-    @model_validator(mode="after")
-    def process_parameters(self) -> QQZZBackgroundDist:
-        """Process parameters and build the parameters dict with constants."""
-        m4l_name, m4l_value = self.process_parameter("m4l")
-        a1_name, a1_value = self.process_parameter("a1")
-        a2_name, a2_value = self.process_parameter("a2")
-        a3_name, a3_value = self.process_parameter("a3")
-        a4_name, a4_value = self.process_parameter("a4")
-
-        self._parameters = {
-            "m4l": m4l_name,
-            "a1": a1_name,
-            "a2": a2_name,
-            "a3": a3_name,
-            "a4": a4_name,
-        }
-
-        # Add any generated constants
-        if m4l_value is not None:
-            self._constants_values[m4l_name] = m4l_value
-        if a1_value is not None:
-            self._constants_values[a1_name] = a1_value
-        if a2_value is not None:
-            self._constants_values[a2_name] = a2_value
-        if a3_value is not None:
-            self._constants_values[a3_name] = a3_value
-        if a4_value is not None:
-            self._constants_values[a4_name] = a4_value
-
-        return self
-
     def expression(self, distributionsandparameters: Context) -> TensorVar:
         """
         Builds a symbolic expression for the qqZZ background PDF.
@@ -271,26 +195,6 @@ class FastVerticalInterpHistPdf2D2Dist(Distribution):
     x: str | float | int
     y: str | float | int
     coefList: list[str]
-
-    @model_validator(mode="after")
-    def process_parameters(self) -> FastVerticalInterpHistPdf2D2Dist:
-        """Process parameters and build the parameters dict."""
-        x_name, x_value = self.process_parameter("x")
-        y_name, y_value = self.process_parameter("y")
-
-        self._parameters = {"x": x_name, "y": y_name}
-
-        # Add any generated constants
-        if x_value is not None:
-            self._constants_values[x_name] = x_value
-        if y_value is not None:
-            self._constants_values[y_name] = y_value
-
-        # Add all coefficient parameters
-        for coef_name in self.coefList:
-            self._parameters[coef_name] = coef_name
-
-        return self
 
     def expression(self, distributionsandparameters: Context) -> TensorVar:
         """

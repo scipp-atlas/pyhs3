@@ -130,27 +130,6 @@ class PolynomialDist(Distribution):
     x: str | float | int
     coefficients: list[str]
 
-    @model_validator(mode="after")
-    def process_parameters(self) -> PolynomialDist:
-        """Process parameters and build the parameters dict with constants."""
-        x_name, x_value = self.process_parameter("x")
-
-        self._parameters = {"x": x_name}
-
-        # Add any generated constants for x
-        if x_value is not None:
-            self._constants_values[x_name] = x_value
-
-        # Add all coefficient names to parameters
-        for coef_name in self.coefficients:
-            self._parameters[coef_name] = coef_name
-
-        # Store coefficients list in flattened parameters for expression method
-        for i, coef_name in enumerate(self.coefficients):
-            self._parameters[f"coefficients[{i}]"] = coef_name
-
-        return self
-
     def expression(self, distributionsandparameters: Context) -> TensorVar:
         """
         Builds a symbolic expression for the polynomial PDF.
@@ -199,37 +178,6 @@ class BernsteinPolyDist(Distribution):
     type: Literal["bernstein_poly_dist"] = "bernstein_poly_dist"
     x: str | float | int
     coefficients: list[str | float | int]
-
-    @model_validator(mode="after")
-    def process_parameters(self) -> BernsteinPolyDist:
-        """Process parameters and build the parameters dict with constants."""
-        x_name, x_value = self.process_parameter("x")
-
-        self._parameters = {"x": x_name}
-
-        # Add any generated constants for x
-        if x_value is not None:
-            self._constants_values[x_name] = x_value
-
-        # Process coefficient names - they can be strings OR numeric values
-        processed_coefficients = []
-        for i, coef in enumerate(self.coefficients):
-            if isinstance(coef, float | int):
-                # Convert numeric coefficient to constant
-                coef_name = f"constant_{self.name}_coef_{i}"
-                self._constants_values[coef_name] = coef
-                processed_coefficients.append(coef_name)
-                self._parameters[coef_name] = coef_name
-            else:
-                # String coefficient name
-                processed_coefficients.append(coef)
-                self._parameters[coef] = coef
-
-        # Store processed coefficients in flattened parameters for type safety
-        for i, coef_name in enumerate(processed_coefficients):
-            self._parameters[f"coefficients[{i}]"] = coef_name
-
-        return self
 
     def expression(self, distributionsandparameters: Context) -> TensorVar:
         """

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
+from enum import IntEnum
 from typing import Annotated, Any, Literal, cast
 
 import pytensor.tensor as pt
@@ -24,7 +25,7 @@ from pydantic import (
 
 from pyhs3.context import Context
 from pyhs3.data import Axis
-from pyhs3.exceptions import UnknownInterpolationCodeError, custom_error_msg
+from pyhs3.exceptions import custom_error_msg
 from pyhs3.functions.core import Function
 from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor
 from pyhs3.typing.aliases import TensorVar
@@ -76,12 +77,6 @@ class SumFunction(Function):
     type: Literal["sum"] = "sum"
     summands: list[str]
 
-    @model_validator(mode="after")
-    def process_parameters(self) -> SumFunction:
-        """Build the parameters dict from summands."""
-        self._parameters = {name: name for name in self.summands}
-        return self
-
     def expression(self, context: Context) -> TensorVar:
         """
         Evaluate the sum function.
@@ -107,18 +102,6 @@ class ProductFunction(Function):
 
     type: Literal["product"] = "product"
     factors: list[int | float | str]
-
-    @model_validator(mode="after")
-    def process_parameters(self) -> ProductFunction:
-        """Build the parameters dict from factors."""
-
-        factor_names, factor_values = self.process_parameter_list("factors")
-
-        for factor_name, factor_value in zip(factor_names, factor_values, strict=False):
-            if factor_value is not None:
-                self._constants_values[factor_name] = factor_value
-
-        return self
 
     def expression(self, context: Context) -> TensorVar:
         """
@@ -201,6 +184,24 @@ class GenericFunction(Function):
         return sympy_to_pytensor(self._sympy_expr, variables)
 
 
+class InterpolationCode(IntEnum):
+    """
+    Enumeration of interpolation codes for systematic variations.
+
+    Defines the different interpolation methods used by InterpolationFunction
+    for systematic uncertainty variations. Each code represents a different
+    mathematical approach to interpolating between nominal, low, and high values.
+    """
+
+    LIN_LIN_ADD = 0
+    EXP_EXP_MUL = 1
+    EXP_LIN_ADD = 2
+    EXP_MIX_ADD = 3
+    POL_LIN_ADD = 4
+    POL_EXP_MUL = 5
+    POL_LIN_MUL = 6
+
+
 class InterpolationFunction(Function):
     r"""
     Piecewise interpolation function implementation.
@@ -232,29 +233,22 @@ class InterpolationFunction(Function):
         vars: Variable names this function depends on (nuisance parameters)
     """
 
+    model_config = ConfigDict(use_enum_values=True)
+
     type: Literal["interpolation"] = "interpolation"
     high: list[str]
     low: list[str]
     nom: str
-    interpolationCodes: list[int]
+    interpolationCodes: Annotated[
+        list[InterpolationCode],
+        custom_error_msg(
+            {
+                "enum": "Unknown interpolation code {input} in function '{name}'. Valid codes are {expected}."
+            }
+        ),
+    ]
     positiveDefinite: bool
     vars: list[str]
-
-    @model_validator(mode="after")
-    def process_parameters(self) -> InterpolationFunction:
-        """Build the parameters dict and validate interpolation codes."""
-
-        # Validate interpolation codes
-        valid_codes = {0, 1, 2, 3, 4, 5, 6}
-        for code in self.interpolationCodes:
-            if code not in valid_codes:
-                msg = f"Unknown interpolation code {code} in function '{self.name}'. Valid codes are 0-6."
-                raise UnknownInterpolationCodeError(msg)
-
-        # Build parameters dict - all high, low, nom, and vars parameters
-        all_params = [*self.high, *self.low, self.nom, *self.vars]
-        self._parameters = {name: name for name in all_params}
-        return self
 
     def _flexible_interp_single(
         self,
@@ -560,20 +554,16 @@ class ProcessNormalizationFunction(Function):
     """
 
     type: Literal["CMS::process_normalization"] = "CMS::process_normalization"
-    nominalValue: float = 1.0
+    nominalValue: float = Field(default=1.0, json_schema_extra={"preprocess": False})
     thetaList: list[str] = Field(default_factory=list)
-    logKappa: list[float] = Field(default_factory=list)
+    logKappa: list[float] = Field(
+        default_factory=list, json_schema_extra={"preprocess": False}
+    )
     asymmThetaList: list[str] = Field(default_factory=list)
-    logAsymmKappa: list[list[float]] = Field(default_factory=list)
+    logAsymmKappa: list[list[float]] = Field(
+        default_factory=list, json_schema_extra={"preprocess": False}
+    )
     otherFactorList: list[str] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def process_parameters(self) -> ProcessNormalizationFunction:
-        """Build the parameters dict from all parameter lists."""
-        # All parameters this function depends on
-        all_params = [*self.thetaList, *self.asymmThetaList, *self.otherFactorList]
-        self._parameters = {name: name for name in all_params}
-        return self
 
     def expression(self, context: Context) -> TensorVar:
         """
@@ -651,31 +641,6 @@ class CMSAsymPowFunction(Function):
     kappaHigh: str | float | int
     theta: str
 
-    @model_validator(mode="after")
-    def process_parameters(self) -> CMSAsymPowFunction:
-        """Build the parameters dict from AsymPow parameters."""
-        # Handle potential constants for kappa values
-        if isinstance(self.kappaLow, float | int):
-            kappa_low_name = f"constant_{self.name}_kappaLow"
-            self._constants_values = {kappa_low_name: self.kappaLow}
-        else:
-            kappa_low_name = self.kappaLow
-
-        if isinstance(self.kappaHigh, float | int):
-            kappa_high_name = f"constant_{self.name}_kappaHigh"
-            if not hasattr(self, "_constants_values"):
-                self._constants_values = {}
-            self._constants_values[kappa_high_name] = self.kappaHigh
-        else:
-            kappa_high_name = self.kappaHigh
-
-        self._parameters = {
-            "kappaLow": kappa_low_name,
-            "kappaHigh": kappa_high_name,
-            "theta": self.theta,
-        }
-        return self
-
     def expression(self, context: Context) -> TensorVar:
         """
         Evaluate the AsymPow function.
@@ -732,7 +697,7 @@ class HistogramFunction(Function):
     """
 
     type: Literal["histogram"] = "histogram"
-    data: HistogramData
+    data: HistogramData = Field(..., json_schema_extra={"preprocess": False})
 
 
 class RooRecursiveFractionFunction(Function):
@@ -757,17 +722,6 @@ class RooRecursiveFractionFunction(Function):
     type: Literal["roorecursivefraction_dist"] = "roorecursivefraction_dist"
     coefficients: list[int | float | str] = Field(alias="list")
     recursive: bool = True
-
-    @model_validator(mode="after")
-    def process_parameters(self) -> RooRecursiveFractionFunction:
-        """Build the parameters dict from coefficient parameters."""
-        coeff_names, coeff_values = self.process_parameter_list("coefficients")
-
-        for coeff_name, coeff_value in zip(coeff_names, coeff_values, strict=False):
-            if coeff_value is not None:
-                self._constants_values[coeff_name] = coeff_value
-
-        return self
 
     def expression(self, context: Context) -> TensorVar:
         """

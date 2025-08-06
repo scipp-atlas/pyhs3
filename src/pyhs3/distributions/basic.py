@@ -12,7 +12,6 @@ import math
 from typing import Literal, cast
 
 import pytensor.tensor as pt
-from pydantic import model_validator
 
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
@@ -39,26 +38,6 @@ class GaussianDist(Distribution):
     mean: str | float | int
     sigma: str | float | int
     x: str | float | int
-
-    @model_validator(mode="after")
-    def process_parameters(self) -> GaussianDist:
-        """Process parameters and build the parameters dict with constants."""
-        # Process parameters and build the parameters dict
-        mean_name, mean_value = self.process_parameter("mean")
-        sigma_name, sigma_value = self.process_parameter("sigma")
-        x_name, x_value = self.process_parameter("x")
-
-        self._parameters = {"mean": mean_name, "sigma": sigma_name, "x": x_name}
-
-        # Add any generated constants
-        if mean_value is not None:
-            self._constants_values[mean_name] = mean_value
-        if sigma_value is not None:
-            self._constants_values[sigma_name] = sigma_value
-        if x_value is not None:
-            self._constants_values[x_name] = x_value
-
-        return self
 
     def expression(self, distributionsandparameters: Context) -> TensorVar:
         """
@@ -112,14 +91,6 @@ class UniformDist(Distribution):
     type: Literal["uniform_dist"] = "uniform_dist"
     x: list[str]
 
-    @model_validator(mode="after")
-    def process_parameters(self) -> UniformDist:
-        """Process parameters and build the parameters dict with constants."""
-        # Uniform distribution takes a list of variable names
-        for name in self.x:
-            self._parameters[name] = name
-        return self
-
     def expression(self, _distributionsandparameters: Context) -> TensorVar:
         """
         Builds a symbolic expression for the uniform PDF.
@@ -159,23 +130,6 @@ class PoissonDist(Distribution):
     type: Literal["poisson_dist"] = "poisson_dist"
     mean: str | float | int
     x: str | float | int
-
-    @model_validator(mode="after")
-    def process_parameters(self) -> PoissonDist:
-        """Process parameters and build the parameters dict with constants."""
-        # Process parameters and build the parameters dict
-        mean_name, mean_value = self.process_parameter("mean")
-        x_name, x_value = self.process_parameter("x")
-
-        self._parameters = {"mean": mean_name, "x": x_name}
-
-        # Add any generated constants
-        if mean_value is not None:
-            self._constants_values[mean_name] = mean_value
-        if x_value is not None:
-            self._constants_values[x_name] = x_value
-
-        return self
 
     def expression(self, distributionsandparameters: Context) -> TensorVar:
         """
@@ -221,22 +175,6 @@ class ExponentialDist(Distribution):
     x: str | float | int
     c: str | float | int
 
-    @model_validator(mode="after")
-    def process_parameters(self) -> ExponentialDist:
-        """Process parameters and build the parameters dict with constants."""
-        x_name, x_value = self.process_parameter("x")
-        c_name, c_value = self.process_parameter("c")
-
-        self._parameters = {"x": x_name, "c": c_name}
-
-        # Add any generated constants
-        if x_value is not None:
-            self._constants_values[x_name] = x_value
-        if c_value is not None:
-            self._constants_values[c_name] = c_value
-
-        return self
-
     def expression(self, distributionsandparameters: Context) -> TensorVar:
         """
         Builds a symbolic expression for the exponential PDF.
@@ -281,25 +219,6 @@ class LogNormalDist(Distribution):
     x: str | float | int
     mu: str | float | int
     sigma: str | float | int
-
-    @model_validator(mode="after")
-    def process_parameters(self) -> LogNormalDist:
-        """Process parameters and build the parameters dict with constants."""
-        x_name, x_value = self.process_parameter("x")
-        mu_name, mu_value = self.process_parameter("mu")
-        sigma_name, sigma_value = self.process_parameter("sigma")
-
-        self._parameters = {"x": x_name, "mu": mu_name, "sigma": sigma_name}
-
-        # Add any generated constants
-        if x_value is not None:
-            self._constants_values[x_name] = x_value
-        if mu_value is not None:
-            self._constants_values[mu_name] = mu_value
-        if sigma_value is not None:
-            self._constants_values[sigma_name] = sigma_value
-
-        return self
 
     def expression(self, distributionsandparameters: Context) -> TensorVar:
         """
@@ -350,25 +269,6 @@ class LandauDist(Distribution):
     x: str | float | int
     mean: str | float | int
     sigma: str | float | int
-
-    @model_validator(mode="after")
-    def process_parameters(self) -> LandauDist:
-        """Process parameters and build the parameters dict with constants."""
-        x_name, x_value = self.process_parameter("x")
-        mean_name, mean_value = self.process_parameter("mean")
-        sigma_name, sigma_value = self.process_parameter("sigma")
-
-        self._parameters = {"x": x_name, "mean": mean_name, "sigma": sigma_name}
-
-        # Add any generated constants
-        if x_value is not None:
-            self._constants_values[x_name] = x_value
-        if mean_value is not None:
-            self._constants_values[mean_name] = mean_value
-        if sigma_value is not None:
-            self._constants_values[sigma_name] = sigma_value
-
-        return self
 
     def expression(self, distributionsandparameters: Context) -> TensorVar:
         """

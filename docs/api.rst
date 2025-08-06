@@ -30,6 +30,17 @@ Modules
    generic_parse
    exceptions
 
+Base Classes
+------------
+
+.. currentmodule:: pyhs3.base
+
+.. autosummary::
+   :toctree: _generated/
+   :nosignatures:
+
+   Evaluable
+
 Functions
 ---------
 

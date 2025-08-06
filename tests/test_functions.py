@@ -12,11 +12,10 @@ import logging
 import numpy as np
 import pytensor.tensor as pt
 import pytest
-from pydantic_core import ValidationError
+from pydantic import ValidationError
 from pytensor import function
 
 from pyhs3 import Workspace
-from pyhs3.exceptions import UnknownInterpolationCodeError
 from pyhs3.functions import (
     Function,
     Functions,
@@ -666,8 +665,8 @@ class TestInterpolationFunction:
         """Test InterpolationFunction raises exception for unknown interpolation codes."""
         # Test invalid code during initialization
         with pytest.raises(
-            UnknownInterpolationCodeError,
-            match="Unknown interpolation code 99 in function 'bad_interp'. Valid codes are 0-6.",
+            ValidationError,
+            match="Unknown interpolation code 99 in function 'bad_interp'. Valid codes are 0, 1, 2, 3, 4, 5 or 6.",
         ):
             InterpolationFunction(
                 name="bad_interp",
@@ -681,8 +680,8 @@ class TestInterpolationFunction:
 
         # Test mix of valid and invalid codes
         with pytest.raises(
-            UnknownInterpolationCodeError,
-            match="Unknown interpolation code -1 in function 'bad_interp2'. Valid codes are 0-6.",
+            ValidationError,
+            match="Unknown interpolation code -1 in function 'bad_interp2'. Valid codes are 0, 1, 2, 3, 4, 5 or 6.",
         ):
             InterpolationFunction(
                 name="bad_interp2",

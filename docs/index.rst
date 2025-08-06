@@ -6,6 +6,7 @@
    workspace
    model
    broadcasting
+   defining_components
    api
 
 .. raw:: html

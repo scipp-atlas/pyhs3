@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from pyhs3.data import Axis
 from pyhs3.distributions.core import Distribution
@@ -52,7 +52,7 @@ class HistogramDist(Distribution):
     """
 
     type: Literal["histogram_dist"] = "histogram_dist"
-    data: HistogramData
+    data: HistogramData = Field(..., json_schema_extra={"preprocess": False})
 
 
 # Registry of histogram distributions

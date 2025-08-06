@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import Literal, cast
 
 import pytensor.tensor as pt
-from pydantic import model_validator
 
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
@@ -40,12 +39,6 @@ class MixtureDist(Distribution):
     summands: list[str]
     coefficients: list[str]
     extended: bool = False
-
-    @model_validator(mode="after")
-    def process_parameters(self) -> MixtureDist:
-        """Build the parameters dict from coefficients and summands."""
-        self._parameters = {name: name for name in [*self.coefficients, *self.summands]}
-        return self
 
     def expression(self, distributionsandparameters: Context) -> TensorVar:
         """
@@ -98,12 +91,6 @@ class ProductDist(Distribution):
 
     type: Literal["product_dist"] = "product_dist"
     factors: list[str]
-
-    @model_validator(mode="after")
-    def process_parameters(self) -> ProductDist:
-        """Build the parameters dict from factors."""
-        self._parameters = {name: name for name in self.factors}
-        return self
 
     def expression(self, distributionsandparameters: Context) -> TensorVar:
         """

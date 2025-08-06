@@ -47,15 +47,6 @@ class ExpressionEvaluationError(HS3Exception):
     """
 
 
-class UnknownInterpolationCodeError(HS3Exception):
-    """
-    Exception raised when an unknown interpolation code is used.
-
-    This occurs when an InterpolationFunction is configured with an
-    interpolation code outside the valid range (0-6).
-    """
-
-
 def custom_error_msg(custom_messages: dict[str, str]) -> Any:
     r"""
     Customize an error message for pydantic validation errors.
@@ -90,7 +81,12 @@ def custom_error_msg(custom_messages: dict[str, str]) -> Any:
             for error in exc.errors():
                 custom_message = custom_messages.get(error["type"])
                 if custom_message:
-                    err_ctx = error.get("ctx", {})
+                    err_ctx = error.get("ctx", {}).copy()
+
+                    # Add input and ValidationInfo data to context
+                    err_ctx["input"] = error["input"]
+                    if ctx.data:
+                        err_ctx.update(ctx.data)
 
                     new_error = InitErrorDetails(
                         type=PydanticCustomError(

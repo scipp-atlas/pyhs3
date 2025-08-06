@@ -11,7 +11,6 @@ from __future__ import annotations
 from typing import Literal, cast
 
 import pytensor.tensor as pt
-from pydantic import model_validator
 
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
@@ -62,19 +61,6 @@ class CrystalBallDist(Distribution):
     m0: str
     n: str
     sigma: str
-
-    @model_validator(mode="after")
-    def process_parameters(self) -> CrystalBallDist:
-        """Build the parameters dict from crystal ball parameters."""
-        params = [
-            self.alpha,
-            self.m,
-            self.m0,
-            self.n,
-            self.sigma,
-        ]
-        self._parameters = {name: name for name in params}
-        return self
 
     def expression(self, distributionsandparameters: Context) -> TensorVar:
         """
@@ -165,22 +151,6 @@ class AsymmetricCrystalBallDist(Distribution):
     sigma_R: str
     sigma_L: str
 
-    @model_validator(mode="after")
-    def process_parameters(self) -> AsymmetricCrystalBallDist:
-        """Build the parameters dict from crystal ball parameters."""
-        params = [
-            self.alpha_L,
-            self.alpha_R,
-            self.m,
-            self.m0,
-            self.n_R,
-            self.n_L,
-            self.sigma_L,
-            self.sigma_R,
-        ]
-        self._parameters = {name: name for name in params}
-        return self
-
     def expression(self, distributionsandparameters: Context) -> TensorVar:
         """
         Evaluate the Crystal Ball distribution.
@@ -258,33 +228,6 @@ class ArgusDist(Distribution):
     resonance: str | float | int
     slope: str | float | int
     power: str | float | int
-
-    @model_validator(mode="after")
-    def process_parameters(self) -> ArgusDist:
-        """Process parameters and build the parameters dict with constants."""
-        mass_name, mass_value = self.process_parameter("mass")
-        resonance_name, resonance_value = self.process_parameter("resonance")
-        slope_name, slope_value = self.process_parameter("slope")
-        power_name, power_value = self.process_parameter("power")
-
-        self._parameters = {
-            "mass": mass_name,
-            "resonance": resonance_name,
-            "slope": slope_name,
-            "power": power_name,
-        }
-
-        # Add any generated constants
-        if mass_value is not None:
-            self._constants_values[mass_name] = mass_value
-        if resonance_value is not None:
-            self._constants_values[resonance_name] = resonance_value
-        if slope_value is not None:
-            self._constants_values[slope_name] = slope_value
-        if power_value is not None:
-            self._constants_values[power_name] = power_value
-
-        return self
 
     def expression(self, distributionsandparameters: Context) -> TensorVar:
         """

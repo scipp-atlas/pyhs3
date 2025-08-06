@@ -81,12 +81,12 @@ class GenericDist(Distribution):
         self._parameters = {var: var for var in independent_vars}
         return self
 
-    def expression(self, distributionsandparameters: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Evaluate the generic distribution using expression parsing.
 
         Args:
-            distributionsandparameters: Mapping of names to pytensor variables
+            context: Mapping of names to pytensor variables
 
         Returns:
             PyTensor expression representing the parsed mathematical expression
@@ -95,9 +95,7 @@ class GenericDist(Distribution):
             ValueError: If the expression cannot be parsed or contains undefined variables
         """
         # Get the required variables using the parameters determined during initialization
-        variables = [
-            distributionsandparameters[name] for name in self._parameters.values()
-        ]
+        variables = [context[name] for name in self._parameters.values()]
 
         # Convert using the pre-parsed sympy expression
         result = sympy_to_pytensor(self._sympy_expr, variables)
@@ -130,23 +128,21 @@ class PolynomialDist(Distribution):
     x: str | float | int
     coefficients: list[str]
 
-    def expression(self, distributionsandparameters: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the polynomial PDF.
 
         Args:
-            distributionsandparameters (dict): Mapping of names to pytensor variables.
+            context (dict): Mapping of names to pytensor variables.
 
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of polynomial PDF.
         """
-        x = distributionsandparameters[self._parameters["x"]]
+        x = context[self._parameters["x"]]
 
         # Build polynomial: sum(a_i * x^i)
         result = pt.constant(0.0)
-        processed_coefficients = self.get_parameter_list(
-            distributionsandparameters, "coefficients"
-        )
+        processed_coefficients = self.get_parameter_list(context, "coefficients")
         for i, coef in enumerate(processed_coefficients):
             result = result + coef if i == 0 else result + coef * x**i  # a_i * x^i
 
@@ -179,23 +175,21 @@ class BernsteinPolyDist(Distribution):
     x: str | float | int
     coefficients: list[str | float | int]
 
-    def expression(self, distributionsandparameters: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the Bernstein polynomial PDF.
 
         Args:
-            distributionsandparameters (dict): Mapping of names to pytensor variables.
+            context (dict): Mapping of names to pytensor variables.
 
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of Bernstein polynomial PDF.
         """
-        x = distributionsandparameters[self._parameters["x"]]
+        x = context[self._parameters["x"]]
         n = len(self.coefficients) - 1  # polynomial degree
 
         result = pt.constant(0.0)
-        processed_coefficients = self.get_parameter_list(
-            distributionsandparameters, "coefficients"
-        )
+        processed_coefficients = self.get_parameter_list(context, "coefficients")
         for i, coef in enumerate(processed_coefficients):
             # Bernstein basis polynomial: C(n,i) * x^i * (1-x)^(n-i)
             # Use pt.gammaln for log(C(n,i)) = log(Γ(n+1)) - log(Γ(i+1)) - log(Γ(n-i+1))

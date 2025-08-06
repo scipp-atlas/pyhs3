@@ -62,18 +62,18 @@ class CrystalBallDist(Distribution):
     n: str
     sigma: str
 
-    def expression(self, distributionsandparameters: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Evaluate the single-sided Crystal Ball distribution.
 
         Implements the ROOT RooCrystalBall formula with a single tail.
         All shape parameters (alpha, n, sigma) are assumed to be positive.
         """
-        alpha = distributionsandparameters[self.alpha]
-        m = distributionsandparameters[self.m]
-        m0 = distributionsandparameters[self.m0]
-        n = distributionsandparameters[self.n]
-        sigma = distributionsandparameters[self.sigma]
+        alpha = context[self.alpha]
+        m = context[self.m]
+        m0 = context[self.m0]
+        n = context[self.n]
+        sigma = context[self.sigma]
 
         # Calculate A and B per ROOT formula
         # Note: alpha, n, sigma are assumed to be positive
@@ -151,21 +151,21 @@ class AsymmetricCrystalBallDist(Distribution):
     sigma_R: str
     sigma_L: str
 
-    def expression(self, distributionsandparameters: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Evaluate the Crystal Ball distribution.
 
         Implements the ROOT RooCrystalBall formula with proper parameter validation.
         All shape parameters (alpha, n, sigma) are assumed to be positive.
         """
-        alpha_L = distributionsandparameters[self.alpha_L]
-        alpha_R = distributionsandparameters[self.alpha_R]
-        m = distributionsandparameters[self.m]
-        m0 = distributionsandparameters[self.m0]
-        n_L = distributionsandparameters[self.n_L]
-        n_R = distributionsandparameters[self.n_R]
-        sigma_L = distributionsandparameters[self.sigma_L]
-        sigma_R = distributionsandparameters[self.sigma_R]
+        alpha_L = context[self.alpha_L]
+        alpha_R = context[self.alpha_R]
+        m = context[self.m]
+        m0 = context[self.m0]
+        n_L = context[self.n_L]
+        n_R = context[self.n_R]
+        sigma_L = context[self.sigma_L]
+        sigma_R = context[self.sigma_R]
 
         # Calculate A_i and B_i per ROOT formula
         # Note: alpha, n, sigma are assumed to be positive
@@ -229,20 +229,20 @@ class ArgusDist(Distribution):
     slope: str | float | int
     power: str | float | int
 
-    def expression(self, distributionsandparameters: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the ARGUS PDF.
 
         Args:
-            distributionsandparameters (dict): Mapping of names to pytensor variables.
+            context (dict): Mapping of names to pytensor variables.
 
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of ARGUS PDF.
         """
-        m = distributionsandparameters[self._parameters["mass"]]
-        m0 = distributionsandparameters[self._parameters["resonance"]]
-        c = distributionsandparameters[self._parameters["slope"]]
-        p = distributionsandparameters[self._parameters["power"]]
+        m = context[self._parameters["mass"]]
+        m0 = context[self._parameters["resonance"]]
+        c = context[self._parameters["slope"]]
+        p = context[self._parameters["power"]]
 
         # ARGUS PDF: m * [1 - (m/m0)^2]^p * exp[c * (1 - (m/m0)^2)]
         ratio_squared = (m / m0) ** 2

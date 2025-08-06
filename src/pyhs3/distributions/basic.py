@@ -39,28 +39,23 @@ class GaussianDist(Distribution):
     sigma: str | float | int
     x: str | float | int
 
-    def expression(self, distributionsandparameters: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the Gaussian PDF.
 
         Args:
-            distributionsandparameters (dict): Mapping of names to pytensor variables.
+            context (dict): Mapping of names to pytensor variables.
 
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of the Gaussian PDF.
         """
         # log.info("parameters: ", parameters)
-        norm_const = 1.0 / (
-            pt.sqrt(2 * math.pi) * distributionsandparameters[self._parameters["sigma"]]
-        )
+        norm_const = 1.0 / (pt.sqrt(2 * math.pi) * context[self._parameters["sigma"]])
         exponent = pt.exp(
             -0.5
             * (
-                (
-                    distributionsandparameters[self._parameters["x"]]
-                    - distributionsandparameters[self._parameters["mean"]]
-                )
-                / distributionsandparameters[self._parameters["sigma"]]
+                (context[self._parameters["x"]] - context[self._parameters["mean"]])
+                / context[self._parameters["sigma"]]
             )
             ** 2
         )
@@ -91,12 +86,12 @@ class UniformDist(Distribution):
     type: Literal["uniform_dist"] = "uniform_dist"
     x: list[str]
 
-    def expression(self, _distributionsandparameters: Context) -> TensorVar:
+    def expression(self, _context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the uniform PDF.
 
         Args:
-            distributionsandparameters (dict): Mapping of names to pytensor variables.
+            _context (dict): Mapping of names to pytensor variables.
 
         Returns:
             pytensor.tensor.variable.TensorVariable: Constant value representing uniform density.
@@ -131,18 +126,18 @@ class PoissonDist(Distribution):
     mean: str | float | int
     x: str | float | int
 
-    def expression(self, distributionsandparameters: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the Poisson PMF.
 
         Args:
-            distributionsandparameters (dict): Mapping of names to pytensor variables.
+            context (dict): Mapping of names to pytensor variables.
 
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of the Poisson PMF.
         """
-        mean = distributionsandparameters[self._parameters["mean"]]
-        x = distributionsandparameters[self._parameters["x"]]
+        mean = context[self._parameters["mean"]]
+        x = context[self._parameters["x"]]
 
         # Poisson PMF: λ^k * e^(-λ) / k!
         # Using pt.gammaln for log(k!) = log(Γ(k+1))
@@ -175,18 +170,18 @@ class ExponentialDist(Distribution):
     x: str | float | int
     c: str | float | int
 
-    def expression(self, distributionsandparameters: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the exponential PDF.
 
         Args:
-            distributionsandparameters (dict): Mapping of names to pytensor variables.
+            context (dict): Mapping of names to pytensor variables.
 
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of exponential PDF.
         """
-        x = distributionsandparameters[self._parameters["x"]]
-        c = distributionsandparameters[self._parameters["c"]]
+        x = context[self._parameters["x"]]
+        c = context[self._parameters["c"]]
 
         # Exponential PDF: exp(-c * x)
         return cast(TensorVar, pt.exp(-c * x))
@@ -220,19 +215,19 @@ class LogNormalDist(Distribution):
     mu: str | float | int
     sigma: str | float | int
 
-    def expression(self, distributionsandparameters: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the log-normal PDF.
 
         Args:
-            distributionsandparameters (dict): Mapping of names to pytensor variables.
+            context (dict): Mapping of names to pytensor variables.
 
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of log-normal PDF.
         """
-        x = distributionsandparameters[self._parameters["x"]]
-        mu = distributionsandparameters[self._parameters["mu"]]
-        sigma = distributionsandparameters[self._parameters["sigma"]]
+        x = context[self._parameters["x"]]
+        mu = context[self._parameters["mu"]]
+        sigma = context[self._parameters["sigma"]]
 
         # Log-normal PDF: (1/x) * exp(-((ln(x) - mu)^2) / (2 * sigma^2))
         log_x = pt.log(x)
@@ -270,12 +265,12 @@ class LandauDist(Distribution):
     mean: str | float | int
     sigma: str | float | int
 
-    def expression(self, distributionsandparameters: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the Landau PDF.
 
         Args:
-            distributionsandparameters (dict): Mapping of names to pytensor variables.
+            context (dict): Mapping of names to pytensor variables.
 
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of Landau PDF.
@@ -284,9 +279,9 @@ class LandauDist(Distribution):
             This implementation uses a Gaussian approximation. In practice,
             ROOT uses more sophisticated approximations or numerical methods.
         """
-        x = distributionsandparameters[self._parameters["x"]]
-        mean = distributionsandparameters[self._parameters["mean"]]
-        sigma = distributionsandparameters[self._parameters["sigma"]]
+        x = context[self._parameters["x"]]
+        mean = context[self._parameters["mean"]]
+        sigma = context[self._parameters["sigma"]]
 
         # Normalized variable
         z = (x - mean) / sigma

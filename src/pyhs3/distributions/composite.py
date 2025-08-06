@@ -40,12 +40,12 @@ class MixtureDist(Distribution):
     coefficients: list[str]
     extended: bool = False
 
-    def expression(self, distributionsandparameters: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the mixture distribution.
 
         Args:
-            distributionsandparameters (dict): Mapping of names to pytensor variables.
+            context (dict): Mapping of names to pytensor variables.
 
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of the mixture PDF.
@@ -55,14 +55,11 @@ class MixtureDist(Distribution):
         coeffsum = pt.constant(0.0)
 
         for i, coeff in enumerate(self.coefficients):
-            coeffsum += distributionsandparameters[coeff]
-            mixturesum += (
-                distributionsandparameters[coeff]
-                * distributionsandparameters[self.summands[i]]
-            )
+            coeffsum += context[coeff]
+            mixturesum += context[coeff] * context[self.summands[i]]
 
         last_index = len(self.summands) - 1
-        f_last = distributionsandparameters[self.summands[last_index]]
+        f_last = context[self.summands[last_index]]
         mixturesum = mixturesum + (1 - coeffsum) * f_last
         return cast(TensorVar, mixturesum)
 
@@ -92,12 +89,12 @@ class ProductDist(Distribution):
     type: Literal["product_dist"] = "product_dist"
     factors: list[str]
 
-    def expression(self, distributionsandparameters: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Evaluate the product distribution.
 
         Args:
-            distributionsandparameters: Mapping of names to pytensor variables
+            context: Mapping of names to pytensor variables
 
         Returns:
             Symbolic representation of the product PDF
@@ -105,9 +102,7 @@ class ProductDist(Distribution):
         if not self.factors:
             return cast(TensorVar, pt.constant(1.0))
 
-        pt_factors = pt.stack(
-            [distributionsandparameters[factor] for factor in self.factors]
-        )
+        pt_factors = pt.stack([context[factor] for factor in self.factors])
         return cast(TensorVar, pt.prod(pt_factors, axis=0))  # type: ignore[no-untyped-call]
 
 

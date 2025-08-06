@@ -41,12 +41,12 @@ class FastVerticalInterpHistPdf2Dist(Distribution):
     x: str | float | int
     coefList: list[str]
 
-    def expression(self, distributionsandparameters: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the fast vertical interpolation histogram PDF.
 
         Args:
-            distributionsandparameters (dict): Mapping of names to pytensor variables.
+            context (dict): Mapping of names to pytensor variables.
 
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of interpolated histogram PDF.
@@ -55,15 +55,15 @@ class FastVerticalInterpHistPdf2Dist(Distribution):
             This implementation provides a simplified approximation.
             The actual CMS implementation uses more sophisticated algorithms.
         """
-        _x = distributionsandparameters[self._parameters["x"]]
+        _x = context[self._parameters["x"]]
 
         # Start with a base histogram value
         result = pt.constant(1.0)
 
         # Apply morphing for each coefficient parameter
         for coef_name in self.coefList:
-            if coef_name in distributionsandparameters:
-                coef = distributionsandparameters[coef_name]
+            if coef_name in context:
+                coef = context[coef_name]
                 # Simple linear combination with coefficients
                 result = result * (1.0 + 0.1 * coef)  # Simplified morphing
 
@@ -97,20 +97,20 @@ class GGZZBackgroundDist(Distribution):
     a2: str | float | int
     a3: str | float | int
 
-    def expression(self, distributionsandparameters: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the ggZZ background PDF.
 
         Args:
-            distributionsandparameters (dict): Mapping of names to pytensor variables.
+            context (dict): Mapping of names to pytensor variables.
 
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of ggZZ background PDF.
         """
-        m4l = distributionsandparameters[self._parameters["m4l"]]
-        a1 = distributionsandparameters[self._parameters["a1"]]
-        a2 = distributionsandparameters[self._parameters["a2"]]
-        a3 = distributionsandparameters[self._parameters["a3"]]
+        m4l = context[self._parameters["m4l"]]
+        a1 = context[self._parameters["a1"]]
+        a2 = context[self._parameters["a2"]]
+        a3 = context[self._parameters["a3"]]
 
         # ggZZ background: a1 * m4l^a2 * exp(-a3 * m4l)
         power_term = m4l**a2
@@ -148,21 +148,21 @@ class QQZZBackgroundDist(Distribution):
     a3: str | float | int
     a4: str | float | int
 
-    def expression(self, distributionsandparameters: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the qqZZ background PDF.
 
         Args:
-            distributionsandparameters (dict): Mapping of names to pytensor variables.
+            context (dict): Mapping of names to pytensor variables.
 
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of qqZZ background PDF.
         """
-        m4l = distributionsandparameters[self._parameters["m4l"]]
-        a1 = distributionsandparameters[self._parameters["a1"]]
-        a2 = distributionsandparameters[self._parameters["a2"]]
-        a3 = distributionsandparameters[self._parameters["a3"]]
-        a4 = distributionsandparameters[self._parameters["a4"]]
+        m4l = context[self._parameters["m4l"]]
+        a1 = context[self._parameters["a1"]]
+        a2 = context[self._parameters["a2"]]
+        a3 = context[self._parameters["a3"]]
+        a4 = context[self._parameters["a4"]]
 
         # qqZZ background: a1 * (m4l + a2)^a3 * exp(-a4 * m4l)
         shifted_mass = m4l + a2
@@ -196,12 +196,12 @@ class FastVerticalInterpHistPdf2D2Dist(Distribution):
     y: str | float | int
     coefList: list[str]
 
-    def expression(self, distributionsandparameters: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the 2D fast vertical interpolation histogram PDF.
 
         Args:
-            distributionsandparameters (dict): Mapping of names to pytensor variables.
+            context (dict): Mapping of names to pytensor variables.
 
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of 2D interpolated histogram PDF.
@@ -209,16 +209,16 @@ class FastVerticalInterpHistPdf2D2Dist(Distribution):
         Note:
             This implementation provides a simplified 2D morphing approximation.
         """
-        _x = distributionsandparameters[self._parameters["x"]]
-        _y = distributionsandparameters[self._parameters["y"]]
+        _x = context[self._parameters["x"]]
+        _y = context[self._parameters["y"]]
 
         # Start with a base 2D histogram value
         result = pt.constant(1.0)
 
         # Apply morphing for each coefficient parameter
         for coef_name in self.coefList:
-            if coef_name in distributionsandparameters:
-                coef = distributionsandparameters[coef_name]
+            if coef_name in context:
+                coef = context[coef_name]
                 # Simple 2D morphing with coefficients
                 result = result * (1.0 + 0.1 * coef)  # Simplified morphing
 

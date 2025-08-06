@@ -1,0 +1,421 @@
+"""
+Basic HS3 Distribution implementations.
+
+Provides classes for handling basic probability distributions including
+Gaussian, Uniform, Poisson, Exponential, Log-Normal, and Landau distributions
+as defined in the HS3 specification.
+"""
+
+from __future__ import annotations
+
+import math
+from typing import Literal, cast
+
+import pytensor.tensor as pt
+from pydantic import model_validator
+
+from pyhs3.context import Context
+from pyhs3.distributions.core import Distribution
+from pyhs3.typing.aliases import TensorVar
+
+
+class GaussianDist(Distribution):
+    r"""
+    Gaussian (normal) probability distribution.
+
+    Implements the standard Gaussian probability density function:
+
+    .. math::
+
+        f(x; \mu, \sigma) = \frac{1}{\sigma\sqrt{2\pi}} \exp\left(-\frac{(x-\mu)^2}{2\sigma^2}\right)
+
+    Parameters:
+        mean (str): Parameter name for the mean (μ).
+        sigma (str): Parameter name for the standard deviation (sigma).
+        x (str): Input variable name.
+    """
+
+    type: Literal["gaussian_dist"] = "gaussian_dist"
+    mean: str | float | int
+    sigma: str | float | int
+    x: str | float | int
+
+    @model_validator(mode="after")
+    def process_parameters(self) -> GaussianDist:
+        """Process parameters and build the parameters dict with constants."""
+        # Process parameters and build the parameters dict
+        mean_name, mean_value = self.process_parameter("mean")
+        sigma_name, sigma_value = self.process_parameter("sigma")
+        x_name, x_value = self.process_parameter("x")
+
+        self._parameters = {"mean": mean_name, "sigma": sigma_name, "x": x_name}
+
+        # Add any generated constants
+        if mean_value is not None:
+            self._constants_values[mean_name] = mean_value
+        if sigma_value is not None:
+            self._constants_values[sigma_name] = sigma_value
+        if x_value is not None:
+            self._constants_values[x_name] = x_value
+
+        return self
+
+    def expression(self, distributionsandparameters: Context) -> TensorVar:
+        """
+        Builds a symbolic expression for the Gaussian PDF.
+
+        Args:
+            distributionsandparameters (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of the Gaussian PDF.
+        """
+        # log.info("parameters: ", parameters)
+        norm_const = 1.0 / (
+            pt.sqrt(2 * math.pi) * distributionsandparameters[self._parameters["sigma"]]
+        )
+        exponent = pt.exp(
+            -0.5
+            * (
+                (
+                    distributionsandparameters[self._parameters["x"]]
+                    - distributionsandparameters[self._parameters["mean"]]
+                )
+                / distributionsandparameters[self._parameters["sigma"]]
+            )
+            ** 2
+        )
+        return cast(TensorVar, norm_const * exponent)
+
+
+class UniformDist(Distribution):
+    r"""
+    Uniform (rectangular) probability distribution.
+
+    Implements the continuous uniform probability density function with constant
+    density over its support region, as defined in ROOT's RooUniform.
+
+    .. math::
+
+        f(x) = \frac{1}{\mathcal{M}}
+
+    where the normalization constant $\mathcal{M}$ is determined by the domain bounds.
+
+    Parameters:
+        x (str): Input variable name.
+
+    Note:
+        The actual bounds are defined by the domain, not by distribution parameters.
+        This matches both the HS3 specification and ROOT's RooUniform implementation.
+    """
+
+    type: Literal["uniform_dist"] = "uniform_dist"
+    x: list[str]
+
+    @model_validator(mode="after")
+    def process_parameters(self) -> UniformDist:
+        """Process parameters and build the parameters dict with constants."""
+        # Uniform distribution takes a list of variable names
+        for name in self.x:
+            self._parameters[name] = name
+        return self
+
+    def expression(self, _distributionsandparameters: Context) -> TensorVar:
+        """
+        Builds a symbolic expression for the uniform PDF.
+
+        Args:
+            distributionsandparameters (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Constant value representing uniform density.
+
+        Note:
+            Returns a constant value of 1.0. The actual normalization is handled
+            by the domain bounds during integration/sampling. The variables in self.x
+            are used to define the domain but don't affect the constant density.
+        """
+        # Uniform distribution has constant density over its support
+        # The actual normalization factor is handled by domain bounds
+        # The variables in self.x define the domain but don't change the constant density
+        return cast(TensorVar, pt.constant(1.0))
+
+
+class PoissonDist(Distribution):
+    r"""
+    Poisson probability distribution.
+
+    Implements the Poisson probability mass function:
+
+    .. math::
+
+        P(k; \lambda) = \frac{\lambda^k e^{-\lambda}}{k!}
+
+    Parameters:
+        mean (str): Parameter name for the rate parameter (λ).
+        x (str): Input variable name (discrete count).
+    """
+
+    type: Literal["poisson_dist"] = "poisson_dist"
+    mean: str | float | int
+    x: str | float | int
+
+    @model_validator(mode="after")
+    def process_parameters(self) -> PoissonDist:
+        """Process parameters and build the parameters dict with constants."""
+        # Process parameters and build the parameters dict
+        mean_name, mean_value = self.process_parameter("mean")
+        x_name, x_value = self.process_parameter("x")
+
+        self._parameters = {"mean": mean_name, "x": x_name}
+
+        # Add any generated constants
+        if mean_value is not None:
+            self._constants_values[mean_name] = mean_value
+        if x_value is not None:
+            self._constants_values[x_name] = x_value
+
+        return self
+
+    def expression(self, distributionsandparameters: Context) -> TensorVar:
+        """
+        Builds a symbolic expression for the Poisson PMF.
+
+        Args:
+            distributionsandparameters (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of the Poisson PMF.
+        """
+        mean = distributionsandparameters[self._parameters["mean"]]
+        x = distributionsandparameters[self._parameters["x"]]
+
+        # Poisson PMF: λ^k * e^(-λ) / k!
+        # Using pt.gammaln for log(k!) = log(Γ(k+1))
+        log_pmf = x * pt.log(mean) - mean - pt.gammaln(x + 1)
+        return cast(TensorVar, pt.exp(log_pmf))
+
+
+class ExponentialDist(Distribution):
+    r"""
+    Exponential probability distribution.
+
+    Implements the exponential probability density function as defined in ROOT's
+    RooExponential and the HS3 specification:
+
+    .. math::
+
+        f(x; c) = \frac{1}{\mathcal{M}} \cdot \exp(-c \cdot x)
+
+    Parameters:
+        x (str): Input variable name.
+        c (str): Rate/decay parameter (coefficient).
+
+    Note:
+        The HS3 specification uses the form exp(-c*x), which matches ROOT's RooExponential
+        when the negateCoefficient flag is True. ROOT handles parameter transformations
+        automatically for compatibility.
+    """
+
+    type: Literal["exponential_dist"] = "exponential_dist"
+    x: str | float | int
+    c: str | float | int
+
+    @model_validator(mode="after")
+    def process_parameters(self) -> ExponentialDist:
+        """Process parameters and build the parameters dict with constants."""
+        x_name, x_value = self.process_parameter("x")
+        c_name, c_value = self.process_parameter("c")
+
+        self._parameters = {"x": x_name, "c": c_name}
+
+        # Add any generated constants
+        if x_value is not None:
+            self._constants_values[x_name] = x_value
+        if c_value is not None:
+            self._constants_values[c_name] = c_value
+
+        return self
+
+    def expression(self, distributionsandparameters: Context) -> TensorVar:
+        """
+        Builds a symbolic expression for the exponential PDF.
+
+        Args:
+            distributionsandparameters (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of exponential PDF.
+        """
+        x = distributionsandparameters[self._parameters["x"]]
+        c = distributionsandparameters[self._parameters["c"]]
+
+        # Exponential PDF: exp(-c * x)
+        return cast(TensorVar, pt.exp(-c * x))
+
+
+class LogNormalDist(Distribution):
+    r"""
+    Log-normal probability distribution.
+
+    Implements the log-normal probability density function as defined in ROOT's
+    RooLognormal and the HS3 specification:
+
+    .. math::
+
+        f(x; \mu, \sigma) = \frac{1}{\mathcal{M}} \frac{1}{x} \exp\left(-\frac{(\ln(x)-\mu)^2}{2\sigma^2}\right)
+
+    Parameters:
+        x (str): Input variable name (must be > 0).
+        mu (str): Location parameter (log-scale mean).
+        sigma (str): Scale parameter (log-scale standard deviation).
+
+    Note:
+        This implementation uses the standard parametrization where mu and sigma
+        are the mean and standard deviation of the underlying normal distribution
+        in log-space. ROOT handles parameter transformations automatically for
+        compatibility with median/shape parametrization.
+    """
+
+    type: Literal["lognormal_dist"] = "lognormal_dist"
+    x: str | float | int
+    mu: str | float | int
+    sigma: str | float | int
+
+    @model_validator(mode="after")
+    def process_parameters(self) -> LogNormalDist:
+        """Process parameters and build the parameters dict with constants."""
+        x_name, x_value = self.process_parameter("x")
+        mu_name, mu_value = self.process_parameter("mu")
+        sigma_name, sigma_value = self.process_parameter("sigma")
+
+        self._parameters = {"x": x_name, "mu": mu_name, "sigma": sigma_name}
+
+        # Add any generated constants
+        if x_value is not None:
+            self._constants_values[x_name] = x_value
+        if mu_value is not None:
+            self._constants_values[mu_name] = mu_value
+        if sigma_value is not None:
+            self._constants_values[sigma_name] = sigma_value
+
+        return self
+
+    def expression(self, distributionsandparameters: Context) -> TensorVar:
+        """
+        Builds a symbolic expression for the log-normal PDF.
+
+        Args:
+            distributionsandparameters (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of log-normal PDF.
+        """
+        x = distributionsandparameters[self._parameters["x"]]
+        mu = distributionsandparameters[self._parameters["mu"]]
+        sigma = distributionsandparameters[self._parameters["sigma"]]
+
+        # Log-normal PDF: (1/x) * exp(-((ln(x) - mu)^2) / (2 * sigma^2))
+        log_x = pt.log(x)
+        normalized_log = (log_x - mu) / sigma
+        return cast(TensorVar, (1.0 / x) * pt.exp(-0.5 * normalized_log**2))
+
+
+class LandauDist(Distribution):
+    r"""
+    Landau probability distribution.
+
+    Implements the Landau probability density function as defined in ROOT's
+    RooLandau. Used primarily in high-energy physics for modeling energy
+    loss distributions.
+
+    .. math::
+
+        f(x; \mu, \sigma) = \frac{1}{\sigma} \phi\left(\frac{x-\mu}{\sigma}\right)
+
+    where $\phi(z)$ is the Landau density function.
+
+    Parameters:
+        x (str): Input variable name.
+        mean (str): Location parameter.
+        sigma (str): Scale parameter.
+
+    Note:
+        The Landau distribution is asymmetric with a long tail towards larger values.
+        This implementation uses an approximation since the exact Landau function
+        is not available in PyTensor.
+    """
+
+    type: Literal["landau_dist"] = "landau_dist"
+    x: str | float | int
+    mean: str | float | int
+    sigma: str | float | int
+
+    @model_validator(mode="after")
+    def process_parameters(self) -> LandauDist:
+        """Process parameters and build the parameters dict with constants."""
+        x_name, x_value = self.process_parameter("x")
+        mean_name, mean_value = self.process_parameter("mean")
+        sigma_name, sigma_value = self.process_parameter("sigma")
+
+        self._parameters = {"x": x_name, "mean": mean_name, "sigma": sigma_name}
+
+        # Add any generated constants
+        if x_value is not None:
+            self._constants_values[x_name] = x_value
+        if mean_value is not None:
+            self._constants_values[mean_name] = mean_value
+        if sigma_value is not None:
+            self._constants_values[sigma_name] = sigma_value
+
+        return self
+
+    def expression(self, distributionsandparameters: Context) -> TensorVar:
+        """
+        Builds a symbolic expression for the Landau PDF.
+
+        Args:
+            distributionsandparameters (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of Landau PDF.
+
+        Note:
+            This implementation uses a Gaussian approximation. In practice,
+            ROOT uses more sophisticated approximations or numerical methods.
+        """
+        x = distributionsandparameters[self._parameters["x"]]
+        mean = distributionsandparameters[self._parameters["mean"]]
+        sigma = distributionsandparameters[self._parameters["sigma"]]
+
+        # Normalized variable
+        z = (x - mean) / sigma
+
+        # Landau approximation using a modified Gaussian with asymmetric tails
+        # This is a simplified approximation - ROOT uses more sophisticated methods
+        gaussian_core = pt.exp(-0.5 * z**2)
+        asymmetric_factor = pt.exp(-0.1 * pt.maximum(0.0, z - 1) ** 2)
+
+        return cast(TensorVar, (1.0 / sigma) * gaussian_core * asymmetric_factor)
+
+
+# Registry of basic distributions
+distributions: dict[str, type[Distribution]] = {
+    "gaussian_dist": GaussianDist,
+    "uniform_dist": UniformDist,
+    "poisson_dist": PoissonDist,
+    "exponential_dist": ExponentialDist,
+    "lognormal_dist": LogNormalDist,
+    "landau_dist": LandauDist,
+}
+
+# Define what should be exported from this module
+__all__ = [
+    "ExponentialDist",
+    "GaussianDist",
+    "LandauDist",
+    "LogNormalDist",
+    "PoissonDist",
+    "UniformDist",
+    "distributions",
+]

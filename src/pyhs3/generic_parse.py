@@ -108,6 +108,7 @@ def sympy_to_pytensor(
             "log": pt.math.log,
             "sqrt": pt.math.sqrt,
             "abs": pt.math.abs,
+            "erf": pt.math.erf,
         }
 
         # Convert variable names to SymPy symbols

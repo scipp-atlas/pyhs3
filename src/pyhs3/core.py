@@ -24,6 +24,7 @@ from rich.progress import (
 )
 
 from pyhs3.analyses import Analyses
+from pyhs3.context import Context
 from pyhs3.data import Data
 from pyhs3.distributions import Distributions
 from pyhs3.domains import Domain, Domains, ProductDomain
@@ -266,7 +267,12 @@ class Model:
                 )
 
                 # Build context with all currently available entities
-                context = {**self.parameters, **self.functions, **self.distributions}
+                context_data = {
+                    **self.parameters,
+                    **self.functions,
+                    **self.distributions,
+                }
+                context = Context(context_data)
 
                 if node_type == "parameter":
                     # Create parameter tensor with domain bounds applied

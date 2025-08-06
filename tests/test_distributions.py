@@ -17,12 +17,18 @@ from pytensor import function
 from pyhs3 import Workspace
 from pyhs3.core import create_bounded_tensor
 from pyhs3.distributions import (
+    ArgusDist,
+    AsymmetricCrystalBallDist,
     CrystalBallDist,
     Distribution,
+    ExponentialDist,
     GaussianDist,
     GenericDist,
+    LogNormalDist,
     PoissonDist,
+    PolynomialDist,
     ProductDist,
+    UniformDist,
 )
 
 
@@ -37,7 +43,6 @@ class TestDistribution:
         )
         assert dist.name == "test_dist"
         assert dist.type == "test"
-        assert isinstance(dist.parameters, dict)
 
     def test_distribution_expression_not_implemented(self):
         """Test that base distribution expression method raises NotImplementedError."""
@@ -56,7 +61,7 @@ class TestProductDist:
         dist = ProductDist(name="test_product", factors=["factor1", "factor2"])
         assert dist.name == "test_product"
         assert dist.factors == ["factor1", "factor2"]
-        assert list(dist.parameters.values()) == ["factor1", "factor2"]
+        assert dist.parameters == {"factor1", "factor2"}
 
     def test_product_dist_from_dict(self):
         """Test ProductDist can be created from dictionary."""
@@ -103,11 +108,103 @@ class TestProductDist:
 
 
 class TestCrystalBallDist:
-    """Test CrystalBallDist implementation."""
+    """Test CrystalBallDist (single-sided) implementation."""
 
     def test_crystal_dist_creation(self):
-        """Test CrystalBallDist can be created and configured."""
+        """Test CrystalBallDist (single-sided) can be created and configured."""
         dist = CrystalBallDist(
+            name="test_crystal",
+            alpha="alpha",
+            m="m",
+            m0="m0",
+            n="n",
+            sigma="sigma",
+        )
+        assert dist.name == "test_crystal"
+        assert dist.alpha == "alpha"
+        assert dist.n == "n"
+        assert len(dist.parameters) == 5
+
+    def test_crystal_dist_from_dict(self):
+        """Test CrystalBallDist (single-sided) can be created from dictionary."""
+        config = {
+            "name": "test_crystal",
+            "alpha": "a",
+            "m": "mass",
+            "m0": "mean",
+            "n": "n_param",
+            "sigma": "s",
+        }
+        dist = CrystalBallDist(**config)
+        assert dist.name == "test_crystal"
+        assert dist.m == "mass"
+        assert dist.m0 == "mean"
+
+    def test_crystal_dist_expression_gaussian_core(self):
+        """Test CrystalBallDist (single-sided) reduces to Gaussian in core region."""
+        dist = CrystalBallDist(
+            name="test_crystal",
+            alpha="alpha",
+            m="m",
+            m0="m0",
+            n="n",
+            sigma="sigma",
+        )
+
+        # Test parameters that should give Gaussian behavior
+        params = {
+            "alpha": pt.constant(2.0),
+            "m": pt.constant(0.0),  # At peak
+            "m0": pt.constant(0.0),
+            "n": pt.constant(1.0),
+            "sigma": pt.constant(1.0),
+        }
+
+        result = dist.expression(params)
+        expected = pt.exp(-0.5 * 0.0**2)  # Gaussian at peak
+
+        f = function([], [result, expected])
+        result_val, expected_val = f()
+
+        np.testing.assert_allclose(result_val, expected_val)
+
+    def test_crystal_dist_expression_power_law_tails(self):
+        """Test CrystalBallDist (single-sided) gives power law behavior in tails."""
+        dist = CrystalBallDist(
+            name="test_crystal",
+            alpha="alpha",
+            m="m",
+            m0="m0",
+            n="n",
+            sigma="sigma",
+        )
+
+        # Test parameters for left tail
+        params = {
+            "alpha": pt.constant(1.0),
+            "m": pt.constant(-3.0),  # Far left tail
+            "m0": pt.constant(0.0),
+            "n": pt.constant(2.0),
+            "sigma": pt.constant(1.0),
+        }
+
+        result = dist.expression(params)
+
+        # Should be in left tail region since t = -3.0 < -1.0
+        f = function([], result)
+        result_val = f()
+
+        # Value should be positive and finite
+        assert result_val > 0
+        assert np.isfinite(result_val)
+
+
+class TestAsymmetricCrystalBallDist:
+    """Test AsymmetricCrystalBallDist (double-sided) implementation."""
+
+    def test_asymmetric_crystal_dist_creation(self):
+        """Test AsymmetricCrystalBallDist can be created and configured."""
+        dist = AsymmetricCrystalBallDist(
             name="test_crystal",
             alpha_L="alpha_L",
             alpha_R="alpha_R",
@@ -123,8 +220,8 @@ class TestCrystalBallDist:
         assert dist.alpha_R == "alpha_R"
         assert len(dist.parameters) == 8
 
-    def test_crystal_dist_from_dict(self):
-        """Test CrystalBallDist can be created from dictionary."""
+    def test_asymmetric_crystal_dist_from_dict(self):
+        """Test AsymmetricCrystalBallDist can be created from dictionary."""
         config = {
             "name": "test_crystal",
             "alpha_L": "aL",
@@ -136,14 +233,14 @@ class TestCrystalBallDist:
             "sigma_L": "sL",
             "sigma_R": "sR",
         }
-        dist = CrystalBallDist(**config)
+        dist = AsymmetricCrystalBallDist(**config)
         assert dist.name == "test_crystal"
         assert dist.m == "mass"
         assert dist.m0 == "mean"
 
-    def test_crystal_dist_expression_gaussian_core(self):
-        """Test CrystalBallDist reduces to Gaussian in core region."""
-        dist = CrystalBallDist(
+    def test_asymmetric_crystal_dist_expression_gaussian_core(self):
+        """Test AsymmetricCrystalBallDist reduces to Gaussian in core region."""
+        dist = AsymmetricCrystalBallDist(
             name="test_crystal",
             alpha_L="alpha_L",
             alpha_R="alpha_R",
@@ -175,9 +272,9 @@ class TestCrystalBallDist:
 
         np.testing.assert_allclose(result_val, expected_val)
 
-    def test_crystal_dist_expression_power_law_tails(self):
-        """Test CrystalBallDist gives power law behavior in tails."""
-        dist = CrystalBallDist(
+    def test_asymmetric_crystal_dist_expression_power_law_tails(self):
+        """Test AsymmetricCrystalBallDist gives power law behavior in tails."""
+        dist = AsymmetricCrystalBallDist(
             name="test_crystal",
             alpha_L="alpha_L",
             alpha_R="alpha_R",
@@ -257,7 +354,7 @@ class TestPoissonDist:
         assert dist.name == "test_poisson"
         assert dist.mean == "lambda_param"
         assert dist.x == "count_var"
-        assert list(dist.parameters.values()) == ["lambda_param", "count_var"]
+        assert dist.parameters == {"lambda_param", "count_var"}
 
     def test_poisson_dist_from_dict(self):
         """Test PoissonDist can be created from dictionary."""
@@ -287,8 +384,9 @@ class TestPoissonDist:
         assert dist.x == 2
 
         # Parameters dict should contain the constant names for dependency tracking
-        assert dist.parameters["mean"] == "constant_numeric_poisson_mean"
-        assert dist.parameters["x"] == "constant_numeric_poisson_x"
+        # Check that constants were created for numeric parameters
+        assert "constant_numeric_poisson_mean" in dist.parameters
+        assert "constant_numeric_poisson_x" in dist.parameters
 
         # Constants should be created
         assert "constant_numeric_poisson_mean" in dist.constants
@@ -484,7 +582,7 @@ class TestNumericParameters:
         assert dist.x == "obs_var"  # String reference unchanged
 
         # Check that all parameters (including constants) are in parameters dict values
-        param_values = list(dist.parameters.values())
+        param_values = sorted(dist.parameters)
         assert "mu_param" in param_values
         assert "obs_var" in param_values
         assert "constant_test_gauss_sigma" in param_values  # Constants are dependencies
@@ -514,7 +612,7 @@ class TestNumericParameters:
             "constant_numeric_gauss_sigma",
             "constant_numeric_gauss_x",
         ]
-        assert set(dist.parameters.values()) == set(expected_params)
+        assert dist.parameters == set(expected_params)
 
         # All constants should be created
         assert len(dist.constants) == 3
@@ -539,7 +637,7 @@ class TestNumericParameters:
         assert dist.x == "obs_var"
 
         # String references and constants in parameters
-        assert set(dist.parameters.values()) == {
+        assert dist.parameters == {
             "mu_param",
             "obs_var",
             "constant_mixed_gauss_sigma",
@@ -972,3 +1070,817 @@ class TestCrossDependencies:
 
         for name in ["dist1", "dist2"]:
             assert model.distributions[name] is not None
+
+
+class TestUniformDist:
+    """Test UniformDist implementation."""
+
+    def test_uniform_dist_creation(self):
+        """Test UniformDist can be created and configured."""
+        dist = UniformDist(name="test_uniform", x=["x_var"])
+        assert dist.name == "test_uniform"
+        assert dist.x == ["x_var"]
+        assert dist.parameters == {"x_var"}
+
+    def test_uniform_dist_from_dict(self):
+        """Test UniformDist can be created from dictionary."""
+        config = {
+            "type": "uniform_dist",
+            "name": "test_uniform",
+            "x": ["observable"],
+        }
+        dist = UniformDist(**config)
+        assert dist.name == "test_uniform"
+        assert dist.x == ["observable"]
+
+    def test_uniform_dist_from_dict_with_string_parameter(self):
+        """Test UniformDist handles string x parameter correctly."""
+        config = {
+            "type": "uniform_dist",
+            "name": "string_uniform",
+            "x": ["obs_var"],  # String parameter
+        }
+        dist = UniformDist(**config)
+
+        # Field attributes should preserve original values
+        assert dist.x == ["obs_var"]
+
+        # Parameters dict should contain the parameter mapping
+        assert "obs_var" in dist.parameters
+        assert "obs_var" in dist.parameters
+
+    def test_uniform_dist_expression_constant_value(self):
+        """Test UniformDist returns constant value of 1.0."""
+        dist = UniformDist(name="test_uniform", x=["x"])
+
+        # Parameters - the x value doesn't matter for uniform distribution
+        params = {"x": pt.constant(0.5)}
+
+        result = dist.expression(params)
+        f = function([], result)
+        result_val = f()
+
+        # Should always return 1.0 (normalization handled by domain)
+        assert result_val == 1.0
+
+    def test_uniform_dist_expression_with_different_x_values(self):
+        """Test UniformDist returns same value regardless of x."""
+        dist = UniformDist(name="test_uniform", x=["x"])
+
+        # Test multiple x values - should all give same result
+        x_values = [-1.0, 0.0, 0.5, 1.0, 10.0]
+
+        for x_val in x_values:
+            params = {"x": pt.constant(x_val)}
+            result = dist.expression(params)
+            f = function([], result)
+            result_val = f()
+            assert result_val == 1.0, f"Failed for x={x_val}"
+
+    def test_uniform_dist_integration_with_workspace(self):
+        """Test UniformDist integration in full Workspace workflow."""
+        test_data = {
+            "parameter_points": [
+                {
+                    "name": "test_params",
+                    "parameters": [
+                        {"name": "obs", "value": 0.5},
+                    ],
+                }
+            ],
+            "distributions": [
+                {
+                    "type": "uniform_dist",
+                    "name": "uniform_dist",
+                    "x": ["obs"],
+                }
+            ],
+            "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
+            "functions": [],
+            "metadata": {"hs3_version": "0.2"},
+        }
+
+        ws = Workspace(**test_data)
+        model = ws.model(domain="test_domain", parameter_set="test_params")
+
+        # Verify the distribution was created
+        assert "uniform_dist" in model.distributions
+        assert "obs" in model.parameters
+
+        # Verify we can evaluate the PDF
+        pdf_value = model.pdf("uniform_dist", obs=0.5)
+        assert pdf_value is not None
+        assert pdf_value == 1.0
+
+
+class TestExponentialDist:
+    """Test ExponentialDist implementation."""
+
+    def test_exponential_dist_creation(self):
+        """Test ExponentialDist can be created and configured."""
+        dist = ExponentialDist(name="test_exp", x="x_var", c="c_param")
+        assert dist.name == "test_exp"
+        assert dist.x == "x_var"
+        assert dist.c == "c_param"
+        assert dist.parameters == {"x_var", "c_param"}
+
+    def test_exponential_dist_from_dict(self):
+        """Test ExponentialDist can be created from dictionary."""
+        config = {
+            "type": "exponential_dist",
+            "name": "test_exp",
+            "x": "time",
+            "c": "decay_rate",
+        }
+        dist = ExponentialDist(**config)
+        assert dist.name == "test_exp"
+        assert dist.x == "time"
+        assert dist.c == "decay_rate"
+
+    def test_exponential_dist_from_dict_with_numeric_parameters(self):
+        """Test ExponentialDist handles numeric parameters correctly."""
+        config = {
+            "type": "exponential_dist",
+            "name": "numeric_exp",
+            "x": 1.0,  # Numeric value
+            "c": 0.5,  # Numeric rate
+        }
+        dist = ExponentialDist(**config)
+
+        # Field attributes should preserve original values
+        assert dist.x == 1.0
+        assert dist.c == 0.5
+
+        # Parameters dict should contain the constant names
+        # Check that constants were created for numeric parameters
+        assert "constant_numeric_exp_x" in dist.parameters
+        assert "constant_numeric_exp_c" in dist.parameters
+
+        # Constants should be created
+        assert "constant_numeric_exp_x" in dist.constants
+        assert "constant_numeric_exp_c" in dist.constants
+
+    def test_exponential_dist_expression_known_values(self):
+        """Test ExponentialDist against known exponential values."""
+        dist = ExponentialDist(name="test_exp", x="x", c="c")
+
+        # Test exp(-1 * 1) = exp(-1) ≈ 0.3679
+        params = {"x": pt.constant(1.0), "c": pt.constant(1.0)}
+        result = dist.expression(params)
+        f = function([], result)
+        result_val = f()
+        expected = np.exp(-1.0)
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+        # Test exp(-0.5 * 2) = exp(-1) ≈ 0.3679
+        params = {"x": pt.constant(2.0), "c": pt.constant(0.5)}
+        result = dist.expression(params)
+        f = function([], result)
+        result_val = f()
+        expected = np.exp(-1.0)
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+        # Test exp(-2 * 0) = exp(0) = 1
+        params = {"x": pt.constant(0.0), "c": pt.constant(2.0)}
+        result = dist.expression(params)
+        f = function([], result)
+        result_val = f()
+        expected = 1.0
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    @pytest.mark.parametrize(
+        ("x_val", "c_val", "expected"),
+        [
+            pytest.param(0.0, 1.0, 1.0, id="x0_c1"),  # exp(-1*0) = 1
+            pytest.param(1.0, 1.0, np.exp(-1.0), id="x1_c1"),  # exp(-1*1)
+            pytest.param(2.0, 0.5, np.exp(-1.0), id="x2_c0.5"),  # exp(-0.5*2)
+            pytest.param(0.5, 2.0, np.exp(-1.0), id="x0.5_c2"),  # exp(-2*0.5)
+            pytest.param(1.0, 2.0, np.exp(-2.0), id="x1_c2"),  # exp(-2*1)
+        ],
+    )
+    def test_exponential_dist_parameterized_values(self, x_val, c_val, expected):
+        """Test ExponentialDist against parameterized known values."""
+        dist = ExponentialDist(name="test_exp", x="x", c="c")
+
+        params = {"x": pt.constant(x_val), "c": pt.constant(c_val)}
+        result = dist.expression(params)
+        f = function([], result)
+        result_val = f()
+
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    def test_exponential_dist_expression_with_variables(self):
+        """Test ExponentialDist with variable parameters."""
+        dist = ExponentialDist(name="test_exp", x="x", c="c")
+
+        # Create variables
+        x_var = pt.scalar("x")
+        c_var = pt.scalar("c")
+        params = {"x": x_var, "c": c_var}
+
+        result = dist.expression(params)
+        f = function([x_var, c_var], result)
+
+        # Test several points
+        # exp(-1*0) = 1
+        assert np.isclose(f(0.0, 1.0), 1.0)
+        # exp(-2*1) = exp(-2)
+        assert np.isclose(f(1.0, 2.0), np.exp(-2.0))
+        # exp(-0.5*3) = exp(-1.5)
+        assert np.isclose(f(3.0, 0.5), np.exp(-1.5))
+
+    def test_exponential_dist_properties(self):
+        """Test that ExponentialDist has correct mathematical properties."""
+        dist = ExponentialDist(name="test_exp", x="x", c="c")
+
+        c_val = 1.0
+        params = {"c": pt.constant(c_val)}
+
+        # Test that PDF is positive and decreasing for x >= 0
+        x_values = [0.0, 0.5, 1.0, 2.0, 5.0]
+        pdf_values = []
+
+        for x_val in x_values:
+            test_params = dict(params)
+            test_params["x"] = pt.constant(x_val)
+            result = dist.expression(test_params)
+            f = function([], result)
+            pdf_val = f()
+            assert pdf_val > 0.0, f"PDF should be positive, got {pdf_val} for x={x_val}"
+            pdf_values.append(pdf_val)
+
+        # Check that values are decreasing (for positive c)
+        for i in range(len(pdf_values) - 1):
+            assert pdf_values[i] >= pdf_values[i + 1], (
+                f"PDF should be decreasing, but {pdf_values[i]} < {pdf_values[i + 1]} "
+                f"at positions {i} and {i + 1}"
+            )
+
+    def test_exponential_dist_integration_with_workspace(self):
+        """Test ExponentialDist integration in full Workspace workflow."""
+        test_data = {
+            "parameter_points": [
+                {
+                    "name": "test_params",
+                    "parameters": [
+                        {"name": "time", "value": 1.0},
+                        {"name": "rate", "value": 0.5},
+                    ],
+                }
+            ],
+            "distributions": [
+                {
+                    "type": "exponential_dist",
+                    "name": "exp_decay",
+                    "x": "time",
+                    "c": "rate",
+                }
+            ],
+            "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
+            "functions": [],
+            "metadata": {"hs3_version": "0.2"},
+        }
+
+        ws = Workspace(**test_data)
+        model = ws.model(domain="test_domain", parameter_set="test_params")
+
+        # Verify the distribution was created
+        assert "exp_decay" in model.distributions
+        assert "time" in model.parameters
+        assert "rate" in model.parameters
+
+        # Verify we can evaluate the PDF: exp(-0.5 * 1.0) = exp(-0.5)
+        pdf_value = model.pdf("exp_decay", time=1.0, rate=0.5)
+        assert pdf_value is not None
+        expected = np.exp(-0.5)
+        np.testing.assert_allclose(pdf_value, expected, rtol=1e-6)
+
+
+class TestLogNormalDist:
+    """Test LogNormalDist implementation."""
+
+    def test_lognormal_dist_creation(self):
+        """Test LogNormalDist can be created and configured."""
+        dist = LogNormalDist(
+            name="test_lognorm", x="x_var", mu="mu_param", sigma="sigma_param"
+        )
+        assert dist.name == "test_lognorm"
+        assert dist.x == "x_var"
+        assert dist.mu == "mu_param"
+        assert dist.sigma == "sigma_param"
+        assert dist.parameters == {"x_var", "mu_param", "sigma_param"}
+
+    def test_lognormal_dist_from_dict(self):
+        """Test LogNormalDist can be created from dictionary."""
+        config = {
+            "type": "lognormal_dist",
+            "name": "test_lognorm",
+            "x": "observable",
+            "mu": "log_mean",
+            "sigma": "log_sigma",
+        }
+        dist = LogNormalDist(**config)
+        assert dist.name == "test_lognorm"
+        assert dist.x == "observable"
+        assert dist.mu == "log_mean"
+        assert dist.sigma == "log_sigma"
+
+    def test_lognormal_dist_from_dict_with_numeric_parameters(self):
+        """Test LogNormalDist handles numeric parameters correctly."""
+        config = {
+            "type": "lognormal_dist",
+            "name": "numeric_lognorm",
+            "x": 2.0,  # Numeric value
+            "mu": 0.0,  # Log-scale mean
+            "sigma": 1.0,  # Log-scale std dev
+        }
+        dist = LogNormalDist(**config)
+
+        # Field attributes should preserve original values
+        assert dist.x == 2.0
+        assert dist.mu == 0.0
+        assert dist.sigma == 1.0
+
+        # Parameters dict should contain the constant names
+        # Check that constants were created for numeric parameters
+        assert "constant_numeric_lognorm_x" in dist.parameters
+        assert "constant_numeric_lognorm_mu" in dist.parameters
+        assert "constant_numeric_lognorm_sigma" in dist.parameters
+
+        # Constants should be created
+        assert "constant_numeric_lognorm_x" in dist.constants
+        assert "constant_numeric_lognorm_mu" in dist.constants
+        assert "constant_numeric_lognorm_sigma" in dist.constants
+
+    def test_lognormal_dist_expression_known_values(self):
+        """Test LogNormalDist against known log-normal values."""
+        dist = LogNormalDist(name="test_lognorm", x="x", mu="mu", sigma="sigma")
+
+        # Test standard log-normal at x=1 with mu=0, sigma=1
+        # ln(1) = 0, so we get (1/1) * exp(-0^2 / (2*1^2)) = 1 * exp(0) = 1
+        params = {
+            "x": pt.constant(1.0),
+            "mu": pt.constant(0.0),
+            "sigma": pt.constant(1.0),
+        }
+        result = dist.expression(params)
+        f = function([], result)
+        result_val = f()
+        expected = 1.0
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+        # Test at x=e with mu=1, sigma=1
+        # ln(e) = 1, so we get (1/e) * exp(-(1-1)^2 / (2*1^2)) = (1/e) * exp(0) = 1/e
+        e_val = np.exp(1.0)
+        params = {
+            "x": pt.constant(e_val),
+            "mu": pt.constant(1.0),
+            "sigma": pt.constant(1.0),
+        }
+        result = dist.expression(params)
+        f = function([], result)
+        result_val = f()
+        expected = 1.0 / e_val
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    @pytest.mark.parametrize(
+        ("x_val", "mu_val", "sigma_val"),
+        [
+            pytest.param(
+                1.0, 0.0, 1.0, id="standard_at_1"
+            ),  # Standard log-normal at x=1
+            pytest.param(np.exp(1.0), 1.0, 1.0, id="at_e_mu1"),  # At x=e with mu=1
+            pytest.param(
+                np.exp(0.5), 0.5, 0.5, id="at_exp0.5"
+            ),  # At x=exp(0.5) with mu=0.5
+        ],
+    )
+    def test_lognormal_dist_parameterized_known_values(self, x_val, mu_val, sigma_val):
+        """Test LogNormalDist against parameterized known values."""
+        dist = LogNormalDist(name="test_lognorm", x="x", mu="mu", sigma="sigma")
+
+        params = {
+            "x": pt.constant(x_val),
+            "mu": pt.constant(mu_val),
+            "sigma": pt.constant(sigma_val),
+        }
+        result = dist.expression(params)
+        f = function([], result)
+        result_val = f()
+
+        # Calculate expected value: (1/x) * exp(-((ln(x) - mu)^2) / (2 * sigma^2))
+        log_x = np.log(x_val)
+        normalized_log = (log_x - mu_val) / sigma_val
+        expected = (1.0 / x_val) * np.exp(-0.5 * normalized_log**2)
+
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    def test_lognormal_dist_expression_with_variables(self):
+        """Test LogNormalDist with variable parameters."""
+        dist = LogNormalDist(name="test_lognorm", x="x", mu="mu", sigma="sigma")
+
+        # Create variables
+        x_var = pt.scalar("x")
+        mu_var = pt.scalar("mu")
+        sigma_var = pt.scalar("sigma")
+        params = {"x": x_var, "mu": mu_var, "sigma": sigma_var}
+
+        result = dist.expression(params)
+        f = function([x_var, mu_var, sigma_var], result)
+
+        # Test at x=1, mu=0, sigma=1: should give 1.0
+        assert np.isclose(f(1.0, 0.0, 1.0), 1.0)
+
+        # Test at x=e, mu=1, sigma=1: should give 1/e
+        e_val = np.exp(1.0)
+        assert np.isclose(f(e_val, 1.0, 1.0), 1.0 / e_val)
+
+    def test_lognormal_dist_properties(self):
+        """Test that LogNormalDist has correct mathematical properties."""
+        dist = LogNormalDist(name="test_lognorm", x="x", mu="mu", sigma="sigma")
+
+        mu_val = 0.0
+        sigma_val = 1.0
+        params = {"mu": pt.constant(mu_val), "sigma": pt.constant(sigma_val)}
+
+        # Test that PDF is positive for x > 0
+        x_values = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
+
+        for x_val in x_values:
+            test_params = dict(params)
+            test_params["x"] = pt.constant(x_val)
+            result = dist.expression(test_params)
+            f = function([], result)
+            pdf_val = f()
+            assert pdf_val > 0.0, f"PDF should be positive, got {pdf_val} for x={x_val}"
+
+        # Test that mode is at exp(mu - sigma^2) for our parameters
+        # For mu=0, sigma=1: mode at exp(0-1) = exp(-1)
+        mode_x = np.exp(mu_val - sigma_val**2)
+        test_params = dict(params)
+        test_params["x"] = pt.constant(mode_x)
+        result = dist.expression(test_params)
+        f_mode = function([], result)
+        mode_val = f_mode()
+
+        # Check that nearby points have lower values
+        for offset in [-0.1, 0.1]:
+            test_x = mode_x + offset
+            if test_x > 0:  # Only test positive values
+                test_params = dict(params)
+                test_params["x"] = pt.constant(test_x)
+                result = dist.expression(test_params)
+                f_test = function([], result)
+                test_val = f_test()
+                assert test_val <= mode_val, (
+                    f"Value at mode should be maximum, but {test_val} > {mode_val} "
+                    f"at x={test_x} vs mode x={mode_x}"
+                )
+
+    def test_lognormal_dist_integration_with_workspace(self):
+        """Test LogNormalDist integration in full Workspace workflow."""
+        test_data = {
+            "parameter_points": [
+                {
+                    "name": "test_params",
+                    "parameters": [
+                        {"name": "mass", "value": 1.0},
+                        {"name": "log_mean", "value": 0.0},
+                        {"name": "log_width", "value": 1.0},
+                    ],
+                }
+            ],
+            "distributions": [
+                {
+                    "type": "lognormal_dist",
+                    "name": "lognorm_dist",
+                    "x": "mass",
+                    "mu": "log_mean",
+                    "sigma": "log_width",
+                }
+            ],
+            "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
+            "functions": [],
+            "metadata": {"hs3_version": "0.2"},
+        }
+
+        ws = Workspace(**test_data)
+        model = ws.model(domain="test_domain", parameter_set="test_params")
+
+        # Verify the distribution was created
+        assert "lognorm_dist" in model.distributions
+        assert "mass" in model.parameters
+        assert "log_mean" in model.parameters
+        assert "log_width" in model.parameters
+
+        # Verify we can evaluate the PDF at x=1, mu=0, sigma=1: should give 1.0
+        pdf_value = model.pdf("lognorm_dist", mass=1.0, log_mean=0.0, log_width=1.0)
+        assert pdf_value is not None
+        expected = 1.0
+        np.testing.assert_allclose(pdf_value, expected, rtol=1e-6)
+
+
+class TestPolynomialDist:
+    """Test PolynomialDist implementation."""
+
+    def test_polynomial_dist_creation(self):
+        """Test PolynomialDist can be created and configured."""
+        dist = PolynomialDist(
+            name="test_poly", x="x_var", coefficients=["a0", "a1", "a2"]
+        )
+        assert dist.name == "test_poly"
+        assert dist.x == "x_var"
+        assert dist.coefficients == ["a0", "a1", "a2"]
+        # Should have x plus all coefficients in parameters
+        expected_params = ["x_var", "a0", "a1", "a2"]
+        assert dist.parameters == set(expected_params)
+
+    def test_polynomial_dist_from_dict(self):
+        """Test PolynomialDist can be created from dictionary."""
+        config = {
+            "type": "polynomial_dist",
+            "name": "test_poly",
+            "x": "mass",
+            "coefficients": ["c0", "c1", "c2"],
+        }
+        dist = PolynomialDist(**config)
+        assert dist.name == "test_poly"
+        assert dist.x == "mass"
+        assert dist.coefficients == ["c0", "c1", "c2"]
+
+    def test_polynomial_dist_expression_known_values(self):
+        """Test PolynomialDist against known polynomial values."""
+        # Test quadratic: 1 + 2x + 3x^2
+        dist = PolynomialDist(name="test_poly", x="x", coefficients=["a0", "a1", "a2"])
+
+        # At x=0: 1 + 2*0 + 3*0^2 = 1
+        params = {
+            "x": pt.constant(0.0),
+            "a0": pt.constant(1.0),
+            "a1": pt.constant(2.0),
+            "a2": pt.constant(3.0),
+        }
+        result = dist.expression(params)
+        f = function([], result)
+        result_val = f()
+        expected = 1.0
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+        # At x=1: 1 + 2*1 + 3*1^2 = 6
+        params = {
+            "x": pt.constant(1.0),
+            "a0": pt.constant(1.0),
+            "a1": pt.constant(2.0),
+            "a2": pt.constant(3.0),
+        }
+        result = dist.expression(params)
+        f = function([], result)
+        result_val = f()
+        expected = 6.0
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+        # At x=2: 1 + 2*2 + 3*2^2 = 1 + 4 + 12 = 17
+        params = {
+            "x": pt.constant(2.0),
+            "a0": pt.constant(1.0),
+            "a1": pt.constant(2.0),
+            "a2": pt.constant(3.0),
+        }
+        result = dist.expression(params)
+        f = function([], result)
+        result_val = f()
+        expected = 17.0
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    def test_polynomial_dist_linear_case(self):
+        """Test PolynomialDist for simple linear case."""
+        # Test linear: 5 + 3x
+        dist = PolynomialDist(name="linear", x="x", coefficients=["c0", "c1"])
+
+        # At x=0: 5 + 3*0 = 5
+        params = {"x": pt.constant(0.0), "c0": pt.constant(5.0), "c1": pt.constant(3.0)}
+        result = dist.expression(params)
+        f = function([], result)
+        assert np.isclose(f(), 5.0)
+
+        # At x=2: 5 + 3*2 = 11
+        params = {"x": pt.constant(2.0), "c0": pt.constant(5.0), "c1": pt.constant(3.0)}
+        result = dist.expression(params)
+        f = function([], result)
+        assert np.isclose(f(), 11.0)
+
+    def test_polynomial_dist_constant_case(self):
+        """Test PolynomialDist for constant case."""
+        # Test constant: 42
+        dist = PolynomialDist(name="constant", x="x", coefficients=["c0"])
+
+        # Should always return 42 regardless of x value
+        for x_val in [0.0, 1.0, -1.0, 10.0]:
+            params = {"x": pt.constant(x_val), "c0": pt.constant(42.0)}
+            result = dist.expression(params)
+            f = function([], result)
+            assert np.isclose(f(), 42.0), f"Failed for x={x_val}"
+
+    def test_polynomial_dist_integration_with_workspace(self):
+        """Test PolynomialDist integration in full Workspace workflow."""
+        test_data = {
+            "parameter_points": [
+                {
+                    "name": "test_params",
+                    "parameters": [
+                        {"name": "mass", "value": 1.0},
+                        {"name": "p0", "value": 1.0},
+                        {"name": "p1", "value": 2.0},
+                    ],
+                }
+            ],
+            "distributions": [
+                {
+                    "type": "polynomial_dist",
+                    "name": "poly_bkg",
+                    "x": "mass",
+                    "coefficients": ["p0", "p1"],
+                }
+            ],
+            "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
+            "functions": [],
+            "metadata": {"hs3_version": "0.2"},
+        }
+
+        ws = Workspace(**test_data)
+        model = ws.model(domain="test_domain", parameter_set="test_params")
+
+        # Verify the distribution was created
+        assert "poly_bkg" in model.distributions
+        assert "mass" in model.parameters
+        assert "p0" in model.parameters
+        assert "p1" in model.parameters
+
+        # Verify we can evaluate the PDF: 1 + 2*1 = 3
+        pdf_value = model.pdf("poly_bkg", mass=1.0, p0=1.0, p1=2.0)
+        assert pdf_value is not None
+        expected = 3.0
+        np.testing.assert_allclose(pdf_value, expected, rtol=1e-6)
+
+
+class TestArgusDist:
+    """Test ArgusDist implementation."""
+
+    def test_argus_dist_creation(self):
+        """Test ArgusDist can be created and configured."""
+        dist = ArgusDist(
+            name="test_argus", mass="m", resonance="m0", slope="c", power="p"
+        )
+        assert dist.name == "test_argus"
+        assert dist.mass == "m"
+        assert dist.resonance == "m0"
+        assert dist.slope == "c"
+        assert dist.power == "p"
+        expected_params = ["m", "m0", "c", "p"]
+        assert dist.parameters == set(expected_params)
+
+    def test_argus_dist_from_dict(self):
+        """Test ArgusDist can be created from dictionary."""
+        config = {
+            "type": "argus_dist",
+            "name": "test_argus",
+            "mass": "mbc",
+            "resonance": "m_B",
+            "slope": "c_argus",
+            "power": "p_argus",
+        }
+        dist = ArgusDist(**config)
+        assert dist.name == "test_argus"
+        assert dist.mass == "mbc"
+        assert dist.resonance == "m_B"
+        assert dist.slope == "c_argus"
+        assert dist.power == "p_argus"
+
+    def test_argus_dist_expression_known_values(self):
+        """Test ArgusDist against known ARGUS values."""
+        dist = ArgusDist(
+            name="test_argus", mass="m", resonance="m0", slope="c", power="p"
+        )
+
+        # Test at m=0: 0 * [1 - 0]^p * exp[c * 1] = 0 (regardless of other params)
+        params = {
+            "m": pt.constant(0.0),
+            "m0": pt.constant(5.0),
+            "c": pt.constant(-1.0),
+            "p": pt.constant(0.5),
+        }
+        result = dist.expression(params)
+        f = function([], result)
+        result_val = f()
+        expected = 0.0
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+        # Test specific case: m=3, m0=5, c=-0.5, p=0.5
+        # Should give: 3 * [1 - (3/5)^2]^0.5 * exp[-0.5 * (1 - (3/5)^2)]
+        # = 3 * [1 - 9/25]^0.5 * exp[-0.5 * (1 - 9/25)]
+        # = 3 * [16/25]^0.5 * exp[-0.5 * 16/25]
+        # = 3 * (4/5) * exp[-0.32]
+        m_val, m0_val, c_val, p_val = 3.0, 5.0, -0.5, 0.5
+        params = {
+            "m": pt.constant(m_val),
+            "m0": pt.constant(m0_val),
+            "c": pt.constant(c_val),
+            "p": pt.constant(p_val),
+        }
+        result = dist.expression(params)
+        f = function([], result)
+        result_val = f()
+
+        # Calculate expected manually
+        ratio_squared = (m_val / m0_val) ** 2  # (3/5)^2 = 9/25 = 0.36
+        bracket_term = 1.0 - ratio_squared  # 1 - 0.36 = 0.64
+        power_term = bracket_term**p_val  # 0.64^0.5 = 0.8
+        exp_term = np.exp(c_val * bracket_term)  # exp(-0.5 * 0.64) = exp(-0.32)
+        expected = m_val * power_term * exp_term  # 3 * 0.8 * exp(-0.32)
+
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    def test_argus_dist_properties(self):
+        """Test that ArgusDist has correct mathematical properties."""
+        dist = ArgusDist(
+            name="test_argus", mass="m", resonance="m0", slope="c", power="p"
+        )
+
+        # Fixed parameters for B physics: m0=5.279 (B meson mass), typical values
+        m0_val = 5.279
+        c_val = -15.0  # Negative slope parameter
+        p_val = 0.5  # Common power
+        params = {
+            "m0": pt.constant(m0_val),
+            "c": pt.constant(c_val),
+            "p": pt.constant(p_val),
+        }
+
+        # Test that PDF is zero at endpoint m = m0
+        test_params = dict(params)
+        test_params["m"] = pt.constant(m0_val)
+        result = dist.expression(test_params)
+        f = function([], result)
+        pdf_val = f()
+        assert np.isclose(pdf_val, 0.0, atol=1e-10), (
+            f"PDF should be 0 at endpoint, got {pdf_val}"
+        )
+
+        # Test that PDF is positive for m < m0
+        m_values = [1.0, 2.0, 3.0, 4.0, 5.0]  # All less than m0
+
+        for m_val in m_values:
+            test_params = dict(params)
+            test_params["m"] = pt.constant(m_val)
+            result = dist.expression(test_params)
+            f = function([], result)
+            pdf_val = f()
+            assert pdf_val >= 0.0, (
+                f"PDF should be non-negative, got {pdf_val} for m={m_val}"
+            )
+
+    def test_argus_dist_integration_with_workspace(self):
+        """Test ArgusDist integration in full Workspace workflow."""
+        test_data = {
+            "parameter_points": [
+                {
+                    "name": "test_params",
+                    "parameters": [
+                        {"name": "mbc", "value": 5.0},
+                        {"name": "m_B", "value": 5.279},
+                        {"name": "c_slope", "value": -10.0},
+                        {"name": "p_power", "value": 0.5},
+                    ],
+                }
+            ],
+            "distributions": [
+                {
+                    "type": "argus_dist",
+                    "name": "argus_bkg",
+                    "mass": "mbc",
+                    "resonance": "m_B",
+                    "slope": "c_slope",
+                    "power": "p_power",
+                }
+            ],
+            "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
+            "functions": [],
+            "metadata": {"hs3_version": "0.2"},
+        }
+
+        ws = Workspace(**test_data)
+        model = ws.model(domain="test_domain", parameter_set="test_params")
+
+        # Verify the distribution was created
+        assert "argus_bkg" in model.distributions
+        assert "mbc" in model.parameters
+        assert "m_B" in model.parameters
+        assert "c_slope" in model.parameters
+        assert "p_power" in model.parameters
+
+        # Verify we can evaluate the PDF
+        pdf_value = model.pdf(
+            "argus_bkg", mbc=5.0, m_B=5.279, c_slope=-10.0, p_power=0.5
+        )
+        assert pdf_value is not None
+        assert pdf_value >= 0.0  # Should be non-negative

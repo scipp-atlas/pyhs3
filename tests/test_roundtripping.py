@@ -10,6 +10,7 @@ This module tests that every distribution and function can be:
 from __future__ import annotations
 
 from pyhs3.distributions import (
+    AsymmetricCrystalBallDist,
     CrystalBallDist,
     GaussianDist,
     GenericDist,
@@ -152,10 +153,41 @@ class TestDistributionRoundtripping:
         assert serialized == config
 
     def test_crystal_ball_dist_roundtrip(self):
-        """Test CrystalBallDist roundtripping."""
+        """Test CrystalBallDist (single-sided) roundtripping."""
+        config = {
+            "type": "crystalball_dist",
+            "name": "test_crystalball",
+            "alpha": "alpha",
+            "m": "mass",
+            "m0": "mass0",
+            "n": "n",
+            "sigma": "sigma",
+        }
+
+        # Create from dict
+        dist1 = CrystalBallDist(**config)
+
+        # Serialize back to dict
+        serialized = dist1.model_dump()
+
+        # Create again from serialized dict
+        dist2 = CrystalBallDist(**serialized)
+
+        # Should be equivalent
+        assert dist1.name == dist2.name
+        assert dist1.type == dist2.type
+        assert dist1.alpha == dist2.alpha
+        assert dist1.m == dist2.m
+        assert dist1.m0 == dist2.m0
+        assert dist1.n == dist2.n
+        assert dist1.sigma == dist2.sigma
+        assert serialized == config
+
+    def test_asymmetric_crystal_ball_dist_roundtrip(self):
+        """Test AsymmetricCrystalBallDist (double-sided) roundtripping."""
         config = {
             "type": "crystalball_doublesided_dist",
-            "name": "test_crystalball",
+            "name": "test_asymmetric_crystalball",
             "alpha_L": "alpha_L",
             "alpha_R": "alpha_R",
             "m": "mass",
@@ -167,13 +199,13 @@ class TestDistributionRoundtripping:
         }
 
         # Create from dict
-        dist1 = CrystalBallDist(**config)
+        dist1 = AsymmetricCrystalBallDist(**config)
 
         # Serialize back to dict
         serialized = dist1.model_dump()
 
         # Create again from serialized dict
-        dist2 = CrystalBallDist(**serialized)
+        dist2 = AsymmetricCrystalBallDist(**serialized)
 
         # Should be equivalent
         assert dist1.name == dist2.name
@@ -300,18 +332,11 @@ class TestParametersHandling:
 
         dist = GaussianDist(**config)
 
-        # Parameters should be a dict mapping logical names to actual parameter names
-        assert isinstance(dist.parameters, dict)
-        assert "mean" in dist.parameters
-        assert "sigma" in dist.parameters
-        assert "x" in dist.parameters
-
-        # list(parameters) should give dependency names for the dependency graph
-        param_names = list(dist.parameters.values())
-        assert "mu" in param_names
-        assert "obs" in param_names
+        # Parameters should be a set of parameter names this distribution depends on
+        assert "mu" in dist.parameters
+        assert "obs" in dist.parameters
         # Should have generated constant name for sigma
-        assert any("constant_test_sigma" in name for name in param_names)
+        assert any("constant_test_sigma" in name for name in dist.parameters)
 
     def test_mixture_parameters_dict_structure(self):
         """Test that MixtureDist has correct parameters dict structure."""
@@ -325,12 +350,10 @@ class TestParametersHandling:
 
         dist = MixtureDist(**config)
 
-        # Parameters should map each summand and coefficient to itself
-        assert isinstance(dist.parameters, dict)
-        param_values = list(dist.parameters.values())
-        assert "s1" in param_values
-        assert "s2" in param_values
-        assert "c1" in param_values
+        # Parameters should be a set containing summands and coefficients
+        assert "s1" in dist.parameters
+        assert "s2" in dist.parameters
+        assert "c1" in dist.parameters
 
     def test_generic_function_parameters_from_expression(self):
         """Test that GenericFunction extracts parameters from expression."""
@@ -343,8 +366,4 @@ class TestParametersHandling:
         func = GenericFunction(**config)
 
         # Should extract x, y, z as parameters
-        param_values = list(func.parameters.values())
-        assert "x" in param_values
-        assert "y" in param_values
-        assert "z" in param_values
-        assert len(param_values) == 3
+        assert func.parameters == {"x", "y", "z"}

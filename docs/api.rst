@@ -59,11 +59,24 @@ Distributions
    Distributions
    Distribution
    GaussianDist
+   UniformDist
+   PoissonDist
+   ExponentialDist
+   LogNormalDist
+   LandauDist
    MixtureDist
    ProductDist
-   CrystalBallDist
+   HistogramDist
    GenericDist
-   PoissonDist
+   PolynomialDist
+   BernsteinPolyDist
+   CrystalBallDist
+   AsymmetricCrystalBallDist
+   ArgusDist
+   FastVerticalInterpHistPdf2Dist
+   GGZZBackgroundDist
+   QQZZBackgroundDist
+   FastVerticalInterpHistPdf2D2Dist
 
 Domains
 -------

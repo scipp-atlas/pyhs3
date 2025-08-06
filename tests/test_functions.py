@@ -26,6 +26,7 @@ from pyhs3.functions import (
     SumFunction,
     registered_functions,
 )
+from pyhs3.functions.standard import CMSAsymPowFunction, RooRecursiveFractionFunction
 
 
 class TestFunction:
@@ -752,12 +753,16 @@ class TestProcessNormalizationFunction:
         func = ProcessNormalizationFunction(
             name="test_norm",
             thetaList=["theta1", "theta2"],
+            logKappa=[0.1, 0.2],
             asymmThetaList=["asym1"],
+            logAsymmKappa=[[0.05, 0.15]],
             otherFactorList=["factor1"],
         )
         assert func.name == "test_norm"
         assert func.thetaList == ["theta1", "theta2"]
+        assert func.logKappa == [0.1, 0.2]
         assert func.asymmThetaList == ["asym1"]
+        assert func.logAsymmKappa == [[0.05, 0.15]]
         assert func.otherFactorList == ["factor1"]
         assert set(func.parameters) == {"theta1", "theta2", "asym1", "factor1"}
 
@@ -766,13 +771,17 @@ class TestProcessNormalizationFunction:
         config = {
             "name": "test_norm",
             "thetaList": ["sym1", "sym2"],
+            "logKappa": [0.1, -0.05],
             "asymmThetaList": ["asym1", "asym2"],
+            "logAsymmKappa": [[0.02, 0.08], [-0.03, 0.07]],
             "otherFactorList": ["other1", "other2"],
         }
         func = ProcessNormalizationFunction(**config)
         assert func.name == "test_norm"
         assert func.thetaList == ["sym1", "sym2"]
+        assert func.logKappa == [0.1, -0.05]
         assert func.asymmThetaList == ["asym1", "asym2"]
+        assert func.logAsymmKappa == [[0.02, 0.08], [-0.03, 0.07]]
         assert func.otherFactorList == ["other1", "other2"]
 
     def test_process_normalization_nominal_only(self):
@@ -821,7 +830,9 @@ class TestProcessNormalizationFunction:
         func = ProcessNormalizationFunction(
             name="asym_test",
             thetaList=[],
+            logKappa=[],
             asymmThetaList=["asym_theta"],
+            logAsymmKappa=[[-0.1, 0.2]],
             otherFactorList=[],
         )
 
@@ -832,8 +843,12 @@ class TestProcessNormalizationFunction:
         f = function([], result)
         result_val = f()
 
-        # Expected: 1.0 * exp(0.1 * 0.0) = 1.0
-        expected = np.exp(0.1 * 0.0)
+        # For asymmetric interpolation at theta=0:
+        # kappa_sum = 0.2 + (-0.1) = 0.1, kappa_diff = 0.2 - (-0.1) = 0.3
+        # smooth_function at theta=0: polynomial = 15/8 = 1.875
+        # asymShift = 0.5 * (0.3 * 0 + 0.1 * 1.875) = 0.5 * 0.1875 = 0.09375
+        # Expected: 1.0 * exp(0.09375)
+        expected = np.exp(0.5 * (0.1 * 15.0 / 8.0))
         np.testing.assert_allclose(result_val, expected, rtol=1e-6)
 
     def test_process_normalization_asymmetric_interpolation_positive(self):
@@ -842,6 +857,7 @@ class TestProcessNormalizationFunction:
             name="asym_test",
             nominalValue=1.0,
             thetaList=[],
+            logKappa=[],
             asymmThetaList=["asym_theta"],
             logAsymmKappa=[[-0.1, 0.2]],  # logKappaLo=-0.1, logKappaHi=0.2
             otherFactorList=[],
@@ -868,6 +884,7 @@ class TestProcessNormalizationFunction:
             name="asym_test",
             nominalValue=1.0,
             thetaList=[],
+            logKappa=[],
             asymmThetaList=["asym_theta"],
             logAsymmKappa=[[-0.1, 0.2]],  # logKappaLo=-0.1, logKappaHi=0.2
             otherFactorList=[],
@@ -1230,3 +1247,350 @@ class TestFunctionIntegration:
         )
         # InterpolationFunction with empty high/low lists but vars should depend on nominal + vars
         assert set(interp_func.parameters) == {"nominal", "param1", "param2"}
+
+
+class TestCMSAsymPowFunction:
+    """Test CMSAsymPowFunction implementation."""
+
+    def test_cmsasymmow_function_creation(self):
+        """Test CMSAsymPowFunction can be created and configured."""
+        func = CMSAsymPowFunction(
+            name="test_asymm",
+            kappaLow=0.8,
+            kappaHigh=1.2,
+            theta="theta_param",
+        )
+        assert func.name == "test_asymm"
+        assert func.kappaLow == 0.8
+        assert func.kappaHigh == 1.2
+        assert func.theta == "theta_param"
+        assert set(func.parameters) == {
+            "constant_test_asymm_kappaLow",
+            "constant_test_asymm_kappaHigh",
+            "theta_param",
+        }
+
+    def test_cmsasymmow_function_with_string_parameters(self):
+        """Test CMSAsymPowFunction with string kappa parameters."""
+        func = CMSAsymPowFunction(
+            name="test_asymm_str",
+            kappaLow="kappa_low_param",
+            kappaHigh="kappa_high_param",
+            theta="theta_param",
+        )
+        assert func.kappaLow == "kappa_low_param"
+        assert func.kappaHigh == "kappa_high_param"
+        assert func.theta == "theta_param"
+        assert set(func.parameters) == {
+            "kappa_low_param",
+            "kappa_high_param",
+            "theta_param",
+        }
+
+    def test_cmsasymmow_function_expression_positive_theta(self):
+        """Test CMSAsymPowFunction evaluation with positive theta."""
+        func = CMSAsymPowFunction(
+            name="test_asymm",
+            kappaLow=0.8,
+            kappaHigh=1.2,
+            theta="theta",
+        )
+
+        # Test with positive theta: should use kappaHigh^theta
+        context = {
+            "constant_test_asymm_kappaLow": pt.constant(0.8),
+            "constant_test_asymm_kappaHigh": pt.constant(1.2),
+            "theta": pt.constant(0.5),
+        }
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Expected: 1.2^0.5 = sqrt(1.2) ≈ 1.095445
+        expected = 1.2**0.5
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    def test_cmsasymmow_function_expression_negative_theta(self):
+        """Test CMSAsymPowFunction evaluation with negative theta."""
+        func = CMSAsymPowFunction(
+            name="test_asymm",
+            kappaLow=0.8,
+            kappaHigh=1.2,
+            theta="theta",
+        )
+
+        # Test with negative theta: should use kappaLow^(-theta)
+        context = {
+            "constant_test_asymm_kappaLow": pt.constant(0.8),
+            "constant_test_asymm_kappaHigh": pt.constant(1.2),
+            "theta": pt.constant(-0.3),
+        }
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Expected: 0.8^(-(-0.3)) = 0.8^0.3 ≈ 0.9330329
+        expected = 0.8**0.3
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    def test_cmsasymmow_function_expression_zero_theta(self):
+        """Test CMSAsymPowFunction evaluation at theta=0."""
+        func = CMSAsymPowFunction(
+            name="test_asymm",
+            kappaLow=0.5,
+            kappaHigh=2.0,
+            theta="theta",
+        )
+
+        # Test with theta=0: should return 1.0 regardless of kappa values
+        context = {
+            "constant_test_asymm_kappaLow": pt.constant(0.5),
+            "constant_test_asymm_kappaHigh": pt.constant(2.0),
+            "theta": pt.constant(0.0),
+        }
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Expected: any_value^0 = 1.0
+        expected = 1.0
+        np.testing.assert_allclose(result_val, expected, rtol=1e-10)
+
+    def test_cmsasymmow_function_expression_string_parameters(self):
+        """Test CMSAsymPowFunction evaluation with string parameters."""
+        func = CMSAsymPowFunction(
+            name="test_asymm_str",
+            kappaLow="kappa_low",
+            kappaHigh="kappa_high",
+            theta="theta_param",
+        )
+
+        context = {
+            "kappa_low": pt.constant(0.9),
+            "kappa_high": pt.constant(1.1),
+            "theta_param": pt.constant(1.0),
+        }
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Expected: since theta=1.0 > 0, use kappa_high^theta = 1.1^1.0 = 1.1
+        expected = 1.1
+        np.testing.assert_allclose(result_val, expected, rtol=1e-10)
+
+    def test_cmsasymmow_function_boundary_behavior(self):
+        """Test CMSAsymPowFunction behavior at theta boundaries."""
+        func = CMSAsymPowFunction(
+            name="test_boundary",
+            kappaLow=0.5,
+            kappaHigh=1.5,
+            theta="theta",
+        )
+
+        # Test just above zero
+        context = {
+            "constant_test_boundary_kappaLow": pt.constant(0.5),
+            "constant_test_boundary_kappaHigh": pt.constant(1.5),
+            "theta": pt.constant(1e-10),
+        }
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Should use kappaHigh^(small positive) ≈ 1.0
+        assert result_val > 0.99
+        assert result_val < 1.01
+
+        # Test just below zero
+        context = {
+            "constant_test_boundary_kappaLow": pt.constant(0.5),
+            "constant_test_boundary_kappaHigh": pt.constant(1.5),
+            "theta": pt.constant(-1e-10),
+        }
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Should use kappaLow^(small positive) ≈ 1.0
+        assert result_val > 0.99
+        assert result_val < 1.01
+
+
+class TestRooRecursiveFractionFunction:
+    """Test RooRecursiveFractionFunction implementation."""
+
+    def test_recursive_fraction_creation(self):
+        """Test RooRecursiveFractionFunction can be created and configured."""
+        func = RooRecursiveFractionFunction(
+            name="test_recursive",
+            list=["coeff1", "coeff2", "coeff3"],
+            recursive=True,
+        )
+        assert func.name == "test_recursive"
+        assert func.coefficients == ["coeff1", "coeff2", "coeff3"]
+        assert func.recursive is True
+        assert set(func.parameters) == {"coeff1", "coeff2", "coeff3"}
+
+    def test_recursive_fraction_non_recursive(self):
+        """Test RooRecursiveFractionFunction with recursive=False."""
+        func = RooRecursiveFractionFunction(
+            name="non_recursive",
+            list=["a", "b"],
+            recursive=False,
+        )
+        assert func.recursive is False
+
+    def test_recursive_fraction_empty_coefficients(self):
+        """Test RooRecursiveFractionFunction with empty coefficient list."""
+        func = RooRecursiveFractionFunction(
+            name="empty_test",
+            list=[],
+            recursive=True,
+        )
+
+        context = {}
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Should return 0.0 for empty coefficients
+        np.testing.assert_allclose(result_val, 0.0, rtol=1e-10)
+
+    def test_recursive_fraction_single_coefficient(self):
+        """Test RooRecursiveFractionFunction with single coefficient."""
+        func = RooRecursiveFractionFunction(
+            name="single_test",
+            list=["coeff"],
+            recursive=True,
+        )
+
+        context = {"coeff": pt.constant(5.0)}
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # For single coefficient in recursive mode, should return 1.0
+        np.testing.assert_allclose(result_val, 1.0, rtol=1e-10)
+
+    def test_recursive_fraction_single_coefficient_non_recursive(self):
+        """Test RooRecursiveFractionFunction with single coefficient, non-recursive."""
+        func = RooRecursiveFractionFunction(
+            name="single_nr_test",
+            list=["coeff"],
+            recursive=False,
+        )
+
+        context = {"coeff": pt.constant(4.0)}
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # For single coefficient in non-recursive mode: coeff / total = 4.0 / 4.0 = 1.0
+        np.testing.assert_allclose(result_val, 1.0, rtol=1e-10)
+
+    def test_recursive_fraction_multiple_coefficients_recursive(self):
+        """Test RooRecursiveFractionFunction with multiple coefficients in recursive mode."""
+        func = RooRecursiveFractionFunction(
+            name="multi_recursive",
+            list=["a", "b", "c"],
+            recursive=True,
+        )
+
+        context = {
+            "a": pt.constant(2.0),
+            "b": pt.constant(3.0),
+            "c": pt.constant(1.0),
+        }
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # For recursive fractions: first fraction is a / (a + b + c) = 2.0 / 6.0 = 1/3
+        expected = 2.0 / (2.0 + 3.0 + 1.0)  # = 1/3
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    def test_recursive_fraction_multiple_coefficients_non_recursive(self):
+        """Test RooRecursiveFractionFunction with multiple coefficients in non-recursive mode."""
+        func = RooRecursiveFractionFunction(
+            name="multi_nr",
+            list=["x", "y", "z"],
+            recursive=False,
+        )
+
+        context = {
+            "x": pt.constant(4.0),
+            "y": pt.constant(6.0),
+            "z": pt.constant(2.0),
+        }
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # For non-recursive: simple normalization x / (x + y + z) = 4.0 / 12.0 = 1/3
+        expected = 4.0 / (4.0 + 6.0 + 2.0)  # = 1/3
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    def test_recursive_fraction_with_numeric_coefficients(self):
+        """Test RooRecursiveFractionFunction with numeric coefficients."""
+        func = RooRecursiveFractionFunction(
+            name="numeric_test",
+            list=[1.5, 2.0, 0.5],
+            recursive=True,
+        )
+
+        # Check that numeric coefficients get processed into constants
+        assert len(func.parameters) == 3
+        # Parameters will be constant names generated by auto-processing
+
+        # Create appropriate context with constant names
+        expected_params = func.parameters
+        context = {
+            param: pt.constant(1.0) for param in expected_params
+        }  # Will use actual coefficient values
+
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Should return some finite value
+        assert np.isfinite(result_val)
+        assert result_val >= 0.0
+
+    def test_recursive_fraction_zero_coefficients(self):
+        """Test RooRecursiveFractionFunction with zero values."""
+        func = RooRecursiveFractionFunction(
+            name="zero_test",
+            list=["a", "b"],
+            recursive=False,
+        )
+
+        context = {
+            "a": pt.constant(0.0),
+            "b": pt.constant(5.0),
+        }
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Should be 0.0 / 5.0 = 0.0
+        np.testing.assert_allclose(result_val, 0.0, rtol=1e-10)
+
+    def test_recursive_fraction_all_zero_coefficients(self):
+        """Test RooRecursiveFractionFunction when all coefficients are zero."""
+        func = RooRecursiveFractionFunction(
+            name="all_zero_test",
+            list=["a", "b"],
+            recursive=False,
+        )
+
+        context = {
+            "a": pt.constant(0.0),
+            "b": pt.constant(0.0),
+        }
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Should handle division by zero gracefully (0/0 case)
+        # In practice this would be NaN, but we just test that it doesn't crash
+        assert np.isfinite(result_val) or np.isnan(result_val)

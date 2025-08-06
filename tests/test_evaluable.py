@@ -7,12 +7,14 @@ for manual @model_validator methods in distributions and functions.
 
 from __future__ import annotations
 
+import inspect
 from typing import Literal
+from unittest.mock import patch
 
 import pytest
 from pydantic import Field
 
-from pyhs3.base import Evaluable
+from pyhs3.base import Evaluable, find_field_definition_line
 from pyhs3.context import Context
 
 
@@ -402,3 +404,101 @@ class TestConstants:
         assert set(dist.constants.keys()) == {const1_name, const2_name}
         assert dist._constants_values == {const1_name: 3.14, const2_name: 42}
         assert dist.parameters == {const1_name, const2_name}
+
+
+class TestFindFieldDefinitionLine:
+    """Test find_field_definition_line utility function."""
+
+    def test_find_field_definition_line_success(self):
+        """Test finding field definition line for a valid field."""
+
+        class TestClass:
+            field1: str
+            field2: int = 42
+
+        result = find_field_definition_line(TestClass, "field1")
+
+        # Should return a string in format "filepath:line_number"
+        assert result is not None
+        assert ":" in result
+        parts = result.split(":")
+        assert len(parts) >= 2  # filepath:line, may have windows drive letter
+        assert parts[-1].isdigit()  # line number should be numeric
+
+    def test_find_field_definition_line_field_not_found(self):
+        """Test behavior when field is not found in class."""
+
+        class TestClass:
+            existing_field: str
+
+        result = find_field_definition_line(TestClass, "nonexistent_field")
+
+        # Should return None when field is not found
+        assert result is None
+
+    def test_find_field_definition_line_no_source_available(self):
+        """Test behavior when source is not available (built-in classes)."""
+
+        # Test with a built-in class that has no source available
+        result = find_field_definition_line(int, "real")
+
+        # Should return None when source is not available
+        assert result is None
+
+    def test_find_field_definition_line_io_error(self):
+        """Test behavior when inspect raises OSError."""
+
+        class MockClass:
+            field: str
+
+        # Mock inspect to raise OSError
+        with patch.object(inspect, "getsourcelines", side_effect=OSError("No source")):
+            result = find_field_definition_line(MockClass, "field")
+            assert result is None
+
+    def test_find_field_definition_line_type_error(self):
+        """Test behavior when inspect raises TypeError."""
+
+        class MockClass:
+            field: str
+
+        # Mock inspect to raise TypeError
+        with patch.object(
+            inspect, "getsourcelines", side_effect=TypeError("Not supported")
+        ):
+            result = find_field_definition_line(MockClass, "field")
+            assert result is None
+
+    def test_find_field_definition_line_with_complex_field_names(self):
+        """Test finding fields with complex names and annotations."""
+
+        class ComplexClass:
+            simple_field: str
+            _private_field: int
+            fieldWithCamelCase: float
+            field_with_annotation: list[str] = Field(default_factory=list)
+
+        # Test simple field
+        result = find_field_definition_line(ComplexClass, "simple_field")
+        assert result is not None
+
+        # Test private field
+        result = find_field_definition_line(ComplexClass, "_private_field")
+        assert result is not None
+
+        # Test camelCase field
+        result = find_field_definition_line(ComplexClass, "fieldWithCamelCase")
+        assert result is not None
+
+        # Test field with annotation
+        result = find_field_definition_line(ComplexClass, "field_with_annotation")
+        assert result is not None
+
+    def test_find_field_definition_line_empty_class(self):
+        """Test behavior with empty class."""
+
+        class EmptyClass:
+            pass
+
+        result = find_field_definition_line(EmptyClass, "any_field")
+        assert result is None

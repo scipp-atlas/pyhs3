@@ -565,6 +565,21 @@ class ProcessNormalizationFunction(Function):
     )
     otherFactorList: list[str] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def validate_list_lengths(self) -> ProcessNormalizationFunction:
+        """Validate that parameter lists have consistent lengths."""
+        # Check symmetric variations
+        assert len(self.logKappa) == len(self.thetaList), (
+            f"logKappa length ({len(self.logKappa)}) must match thetaList length ({len(self.thetaList)})"
+        )
+
+        # Check asymmetric variations
+        assert len(self.logAsymmKappa) == len(self.asymmThetaList), (
+            f"logAsymmKappa length ({len(self.logAsymmKappa)}) must match asymmThetaList length ({len(self.asymmThetaList)})"
+        )
+
+        return self
+
     def expression(self, context: Context) -> TensorVar:
         """
         Evaluate the process normalization function.
@@ -584,16 +599,15 @@ class ProcessNormalizationFunction(Function):
         # Symmetric variations: symShift = sum(logKappa[i] * theta[i])
         symShift = pt.constant(0.0)
         for i, theta_name in enumerate(self.thetaList):
-            if theta_name in context:
-                theta = context[theta_name]
-                # Use provided logKappa value if available, otherwise assume 0.0 (no effect)
-                log_kappa = self.logKappa[i] if i < len(self.logKappa) else 0.0
-                symShift = symShift + log_kappa * theta
+            theta = context[theta_name]
+            # Use provided logKappa value if available, otherwise assume 0.0 (no effect)
+            log_kappa = self.logKappa[i] if i < len(self.logKappa) else 0.0
+            symShift = symShift + log_kappa * theta
 
         # Asymmetric variations: use asymmetric interpolation
         asymShift = pt.constant(0.0)
         for i, theta_name in enumerate(self.asymmThetaList):
-            if theta_name in context and i < len(self.logAsymmKappa):
+            if i < len(self.logAsymmKappa):
                 theta = context[theta_name]
                 log_kappa_lo, log_kappa_hi = self.logAsymmKappa[i]
                 kappa_sum = log_kappa_hi + log_kappa_lo
@@ -607,9 +621,8 @@ class ProcessNormalizationFunction(Function):
 
         # Multiply by additional factors
         for factor_name in self.otherFactorList:
-            if factor_name in context:
-                factor = context[factor_name]
-                result = result * factor
+            factor = context[factor_name]
+            result = result * factor
 
         return cast(TensorVar, result)
 

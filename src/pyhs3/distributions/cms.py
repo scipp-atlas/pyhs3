@@ -9,10 +9,10 @@ combine files and related analyses.
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Literal, cast
+from typing import Literal, cast
 
 import pytensor.tensor as pt
-from pydantic import Field, model_validator
+from pydantic import model_validator
 
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
@@ -328,14 +328,6 @@ distributions: dict[str, type[Distribution]] = {
     "CMS::qqZZ_background_dist": QQZZBackgroundDist,
     "CMS::FastVerticalInterpHistPdf2D2": FastVerticalInterpHistPdf2D2Dist,
 }
-
-CMSDistributionType = Annotated[
-    FastVerticalInterpHistPdf2Dist
-    | GGZZBackgroundDist
-    | QQZZBackgroundDist
-    | FastVerticalInterpHistPdf2D2Dist,
-    Field(discriminator="type"),
-]
 
 # Define what should be exported from this module
 __all__ = [

@@ -332,11 +332,7 @@ class TestParametersHandling:
 
         dist = GaussianDist(**config)
 
-        # Parameters should be a set of parameter names this distribution depends on
-        assert "mu" in dist.parameters
-        assert "obs" in dist.parameters
-        # Should have generated constant name for sigma
-        assert any("constant_test_sigma" in name for name in dist.parameters)
+        assert dist.parameters == {"constant_test_sigma", "mu", "obs"}
 
     def test_mixture_parameters_dict_structure(self):
         """Test that MixtureDist has correct parameters dict structure."""
@@ -350,10 +346,7 @@ class TestParametersHandling:
 
         dist = MixtureDist(**config)
 
-        # Parameters should be a set containing summands and coefficients
-        assert "s1" in dist.parameters
-        assert "s2" in dist.parameters
-        assert "c1" in dist.parameters
+        assert dist.parameters == {"c1", "s1", "s2"}
 
     def test_generic_function_parameters_from_expression(self):
         """Test that GenericFunction extracts parameters from expression."""

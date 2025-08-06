@@ -67,6 +67,13 @@ class Axis(BaseModel):
 
     @property
     def bin_edges(self) -> list[float] | None:
+        """Get the bin edges for this axis.
+
+        Returns:
+            List of bin edges. For regular binning, generates edges using linspace.
+            For irregular binning, returns the provided edges. Empty list if
+            insufficient information is provided.
+        """
         if self.edges is not None:
             return self.edges
 

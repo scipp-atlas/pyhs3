@@ -18,6 +18,15 @@ from pyhs3.typing.aliases import TensorVar
 
 
 def find_field_definition_line(cls: type, field_name: str) -> str | None:
+    """Find the source file and line number where a field is defined.
+
+    Args:
+        cls: The class to search in.
+        field_name: The name of the field to locate.
+
+    Returns:
+        String in format "filepath:line_number" if found, None otherwise.
+    """
     try:
         lines, start_line = inspect.getsourcelines(cls)
         for i, line in enumerate(lines):

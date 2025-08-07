@@ -22,14 +22,19 @@ from pyhs3.distributions import (
     BernsteinPolyDist,
     CrystalBallDist,
     Distribution,
+    Distributions,
     ExponentialDist,
+    FastVerticalInterpHistPdf2D2Dist,
+    FastVerticalInterpHistPdf2Dist,
     GaussianDist,
     GenericDist,
+    GGZZBackgroundDist,
     LandauDist,
     LogNormalDist,
     PoissonDist,
     PolynomialDist,
     ProductDist,
+    QQZZBackgroundDist,
     UniformDist,
 )
 
@@ -2166,3 +2171,316 @@ class TestLandauDist:
 
             # The distribution should be properly scaled by 1/sigma
             # (this is a basic sanity check, not a strict mathematical verification)
+
+
+class TestDistributionsContainer:
+    """Test Distributions collection class functionality."""
+
+    def test_distributions_container_contains(self):
+        """Test Distributions.__contains__ method."""
+
+        # Create a Distributions container with some distributions
+        distributions_data = [
+            {
+                "type": "gaussian_dist",
+                "name": "signal",
+                "x": "mass",
+                "mean": "mu",
+                "sigma": "sig",
+            },
+            {"type": "uniform_dist", "name": "background", "x": ["mass"]},
+        ]
+
+        distributions = Distributions(distributions_data)
+
+        # Test __contains__ for existing distributions
+        assert "signal" in distributions
+        assert "background" in distributions
+
+        # Test __contains__ for non-existing distribution
+        assert "nonexistent" not in distributions
+        assert "another_dist" not in distributions
+
+        # Test that we can access existing distributions
+        signal_dist = distributions["signal"]
+        assert signal_dist.name == "signal"
+        assert signal_dist.type == "gaussian_dist"
+
+        background_dist = distributions["background"]
+        assert background_dist.name == "background"
+        assert background_dist.type == "uniform_dist"
+
+
+class TestCMSDistributions:
+    """Test CMS-specific distributions."""
+
+    def test_fastverticalinterphistpdf2_creation(self):
+        """Test FastVerticalInterpHistPdf2Dist can be created and configured."""
+        dist = FastVerticalInterpHistPdf2Dist(
+            name="test_interp",
+            x="mass",
+            coefList=["coef1", "coef2", "coef3"],
+        )
+        assert dist.name == "test_interp"
+        assert dist.type == "CMS::fastverticalinterphistpdf2"
+        assert dist.x == "mass"
+        assert dist.coefList == ["coef1", "coef2", "coef3"]
+
+    def test_fastverticalinterphistpdf2_expression_evaluation(self):
+        """Test FastVerticalInterpHistPdf2Dist expression evaluation."""
+        dist = FastVerticalInterpHistPdf2Dist(
+            name="interp_test",
+            x="m",
+            coefList=["alpha", "beta"],
+        )
+
+        context = {
+            "m": pt.constant(125.0),
+            "alpha": pt.constant(0.1),
+            "beta": pt.constant(-0.2),
+        }
+        result = dist.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Should return a positive finite value
+        # Expected: 1.0 * (1 + 0.1*0.1) * (1 + 0.1*(-0.2)) = 1.0 * 1.01 * 0.98 = 0.9898
+        expected = 1.0 * (1.0 + 0.1 * 0.1) * (1.0 + 0.1 * (-0.2))
+        assert np.isfinite(result_val)
+        assert result_val > 0.0
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    def test_fastverticalinterphistpdf2_empty_coeflist(self):
+        """Test FastVerticalInterpHistPdf2Dist with empty coefficient list."""
+        dist = FastVerticalInterpHistPdf2Dist(
+            name="interp_empty",
+            x="mass",
+            coefList=[],
+        )
+
+        context = {"mass": pt.constant(100.0)}
+        result = dist.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Should return base value of 1.0 when no coefficients
+        expected = 1.0
+        np.testing.assert_allclose(result_val, expected, rtol=1e-10)
+
+    def test_ggzz_background_creation(self):
+        """Test GGZZBackgroundDist can be created and configured."""
+        dist = GGZZBackgroundDist(
+            name="ggzz_bkg",
+            m4l="m4l_var",
+            a1="norm",
+            a2="power",
+            a3="exp_param",
+        )
+        assert dist.name == "ggzz_bkg"
+        assert dist.type == "CMS::ggZZ_background_dist"
+        assert dist.m4l == "m4l_var"
+        assert dist.a1 == "norm"
+        assert dist.a2 == "power"
+        assert dist.a3 == "exp_param"
+
+    def test_ggzz_background_expression_evaluation(self):
+        """Test GGZZBackgroundDist expression evaluation."""
+        dist = GGZZBackgroundDist(
+            name="ggzz_test",
+            m4l="mass",
+            a1="a1_param",
+            a2="a2_param",
+            a3="a3_param",
+        )
+
+        context = {
+            "mass": pt.constant(200.0),
+            "a1_param": pt.constant(0.5),
+            "a2_param": pt.constant(-2.0),
+            "a3_param": pt.constant(0.01),
+        }
+        result = dist.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Expected: a1 * m4l^a2 * exp(-a3 * m4l)
+        # 0.5 * 200^(-2) * exp(-0.01 * 200) = 0.5 * (1/40000) * exp(-2)
+        m4l_val, a1_val, a2_val, a3_val = 200.0, 0.5, -2.0, 0.01
+        expected = a1_val * (m4l_val**a2_val) * np.exp(-a3_val * m4l_val)
+
+        assert np.isfinite(result_val)
+        assert result_val > 0.0
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    def test_ggzz_background_mathematical_properties(self):
+        """Test GGZZBackgroundDist mathematical properties."""
+        dist = GGZZBackgroundDist(
+            name="ggzz_math",
+            m4l=100.0,  # Use constant
+            a1=1.0,
+            a2=-1.0,  # Power law decay
+            a3=0.1,  # Exponential decay
+        )
+
+        # Test that distribution is positive for reasonable mass values
+        mass_values = [50.0, 100.0, 200.0, 500.0]
+        for mass_val in mass_values:
+            context = {
+                "constant_ggzz_math_m4l": pt.constant(mass_val),
+                "constant_ggzz_math_a1": pt.constant(1.0),
+                "constant_ggzz_math_a2": pt.constant(-1.0),
+                "constant_ggzz_math_a3": pt.constant(0.1),
+            }
+            result = dist.expression(context)
+            f = function([], result)
+            result_val = f()
+
+            assert np.isfinite(result_val)
+            assert result_val > 0.0
+
+    def test_qqzz_background_creation(self):
+        """Test QQZZBackgroundDist can be created and configured."""
+        dist = QQZZBackgroundDist(
+            name="qqzz_bkg",
+            m4l="m4l_var",
+            a1="norm",
+            a2="shift",
+            a3="power",
+            a4="exp_param",
+        )
+        assert dist.name == "qqzz_bkg"
+        assert dist.type == "CMS::qqZZ_background_dist"
+        assert dist.m4l == "m4l_var"
+        assert dist.a1 == "norm"
+        assert dist.a2 == "shift"
+        assert dist.a3 == "power"
+        assert dist.a4 == "exp_param"
+
+    def test_qqzz_background_expression_evaluation(self):
+        """Test QQZZBackgroundDist expression evaluation."""
+        dist = QQZZBackgroundDist(
+            name="qqzz_test",
+            m4l="mass",
+            a1="a1_param",
+            a2="a2_param",
+            a3="a3_param",
+            a4="a4_param",
+        )
+
+        context = {
+            "mass": pt.constant(150.0),
+            "a1_param": pt.constant(1.0),
+            "a2_param": pt.constant(10.0),
+            "a3_param": pt.constant(-1.5),
+            "a4_param": pt.constant(0.005),
+        }
+        result = dist.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Expected: a1 * (m4l + a2)^a3 * exp(-a4 * m4l)
+        # 1.0 * (150 + 10)^(-1.5) * exp(-0.005 * 150)
+        m4l_val, a1_val, a2_val, a3_val, a4_val = 150.0, 1.0, 10.0, -1.5, 0.005
+        expected = a1_val * ((m4l_val + a2_val) ** a3_val) * np.exp(-a4_val * m4l_val)
+
+        assert np.isfinite(result_val)
+        assert result_val > 0.0
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    def test_qqzz_background_shift_parameter(self):
+        """Test QQZZBackgroundDist mass shift parameter behavior."""
+        dist = QQZZBackgroundDist(
+            name="qqzz_shift",
+            m4l=100.0,
+            a1=1.0,
+            a2="shift_param",  # Variable shift
+            a3=1.0,  # Linear power
+            a4=0.0,  # No exponential decay for simplicity
+        )
+
+        # Test different shift values
+        shift_values = [0.0, 10.0, 50.0]
+        for shift_val in shift_values:
+            context = {
+                "constant_qqzz_shift_m4l": pt.constant(100.0),
+                "constant_qqzz_shift_a1": pt.constant(1.0),
+                "shift_param": pt.constant(shift_val),
+                "constant_qqzz_shift_a3": pt.constant(1.0),
+                "constant_qqzz_shift_a4": pt.constant(0.0),
+            }
+            result = dist.expression(context)
+            f = function([], result)
+            result_val = f()
+
+            # Expected: 1.0 * (100 + shift_val)^1.0 * exp(0) = 100 + shift_val
+            expected = 100.0 + shift_val
+            assert np.isfinite(result_val)
+            np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    def test_fastverticalinterphistpdf2d2_creation(self):
+        """Test FastVerticalInterpHistPdf2D2Dist can be created and configured."""
+        dist = FastVerticalInterpHistPdf2D2Dist(
+            name="test_2d_interp",
+            x="var_x",
+            y="var_y",
+            coefList=["coef1", "coef2"],
+        )
+        assert dist.name == "test_2d_interp"
+        assert dist.type == "CMS::FastVerticalInterpHistPdf2D2"
+        assert dist.x == "var_x"
+        assert dist.y == "var_y"
+        assert dist.coefList == ["coef1", "coef2"]
+
+    def test_fastverticalinterphistpdf2d2_expression_evaluation(self):
+        """Test FastVerticalInterpHistPdf2D2Dist expression evaluation."""
+        dist = FastVerticalInterpHistPdf2D2Dist(
+            name="interp2d_test",
+            x="x_var",
+            y="y_var",
+            coefList=["alpha", "beta", "gamma"],
+        )
+
+        context = {
+            "x_var": pt.constant(1.0),
+            "y_var": pt.constant(2.0),
+            "alpha": pt.constant(0.2),
+            "beta": pt.constant(-0.1),
+            "gamma": pt.constant(0.05),
+        }
+        result = dist.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Should return a positive finite value
+        # Expected: 1.0 * (1 + 0.1*0.2) * (1 + 0.1*(-0.1)) * (1 + 0.1*0.05)
+        expected = 1.0 * (1.0 + 0.1 * 0.2) * (1.0 + 0.1 * (-0.1)) * (1.0 + 0.1 * 0.05)
+        assert np.isfinite(result_val)
+        assert result_val > 0.0
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    def test_fastverticalinterphistpdf2d2_missing_coefficients(self):
+        """Test FastVerticalInterpHistPdf2D2Dist with missing coefficients in context."""
+        dist = FastVerticalInterpHistPdf2D2Dist(
+            name="interp2d_missing",
+            x="x_var",
+            y="y_var",
+            coefList=["existing_coef", "missing_coef"],
+        )
+
+        # Only provide one coefficient in context
+        context = {
+            "x_var": pt.constant(1.0),
+            "y_var": pt.constant(2.0),
+            "existing_coef": pt.constant(0.1),
+            # "missing_coef" not provided
+        }
+        result = dist.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Should still work, only applying existing coefficient
+        # Expected: 1.0 * (1 + 0.1*0.1) = 1.01
+        expected = 1.0 * (1.0 + 0.1 * 0.1)
+        assert np.isfinite(result_val)
+        assert result_val > 0.0
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)

@@ -11,6 +11,7 @@ import inspect
 from typing import Literal
 from unittest.mock import patch
 
+import pytensor.tensor as pt
 import pytest
 from pydantic import Field
 
@@ -502,3 +503,197 @@ class TestFindFieldDefinitionLine:
 
         result = find_field_definition_line(EmptyClass, "any_field")
         assert result is None
+
+
+class TestContext:
+    """Test Context class functionality."""
+
+    def test_context_creation(self):
+        """Test Context creation with dictionary data."""
+
+        data = {
+            "param1": pt.constant(1.0),
+            "param2": pt.constant(2.0),
+            "param3": pt.constant(3.0),
+        }
+        context = Context(data)
+
+        # Test __getitem__
+        assert context["param1"] is data["param1"]
+        assert context["param2"] is data["param2"]
+        assert context["param3"] is data["param3"]
+
+    def test_context_contains(self):
+        """Test Context __contains__ method."""
+
+        data = {"existing_param": pt.constant(1.0), "another_param": pt.constant(2.0)}
+        context = Context(data)
+
+        # Test __contains__
+        assert "existing_param" in context
+        assert "another_param" in context
+        assert "nonexistent_param" not in context
+
+    def test_context_keys(self):
+        """Test Context keys() method."""
+
+        data = {
+            "alpha": pt.constant(1.0),
+            "beta": pt.constant(2.0),
+            "gamma": pt.constant(3.0),
+        }
+        context = Context(data)
+
+        # Test keys()
+        keys = context.keys()
+        assert set(keys) == {"alpha", "beta", "gamma"}
+        assert len(keys) == 3
+
+    def test_context_values(self):
+        """Test Context values() method."""
+
+        tensor1 = pt.constant(1.0)
+        tensor2 = pt.constant(2.0)
+        data = {"param1": tensor1, "param2": tensor2}
+        context = Context(data)
+
+        # Test values()
+        values = list(context.values())
+        assert len(values) == 2
+        assert tensor1 in values
+        assert tensor2 in values
+
+    def test_context_items(self):
+        """Test Context items() method."""
+
+        tensor1 = pt.constant(1.0)
+        tensor2 = pt.constant(2.0)
+        data = {"x": tensor1, "y": tensor2}
+        context = Context(data)
+
+        # Test items()
+        items = list(context.items())
+        assert len(items) == 2
+        assert ("x", tensor1) in items
+        assert ("y", tensor2) in items
+
+    def test_context_empty(self):
+        """Test Context with empty data."""
+        context = Context({})
+
+        # Test all methods with empty context
+        assert len(context.keys()) == 0
+        assert len(context.values()) == 0
+        assert len(context.items()) == 0
+        assert "anything" not in context
+
+    def test_context_getitem_keyerror(self):
+        """Test Context __getitem__ raises KeyError for missing key."""
+
+        context = Context({"param1": pt.constant(1.0)})
+
+        with pytest.raises(KeyError):
+            _ = context["nonexistent_key"]
+
+
+class TestEvaluableAdvanced:
+    """Test advanced Evaluable functionality and edge cases."""
+
+    def test_evaluable_manual_parameter_override(self):
+        """Test Evaluable when _parameters is manually set (skips auto-processing)."""
+
+        class TestEvaluableOverride(Evaluable):
+            type: Literal["test"] = "test"
+            param1: str
+            param2: float
+
+        # Create evaluable normally first
+        evaluable = TestEvaluableOverride(
+            name="test_override", param1="alpha", param2=3.14
+        )
+
+        # Verify it was auto-processed normally first
+        assert evaluable._parameters == {
+            "param1": "alpha",
+            "param2": "constant_test_override_param2",
+        }
+
+        # Now test the manual override by calling the auto-processing method directly
+        # after manually setting parameters
+        evaluable._parameters = {"param1": "manual_param1", "param2": "manual_param2"}
+        result = evaluable._auto_process_parameters()
+
+        # Should return self unchanged (early return due to _parameters being set)
+        assert result is evaluable
+        assert evaluable._parameters == {
+            "param1": "manual_param1",
+            "param2": "manual_param2",
+        }
+        assert evaluable.parameters == {"manual_param1", "manual_param2"}
+
+    def test_evaluable_unsupported_field_error_with_location(self):
+        """Test error message includes location when find_field_definition_line succeeds."""
+
+        class TestUnsupportedField(Evaluable):
+            type: Literal["test"] = "test"
+            unsupported_field: set[str]  # set is not supported
+
+        # This should raise RuntimeError with location info
+        with pytest.raises(RuntimeError) as exc_info:
+            TestUnsupportedField(name="test", unsupported_field={"a", "b"})
+
+        error_msg = str(exc_info.value)
+        assert "Unable to handle `unsupported_field`" in error_msg
+        assert "with type `builtins.set`" in error_msg
+        assert "TestUnsupportedField" in error_msg
+        assert "Declared at" in error_msg  # Location should be included
+        assert 'add `json_schema_extra={"preprocess": False}`' in error_msg
+
+    def test_evaluable_union_single_typing_arg(self):
+        """Test union type handling with a simple single union type."""
+
+        class TestUnionSingle(Evaluable):
+            type: Literal["test"] = "test"
+            # Test a regular supported union type
+            param1: str | float
+
+        evaluable = TestUnionSingle(name="test", param1="alpha")
+
+        # Should handle union correctly - string value should be used as parameter name
+        assert "alpha" in evaluable.parameters
+        assert evaluable._parameters["param1"] == "alpha"
+
+    def test_evaluable_str_float_union_handling(self):
+        """Test str/float union type handling."""
+
+        class TestStrFloatUnion(Evaluable):
+            type: Literal["test"] = "test"
+            mixed_param: str | float
+
+        # Test with string value
+        evaluable_str = TestStrFloatUnion(name="test1", mixed_param="alpha")
+        assert evaluable_str._parameters["mixed_param"] == "alpha"
+        assert "alpha" in evaluable_str.parameters
+
+        # Test with float value
+        evaluable_float = TestStrFloatUnion(name="test2", mixed_param=3.14)
+        assert "constant_test2_mixed_param" in evaluable_float.parameters
+        assert evaluable_float.constants["constant_test2_mixed_param"] is not None
+
+    def test_evaluable_union_single_typing_arg_coverage(self):
+        """Test union type handling code path with integer/string union."""
+
+        class TestIntStrUnion(Evaluable):
+            type: Literal["test"] = "test"
+            # Test int | str union type
+            mixed_param: int | str
+
+        # Test with string value
+        evaluable_str = TestIntStrUnion(name="test1", mixed_param="alpha")
+        assert evaluable_str._parameters["mixed_param"] == "alpha"
+        assert "alpha" in evaluable_str.parameters
+
+        # Test with int value
+        evaluable_int = TestIntStrUnion(name="test2", mixed_param=42)
+        assert "constant_test2_mixed_param" in evaluable_int.parameters
+        assert evaluable_int.constants["constant_test2_mixed_param"] is not None

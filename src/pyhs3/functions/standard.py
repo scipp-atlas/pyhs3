@@ -607,14 +607,11 @@ class ProcessNormalizationFunction(Function):
         # Asymmetric variations: use asymmetric interpolation
         asymShift = pt.constant(0.0)
         for i, theta_name in enumerate(self.asymmThetaList):
-            if i < len(self.logAsymmKappa):
-                theta = context[theta_name]
-                log_kappa_lo, log_kappa_hi = self.logAsymmKappa[i]
-                kappa_sum = log_kappa_hi + log_kappa_lo
-                kappa_diff = log_kappa_hi - log_kappa_lo
-                asymShift = asymShift + _asym_interpolation(
-                    theta, kappa_sum, kappa_diff
-                )
+            theta = context[theta_name]
+            log_kappa_lo, log_kappa_hi = self.logAsymmKappa[i]
+            kappa_sum = log_kappa_hi + log_kappa_lo
+            kappa_diff = log_kappa_hi - log_kappa_lo
+            asymShift = asymShift + _asym_interpolation(theta, kappa_sum, kappa_diff)
 
         # Apply exponential scaling: nominal * exp(symShift + asymShift)
         result = result * pt.exp(symShift + asymShift)

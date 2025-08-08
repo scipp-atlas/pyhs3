@@ -5,7 +5,7 @@ import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, TypeAlias, TypeVar, cast
+from typing import Any, Literal, TypeAlias, TypeVar, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -251,7 +251,9 @@ class Model:
 
             for node_idx in sorted_nodes:
                 node_data = graph[node_idx]
-                node_type = node_data["type"]
+                node_type: Literal[
+                    "parameter", "constant", "function", "distribution"
+                ] = node_data["type"]
                 node_name = node_data["name"]
 
                 # Truncate long names to prevent jumpiness
@@ -297,7 +299,7 @@ class Model:
                     # Functions are evaluated by design
                     self.functions[node_name] = functions[node_name].expression(context)
 
-                elif node_type == "distribution":
+                else:  # node_type == "distribution"
                     # Distributions are evaluated by design
                     self.distributions[node_name] = distributions[node_name].expression(
                         context

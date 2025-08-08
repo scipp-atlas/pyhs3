@@ -326,10 +326,6 @@ class Evaluable(BaseModel):
         ):
             return True
 
-        # Check if field exists and has a value
-        if not hasattr(self, field_name):
-            return True
-
         # Skip boolean fields - they're not parameters
         return field_info.annotation is bool
 

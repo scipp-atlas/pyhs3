@@ -2458,29 +2458,28 @@ class TestCMSDistributions:
         assert result_val > 0.0
         np.testing.assert_allclose(result_val, expected, rtol=1e-6)
 
-    def test_fastverticalinterphistpdf2d2_missing_coefficients(self):
-        """Test FastVerticalInterpHistPdf2D2Dist with missing coefficients in context."""
+    def test_fastverticalinterphistpdf2d2_all_coefficients_required(self):
+        """Test FastVerticalInterpHistPdf2D2Dist requires all coefficients in context."""
         dist = FastVerticalInterpHistPdf2D2Dist(
-            name="interp2d_missing",
+            name="interp2d_complete",
             x="x_var",
             y="y_var",
-            coefList=["existing_coef", "missing_coef"],
+            coefList=["coef1", "coef2"],
         )
 
-        # Only provide one coefficient in context
+        # Provide all coefficients in context
         context = {
             "x_var": pt.constant(1.0),
             "y_var": pt.constant(2.0),
-            "existing_coef": pt.constant(0.1),
-            # "missing_coef" not provided
+            "coef1": pt.constant(0.1),
+            "coef2": pt.constant(-0.05),
         }
         result = dist.expression(context)
         f = function([], result)
         result_val = f()
 
-        # Should still work, only applying existing coefficient
-        # Expected: 1.0 * (1 + 0.1*0.1) = 1.01
-        expected = 1.0 * (1.0 + 0.1 * 0.1)
+        # Expected: 1.0 * (1 + 0.1*0.1) * (1 + 0.1*(-0.05)) = 1.01 * 0.995 = 1.00495
+        expected = 1.0 * (1.0 + 0.1 * 0.1) * (1.0 + 0.1 * (-0.05))
         assert np.isfinite(result_val)
         assert result_val > 0.0
         np.testing.assert_allclose(result_val, expected, rtol=1e-6)

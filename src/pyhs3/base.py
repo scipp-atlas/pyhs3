@@ -367,28 +367,25 @@ class Evaluable(BaseModel):
     ) -> None:
         """Process a list field during auto-processing."""
         typing_args = get_args(field_info.annotation)
-        # Check if this is a simple string list (like UniformDist.x)
-        if len(typing_args) == 1:
-            if str in typing_args:
-                # handle list[str]
-                for index, name in enumerate(field_value):
-                    self._parameters[f"{field_name}[{index}]"] = name
-            elif float in typing_args or int in typing_args:
-                # skip list[float] and list[int]
-                pass
-            elif isinstance(typing_args[0], types.UnionType):
-                subargs = get_args(typing_args[0])
-                if str in subargs and (float in subargs or int in subargs):
-                    # handle list[int | float | str] or similar mixed versions
-                    processed_names, processed_values = self.process_parameter_list(
-                        field_name
-                    )
-                    # Add constants for numeric values
-                    for name, value in zip(
-                        processed_names, processed_values, strict=False
-                    ):
-                        if value is not None:
-                            self._constants_values[name] = value
+        # Process the list based on its inner type (list[T] always has exactly one type argument)
+        if str in typing_args:
+            # handle list[str]
+            for index, name in enumerate(field_value):
+                self._parameters[f"{field_name}[{index}]"] = name
+        elif float in typing_args or int in typing_args:
+            # skip list[float] and list[int]
+            pass
+        elif isinstance(typing_args[0], types.UnionType):
+            subargs = get_args(typing_args[0])
+            if str in subargs and (float in subargs or int in subargs):
+                # handle list[int | float | str] or similar mixed versions
+                processed_names, processed_values = self.process_parameter_list(
+                    field_name
+                )
+                # Add constants for numeric values
+                for name, value in zip(processed_names, processed_values, strict=False):
+                    if value is not None:
+                        self._constants_values[name] = value
 
     def _process_single_field(self, field_name: str) -> None:
         """Process a single parameter field during auto-processing."""

@@ -697,3 +697,52 @@ class TestEvaluableAdvanced:
         evaluable_int = TestIntStrUnion(name="test2", mixed_param=42)
         assert "constant_test2_mixed_param" in evaluable_int.parameters
         assert evaluable_int.constants["constant_test2_mixed_param"] is not None
+
+
+class TestProcessListFieldCoverage:
+    """Test _process_list_field method falsey cases for coverage."""
+
+    def test_process_list_field_union_without_str_and_numeric(self):
+        """Test union subargs that don't contain both str and numeric types."""
+
+        class TestUnionWithoutStrNumeric(Evaluable):
+            type: Literal["test"] = "test"
+            # Create a list with union that doesn't match the condition
+            # This tests the falsey case for: str in subargs and (float in subargs or int in subargs)
+            mixed_list: list[str | bool]  # bool is not numeric
+
+        # This should not be processed because bool is not int/float
+        # The condition `str in subargs and (float in subargs or int in subargs)` is False
+        # So the list is ignored (not processed, no parameters added)
+        evaluable = TestUnionWithoutStrNumeric(name="test", mixed_list=["alpha", True])
+
+        # Should have no parameters because the list was not processed
+        assert evaluable._parameters == {}
+        assert evaluable.parameters == set()
+        assert evaluable._constants_values == {}
+
+
+class TestErrorLocationCoverage:
+    """Test error location falsey case coverage."""
+
+    def test_error_without_location(self):
+        """Test error message when find_field_definition_line returns None."""
+
+        class TestNoLocation(Evaluable):
+            type: Literal["test"] = "test"
+            unsupported_field: dict  # unsupported type
+
+        # Mock find_field_definition_line to return None
+        with (
+            patch("pyhs3.base.find_field_definition_line", return_value=None),
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            TestNoLocation(name="test", unsupported_field={"key": "value"})
+
+        error_msg = str(exc_info.value)
+        assert "Unable to handle `unsupported_field`" in error_msg
+        assert "with type `builtins.dict`" in error_msg
+        assert "TestNoLocation" in error_msg
+        # Should NOT contain "Declared at" when location is None
+        assert "Declared at" not in error_msg
+        assert 'add `json_schema_extra={"preprocess": False}`' in error_msg

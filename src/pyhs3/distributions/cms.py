@@ -62,10 +62,9 @@ class FastVerticalInterpHistPdf2Dist(Distribution):
 
         # Apply morphing for each coefficient parameter
         for coef_name in self.coefList:
-            if coef_name in context:
-                coef = context[coef_name]
-                # Simple linear combination with coefficients
-                result = result * (1.0 + 0.1 * coef)  # Simplified morphing
+            coef = context[coef_name]
+            # Simple linear combination with coefficients
+            result = result * (1.0 + 0.1 * coef)  # Simplified morphing
 
         return cast(TensorVar, result)
 
@@ -217,10 +216,9 @@ class FastVerticalInterpHistPdf2D2Dist(Distribution):
 
         # Apply morphing for each coefficient parameter
         for coef_name in self.coefList:
-            if coef_name in context:
-                coef = context[coef_name]
-                # Simple 2D morphing with coefficients
-                result = result * (1.0 + 0.1 * coef)  # Simplified morphing
+            coef = context[coef_name]
+            # Simple 2D morphing with coefficients
+            result = result * (1.0 + 0.1 * coef)  # Simplified morphing
 
         return cast(TensorVar, result)
 

@@ -30,6 +30,17 @@ Modules
    generic_parse
    exceptions
 
+Base Classes
+------------
+
+.. currentmodule:: pyhs3.base
+
+.. autosummary::
+   :toctree: _generated/
+   :nosignatures:
+
+   Evaluable
+
 Functions
 ---------
 
@@ -59,11 +70,24 @@ Distributions
    Distributions
    Distribution
    GaussianDist
+   UniformDist
+   PoissonDist
+   ExponentialDist
+   LogNormalDist
+   LandauDist
    MixtureDist
    ProductDist
-   CrystalBallDist
+   HistogramDist
    GenericDist
-   PoissonDist
+   PolynomialDist
+   BernsteinPolyDist
+   CrystalBallDist
+   AsymmetricCrystalBallDist
+   ArgusDist
+   FastVerticalInterpHistPdf2Dist
+   GGZZBackgroundDist
+   QQZZBackgroundDist
+   FastVerticalInterpHistPdf2D2Dist
 
 Domains
 -------

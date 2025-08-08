@@ -29,7 +29,7 @@ class Likelihood(BaseModel):
 
     name: str
     distributions: list[str]
-    data: list[str | float | int]
+    data: list[str | int | float | int]
     aux_distributions: list[str] | None = Field(default=None)
 
 
@@ -49,7 +49,7 @@ class Likelihoods(RootModel[list[Likelihood]]):
         """Mapping from likelihood names to Likelihood instances."""
         return {likelihood.name: likelihood for likelihood in self.root}
 
-    def __len__(self) -> int:
+    def __len__(self) -> int | float:
         """Number of likelihoods in this collection."""
         return len(self.root)
 

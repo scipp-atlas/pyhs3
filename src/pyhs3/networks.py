@@ -202,13 +202,13 @@ def build_entity_mappings(
 
     # Map all function names and their dependencies
     for func in functions:
-        for param_name in func.parameters.values():
+        for param_name in func.parameters:
             entity_types.setdefault(param_name, "parameter")
         entity_types[func.name] = "function"
 
     # Map all distribution names, dependencies, and constants
     for dist in distributions:
-        for param_name in dist.parameters.values():
+        for param_name in dist.parameters:
             entity_types.setdefault(param_name, "parameter")
         entity_types[dist.name] = "distribution"
 
@@ -254,11 +254,7 @@ def build_dependency_graph(
     # Add edges for dependencies
     for entity in [*functions, *distributions]:
         # Get parameter dependencies for this entity
-        param_names = (
-            entity.parameters.values()
-            if hasattr(entity.parameters, "values")
-            else entity.parameters
-        )
+        param_names = entity.parameters
 
         for param_name in param_names:
             # Add edge: dependency -> entity (param/func/dist feeds into entity)

@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
-from typing import Annotated, Any, Literal, TypeVar, cast
+from enum import IntEnum
+from typing import Annotated, Any, Literal, cast
 
 import pytensor.tensor as pt
 import sympy as sp
@@ -22,42 +23,52 @@ from pydantic import (
     model_validator,
 )
 
-from pyhs3.exceptions import UnknownInterpolationCodeError, custom_error_msg
+from pyhs3.context import Context
+from pyhs3.data import Axis
+from pyhs3.exceptions import custom_error_msg
+from pyhs3.functions.core import Function
 from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor
 from pyhs3.typing.aliases import TensorVar
 
 log = logging.getLogger(__name__)
 
 
-FuncT = TypeVar("FuncT", bound="Function")
+def _asym_interpolation(
+    theta: TensorVar, kappa_sum: float, kappa_diff: float
+) -> TensorVar:
+    """
+    Implement asymmetric interpolation for ProcessNormalization.
 
+    Based on the jaxfit implementation:
+    https://github.com/nsmith-/jaxfit/blob/8479cd73e733ba35462287753fab44c0c560037b/src/jaxfit/roofit/combine.py#L197
+    and CMS Combine logic.
+    Uses polynomial interpolation for |theta| < 1 and linear extrapolation beyond.
 
-class Function(BaseModel):
-    """Base class for HS3 functions."""
+    Args:
+        theta: The nuisance parameter value
+        kappa_sum: logKappaHi + logKappaLo
+        kappa_diff: logKappaHi - logKappaLo
 
-    model_config = ConfigDict(serialize_by_alias=True)
+    Returns:
+        The interpolated shift value
+    """
+    # Polynomial interpolation for |theta| < 1
+    # Polynomial: (3*theta^4 - 10*theta^2 + 15) / 8
+    theta_sq = theta * theta
+    theta_quad = theta_sq * theta_sq
+    poly_result = (3.0 * theta_quad - 10.0 * theta_sq + 15.0) / 8.0
 
-    name: str
-    type: str
-    _parameters: dict[str, str] = PrivateAttr(default_factory=dict)
+    # Linear extrapolation for |theta| >= 1
+    linear_result = pt.abs(theta)
 
-    @property
-    def parameters(self) -> dict[str, str]:
-        """Access to parameter mapping."""
-        return self._parameters
+    # Choose between polynomial and linear based on |theta|
+    abs_theta = pt.abs(theta)
+    smooth_function = cast(
+        TensorVar, pt.switch(abs_theta < 1.0, poly_result, linear_result)
+    )
 
-    def expression(self, _: dict[str, TensorVar]) -> TensorVar:
-        """
-        Evaluate the function expression.
-
-        Args:
-            context: Mapping of names to pytensor variables
-
-        Returns:
-            PyTensor expression representing the function result
-        """
-        msg = f"Function type {self.type} not implemented"
-        raise NotImplementedError(msg)
+    # Final asymmetric interpolation formula
+    return cast(TensorVar, 0.5 * (kappa_diff * theta + kappa_sum * smooth_function))
 
 
 class SumFunction(Function):
@@ -66,13 +77,7 @@ class SumFunction(Function):
     type: Literal["sum"] = "sum"
     summands: list[str]
 
-    @model_validator(mode="after")
-    def process_parameters(self) -> SumFunction:
-        """Build the parameters dict from summands."""
-        self._parameters = {name: name for name in self.summands}
-        return self
-
-    def expression(self, context: dict[str, TensorVar]) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Evaluate the sum function.
 
@@ -96,15 +101,9 @@ class ProductFunction(Function):
     """Product function that multiplies factors together."""
 
     type: Literal["product"] = "product"
-    factors: list[str]
+    factors: list[int | float | str]
 
-    @model_validator(mode="after")
-    def process_parameters(self) -> ProductFunction:
-        """Build the parameters dict from factors."""
-        self._parameters = {name: name for name in self.factors}
-        return self
-
-    def expression(self, context: dict[str, TensorVar]) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Evaluate the product function.
 
@@ -117,9 +116,11 @@ class ProductFunction(Function):
         if not self.factors:
             return pt.constant(1.0)
 
-        result = context[self.factors[0]]
-        for factor in self.factors[1:]:
-            result = result * context[factor]
+        # Get list of factors using flattened parameter keys
+        factor_values = self.get_parameter_list(context, "factors")
+        result = factor_values[0]
+        for factor_value in factor_values[1:]:
+            result = result * factor_value
 
         return result
 
@@ -166,7 +167,7 @@ class GenericFunction(Function):
         self._parameters = {var: var for var in independent_vars}
         return self
 
-    def expression(self, context: dict[str, TensorVar]) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Evaluate the generic function expression.
 
@@ -181,6 +182,24 @@ class GenericFunction(Function):
 
         # Convert using the pre-parsed sympy expression
         return sympy_to_pytensor(self._sympy_expr, variables)
+
+
+class InterpolationCode(IntEnum):
+    """
+    Enumeration of interpolation codes for systematic variations.
+
+    Defines the different interpolation methods used by InterpolationFunction
+    for systematic uncertainty variations. Each code represents a different
+    mathematical approach to interpolating between nominal, low, and high values.
+    """
+
+    LIN_LIN_ADD = 0
+    EXP_EXP_MUL = 1
+    EXP_LIN_ADD = 2
+    EXP_MIX_ADD = 3
+    POL_LIN_ADD = 4
+    POL_EXP_MUL = 5
+    POL_LIN_MUL = 6
 
 
 class InterpolationFunction(Function):
@@ -214,29 +233,22 @@ class InterpolationFunction(Function):
         vars: Variable names this function depends on (nuisance parameters)
     """
 
+    model_config = ConfigDict(use_enum_values=True)
+
     type: Literal["interpolation"] = "interpolation"
     high: list[str]
     low: list[str]
     nom: str
-    interpolationCodes: list[int]
+    interpolationCodes: Annotated[
+        list[InterpolationCode],
+        custom_error_msg(
+            {
+                "enum": "Unknown interpolation code {input} in function '{name}'. Valid codes are {expected}."
+            }
+        ),
+    ]
     positiveDefinite: bool
     vars: list[str]
-
-    @model_validator(mode="after")
-    def process_parameters(self) -> InterpolationFunction:
-        """Build the parameters dict and validate interpolation codes."""
-
-        # Validate interpolation codes
-        valid_codes = {0, 1, 2, 3, 4, 5, 6}
-        for code in self.interpolationCodes:
-            if code not in valid_codes:
-                msg = f"Unknown interpolation code {code} in function '{self.name}'. Valid codes are 0-6."
-                raise UnknownInterpolationCodeError(msg)
-
-        # Build parameters dict - all high, low, nom, and vars parameters
-        all_params = [*self.high, *self.low, self.nom, *self.vars]
-        self._parameters = {name: name for name in all_params}
-        return self
 
     def _flexible_interp_single(
         self,
@@ -440,7 +452,7 @@ class InterpolationFunction(Function):
             ),
         )
 
-    def expression(self, context: dict[str, TensorVar]) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         r"""
         Evaluate the interpolation function.
 
@@ -518,69 +530,62 @@ class ProcessNormalizationFunction(Function):
     Process normalization function with systematic variations.
 
     Implements the CMS Combine ProcessNormalization class which computes
-    a normalization factor based on a nominal value and systematic variations.
+    a normalization factor based on systematic variations. This matches
+    the actual CMS Combine implementation and JSON structure from combine files.
+
+    Mathematical formulation:
+        result = nominalValue * exp(symShift + asymShift) * otherFactors
+
+        where:
+        - symShift = sum(logKappa[i] * theta[i]) for symmetric variations
+        - asymShift = sum(_asym_interpolation(theta[i], kappa_sum[i], kappa_diff[i]))
+          for asymmetric variations with kappa_sum = logKappaHi + logKappaLo
+          and kappa_diff = logKappaHi - logKappaLo
+        - otherFactors = product of all additional multiplicative terms
 
     Parameters:
         name: Name of the function
-        expression: Expression identifier (typically same as name)
-        nominalValue: Base normalization value
+        nominalValue: Baseline normalization value (default 1.0)
         thetaList: Names of symmetric variation nuisance parameters
-        logKappa: Symmetric log-normal variation factors
+        logKappa: Log-kappa values for symmetric variations (optional, defaults to empty)
         asymmThetaList: Names of asymmetric variation nuisance parameters
-        logAsymmKappa: Asymmetric [low, high] log-normal variation factors
+        logAsymmKappa: List of [logKappaLo, logKappaHi] pairs for asymmetric variations (optional)
         otherFactorList: Names of additional multiplicative factors
     """
 
     type: Literal["CMS::process_normalization"] = "CMS::process_normalization"
-    expression_name: str = Field(alias="expression")
-    nominalValue: float
-    thetaList: list[str]
-    logKappa: list[float]
-    asymmThetaList: list[str]
-    logAsymmKappa: list[list[float]]
-    otherFactorList: list[str]
+    nominalValue: float = Field(default=1.0, json_schema_extra={"preprocess": False})
+    thetaList: list[str] = Field(default_factory=list)
+    logKappa: list[float] = Field(
+        default_factory=list, json_schema_extra={"preprocess": False}
+    )
+    asymmThetaList: list[str] = Field(default_factory=list)
+    logAsymmKappa: list[list[float]] = Field(
+        default_factory=list, json_schema_extra={"preprocess": False}
+    )
+    otherFactorList: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def process_parameters(self) -> ProcessNormalizationFunction:
-        """Build the parameters dict from all parameter lists."""
-        # All parameters this function depends on
-        all_params = [*self.thetaList, *self.asymmThetaList, *self.otherFactorList]
-        self._parameters = {name: name for name in all_params}
+    def validate_list_lengths(self) -> ProcessNormalizationFunction:
+        """Validate that parameter lists have consistent lengths."""
+        # Check symmetric variations
+        assert len(self.logKappa) == len(self.thetaList), (
+            f"logKappa length ({len(self.logKappa)}) must match thetaList length ({len(self.thetaList)})"
+        )
+
+        # Check asymmetric variations
+        assert len(self.logAsymmKappa) == len(self.asymmThetaList), (
+            f"logAsymmKappa length ({len(self.logAsymmKappa)}) must match asymmThetaList length ({len(self.asymmThetaList)})"
+        )
+
         return self
 
-    def _asym_interpolation(
-        self, theta: TensorVar, kappa_sum: float, kappa_diff: float
-    ) -> TensorVar:
-        """
-        Implement asymmetric interpolation function.
-
-        Based on CMS Combine's _asym_interpolation function.
-
-        Args:
-            theta: Nuisance parameter value
-            kappa_sum: Sum of low and high kappa values
-            kappa_diff: Difference of high and low kappa values
-
-        Returns:
-            Interpolated value
-        """
-        abs_theta = pt.abs(theta)
-
-        # Polynomial coefficients for smooth interpolation
-        # Based on _asym_poly = jnp.array([3.0, -10.0, 15.0, 0.0]) / 8.0
-        poly_result = (3.0 * theta**4 - 10.0 * theta**2 + 15.0) / 8.0
-
-        # Choose between linear extrapolation (|theta| > 1) and polynomial interpolation (|theta| <= 1)
-        smooth_function = pt.switch(abs_theta > 1.0, abs_theta, poly_result)
-
-        # Apply asymmetric interpolation formula
-        morph = 0.5 * (kappa_diff * theta + kappa_sum * smooth_function)
-
-        return cast(TensorVar, morph)
-
-    def expression(self, context: dict[str, TensorVar]) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
         Evaluate the process normalization function.
+
+        Implements the full CMS Combine ProcessNormalization logic:
+        result = nominalValue * exp(symShift + asymShift) * otherFactors
 
         Args:
             context: Mapping of names to PyTensor variables.
@@ -588,29 +593,28 @@ class ProcessNormalizationFunction(Function):
         Returns:
             TensorVar: PyTensor expression representing the normalization factor.
         """
-        # Start with the nominal value
+        # Start with nominal value
         result = pt.constant(self.nominalValue)
 
-        # Add symmetric variations
-        sym_shift = pt.constant(0.0)
-        for theta_name, kappa in zip(self.thetaList, self.logKappa, strict=False):
+        # Symmetric variations: symShift = sum(logKappa[i] * theta[i])
+        symShift = pt.constant(0.0)
+        for i, theta_name in enumerate(self.thetaList):
             theta = context[theta_name]
-            sym_shift = sym_shift + kappa * theta
+            # Use provided logKappa value if available, otherwise assume 0.0 (no effect)
+            log_kappa = self.logKappa[i] if i < len(self.logKappa) else 0.0
+            symShift = symShift + log_kappa * theta
 
-        # Add asymmetric variations
-        asym_shift = pt.constant(0.0)
-        for theta_name, kappa_pair in zip(
-            self.asymmThetaList, self.logAsymmKappa, strict=False
-        ):
+        # Asymmetric variations: use asymmetric interpolation
+        asymShift = pt.constant(0.0)
+        for i, theta_name in enumerate(self.asymmThetaList):
             theta = context[theta_name]
-            kappa_lo, kappa_hi = kappa_pair
-            kappa_sum = kappa_hi + kappa_lo
-            kappa_diff = kappa_hi - kappa_lo
-            asym_contribution = self._asym_interpolation(theta, kappa_sum, kappa_diff)
-            asym_shift = asym_shift + asym_contribution
+            log_kappa_lo, log_kappa_hi = self.logAsymmKappa[i]
+            kappa_sum = log_kappa_hi + log_kappa_lo
+            kappa_diff = log_kappa_hi - log_kappa_lo
+            asymShift = asymShift + _asym_interpolation(theta, kappa_sum, kappa_diff)
 
-        # Apply exponential of total shift
-        result = result * pt.exp(sym_shift + asym_shift)
+        # Apply exponential scaling: nominal * exp(symShift + asymShift)
+        result = result * pt.exp(symShift + asymShift)
 
         # Multiply by additional factors
         for factor_name in self.otherFactorList:
@@ -620,6 +624,149 @@ class ProcessNormalizationFunction(Function):
         return cast(TensorVar, result)
 
 
+class CMSAsymPowFunction(Function):
+    r"""
+    CMS AsymPow function implementation.
+
+    Implements CMS's AsymPow function which provides asymmetric power-law
+    variations for systematic uncertainties. Used in CMS combine for
+    asymmetric systematic variations.
+
+    .. math::
+
+        f(\theta; \kappa_{low}, \kappa_{high}) = \begin{cases}
+        \kappa_{low}^{-\theta}, & \text{if } \theta < 0 \\
+        \kappa_{high}^{\theta}, & \text{if } \theta \geq 0
+        \end{cases}
+
+    Parameters:
+        name: Name of the function
+        kappaLow: Low-side variation factor (used for θ < 0)
+        kappaHigh: High-side variation factor (used for θ ≥ 0)
+        theta: Parameter name for the nuisance parameter
+    """
+
+    type: Literal["CMS::asympow"] = "CMS::asympow"
+    kappaLow: str | float | int
+    kappaHigh: str | float | int
+    theta: str
+
+    def expression(self, context: Context) -> TensorVar:
+        """
+        Evaluate the AsymPow function.
+
+        Args:
+            context: Mapping of names to PyTensor variables.
+
+        Returns:
+            TensorVar: PyTensor expression representing the asymmetric power function.
+        """
+        kappa_low = context[self._parameters["kappaLow"]]
+        kappa_high = context[self._parameters["kappaHigh"]]
+        theta = context[self._parameters["theta"]]
+
+        # AsymPow: kappaLow^(-theta) for theta < 0, kappaHigh^theta for theta >= 0
+        return cast(
+            TensorVar,
+            pt.switch(
+                theta < 0,
+                cast(TensorVar, pt.power(kappa_low, -theta)),  # type: ignore[no-untyped-call]
+                cast(TensorVar, pt.power(kappa_high, theta)),  # type: ignore[no-untyped-call]
+            ),
+        )
+
+
+class HistogramData(BaseModel):
+    """
+    Histogram data implementation for the HistogramFunction.
+
+    Parameters:
+        axes: list of Axis used to describe the binning
+        contents: list of bin content parameter values
+    """
+
+    axes: list[Axis]
+    contents: list[float]
+
+
+class HistogramFunction(Function):
+    r"""
+    Histogram function implementation.
+
+    Implements a histogram-based function that provides piecewise constant
+    values based on bin lookup. Used for non-parametric functions and
+    data-driven backgrounds.
+
+    .. math::
+
+        f(x) = h_i \quad \text{where } x \in \text{bin}_i
+
+    Parameters:
+        name: Name of the function
+        data: histogram data with binning and contents
+    """
+
+    type: Literal["histogram"] = "histogram"
+    data: HistogramData = Field(..., json_schema_extra={"preprocess": False})
+
+
+class RooRecursiveFractionFunction(Function):
+    r"""
+    ROOT RooRecursiveFraction function implementation.
+
+    Implements ROOT's RooRecursiveFraction which computes fractions recursively.
+    Used for constrained fraction calculations where fractions must sum to 1.
+
+    .. math::
+
+        f_i = \frac{a_i}{\sum_{j=i}^n a_j}
+
+    where the recursive fractions ensure proper normalization.
+
+    Parameters:
+        name: Name of the function
+        coefficients: List of coefficient parameter names
+        recursive: Whether to use recursive fraction calculation
+    """
+
+    type: Literal["roorecursivefraction_dist"] = "roorecursivefraction_dist"
+    coefficients: list[int | float | str] = Field(alias="list")
+    recursive: bool = True
+
+    def expression(self, context: Context) -> TensorVar:
+        """
+        Evaluate the recursive fraction function.
+
+        Args:
+            context: Mapping of names to PyTensor variables.
+
+        Returns:
+            TensorVar: PyTensor expression representing the recursive fraction.
+        """
+        if not self.coefficients:
+            return cast(TensorVar, pt.constant(0.0))
+
+        coeffs = self.get_parameter_list(context, "coefficients")
+
+        if not self.recursive:
+            # Simple normalization
+            total = sum(coeffs)
+            return cast(TensorVar, coeffs[0] / total)
+
+        # Recursive fraction calculation
+        # For first coefficient: a_0 / (a_0 + a_1 + ... + a_n)
+        # For i-th coefficient: a_i / (a_i + a_{i+1} + ... + a_n) * (1 - sum of previous fractions)
+
+        if len(coeffs) == 1:
+            return cast(TensorVar, pt.constant(1.0))
+
+        # Calculate the first recursive fraction: a_0 / sum(all)
+        total_sum = sum(coeffs)
+        first_fraction = coeffs[0] / total_sum
+
+        return cast(TensorVar, first_fraction)
+
+
 # Define the union type for all function configurations
 FunctionConfig = (
     SumFunction
@@ -627,6 +774,9 @@ FunctionConfig = (
     | GenericFunction
     | InterpolationFunction
     | ProcessNormalizationFunction
+    | CMSAsymPowFunction
+    | HistogramFunction
+    | RooRecursiveFractionFunction
 )
 
 registered_functions: dict[str, type[Function]] = {
@@ -635,6 +785,9 @@ registered_functions: dict[str, type[Function]] = {
     "generic_function": GenericFunction,
     "interpolation": InterpolationFunction,
     "CMS::process_normalization": ProcessNormalizationFunction,
+    "CMS::asympow": CMSAsymPowFunction,
+    "histogram": HistogramFunction,
+    "roorecursivefraction_dist": RooRecursiveFractionFunction,
 }
 
 # Type alias for all function types using discriminated union
@@ -643,7 +796,10 @@ FunctionType = Annotated[
     | ProductFunction
     | GenericFunction
     | InterpolationFunction
-    | ProcessNormalizationFunction,
+    | ProcessNormalizationFunction
+    | CMSAsymPowFunction
+    | HistogramFunction
+    | RooRecursiveFractionFunction,
     Field(discriminator="type"),
 ]
 

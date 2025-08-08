@@ -34,7 +34,7 @@ class Axis(BaseModel):
     max: float | None = None
 
     @model_validator(mode="after")
-    def validate_range(self) -> Axis:
+    def check_min_le_max(self) -> Axis:
         """Validate that max >= min when both are provided."""
         if self.max is not None and self.min is not None and self.max < self.min:
             msg = f"Axis '{self.name}': max ({self.max}) must be >= min ({self.min})"

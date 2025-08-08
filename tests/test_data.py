@@ -72,6 +72,86 @@ class TestAxis:
         axis = Axis(name="test", edges=[1.0, 2.0, 2.0, 3.0])
         assert axis.edges == [1.0, 2.0, 2.0, 3.0]
 
+    def test_axis_bin_edges_regular_binning(self):
+        """Test bin_edges property with regular binning."""
+        axis = Axis(name="mass", min=0.0, max=10.0, nbins=5)
+        edges = axis.bin_edges
+
+        # Should return 6 edges for 5 bins: [0, 2, 4, 6, 8, 10]
+        expected_edges = [0.0, 2.0, 4.0, 6.0, 8.0, 10.0]
+        assert len(edges) == 6
+        assert edges == pytest.approx(expected_edges)
+
+    def test_axis_bin_edges_irregular_binning(self):
+        """Test bin_edges property with irregular binning."""
+        custom_edges = [0.0, 1.0, 5.0, 12.0, 25.0]
+        axis = Axis(name="pt", edges=custom_edges)
+        edges = axis.bin_edges
+
+        # Should return the provided edges exactly
+        assert edges == custom_edges
+
+    def test_axis_bin_edges_no_binning_info(self):
+        """Test bin_edges property when no binning information is provided."""
+        axis = Axis(name="var")
+        edges = axis.bin_edges
+
+        # Should return empty list when no binning info
+        assert edges == []
+
+    def test_axis_bin_edges_partial_regular_info(self):
+        """Test bin_edges property with incomplete regular binning info."""
+        # Missing nbins
+        axis = Axis(name="var", min=0.0, max=5.0)
+        assert axis.bin_edges == []
+
+        # Missing max
+        axis = Axis(name="var", min=0.0, nbins=3)
+        assert axis.bin_edges == []
+
+        # Missing min
+        axis = Axis(name="var", max=5.0, nbins=3)
+        assert axis.bin_edges == []
+
+    def test_axis_bin_edges_single_bin(self):
+        """Test bin_edges property with single bin."""
+        axis = Axis(name="single", min=1.0, max=2.0, nbins=1)
+        edges = axis.bin_edges
+
+        # Should return 2 edges for 1 bin: [1.0, 2.0]
+        assert len(edges) == 2
+        assert edges == pytest.approx([1.0, 2.0])
+
+    def test_axis_bin_edges_zero_range(self):
+        """Test bin_edges property with zero range (min=max)."""
+        axis = Axis(name="zero_range", min=5.0, max=5.0, nbins=1)
+        edges = axis.bin_edges
+
+        # Should return [5.0, 5.0] for zero range
+        assert len(edges) == 2
+        assert edges == pytest.approx([5.0, 5.0])
+
+    def test_axis_bin_edges_negative_range(self):
+        """Test bin_edges property with negative values."""
+        axis = Axis(name="negative", min=-10.0, max=-2.0, nbins=4)
+        edges = axis.bin_edges
+
+        # Should handle negative values correctly: [-10, -8, -6, -4, -2]
+        expected_edges = [-10.0, -8.0, -6.0, -4.0, -2.0]
+        assert len(edges) == 5
+        assert edges == pytest.approx(expected_edges)
+
+    def test_axis_bin_edges_large_number_of_bins(self):
+        """Test bin_edges property with large number of bins."""
+        axis = Axis(name="many_bins", min=0.0, max=100.0, nbins=1000)
+        edges = axis.bin_edges
+
+        # Should return 1001 edges for 1000 bins
+        assert len(edges) == 1001
+        assert edges[0] == pytest.approx(0.0)
+        assert edges[-1] == pytest.approx(100.0)
+        assert edges[500] == pytest.approx(50.0)  # Middle should be 50.0
+
 
 class TestGaussianUncertainty:
     """Tests for the GaussianUncertainty class."""

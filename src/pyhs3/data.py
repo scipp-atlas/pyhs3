@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Annotated, Literal
 
+import numpy as np
 from pydantic import BaseModel, Field, RootModel, model_validator
 
 from pyhs3.exceptions import custom_error_msg
@@ -63,6 +64,22 @@ class Axis(BaseModel):
                 raise ValueError(msg)
 
         return self
+
+    @property
+    def bin_edges(self) -> list[float] | None:
+        """Get the bin edges for this axis.
+
+        Returns:
+            List of bin edges. For regular binning, generates edges using linspace.
+            For irregular binning, returns the provided edges. Empty list if
+            insufficient information is provided.
+        """
+        if self.edges is not None:
+            return self.edges
+
+        if self.min is not None and self.max is not None and self.nbins is not None:
+            return list(np.linspace(self.min, self.max, self.nbins + 1))
+        return []
 
 
 class GaussianUncertainty(BaseModel):

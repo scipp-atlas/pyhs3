@@ -33,27 +33,9 @@ HistogramFunction = standard.HistogramFunction
 RooRecursiveFractionFunction = standard.RooRecursiveFractionFunction
 
 
-# Define the union type for all function configurations
-FunctionConfig = (
-    SumFunction
-    | ProductFunction
-    | GenericFunction
-    | InterpolationFunction
-    | ProcessNormalizationFunction
-    | CMSAsymPowFunction
-    | HistogramFunction
-    | RooRecursiveFractionFunction
-)
-
+# Combine all function registries
 registered_functions: dict[str, type[Function]] = {
-    "sum": SumFunction,
-    "product": ProductFunction,
-    "generic_function": GenericFunction,
-    "interpolation": InterpolationFunction,
-    "CMS::process_normalization": ProcessNormalizationFunction,
-    "CMS::asympow": CMSAsymPowFunction,
-    "histogram": HistogramFunction,
-    "roorecursivefraction_dist": RooRecursiveFractionFunction,
+    **standard.functions,
 }
 
 # Type alias for all function types using discriminated union

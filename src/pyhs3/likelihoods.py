@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from pydantic import BaseModel, Field, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 
 class Likelihood(BaseModel):
@@ -27,10 +27,12 @@ class Likelihood(BaseModel):
         aux_distributions: Optional array of auxiliary distributions for regularization
     """
 
-    name: str
-    distributions: list[str]
-    data: list[str | int | float | int]
-    aux_distributions: list[str] | None = Field(default=None)
+    model_config = ConfigDict()
+
+    name: str = Field(..., repr=True)
+    distributions: list[str] = Field(..., repr=False)
+    data: list[str | int | float | int] = Field(..., repr=False)
+    aux_distributions: list[str] | None = Field(default=None, repr=False)
 
 
 class Likelihoods(RootModel[list[Likelihood]]):

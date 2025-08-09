@@ -10,7 +10,14 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, PrivateAttr, RootModel, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    RootModel,
+    model_validator,
+)
 
 from pyhs3.exceptions import custom_error_msg
 
@@ -29,9 +36,11 @@ class Axis(BaseModel):
         max: Maximum value for the axis range (optional)
     """
 
-    name: str
-    min: float | None = None
-    max: float | None = None
+    model_config = ConfigDict()
+
+    name: str = Field(repr=True)
+    min: float | None = Field(default=None, repr=False)
+    max: float | None = Field(default=None, repr=False)
 
     @model_validator(mode="after")
     def check_min_le_max(self) -> Axis:
@@ -56,8 +65,10 @@ class Domain(BaseModel):
         type: Domain type identifier
     """
 
-    name: str
-    type: str
+    model_config = ConfigDict()
+
+    name: str = Field(..., repr=True)
+    type: str = Field(..., repr=False)
 
     @property
     def dimension(self) -> int:

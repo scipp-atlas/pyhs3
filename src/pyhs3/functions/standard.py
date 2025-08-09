@@ -683,8 +683,10 @@ class HistogramData(BaseModel):
         contents: list of bin content parameter values
     """
 
-    axes: list[Axis]
-    contents: list[float]
+    model_config = ConfigDict()
+
+    axes: list[Axis] = Field(..., repr=False)
+    contents: list[float] = Field(..., repr=False)
 
 
 class HistogramFunction(Function):

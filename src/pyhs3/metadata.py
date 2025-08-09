@@ -7,7 +7,7 @@ package information, authorship, and publication details following the HS3 speci
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PackageInfo(BaseModel):
@@ -22,8 +22,10 @@ class PackageInfo(BaseModel):
         version: Version string of the package
     """
 
-    name: str
-    version: str
+    model_config = ConfigDict()
+
+    name: str = Field(repr=True)
+    version: str = Field(repr=False)
 
 
 class Metadata(BaseModel):
@@ -42,8 +44,10 @@ class Metadata(BaseModel):
         description: Short description or abstract (optional)
     """
 
-    hs3_version: str
-    packages: list[PackageInfo] | None = None
-    authors: list[str] | None = None
-    publications: list[str] | None = None
-    description: str | None = None
+    model_config = ConfigDict()
+
+    hs3_version: str = Field(..., repr=False)
+    packages: list[PackageInfo] | None = Field(default=None, repr=False)
+    authors: list[str] | None = Field(default=None, repr=False)
+    publications: list[str] | None = Field(default=None, repr=False)
+    description: str | None = Field(default=None, repr=False)

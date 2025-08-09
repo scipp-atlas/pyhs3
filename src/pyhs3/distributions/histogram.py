@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from pyhs3.data import Axis
 from pyhs3.distributions.core import Distribution
@@ -25,8 +25,10 @@ class HistogramData(BaseModel):
         contents: list of bin content parameter values
     """
 
-    axes: list[Axis]
-    contents: list[float]
+    model_config = ConfigDict()
+
+    axes: list[Axis] = Field(..., repr=False)
+    contents: list[float] = Field(..., repr=False)
 
 
 class HistogramDist(Distribution):

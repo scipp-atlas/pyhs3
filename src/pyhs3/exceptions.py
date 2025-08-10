@@ -79,7 +79,9 @@ def custom_error_msg(custom_messages: dict[str, str]) -> Any:
         except ValidationError as exc:
             new_errors: list[InitErrorDetails | ErrorDetails] = []
             for error in exc.errors():
+                error["loc"] = error["loc"][1:]  # to skip current location
                 custom_message = custom_messages.get(error["type"])
+
                 if custom_message:
                     err_ctx = error.get("ctx", {}).copy()
 

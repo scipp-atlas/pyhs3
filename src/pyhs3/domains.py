@@ -114,8 +114,8 @@ class ProductDomain(Domain):
         axes: List of Axis specifications defining each dimension
     """
 
-    type: Literal["product_domain"] = "product_domain"
-    axes: list[Axis] = Field(default_factory=list)
+    type: Literal["product_domain"] = Field(default="product_domain", repr=False)
+    axes: list[Axis] = Field(default_factory=list, repr=False)
     _axes_map: dict[str, Axis] = PrivateAttr(default_factory=dict)
 
     @model_validator(mode="after")

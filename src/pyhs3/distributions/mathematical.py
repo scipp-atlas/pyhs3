@@ -61,8 +61,8 @@ class GenericDist(Distribution):
 
     model_config = ConfigDict(arbitrary_types_allowed=True, serialize_by_alias=True)
 
-    type: Literal["generic_dist"] = "generic_dist"
-    expression_str: str = Field(alias="expression")
+    type: Literal["generic_dist"] = Field(default="generic_dist", repr=False)
+    expression_str: str = Field(alias="expression", repr=False)
     _sympy_expr: sp.Expr = PrivateAttr(default=None)
     _dependent_vars: list[str] = PrivateAttr(default_factory=list)
 

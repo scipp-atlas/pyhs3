@@ -72,8 +72,8 @@ def _asym_interpolation(
 class SumFunction(Function):
     """Sum function that adds summands together."""
 
-    type: Literal["sum"] = "sum"
-    summands: list[str]
+    type: Literal["sum"] = Field(default="sum", repr=False)
+    summands: list[str] = Field(..., repr=False)
 
     def expression(self, context: Context) -> TensorVar:
         """
@@ -98,8 +98,8 @@ class SumFunction(Function):
 class ProductFunction(Function):
     """Product function that multiplies factors together."""
 
-    type: Literal["product"] = "product"
-    factors: list[int | float | str]
+    type: Literal["product"] = Field(default="product", repr=False)
+    factors: list[int | float | str] = Field(..., repr=False)
 
     def expression(self, context: Context) -> TensorVar:
         """
@@ -145,8 +145,8 @@ class GenericFunction(Function):
 
     model_config = ConfigDict(arbitrary_types_allowed=True, serialize_by_alias=True)
 
-    type: Literal["generic_function"] = "generic_function"
-    expression_str: str = Field(alias="expression")
+    type: Literal["generic_function"] = Field(default="generic_function", repr=False)
+    expression_str: str = Field(alias="expression", repr=False)
     _sympy_expr: sp.Expr = PrivateAttr(default=None)
     _dependent_vars: list[str] = PrivateAttr(default_factory=list)
 
@@ -233,10 +233,10 @@ class InterpolationFunction(Function):
 
     model_config = ConfigDict(use_enum_values=True)
 
-    type: Literal["interpolation"] = "interpolation"
-    high: list[str]
-    low: list[str]
-    nom: str
+    type: Literal["interpolation"] = Field(default="interpolation", repr=False)
+    high: list[str] = Field(..., repr=False)
+    low: list[str] = Field(..., repr=False)
+    nom: str = Field(..., repr=False)
     interpolationCodes: Annotated[
         list[InterpolationCode],
         custom_error_msg(
@@ -244,9 +244,9 @@ class InterpolationFunction(Function):
                 "enum": "Unknown interpolation code {input} in function '{name}'. Valid codes are {expected}."
             }
         ),
-    ]
-    positiveDefinite: bool
-    vars: list[str]
+    ] = Field(..., repr=False)
+    positiveDefinite: bool = Field(..., repr=False)
+    vars: list[str] = Field(..., repr=False)
 
     def _flexible_interp_single(
         self,
@@ -551,17 +551,21 @@ class ProcessNormalizationFunction(Function):
         otherFactorList: Names of additional multiplicative factors
     """
 
-    type: Literal["CMS::process_normalization"] = "CMS::process_normalization"
-    nominalValue: float = Field(default=1.0, json_schema_extra={"preprocess": False})
-    thetaList: list[str] = Field(default_factory=list)
+    type: Literal["CMS::process_normalization"] = Field(
+        default="CMS::process_normalization", repr=False
+    )
+    nominalValue: float = Field(
+        default=1.0, json_schema_extra={"preprocess": False}, repr=False
+    )
+    thetaList: list[str] = Field(default_factory=list, repr=False)
     logKappa: list[float] = Field(
-        default_factory=list, json_schema_extra={"preprocess": False}
+        default_factory=list, json_schema_extra={"preprocess": False}, repr=False
     )
-    asymmThetaList: list[str] = Field(default_factory=list)
+    asymmThetaList: list[str] = Field(default_factory=list, repr=False)
     logAsymmKappa: list[list[float]] = Field(
-        default_factory=list, json_schema_extra={"preprocess": False}
+        default_factory=list, json_schema_extra={"preprocess": False}, repr=False
     )
-    otherFactorList: list[str] = Field(default_factory=list)
+    otherFactorList: list[str] = Field(default_factory=list, repr=False)
 
     @model_validator(mode="after")
     def validate_list_lengths(self) -> ProcessNormalizationFunction:
@@ -644,10 +648,10 @@ class CMSAsymPowFunction(Function):
         theta: Parameter name for the nuisance parameter
     """
 
-    type: Literal["CMS::asympow"] = "CMS::asympow"
-    kappaLow: str | float | int
-    kappaHigh: str | float | int
-    theta: str
+    type: Literal["CMS::asympow"] = Field(default="CMS::asympow", repr=False)
+    kappaLow: str | float | int = Field(..., repr=False)
+    kappaHigh: str | float | int = Field(..., repr=False)
+    theta: str = Field(..., repr=False)
 
     def expression(self, context: Context) -> TensorVar:
         """
@@ -706,8 +710,10 @@ class HistogramFunction(Function):
         data: histogram data with binning and contents
     """
 
-    type: Literal["histogram"] = "histogram"
-    data: HistogramData = Field(..., json_schema_extra={"preprocess": False})
+    type: Literal["histogram"] = Field(default="histogram", repr=False)
+    data: HistogramData = Field(
+        ..., json_schema_extra={"preprocess": False}, repr=False
+    )
 
 
 class RooRecursiveFractionFunction(Function):
@@ -729,9 +735,11 @@ class RooRecursiveFractionFunction(Function):
         recursive: Whether to use recursive fraction calculation
     """
 
-    type: Literal["roorecursivefraction_dist"] = "roorecursivefraction_dist"
-    coefficients: list[int | float | str] = Field(alias="list")
-    recursive: bool = True
+    type: Literal["roorecursivefraction_dist"] = Field(
+        default="roorecursivefraction_dist", repr=False
+    )
+    coefficients: list[int | float | str] = Field(alias="list", repr=False)
+    recursive: bool = Field(default=True, repr=False)
 
     def expression(self, context: Context) -> TensorVar:
         """

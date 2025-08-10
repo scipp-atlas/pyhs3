@@ -96,7 +96,9 @@ class GaussianUncertainty(BaseModel):
 
     model_config = ConfigDict()
 
-    type: Literal["gaussian_uncertainty"] = Field(..., repr=False)
+    type: Literal["gaussian_uncertainty"] = Field(
+        default="gaussian_uncertainty", repr=False
+    )
     sigma: list[float] = Field(..., repr=False)
     correlation: list[list[float]] | Literal[0] = Field(default=0, repr=False)
 
@@ -146,9 +148,9 @@ class PointData(Datum):
         uncertainty: Optional uncertainty/error
     """
 
-    type: Literal["point"]
-    value: float
-    uncertainty: float | None = Field(default=None)
+    type: Literal["point"] = Field(default="point", repr=False)
+    value: float = Field(..., repr=False)
+    uncertainty: float | None = Field(default=None, repr=False)
 
 
 class UnbinnedData(Datum):
@@ -167,11 +169,11 @@ class UnbinnedData(Datum):
         entries_uncertainties: Optional uncertainties for each coordinate
     """
 
-    type: Literal["unbinned"]
-    entries: list[list[float]]
-    axes: list[Axis]
-    weights: list[float] | None = Field(default=None)
-    entries_uncertainties: list[list[float]] | None = Field(default=None)
+    type: Literal["unbinned"] = Field(default="unbinned", repr=False)
+    entries: list[list[float]] = Field(..., repr=False)
+    axes: list[Axis] = Field(..., repr=False)
+    weights: list[float] | None = Field(default=None, repr=False)
+    entries_uncertainties: list[list[float]] | None = Field(default=None, repr=False)
 
     @model_validator(mode="after")
     def validate_unbinned_data(self) -> UnbinnedData:
@@ -230,10 +232,10 @@ class BinnedData(Datum):
         uncertainty: Optional uncertainty specification
     """
 
-    type: Literal["binned"]
-    contents: list[float]
-    axes: list[Axis]
-    uncertainty: GaussianUncertainty | None = Field(default=None)
+    type: Literal["binned"] = Field(default="binned", repr=False)
+    contents: list[float] = Field(..., repr=False)
+    axes: list[Axis] = Field(..., repr=False)
+    uncertainty: GaussianUncertainty | None = Field(default=None, repr=False)
 
     @model_validator(mode="after")
     def validate_binned_data(self) -> BinnedData:

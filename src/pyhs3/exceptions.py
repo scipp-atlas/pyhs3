@@ -47,6 +47,12 @@ class ExpressionEvaluationError(HS3Exception):
     """
 
 
+class WorkspaceValidationError(HS3Exception):
+    """
+    Raised when a workspace fails to validate.
+    """
+
+
 def custom_error_msg(custom_messages: dict[str, str]) -> Any:
     r"""
     Customize an error message for pydantic validation errors.
@@ -97,6 +103,7 @@ def custom_error_msg(custom_messages: dict[str, str]) -> Any:
                         loc=error["loc"],
                         input=error["input"],
                     )
+
                     new_errors.append(new_error)
                 else:
                     new_errors.append(error)

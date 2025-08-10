@@ -567,21 +567,6 @@ class ProcessNormalizationFunction(Function):
     )
     otherFactorList: list[str] = Field(default_factory=list, repr=False)
 
-    @model_validator(mode="after")
-    def validate_list_lengths(self) -> ProcessNormalizationFunction:
-        """Validate that parameter lists have consistent lengths."""
-        # Check symmetric variations
-        assert len(self.logKappa) == len(self.thetaList), (
-            f"logKappa length ({len(self.logKappa)}) must match thetaList length ({len(self.thetaList)})"
-        )
-
-        # Check asymmetric variations
-        assert len(self.logAsymmKappa) == len(self.asymmThetaList), (
-            f"logAsymmKappa length ({len(self.logAsymmKappa)}) must match asymmThetaList length ({len(self.asymmThetaList)})"
-        )
-
-        return self
-
     def expression(self, context: Context) -> TensorVar:
         """
         Evaluate the process normalization function.

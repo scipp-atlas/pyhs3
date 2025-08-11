@@ -271,6 +271,36 @@ def test_workspace_validation_error(tmp_path):
     with invalid_json_path.open("w") as f:
         json.dump(invalid_workspace, f)
 
-    # Verify that loading the invalid workspace raises WorkspaceValidationError
+    # Test with default suppress_traceback=True
+    with pytest.raises(WorkspaceValidationError, match="Workspace validation failed"):
+        Workspace.load(invalid_json_path)
+
+    # Test with suppress_traceback=False to cover that branch
+    with pytest.raises(WorkspaceValidationError, match="Workspace validation failed"):
+        Workspace.load(invalid_json_path, suppress_traceback=False)
+
+
+def test_workspace_validation_error_with_named_fields(tmp_path):
+    """Test WorkspaceValidationError with named fields to cover readable_loc conditional."""
+    # Create invalid workspace with named distributions to trigger the readable_loc branch
+    invalid_workspace = {
+        "metadata": {"hs3_version": "0.2"},  # Valid metadata to get to distributions
+        "distributions": [
+            {
+                "name": "named_dist",  # This name should appear in error formatting
+                "type": "gaussian_dist",
+                "x": "x",
+                "mean": "mu",
+                # Missing required 'sigma' field - this should trigger validation error with name
+            }
+        ],
+    }
+
+    # Write invalid JSON to temp file
+    invalid_json_path = tmp_path / "invalid_named_workspace.json"
+    with invalid_json_path.open("w") as f:
+        json.dump(invalid_workspace, f)
+
+    # Verify that loading raises WorkspaceValidationError
     with pytest.raises(WorkspaceValidationError, match="Workspace validation failed"):
         Workspace.load(invalid_json_path)

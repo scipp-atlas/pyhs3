@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 import pytensor.tensor as pt
-from pydantic import BaseModel, Field, PrivateAttr, RootModel
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, RootModel
 
 from pyhs3.typing.aliases import TensorVar
 
@@ -32,11 +32,13 @@ class ParameterPoint(BaseModel):
         kind: Type of tensor to create (optional, defaults to pt.scalar)
     """
 
-    name: str
-    value: float
-    const: bool = False
-    nbins: int | None = None
-    kind: Callable[..., TensorVar] = Field(default=pt.scalar, exclude=True)
+    model_config = ConfigDict()
+
+    name: str = Field(..., repr=True)
+    value: float = Field(..., repr=False)
+    const: bool = Field(default=False, repr=False)
+    nbins: int | None = Field(default=None, repr=False)
+    kind: Callable[..., TensorVar] = Field(default=pt.scalar, exclude=True, repr=False)
 
 
 class ParameterSet(BaseModel):
@@ -52,8 +54,10 @@ class ParameterSet(BaseModel):
         parameters: List of ParameterPoint specifications
     """
 
-    name: str
-    parameters: list[ParameterPoint] = Field(default_factory=list)
+    model_config = ConfigDict()
+
+    name: str = Field(..., repr=True)
+    parameters: list[ParameterPoint] = Field(default_factory=list, repr=False)
 
     @property
     def points(self) -> dict[str, ParameterPoint]:

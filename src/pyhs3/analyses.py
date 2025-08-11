@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from pydantic import BaseModel, Field, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 
 class Analysis(BaseModel):
@@ -30,12 +30,14 @@ class Analysis(BaseModel):
         prior: Optional name of prior distribution from distributions component
     """
 
-    name: str
-    likelihood: str
-    parameters_of_interest: list[str] | None = Field(default=None)
-    domains: list[str]
-    init: str | None = Field(default=None)
-    prior: str | None = Field(default=None)
+    model_config = ConfigDict()
+
+    name: str = Field(..., repr=True)
+    likelihood: str = Field(..., repr=False)
+    parameters_of_interest: list[str] | None = Field(default=None, repr=False)
+    domains: list[str] = Field(..., repr=False)
+    init: str | None = Field(default=None, repr=False)
+    prior: str | None = Field(default=None, repr=False)
 
 
 class Analyses(RootModel[list[Analysis]]):

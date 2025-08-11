@@ -124,8 +124,8 @@ class Evaluable(BaseModel):
 
     model_config = ConfigDict(serialize_by_alias=True)
 
-    name: str = Field(..., json_schema_extra={"preprocess": False})
-    type: str = Field(..., json_schema_extra={"preprocess": False})
+    name: str = Field(..., json_schema_extra={"preprocess": False}, repr=True)
+    type: str = Field(..., json_schema_extra={"preprocess": False}, repr=False)
     _parameters: dict[str, str] = PrivateAttr(default_factory=dict)
     _constants_values: dict[str, float | int] = PrivateAttr(default_factory=dict)
 

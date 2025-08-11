@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from typing import Annotated, Literal
 
 import numpy as np
-from pydantic import BaseModel, Field, RootModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 from pyhs3.exceptions import custom_error_msg
 
@@ -32,11 +32,13 @@ class Axis(BaseModel):
         edges: Bin edges array (for irregular binning, length n+1)
     """
 
-    name: str
-    min: float | None = Field(default=None)
-    max: float | None = Field(default=None)
-    nbins: int | None = Field(default=None)
-    edges: list[float] | None = Field(default=None)
+    model_config = ConfigDict()
+
+    name: str = Field(..., repr=True)
+    min: float | None = Field(default=None, repr=False)
+    max: float | None = Field(default=None, repr=False)
+    nbins: int | None = Field(default=None, repr=False)
+    edges: list[float] | None = Field(default=None, repr=False)
 
     @model_validator(mode="after")
     def validate_binning(self) -> Axis:
@@ -92,9 +94,13 @@ class GaussianUncertainty(BaseModel):
         correlation: Correlation matrix or 0 for no correlation
     """
 
-    type: Literal["gaussian_uncertainty"]
-    sigma: list[float]
-    correlation: list[list[float]] | Literal[0] = Field(default=0)
+    model_config = ConfigDict()
+
+    type: Literal["gaussian_uncertainty"] = Field(
+        default="gaussian_uncertainty", repr=False
+    )
+    sigma: list[float] = Field(..., repr=False)
+    correlation: list[list[float]] | Literal[0] = Field(default=0, repr=False)
 
     @model_validator(mode="after")
     def validate_correlation(self) -> GaussianUncertainty:
@@ -123,8 +129,10 @@ class Datum(BaseModel):
         type: Type identifier for the data format
     """
 
-    name: str
-    type: str
+    model_config = ConfigDict()
+
+    name: str = Field(..., repr=True)
+    type: str = Field(..., repr=False)
 
 
 class PointData(Datum):
@@ -140,9 +148,9 @@ class PointData(Datum):
         uncertainty: Optional uncertainty/error
     """
 
-    type: Literal["point"]
-    value: float
-    uncertainty: float | None = Field(default=None)
+    type: Literal["point"] = Field(default="point", repr=False)
+    value: float = Field(..., repr=False)
+    uncertainty: float | None = Field(default=None, repr=False)
 
 
 class UnbinnedData(Datum):
@@ -161,11 +169,11 @@ class UnbinnedData(Datum):
         entries_uncertainties: Optional uncertainties for each coordinate
     """
 
-    type: Literal["unbinned"]
-    entries: list[list[float]]
-    axes: list[Axis]
-    weights: list[float] | None = Field(default=None)
-    entries_uncertainties: list[list[float]] | None = Field(default=None)
+    type: Literal["unbinned"] = Field(default="unbinned", repr=False)
+    entries: list[list[float]] = Field(..., repr=False)
+    axes: list[Axis] = Field(..., repr=False)
+    weights: list[float] | None = Field(default=None, repr=False)
+    entries_uncertainties: list[list[float]] | None = Field(default=None, repr=False)
 
     @model_validator(mode="after")
     def validate_unbinned_data(self) -> UnbinnedData:
@@ -224,10 +232,10 @@ class BinnedData(Datum):
         uncertainty: Optional uncertainty specification
     """
 
-    type: Literal["binned"]
-    contents: list[float]
-    axes: list[Axis]
-    uncertainty: GaussianUncertainty | None = Field(default=None)
+    type: Literal["binned"] = Field(default="binned", repr=False)
+    contents: list[float] = Field(..., repr=False)
+    axes: list[Axis] = Field(..., repr=False)
+    uncertainty: GaussianUncertainty | None = Field(default=None, repr=False)
 
     @model_validator(mode="after")
     def validate_binned_data(self) -> BinnedData:

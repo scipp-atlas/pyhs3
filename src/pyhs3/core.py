@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, TypeAlias, TypeVar, cast
@@ -10,7 +12,7 @@ from typing import Any, Literal, TypeAlias, TypeVar, cast
 import numpy as np
 import numpy.typing as npt
 import pytensor.tensor as pt
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pytensor.compile.function import function
 from pytensor.graph.basic import applys_between, graph_inputs
 from rich.progress import (
@@ -28,6 +30,7 @@ from pyhs3.context import Context
 from pyhs3.data import Data
 from pyhs3.distributions import Distributions
 from pyhs3.domains import Domain, Domains, ProductDomain
+from pyhs3.exceptions import WorkspaceValidationError
 from pyhs3.functions import Functions
 from pyhs3.likelihoods import Likelihoods
 from pyhs3.metadata import Metadata
@@ -86,12 +89,20 @@ class Workspace(BaseModel):
     misc: dict[str, Any] | None = Field(default_factory=dict)
 
     @classmethod
-    def load(cls, path: str | os.PathLike[str]) -> Workspace:
+    def load(
+        cls,
+        path: str | os.PathLike[str],
+        *,
+        verbose: bool = False,
+        suppress_traceback: bool = True,
+    ) -> Workspace:
         """
         Load workspace from a JSON file.
 
         Args:
             path: Path to the JSON file containing the HS3 specification
+            verbose: If True, show all errors. If False, show first 20 and summarize rest.
+            suppress_traceback: If True, suppress traceback on validation errors (default True).
 
         Returns:
             Workspace: The loaded workspace instance
@@ -99,7 +110,97 @@ class Workspace(BaseModel):
         path_obj = Path(path)
         with path_obj.open("r", encoding="utf-8") as f:
             spec_dict = json.load(f)
-        return cls(**spec_dict)
+
+        try:
+            return cls(**spec_dict)
+        except ValidationError as e:
+            error_summary = cls._format_validation_error(e, path, verbose)
+
+            if suppress_traceback:
+                sys.tracebacklimit = 0
+            raise WorkspaceValidationError(error_summary) from None
+
+    @classmethod
+    def _format_validation_error(
+        cls,
+        validation_error: ValidationError,
+        path: str | os.PathLike[str],
+        verbose: bool,
+    ) -> str:
+        """
+        Format a ValidationError into a readable error summary.
+
+        Args:
+            validation_error: The ValidationError to format
+            path: Path to the file that caused the error
+            verbose: If True, show all errors. If False, show first 20 and summarize rest.
+
+        Returns:
+            Formatted error message string
+        """
+        error_count = len(validation_error.errors())
+        error_types: Counter[str] = Counter()
+        loc_errors: Counter[tuple[str, ...]] = Counter()
+
+        for error in validation_error.errors():
+            error_types[error["type"]] += 1
+            loc_errors[
+                tuple("#" if isinstance(key, int) else key for key in error["loc"])
+            ] += 1
+
+        # Create a concise error message
+        error_summary = (
+            f"Workspace validation failed with {error_count} errors from {path}\n"
+        )
+        error_summary += "\nError breakdown by type:\n"
+        for error_type, count in error_types.most_common():
+            error_summary += f"  {error_type}: {count}\n"
+
+        error_summary += "\nError breakdown by component:\n"
+        for loc, count in loc_errors.most_common():
+            loc_str = ".".join(loc)
+            error_summary += f"  {loc_str}: {count}\n"
+
+        # Show detailed errors with improved formatting
+        errors_to_show = (
+            validation_error.errors() if verbose else validation_error.errors()[:20]
+        )
+        error_summary += (
+            f"\nErrors for debugging ({'all' if verbose else 'first 20'}):\n"
+        )
+        for i, error in enumerate(errors_to_show):
+            # Format location more readably
+            loc_parts = []
+            for part in error.get("loc", []):
+                if isinstance(part, int):
+                    loc_parts.append(f"[{part}]")
+                else:
+                    loc_parts.append(str(part))
+
+            # Build readable location string
+            readable_loc = ""
+            for j, part in enumerate(loc_parts):
+                if j == 0:
+                    readable_loc = part
+                elif part.startswith("["):
+                    readable_loc += part  # Index directly follows
+                else:
+                    readable_loc += f" -> {part}"
+
+            # Add name from input if available
+            input_data = error.get("input", {})
+            if isinstance(input_data, dict) and "name" in input_data:
+                name = input_data["name"]
+                if readable_loc and not readable_loc.endswith("]"):
+                    readable_loc += f"('{name}')"
+
+            msg = error.get("msg", "Unknown error")
+            error_summary += f"  {i + 1}. {readable_loc}: {msg}\n"
+
+        if not verbose and error_count > 20:
+            error_summary += f"  ... and {error_count - 20} more errors (use verbose=True to see all)\n"
+
+        return error_summary
 
     def model(
         self,

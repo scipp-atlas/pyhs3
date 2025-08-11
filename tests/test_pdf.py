@@ -5,10 +5,12 @@ import math
 
 import numpy as np
 import pytensor.tensor as pt
+import pytest
 from pytensor import function
 
 from pyhs3 import Workspace
 from pyhs3.core import create_bounded_tensor
+from pyhs3.exceptions import WorkspaceValidationError
 
 
 def test_workspace_load_from_file(datadir):
@@ -235,3 +237,40 @@ def test_combine_long_exercise_logpdf_evaluation(datadir):
     # Since observed = 10 and all expected values > 10, smaller r values should give higher logPDF
     assert logpdf_val_r05 > default_logpdf_val  # r=0.5 closer to optimum than r=1.0
     assert default_logpdf_val > logpdf_val_r20  # r=1.0 closer to optimum than r=2.0
+
+
+def test_workspace_validation_error(tmp_path):
+    """Test that WorkspaceValidationError is raised for invalid workspace JSON."""
+    # Create an invalid workspace JSON that will trigger validation errors
+    invalid_workspace = {
+        # Missing required 'metadata' field
+        "distributions": [
+            {
+                "name": "gauss",
+                "type": "invalid_distribution_type",  # Invalid type
+                "x": "x",
+                "mean": "mu",
+                # Missing required 'sigma' field for gaussian_dist
+            }
+        ],
+        "parameter_points": [
+            {
+                "name": "test_params",
+                "parameters": [
+                    {
+                        # Missing required 'name' field
+                        "value": 1.0
+                    }
+                ],
+            }
+        ],
+    }
+
+    # Write invalid JSON to temp file
+    invalid_json_path = tmp_path / "invalid_workspace.json"
+    with invalid_json_path.open("w") as f:
+        json.dump(invalid_workspace, f)
+
+    # Verify that loading the invalid workspace raises WorkspaceValidationError
+    with pytest.raises(WorkspaceValidationError, match="Workspace validation failed"):
+        Workspace.load(invalid_json_path)

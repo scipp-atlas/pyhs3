@@ -36,7 +36,7 @@ Core Components
 Distributions
 ~~~~~~~~~~~~~
 
-**Distributions** are probability density functions that form the core of your statistical model:
+**Distributions** are probability density functions that form the core of your statistical model. PyHS3 supports all :hs3:label:`HS3 distribution types <hs3.sec:distributions>`:
 
 .. code-block:: python
 
@@ -53,7 +53,7 @@ For available distribution types, see the :doc:`api` documentation under :mod:`p
 Functions
 ~~~~~~~~~
 
-**Functions** compute derived parameters from other parameters:
+**Functions** compute derived parameters from other parameters following the :hs3:label:`HS3 functions specification <hs3.sec:functions>`:
 
 .. code-block:: python
 

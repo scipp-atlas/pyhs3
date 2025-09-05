@@ -20,7 +20,7 @@ Models are created from workspaces and provide the interface for evaluating PDFs
 Creating Models
 ---------------
 
-Models are created from workspaces using the ``.model()`` method:
+Models are created from workspaces using the ``.model()`` method. The following example uses the :hs3:label:`gaussian_dist <hs3.gaussian-normal-distribution>` distribution type:
 
 .. code-block:: python
 
@@ -203,7 +203,7 @@ Models use PyTensor for fast compilation and evaluation:
 Working with Complex Models
 ---------------------------
 
-For models with multiple distributions and functions:
+For models with multiple distributions and functions, including :hs3:label:`generic_dist <hs3.sec:generic_expression>` with mathematical expressions and :hs3:label:`sum functions <hs3.sum>`:
 
 .. code-block:: python
 

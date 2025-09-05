@@ -32,6 +32,9 @@ class GaussianDist(Distribution):
         mean (str): Parameter name for the mean (μ).
         sigma (str): Parameter name for the standard deviation (sigma).
         x (str): Input variable name.
+
+    HS3 Reference:
+        :hs3:label:`gaussian_dist <hs3.gaussian-normal-distribution>`
     """
 
     type: Literal["gaussian_dist"] = "gaussian_dist"
@@ -81,6 +84,9 @@ class UniformDist(Distribution):
     Note:
         The actual bounds are defined by the domain, not by distribution parameters.
         This matches both the HS3 specification and ROOT's RooUniform implementation.
+
+    HS3 Reference:
+        :hs3:label:`uniform_dist <hs3.uniform-distribution>`
     """
 
     type: Literal["uniform_dist"] = "uniform_dist"
@@ -120,6 +126,9 @@ class PoissonDist(Distribution):
     Parameters:
         mean (str): Parameter name for the rate parameter (λ).
         x (str): Input variable name (discrete count).
+
+    HS3 Reference:
+        :hs3:label:`poisson_dist <hs3.dist:poisson>`
     """
 
     type: Literal["poisson_dist"] = "poisson_dist"
@@ -164,6 +173,9 @@ class ExponentialDist(Distribution):
         The HS3 specification uses the form exp(-c*x), which matches ROOT's RooExponential
         when the negateCoefficient flag is True. ROOT handles parameter transformations
         automatically for compatibility.
+
+    HS3 Reference:
+        :hs3:label:`exponential_dist <hs3.exponential-distribution>`
     """
 
     type: Literal["exponential_dist"] = "exponential_dist"
@@ -208,6 +220,9 @@ class LogNormalDist(Distribution):
         are the mean and standard deviation of the underlying normal distribution
         in log-space. ROOT handles parameter transformations automatically for
         compatibility with median/shape parametrization.
+
+    HS3 Reference:
+        :hs3:label:`lognormal_dist <hs3.log-normal-distribution>`
     """
 
     type: Literal["lognormal_dist"] = "lognormal_dist"
@@ -258,6 +273,9 @@ class LandauDist(Distribution):
         The Landau distribution is asymmetric with a long tail towards larger values.
         This implementation uses an approximation since the exact Landau function
         is not available in PyTensor.
+
+    HS3 Reference:
+        Note: Landau distribution is not explicitly defined in the current HS3 specification.
     """
 
     type: Literal["landau_dist"] = "landau_dist"

@@ -10,8 +10,8 @@ What is a Workspace?
 
 A **Workspace** is the main container in PyHS3 that holds all the components needed to define a statistical model:
 
-- **Distributions**: Probability distributions (Gaussian, Poisson, etc.)
-- **Functions**: Mathematical functions that compute parameter values
+- **Distributions**: Probability distributions (:ref:`hs3:hs3.gaussian-normal-distribution`, :ref:`hs3:hs3.dist:poisson`, etc.)
+- **Functions**: Mathematical functions that compute parameter values (:ref:`hs3:hs3.sum`, :ref:`hs3:hs3.product`, :ref:`hs3:hs3.generic-function`)
 - **Domains**: Parameter space constraints and bounds
 - **Parameter Points**: Named sets of parameter values
 - **Data**: Observed data specifications (point data, unbinned data, binned/histogram data)
@@ -22,7 +22,7 @@ A **Workspace** is the main container in PyHS3 that holds all the components nee
 Loading a Workspace
 -------------------
 
-You can create a workspace from a dictionary or load it from a JSON file:
+You can create a workspace from a dictionary or load it from a JSON file. The following example shows a simple workspace with a :ref:`Gaussian distribution <hs3:hs3.gaussian-normal-distribution>`:
 
 .. code-block:: python
 
@@ -284,7 +284,7 @@ The main purpose of a workspace is to create models that you can evaluate:
 Example: Complete Physics Model
 ------------------------------
 
-Here's a more realistic example of a workspace for a physics analysis:
+Here's a more realistic example of a workspace for a physics analysis using both :ref:`Gaussian distributions <hs3:hs3.gaussian-normal-distribution>` and :ref:`generic expressions <hs3:hs3.sec:generic_expression>` with a :ref:`sum function <hs3:hs3.sum>`:
 
 .. code-block:: python
 
@@ -417,7 +417,7 @@ Working with Data Components
 
 The data component in PyHS3 provides structured specifications for observed data used in likelihood evaluations. There are three types of data supported:
 
-**Point Data**: Single measurements with optional uncertainties
+**Point Data**: Single measurements with optional uncertainties (see :mod:`HS3 data specification <hs3:chapters.2.3_data>`)
 
 .. code-block:: python
 

@@ -129,6 +129,9 @@ class Distributions(RootModel[list[DistributionType]]):
 
     Attributes:
         dists: Mapping from distribution names to Distribution instances.
+
+    HS3 Reference:
+        :hs3:label:`distributions <hs3.sec:distributions>`
     """
 
     root: Annotated[

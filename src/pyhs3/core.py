@@ -67,6 +67,9 @@ class Workspace(BaseModel):
         distribution_set (Distributions): Available distributions.
         domain_collection (Domains): Domain constraints for parameters.
         function_set (Functions): Available functions for parameter computation.
+
+    HS3 Reference:
+        See :hs3:label:`HS3 file format specification <hs3.file-format>` for the complete workspace structure.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -265,6 +268,9 @@ class Model:
     The model handles dependency resolution between parameters, functions,
     and distributions, ensuring proper evaluation order through topological
     sorting of the computation graph.
+
+    HS3 Reference:
+        Models are computational representations of :hs3:label:`HS3 workspaces <hs3.file-format>`.
     """
 
     def __init__(

@@ -70,7 +70,11 @@ def _asym_interpolation(
 
 
 class SumFunction(Function):
-    """Sum function that adds summands together."""
+    """Sum function that adds summands together.
+
+    HS3 Reference:
+        :ref:`hs3:hs3.sum`
+    """
 
     type: Literal["sum"] = Field(default="sum", repr=False)
     summands: list[str] = Field(..., repr=False)
@@ -96,7 +100,11 @@ class SumFunction(Function):
 
 
 class ProductFunction(Function):
-    """Product function that multiplies factors together."""
+    """Product function that multiplies factors together.
+
+    HS3 Reference:
+        :ref:`hs3:hs3.product`
+    """
 
     type: Literal["product"] = Field(default="product", repr=False)
     factors: list[int | float | str] = Field(..., repr=False)
@@ -141,6 +149,9 @@ class GenericFunction(Function):
     Examples:
         >>> func = GenericFunction(name="quadratic", expression="x**2 + 2*x + 1")
         >>> func = GenericFunction(name="sinusoid", expression="sin(x) * exp(-t)")
+
+    HS3 Reference:
+        :hs3:label:`generic_function <hs3.generic-function>`
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, serialize_by_alias=True)
@@ -207,6 +218,9 @@ class InterpolationFunction(Function):
     Implements ROOT's PiecewiseInterpolation logic to morph between nominal
     and variation distributions based on nuisance parameter values.
     Supports multiple interpolation codes (0-6) for different mathematical approaches.
+
+    HS3 Reference:
+        Note: Interpolation functions are not explicitly defined in the current HS3 specification.
 
     Mathematical Formulations:
         For **additive** interpolation modes (codes 0, 2, 3, 4):

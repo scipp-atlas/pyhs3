@@ -53,6 +53,9 @@ class CrystalBallDist(Distribution):
     Note:
         All parameters except m and m0 must be positive. This is the standard
         single-sided Crystal Ball used widely in high-energy physics.
+
+    HS3 Reference:
+        :hs3:label:`crystalball_dist <hs3.crystalball-distribution>`
     """
 
     type: Literal["crystalball_dist"] = "crystalball_dist"
@@ -139,6 +142,9 @@ class AsymmetricCrystalBallDist(Distribution):
         All parameters except m and m0 must be positive. The distribution
         reduces to a single-sided Crystal Ball when one of the alpha parameters
         is set to zero.
+
+    HS3 Reference:
+        Note: Asymmetric Crystal Ball distribution is not explicitly defined in the current HS3 specification.
     """
 
     type: Literal["crystalball_doublesided_dist"] = "crystalball_doublesided_dist"
@@ -221,6 +227,9 @@ class ArgusDist(Distribution):
         The ARGUS distribution is used to model the invariant mass spectrum of
         combinatorial backgrounds in B meson decays. The resonance parameter
         typically corresponds to a kinematic endpoint.
+
+    HS3 Reference:
+        :hs3:label:`argus_dist <hs3.argus-distribution>`
     """
 
     type: Literal["argus_dist"] = "argus_dist"

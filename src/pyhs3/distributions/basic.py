@@ -34,7 +34,7 @@ class GaussianDist(Distribution):
         x (str): Input variable name.
 
     HS3 Reference:
-        :hs3:label:`gaussian_dist <hs3.gaussian-normal-distribution>`
+        :ref:`hs3:hs3.gaussian-normal-distribution`
     """
 
     type: Literal["gaussian_dist"] = "gaussian_dist"
@@ -86,7 +86,7 @@ class UniformDist(Distribution):
         This matches both the HS3 specification and ROOT's RooUniform implementation.
 
     HS3 Reference:
-        :hs3:label:`uniform_dist <hs3.uniform-distribution>`
+        :ref:`hs3:hs3.uniform-distribution`
     """
 
     type: Literal["uniform_dist"] = "uniform_dist"
@@ -128,7 +128,7 @@ class PoissonDist(Distribution):
         x (str): Input variable name (discrete count).
 
     HS3 Reference:
-        :hs3:label:`poisson_dist <hs3.dist:poisson>`
+        :ref:`hs3:hs3.dist:poisson`
     """
 
     type: Literal["poisson_dist"] = "poisson_dist"

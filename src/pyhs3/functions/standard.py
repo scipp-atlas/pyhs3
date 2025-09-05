@@ -73,7 +73,7 @@ class SumFunction(Function):
     """Sum function that adds summands together.
 
     HS3 Reference:
-        :hs3:label:`sum <hs3.sum>`
+        :ref:`hs3:hs3.sum`
     """
 
     type: Literal["sum"] = Field(default="sum", repr=False)
@@ -103,7 +103,7 @@ class ProductFunction(Function):
     """Product function that multiplies factors together.
 
     HS3 Reference:
-        :hs3:label:`product <hs3.product>`
+        :ref:`hs3:hs3.product`
     """
 
     type: Literal["product"] = Field(default="product", repr=False)

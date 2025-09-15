@@ -55,7 +55,7 @@ class TestDistribution:
         """Test that base distribution expression method raises NotImplementedError."""
         dist = Distribution(name="test", type="unknown")
         with pytest.raises(
-            NotImplementedError, match="Distribution type=unknown is not implemented."
+            NotImplementedError, match=r"Distribution type=unknown is not implemented."
         ):
             dist.expression({})
 

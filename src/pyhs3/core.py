@@ -191,7 +191,7 @@ class Workspace(BaseModel):
                     readable_loc += f" -> {part}"
 
             # Add name from input if available
-            input_data = error.get("input", {})
+            input_data: Any = error.get("input", {})
             if isinstance(input_data, dict) and "name" in input_data:
                 name = input_data["name"]
                 if readable_loc and not readable_loc.endswith("]"):

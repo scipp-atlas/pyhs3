@@ -275,7 +275,7 @@ class TestUnbinnedData:
         weights = [0.8, 1.2]  # Wrong length
 
         with pytest.raises(
-            ValueError, match="Weights array length .* must match entries length"
+            ValueError, match=r"Weights array length .* must match entries length"
         ):
             UnbinnedData(
                 name="test",
@@ -292,7 +292,7 @@ class TestUnbinnedData:
         uncertainties = [[0.1], [0.2], [0.3]]  # Wrong length
 
         with pytest.raises(
-            ValueError, match="Uncertainties array length .* must match entries length"
+            ValueError, match=r"Uncertainties array length .* must match entries length"
         ):
             UnbinnedData(
                 name="test",
@@ -308,7 +308,7 @@ class TestUnbinnedData:
         axes = [Axis(name="x"), Axis(name="y")]  # 2 axes
 
         with pytest.raises(
-            ValueError, match="Entry dimensionality .* must match number of axes"
+            ValueError, match=r"Entry dimensionality .* must match number of axes"
         ):
             UnbinnedData(name="test", type="unbinned", entries=entries, axes=axes)
 
@@ -317,7 +317,7 @@ class TestUnbinnedData:
         entries = [[1.0, 2.0], [3.0]]  # Inconsistent dimensions
         axes = [Axis(name="x"), Axis(name="y")]
 
-        with pytest.raises(ValueError, match="Entry.*has.*dimensions, expected"):
+        with pytest.raises(ValueError, match=r"Entry.*has.*dimensions, expected"):
             UnbinnedData(name="test", type="unbinned", entries=entries, axes=axes)
 
     def test_unbinned_data_validation_inconsistent_uncertainty_dimensions(self):
@@ -445,7 +445,7 @@ class TestBinnedData:
 
         with pytest.raises(
             ValueError,
-            match="Contents array length .* must match expected number of bins",
+            match=r"Contents array length .* must match expected number of bins",
         ):
             BinnedData(name="test", type="binned", contents=contents, axes=axes)
 
@@ -456,7 +456,7 @@ class TestBinnedData:
 
         with pytest.raises(
             ValueError,
-            match="must specify either regular binning .* or irregular binning",
+            match=r"must specify either regular binning .* or irregular binning",
         ):
             BinnedData(name="test", type="binned", contents=contents, axes=axes)
 
@@ -469,7 +469,7 @@ class TestBinnedData:
         )  # Wrong length
 
         with pytest.raises(
-            ValueError, match="Uncertainty sigma length .* must match contents length"
+            ValueError, match=r"Uncertainty sigma length .* must match contents length"
         ):
             BinnedData(
                 name="test",

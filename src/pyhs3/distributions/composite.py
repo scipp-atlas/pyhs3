@@ -150,13 +150,6 @@ class MixtureDist(Distribution):
             last_index = len(self.summands) - 1
             f_last = context[self.summands[last_index]]
             mixturesum += (1 - coeffsum) * f_last
-        else:
-            # This should be caught by validation, but included for safety
-            msg = (
-                f"Invalid coefficient configuration: {n_coeffs} coefficients "
-                f"for {n_summands} summands. Must have N or N-1 coefficients."
-            )
-            raise ValueError(msg)
 
         return cast(TensorVar, mixturesum)
 

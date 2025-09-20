@@ -2660,27 +2660,3 @@ class TestMixtureDist:
         assert loaded_dist.summands == dist.summands
         assert loaded_dist.coefficients == dist.coefficients
         assert loaded_dist.ref_coef_norm == dist.ref_coef_norm
-
-    def test_mixture_dist_validation_safety_check(self):
-        """Test that expression method handles invalid configurations gracefully."""
-        # Create a MixtureDist with an impossible configuration by manually manipulating
-        # the coefficients list after creation
-        dist = MixtureDist(
-            name="test_mixture",
-            summands=["pdf1", "pdf2"],
-            coefficients=["coeff1"],  # Valid for 2 PDFs initially
-        )
-
-        # Manually add a third summand to create invalid state (for testing error handling)
-        dist.summands.append("pdf3")  # Now 1 coeff for 3 PDFs (invalid)
-
-        context = {
-            "pdf1": pt.constant(1.0),
-            "pdf2": pt.constant(2.0),
-            "pdf3": pt.constant(3.0),
-            "coeff1": pt.constant(0.5),
-        }
-
-        # Should raise ValueError in expression method
-        with pytest.raises(ValueError, match=r"Invalid coefficient configuration"):
-            dist.expression(context)

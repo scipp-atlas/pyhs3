@@ -53,7 +53,9 @@ class MixtureDist(Distribution):
         coefficients (list[str]): Names of coefficient parameters.
         summands (list[str]): Names of component distributions.
         extended (bool): Whether the mixture is extended (affects normalization).
+            Must be True for N coefficients, False for N-1 coefficients.
         ref_coef_norm (list[str] | None): Optional list of coefficient names for custom normalization.
+            Only valid when using N coefficients (extended=True).
 
     ROOT Reference:
         :rootref:`RooAddPdf <classRooAddPdf.html>`
@@ -133,6 +135,34 @@ class MixtureDist(Distribution):
 
         return coefficients
 
+    @field_validator("extended", mode="after")
+    @classmethod
+    def validate_extended_matches_coefficients(
+        cls, extended: bool, info: ValidationInfo
+    ) -> bool:
+        """Validate that extended matches coefficient configuration."""
+        # Get summands and coefficients from the values being validated
+        summands = info.data.get("summands", [])
+        coefficients = info.data.get("coefficients", [])
+        n_coeffs = len(coefficients)
+        n_summands = len(summands)
+
+        # Validate extended matches coefficient configuration
+        if n_coeffs == n_summands and not extended:
+            msg = (
+                f"extended must be True when N coefficients = N summands "
+                f"({n_coeffs} coefficients, {n_summands} summands)."
+            )
+            raise ValueError(msg)
+        if n_coeffs == n_summands - 1 and extended:
+            msg = (
+                f"extended must be False when N-1 coefficients with N summands "
+                f"({n_coeffs} coefficients, {n_summands} summands)."
+            )
+            raise ValueError(msg)
+
+        return extended
+
     def expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the mixture distribution.
@@ -188,6 +218,66 @@ class MixtureDist(Distribution):
             mixturesum += (1 - coeffsum) * f_last
 
         return cast(TensorVar, mixturesum)
+
+    def expected_yield(self, context: Context) -> TensorVar:
+        """
+        Compute the total expected yield nu in the extended case.
+
+        - N coefficients case: nu = sum(coefficients) or sum(ref_coef_norm) if specified
+        - N-1 coefficients case: not defined (extended=False always)
+
+        Args:
+            context: Mapping of names to pytensor variables
+
+        Returns:
+            Expected yield (nu) for extended likelihood
+
+        Raises:
+            RuntimeError: If called on non-extended PDF
+        """
+        if not self.extended:
+            msg = "expected_yield only valid for extended PDFs"
+            raise RuntimeError(msg)
+
+        nu = pt.constant(0.0)
+
+        if self.ref_coef_norm is not None:
+            # Use only the coefficients specified in ref_coef_norm
+            for coeff in self.ref_coef_norm:
+                nu += context[coeff]
+        else:
+            # Use all coefficients
+            for coeff in self.coefficients:
+                nu += context[coeff]
+
+        return cast(TensorVar, nu)
+
+    def extended_likelihood(self, context: Context, n_observed: int) -> TensorVar:
+        """
+        Poisson term for the extended likelihood.
+
+        Computes: log Pois(N_obs | nu) = N_obs * log(nu) - nu
+
+        Args:
+            context: Mapping of names to pytensor variables
+            n_observed: Number of observed events
+
+        Returns:
+            Log Poisson probability for extended likelihood
+
+        Raises:
+            RuntimeError: If called on non-extended PDF
+        """
+        if not self.extended:
+            msg = "extended_likelihood only valid when extended=True"
+            raise RuntimeError(msg)
+
+        nu = self.expected_yield(context)
+        n_obs = pt.constant(n_observed, dtype="float64")
+
+        # log(Pois(N|nu)), dropping the constant -log(N!)
+        log_pois = n_obs * pt.log(nu) - nu
+        return cast(TensorVar, log_pois)
 
 
 class ProductDist(Distribution):

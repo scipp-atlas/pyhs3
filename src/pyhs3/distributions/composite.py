@@ -203,7 +203,7 @@ class MixtureDist(Distribution):
                     coeffsum += context[coeff]
                 mixturesum = mixturesum / coeffsum
 
-        elif n_coeffs == n_summands - 1:
+        else:
             # N-1 coefficients case: traditional approach with automatic last term
             mixturesum = pt.constant(0.0)
             coeffsum = pt.constant(0.0)

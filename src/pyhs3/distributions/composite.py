@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Literal, cast
 
 import pytensor.tensor as pt
+from pydantic import Field, ValidationInfo, field_serializer, field_validator
 
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
@@ -20,29 +21,89 @@ class MixtureDist(Distribution):
     r"""
     Mixture of probability distributions.
 
-    Implements a weighted combination of multiple distributions:
+    Implements a weighted combination of multiple distributions following ROOT's RooAddPdf.
+    Supports both N and N-1 coefficient configurations:
+
+    **N-1 coefficients (traditional):**
 
     .. math::
 
         f(x) = \sum_{i=1}^{n-1} c_i \cdot f_i(x) + (1 - \sum_{i=1}^{n-1} c_i) \cdot f_n(x)
 
-    The last component is automatically normalized to ensure the
-    coefficients sum to 1.
+    **N coefficients (equal counts):**
+
+    .. math::
+
+        f(x) = \frac{\sum_{i=1}^{n} c_i \cdot f_i(x)}{\sum_{i=1}^{n} c_i}
+
+    **N coefficients with ref_coef_norm:**
+
+    .. math::
+
+        f(x) = \frac{\sum_{i=1}^{n} c_i \cdot f_i(x)}{\sum_{j \in \text{ref\_coef\_norm}} c_j}
 
     Parameters:
         coefficients (list[str]): Names of coefficient parameters.
         summands (list[str]): Names of component distributions.
         extended (bool): Whether the mixture is extended (affects normalization).
+        ref_coef_norm (list[str] | None): Optional list of coefficient names for custom normalization.
+
+    ROOT Reference:
+        :rootref:`RooAddPdf <classRooAddPdf.html>`
     """
 
     type: Literal["mixture_dist"] = "mixture_dist"
     summands: list[str]
     coefficients: list[str]
     extended: bool = False
+    ref_coef_norm: list[str] | None = Field(
+        default=None, json_schema_extra={"preprocess": False}
+    )
+
+    @field_validator("ref_coef_norm", mode="before")
+    @classmethod
+    def split_comma_separated_ref_coef_norm(cls, v: object) -> object:
+        """Convert comma-separated string to list for ref_coef_norm."""
+        if isinstance(v, str):
+            v = v.strip()
+            return None if v == "" else v.split(",")
+        return v
+
+    @field_serializer("ref_coef_norm")
+    def serialize_ref_coef_norm(self, ref_coef_norm: list[str] | None) -> str | None:
+        """Convert list back to comma-separated string for serialization."""
+        if ref_coef_norm is None:
+            return None
+        return ",".join(ref_coef_norm)
+
+    @field_validator("coefficients", mode="after")
+    @classmethod
+    def validate_coefficient_count(
+        cls, coefficients: list[str], info: ValidationInfo
+    ) -> list[str]:
+        """Validate that coefficient count matches summand count appropriately."""
+        # Get summands from the values being validated
+        summands = info.data.get("summands", [])
+        n_coeffs = len(coefficients)
+        n_summands = len(summands)
+
+        if n_coeffs == n_summands or n_coeffs == n_summands - 1:
+            return coefficients
+
+        msg = (
+            f"Invalid coefficient configuration: {n_coeffs} coefficients "
+            f"for {n_summands} summands. Must have N ({n_summands}) or "
+            f"N-1 ({n_summands - 1}) coefficients."
+        )
+        raise ValueError(msg)
 
     def expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the mixture distribution.
+
+        Handles both N and N-1 coefficient cases:
+        - N-1 coefficients: Traditional approach with automatic normalization
+        - N coefficients: Direct summation with optional custom normalization
 
         Args:
             context (dict): Mapping of names to pytensor variables.
@@ -50,17 +111,53 @@ class MixtureDist(Distribution):
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of the mixture PDF.
         """
+        n_coeffs = len(self.coefficients)
+        n_summands = len(self.summands)
 
-        mixturesum = pt.constant(0.0)
-        coeffsum = pt.constant(0.0)
+        if n_coeffs == n_summands:
+            # N coefficients case: direct summation with normalization
+            mixturesum = pt.constant(0.0)
 
-        for i, coeff in enumerate(self.coefficients):
-            coeffsum += context[coeff]
-            mixturesum += context[coeff] * context[self.summands[i]]
+            # Calculate the mixture sum
+            for i, coeff in enumerate(self.coefficients):
+                mixturesum += context[coeff] * context[self.summands[i]]
 
-        last_index = len(self.summands) - 1
-        f_last = context[self.summands[last_index]]
-        mixturesum = mixturesum + (1 - coeffsum) * f_last
+            # Handle normalization
+            if self.ref_coef_norm is not None:
+                # Custom normalization using specified coefficients
+                norm_sum = pt.constant(0.0)
+                for norm_coeff in self.ref_coef_norm:
+                    norm_sum += context[norm_coeff]
+                mixturesum = mixturesum / norm_sum
+            else:
+                # Standard normalization: divide by sum of all coefficients
+                coeffsum = pt.constant(0.0)
+                for coeff in self.coefficients:
+                    coeffsum += context[coeff]
+                mixturesum = mixturesum / coeffsum
+
+        elif n_coeffs == n_summands - 1:
+            # N-1 coefficients case: traditional approach with automatic last term
+            mixturesum = pt.constant(0.0)
+            coeffsum = pt.constant(0.0)
+
+            # Sum the first N-1 terms
+            for i, coeff in enumerate(self.coefficients):
+                coeffsum += context[coeff]
+                mixturesum += context[coeff] * context[self.summands[i]]
+
+            # Add the last term with remaining coefficient
+            last_index = len(self.summands) - 1
+            f_last = context[self.summands[last_index]]
+            mixturesum += (1 - coeffsum) * f_last
+        else:
+            # This should be caught by validation, but included for safety
+            msg = (
+                f"Invalid coefficient configuration: {n_coeffs} coefficients "
+                f"for {n_summands} summands. Must have N or N-1 coefficients."
+            )
+            raise ValueError(msg)
+
         return cast(TensorVar, mixturesum)
 
 

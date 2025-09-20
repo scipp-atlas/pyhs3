@@ -71,6 +71,7 @@ class MixtureDist(Distribution):
 
     @model_serializer(mode="wrap")
     def serialize_model(self, handler: Callable[[Any], Any]) -> Any:
+        """Do not serialize ref_coef_norm if it is unspecified (None)."""
         data = handler(self)
         if self.ref_coef_norm is None:
             del data["ref_coef_norm"]

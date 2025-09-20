@@ -7,10 +7,17 @@ multiple other distributions, including mixtures and products of distributions.
 
 from __future__ import annotations
 
-from typing import Literal, cast
+from collections.abc import Callable
+from typing import Any, Literal, cast
 
 import pytensor.tensor as pt
-from pydantic import Field, ValidationInfo, field_serializer, field_validator
+from pydantic import (
+    Field,
+    ValidationInfo,
+    field_serializer,
+    field_validator,
+    model_serializer,
+)
 
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
@@ -60,6 +67,13 @@ class MixtureDist(Distribution):
         default=None, json_schema_extra={"preprocess": False}
     )
 
+    @model_serializer(mode="wrap")
+    def serialize_model(self, handler: Callable[[Any], Any]) -> Any:
+        data = handler(self)
+        if self.ref_coef_norm is None:
+            del data["ref_coef_norm"]
+        return data
+
     @field_validator("ref_coef_norm", mode="before")
     @classmethod
     def split_comma_separated_ref_coef_norm(cls, v: object) -> object:
@@ -68,6 +82,28 @@ class MixtureDist(Distribution):
             v = v.strip()
             return None if v == "" else v.split(",")
         return v
+
+    @field_validator("ref_coef_norm", mode="after")
+    @classmethod
+    def validate_ref_coef_norm_usage(
+        cls, ref_coef_norm: list[str] | None, info: ValidationInfo
+    ) -> list[str] | None:
+        """Validate that ref_coef_norm is only used with N=N coefficient case."""
+        if ref_coef_norm is not None:
+            # Get summands and coefficients from the values being validated
+            summands = info.data.get("summands", [])
+            coefficients = info.data.get("coefficients", [])
+            n_coeffs = len(coefficients)
+            n_summands = len(summands)
+
+            if n_coeffs != n_summands:
+                msg = (
+                    f"ref_coef_norm can only be used with N coefficients and N summands "
+                    f"(N={n_summands}), but got {n_coeffs} coefficients."
+                )
+                raise ValueError(msg)
+
+        return ref_coef_norm
 
     @field_serializer("ref_coef_norm")
     def serialize_ref_coef_norm(self, ref_coef_norm: list[str] | None) -> str | None:
@@ -87,15 +123,15 @@ class MixtureDist(Distribution):
         n_coeffs = len(coefficients)
         n_summands = len(summands)
 
-        if n_coeffs in (n_summands, n_summands - 1):
-            return coefficients
+        if n_coeffs not in (n_summands, n_summands - 1):
+            msg = (
+                f"Invalid coefficient configuration: {n_coeffs} coefficients "
+                f"for {n_summands} summands. Must have N ({n_summands}) or "
+                f"N-1 ({n_summands - 1}) coefficients."
+            )
+            raise ValueError(msg)
 
-        msg = (
-            f"Invalid coefficient configuration: {n_coeffs} coefficients "
-            f"for {n_summands} summands. Must have N ({n_summands}) or "
-            f"N-1 ({n_summands - 1}) coefficients."
-        )
-        raise ValueError(msg)
+        return coefficients
 
     def expression(self, context: Context) -> TensorVar:
         """

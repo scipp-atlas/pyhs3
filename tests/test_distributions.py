@@ -2636,6 +2636,18 @@ class TestMixtureDist:
                 coefficients=["coeff1", "coeff2", "coeff3", "coeff4"],
             )
 
+        # Test ref_coef_norm with N-1 coefficients (invalid)
+        with pytest.raises(
+            ValueError,
+            match=r"ref_coef_norm can only be used with N coefficients and N summands",
+        ):
+            MixtureDist(
+                name="test_mixture",
+                summands=["pdf1", "pdf2", "pdf3"],
+                coefficients=["coeff1", "coeff2"],  # N-1 coefficients
+                ref_coef_norm=["coeff1"],  # Should not be allowed
+            )
+
     def test_mixture_dist_json_roundtrip(self):
         """Test JSON serialization and deserialization with ref_coef_norm."""
 

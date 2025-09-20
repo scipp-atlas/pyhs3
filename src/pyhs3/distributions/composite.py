@@ -87,7 +87,7 @@ class MixtureDist(Distribution):
         n_coeffs = len(coefficients)
         n_summands = len(summands)
 
-        if n_coeffs == n_summands or n_coeffs == n_summands - 1:
+        if n_coeffs in (n_summands, n_summands - 1):
             return coefficients
 
         msg = (

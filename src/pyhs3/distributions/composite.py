@@ -29,21 +29,21 @@ class MixtureDist(Distribution):
     Mixture of probability distributions.
 
     Implements a weighted combination of multiple distributions following ROOT's RooAddPdf.
-    Supports both N and N-1 coefficient configurations:
+    Supports both N and N-1 coefficient configurations where :math:`N` represents number of distributions (`summands`):
 
-    **N-1 coefficients (traditional):**
+    **N-1 coefficients:**
 
     .. math::
 
         f(x) = \sum_{i=1}^{n-1} c_i \cdot f_i(x) + (1 - \sum_{i=1}^{n-1} c_i) \cdot f_n(x)
 
-    **N coefficients (equal counts):**
+    **N coefficients:**
 
     .. math::
 
         f(x) = \frac{\sum_{i=1}^{n} c_i \cdot f_i(x)}{\sum_{i=1}^{n} c_i}
 
-    **N coefficients with ref_coef_norm:**
+    **N coefficients with `ref_coef_norm`:**
 
     .. math::
 

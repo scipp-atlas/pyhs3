@@ -7,6 +7,7 @@ including validation against expected NLL values from ROOT fits.
 
 from __future__ import annotations
 
+import json
 import math
 
 import numpy as np
@@ -31,6 +32,7 @@ from pyhs3.distributions import (
     GGZZBackgroundDist,
     LandauDist,
     LogNormalDist,
+    MixtureDist,
     PoissonDist,
     PolynomialDist,
     ProductDist,
@@ -2483,3 +2485,319 @@ class TestCMSDistributions:
         assert np.isfinite(result_val)
         assert result_val > 0.0
         np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+
+class TestMixtureDist:
+    """Test MixtureDist implementation with various coefficient scenarios."""
+
+    def test_mixture_dist_creation(self):
+        """Test MixtureDist can be created and configured."""
+        # Test basic creation with N-1 coefficients
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2"],
+            extended=False,
+        )
+        assert dist.name == "test_mixture"
+        assert dist.summands == ["pdf1", "pdf2", "pdf3"]
+        assert dist.coefficients == ["coeff1", "coeff2"]
+        assert dist.extended is False
+        assert dist.ref_coef_norm is None
+
+    def test_mixture_dist_n_minus_1_coefficients(self):
+        """Test traditional N-1 coefficient case (2 coefficients, 3 PDFs)."""
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2"],
+        )
+
+        # Create simple mock context
+        context = {
+            "pdf1": pt.constant(1.0),
+            "pdf2": pt.constant(2.0),
+            "pdf3": pt.constant(3.0),
+            "coeff1": pt.constant(0.3),
+            "coeff2": pt.constant(0.4),
+        }
+
+        result = dist.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Expected: 0.3*1.0 + 0.4*2.0 + (1-0.3-0.4)*3.0 = 0.3 + 0.8 + 0.3*3.0 = 0.3 + 0.8 + 0.9 = 2.0
+        expected = 0.3 * 1.0 + 0.4 * 2.0 + (1 - 0.3 - 0.4) * 3.0
+        assert np.isfinite(result_val)
+        np.testing.assert_allclose(result_val, expected, rtol=1e-10)
+
+    def test_mixture_dist_n_coefficients_standard_norm(self):
+        """Test N coefficient case with standard normalization (3 coefficients, 3 PDFs)."""
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+        )
+
+        context = {
+            "pdf1": pt.constant(1.0),
+            "pdf2": pt.constant(2.0),
+            "pdf3": pt.constant(3.0),
+            "coeff1": pt.constant(0.2),
+            "coeff2": pt.constant(0.3),
+            "coeff3": pt.constant(0.5),
+        }
+
+        result = dist.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Expected: (0.2*1.0 + 0.3*2.0 + 0.5*3.0) / (0.2 + 0.3 + 0.5)
+        #         = (0.2 + 0.6 + 1.5) / 1.0 = 2.3
+        numerator = 0.2 * 1.0 + 0.3 * 2.0 + 0.5 * 3.0
+        denominator = 0.2 + 0.3 + 0.5
+        expected = numerator / denominator
+        assert np.isfinite(result_val)
+        np.testing.assert_allclose(result_val, expected, rtol=1e-10)
+
+    def test_mixture_dist_n_coefficients_ref_coef_norm(self):
+        """Test N coefficient case with ref_coef_norm custom normalization."""
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+            ref_coef_norm=[
+                "coeff1",
+                "coeff2",
+            ],  # Only normalize by first two coefficients
+        )
+
+        context = {
+            "pdf1": pt.constant(1.0),
+            "pdf2": pt.constant(2.0),
+            "pdf3": pt.constant(3.0),
+            "coeff1": pt.constant(0.2),
+            "coeff2": pt.constant(0.3),
+            "coeff3": pt.constant(0.5),
+        }
+
+        result = dist.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # Expected: (0.2*1.0 + 0.3*2.0 + 0.5*3.0) / (0.2 + 0.3)
+        #         = (0.2 + 0.6 + 1.5) / 0.5 = 2.3 / 0.5 = 4.6
+        numerator = 0.2 * 1.0 + 0.3 * 2.0 + 0.5 * 3.0
+        denominator = 0.2 + 0.3  # Only coeff1 + coeff2
+        expected = numerator / denominator
+        assert np.isfinite(result_val)
+        np.testing.assert_allclose(result_val, expected, rtol=1e-10)
+
+    def test_mixture_dist_ref_coef_norm_parsing(self):
+        """Test ref_coef_norm parsing from comma-separated string."""
+        # Test creation from comma-separated string
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+            ref_coef_norm="coeff1,coeff2",
+        )
+        assert dist.ref_coef_norm == ["coeff1", "coeff2"]
+
+        # Test serialization back to comma-separated string
+        serialized = dist.serialize_ref_coef_norm(dist.ref_coef_norm)
+        assert serialized == "coeff1,coeff2"
+
+        # Test empty string handling
+        dist_empty = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2"],
+            coefficients=["coeff1"],
+            ref_coef_norm="",
+        )
+        assert dist_empty.ref_coef_norm is None
+
+    def test_mixture_dist_validation_errors(self):
+        """Test validation errors for invalid coefficient configurations."""
+
+        # Test 1 coefficient, 3 PDFs (invalid)
+        with pytest.raises(ValueError, match=r"Invalid coefficient configuration"):
+            MixtureDist(
+                name="test_mixture",
+                summands=["pdf1", "pdf2", "pdf3"],
+                coefficients=["coeff1"],
+            )
+
+        # Test 4 coefficients, 3 PDFs (invalid)
+        with pytest.raises(ValueError, match=r"Invalid coefficient configuration"):
+            MixtureDist(
+                name="test_mixture",
+                summands=["pdf1", "pdf2", "pdf3"],
+                coefficients=["coeff1", "coeff2", "coeff3", "coeff4"],
+            )
+
+        # Test ref_coef_norm with N-1 coefficients (invalid)
+        with pytest.raises(
+            ValueError,
+            match=r"ref_coef_norm can only be used with N coefficients and N summands",
+        ):
+            MixtureDist(
+                name="test_mixture",
+                summands=["pdf1", "pdf2", "pdf3"],
+                coefficients=["coeff1", "coeff2"],  # N-1 coefficients
+                ref_coef_norm=["coeff1"],  # Should not be allowed
+            )
+
+        # Test extended=False with N coefficients (invalid)
+        with pytest.raises(
+            ValueError, match=r"extended must be True when N coefficients = N summands"
+        ):
+            MixtureDist(
+                name="test_mixture",
+                summands=["pdf1", "pdf2", "pdf3"],
+                coefficients=["coeff1", "coeff2", "coeff3"],  # N coefficients
+                extended=False,  # Should be True
+            )
+
+        # Test extended=True with N-1 coefficients (invalid)
+        with pytest.raises(
+            ValueError,
+            match=r"extended must be False when N-1 coefficients with N summands",
+        ):
+            MixtureDist(
+                name="test_mixture",
+                summands=["pdf1", "pdf2", "pdf3"],
+                coefficients=["coeff1", "coeff2"],  # N-1 coefficients
+                extended=True,  # Should be False
+            )
+
+    def test_mixture_dist_json_roundtrip(self):
+        """Test JSON serialization and deserialization with ref_coef_norm."""
+
+        # Create MixtureDist with ref_coef_norm
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+            ref_coef_norm=["coeff1", "coeff2"],
+        )
+
+        # Serialize to JSON
+        dist_dict = dist.model_dump()
+        json_str = json.dumps(dist_dict)
+
+        # Deserialize from JSON
+        loaded_dict = json.loads(json_str)
+        loaded_dist = MixtureDist(**loaded_dict)
+
+        # Verify roundtrip
+        assert loaded_dist.name == dist.name
+        assert loaded_dist.summands == dist.summands
+        assert loaded_dist.coefficients == dist.coefficients
+        assert loaded_dist.ref_coef_norm == dist.ref_coef_norm
+
+    def test_mixture_dist_expected_yield(self):
+        """Test expected_yield method for extended PDFs."""
+        # Test with N coefficients (extended=True)
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+        )
+
+        context = {
+            "coeff1": pt.constant(10.0),
+            "coeff2": pt.constant(20.0),
+            "coeff3": pt.constant(30.0),
+        }
+
+        result = dist.expected_yield(context)
+        f = function([], result)
+        yield_val = f()
+
+        # Expected: sum of all coefficients = 10 + 20 + 30 = 60
+        assert np.isclose(yield_val, 60.0)
+
+    def test_mixture_dist_expected_yield_with_ref_coef_norm(self):
+        """Test expected_yield with ref_coef_norm uses only specified coefficients."""
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+            ref_coef_norm=["coeff1", "coeff2"],
+        )
+
+        context = {
+            "coeff1": pt.constant(10.0),
+            "coeff2": pt.constant(20.0),
+            "coeff3": pt.constant(30.0),
+        }
+
+        result = dist.expected_yield(context)
+        f = function([], result)
+        yield_val = f()
+
+        # Expected: sum of ref_coef_norm coefficients = 10 + 20 = 30
+        assert np.isclose(yield_val, 30.0)
+
+    def test_mixture_dist_expected_yield_non_extended_error(self):
+        """Test that expected_yield raises error for non-extended PDFs."""
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2"],
+            extended=False,
+        )
+
+        context = {"coeff1": pt.constant(10.0), "coeff2": pt.constant(20.0)}
+
+        with pytest.raises(
+            RuntimeError, match="expected_yield only valid for extended PDFs"
+        ):
+            dist.expected_yield(context)
+
+    def test_mixture_dist_extended_likelihood(self):
+        """Test extended_likelihood method."""
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+        )
+
+        context = {
+            "coeff1": pt.constant(10.0),
+            "coeff2": pt.constant(20.0),
+            "coeff3": pt.constant(30.0),
+        }
+
+        n_observed = 50
+        result = dist.extended_likelihood(context, n_observed)
+        f = function([], result)
+        likelihood_val = f()
+
+        # Expected: log(Pois(50 | 60)) = 50 * log(60) - 60
+        expected = 50 * np.log(60) - 60
+        assert np.isclose(likelihood_val, expected)
+
+    def test_mixture_dist_extended_likelihood_non_extended_error(self):
+        """Test that extended_likelihood raises error for non-extended PDFs."""
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2"],
+            extended=False,
+        )
+
+        context = {"coeff1": pt.constant(10.0), "coeff2": pt.constant(20.0)}
+
+        with pytest.raises(
+            RuntimeError, match="extended_likelihood only valid when extended=True"
+        ):
+            dist.extended_likelihood(context, 50)

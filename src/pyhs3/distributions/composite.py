@@ -32,7 +32,6 @@ class MixtureDist(Distribution):
     Mixture of probability distributions.
 
     Implements a weighted combination of multiple distributions following ROOT's RooAddPdf.
-    All computations performed in logarithmic space for numerical stability.
     Supports both N and N-1 coefficient configurations where :math:`N` represents number of distributions (`summands`):
 
     **N-1 coefficients:**

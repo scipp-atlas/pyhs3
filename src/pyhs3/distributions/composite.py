@@ -262,14 +262,12 @@ class MixtureDist(Distribution):
         """
         Poisson term for the extended likelihood.
 
-        Computes: Pois(N_obs | nu) = exp(N_obs * log(nu) - nu)
-
         Args:
             context: Mapping of names to pytensor variables
             data: Tensor containing observed event count (if None, returns 1.0)
 
         Returns:
-            Poisson probability for extended likelihood (normal space)
+            pytensor.tensor.variable.TensorVariable: :func:`PoissonDist.expression` object
 
         Raises:
             RuntimeError: If called on non-extended PDF

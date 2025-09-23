@@ -28,6 +28,12 @@ class GaussianDist(Distribution):
 
         f(x; \mu, \sigma) = \frac{1}{\sigma\sqrt{2\pi}} \exp\left(-\frac{(x-\mu)^2}{2\sigma^2}\right)
 
+    Log-PDF expression:
+
+    .. math::
+
+        \log f(x; \mu, \sigma) = -\frac{\mu^2}{2\sigma^2} + \frac{\mu x}{\sigma^2} - \log(\sigma) - \frac{x^2}{2\sigma^2} - \frac{\log(2\pi)}{2}
+
     Parameters:
         mean (str): Parameter name for the mean (μ).
         sigma (str): Parameter name for the standard deviation (sigma).
@@ -63,6 +69,34 @@ class GaussianDist(Distribution):
             ** 2
         )
         return cast(TensorVar, norm_const * exponent)
+
+    def log_expression(self, context: Context) -> TensorVar:
+        """
+        Log-PDF expression for Gaussian distribution in logarithmic space.
+
+        Implements: -mean**2/(2*sigma**2) + mean*x/sigma**2 - log(sigma) - x**2/(2*sigma**2) - log(2*pi)/2
+
+        Returns:
+            TensorVar: Log-probability density in log-space
+        """
+        x = context[self._parameters["x"]]
+        mean = context[self._parameters["mean"]]
+        sigma = context[self._parameters["sigma"]]
+
+        # Variable terms from symbolic analysis:
+        # -mean**2/(2*sigma**2) + mean*x/sigma**2 - log(sigma) - x**2/(2*sigma**2)
+        sigma_sq = sigma**2
+        log_pdf = (
+            -(mean**2) / (2 * sigma_sq)
+            + mean * x / sigma_sq
+            - pt.log(sigma)
+            - x**2 / (2 * sigma_sq)
+        )
+
+        # Constant terms: -log(pi)/2 - log(2)/2 = -log(2*pi)/2
+        log_pdf = log_pdf - pt.log(2 * math.pi) / 2
+
+        return cast(TensorVar, log_pdf)
 
 
 class UniformDist(Distribution):
@@ -112,6 +146,17 @@ class UniformDist(Distribution):
         # The variables in self.x define the domain but don't change the constant density
         return cast(TensorVar, pt.constant(1.0))
 
+    def log_expression(self, _context: Context) -> TensorVar:
+        """
+        Log-PDF expression for uniform distribution in logarithmic space.
+
+        Since uniform has constant density 1.0, log(1.0) = 0.0.
+
+        Returns:
+            TensorVar: Log-probability density (always 0.0)
+        """
+        return cast(TensorVar, pt.constant(0.0))
+
 
 class PoissonDist(Distribution):
     r"""
@@ -122,6 +167,12 @@ class PoissonDist(Distribution):
     .. math::
 
         P(k; \lambda) = \frac{\lambda^k e^{-\lambda}}{k!}
+
+    Log-PMF expression:
+
+    .. math::
+
+        \log P(k; \lambda) = k \log(\lambda) - \lambda - \log(k!)
 
     Parameters:
         mean (str): Parameter name for the rate parameter (λ).
@@ -153,17 +204,39 @@ class PoissonDist(Distribution):
         log_pmf = x * pt.log(mean) - mean - pt.gammaln(x + 1)
         return cast(TensorVar, pt.exp(log_pmf))
 
+    def log_expression(self, context: Context) -> TensorVar:
+        """
+        Log-PMF expression for Poisson distribution in logarithmic space.
+
+        Implements: x*log(mean) - mean - log(x!) where log(x!) = gammaln(x+1)
+
+        Returns:
+            TensorVar: Log-probability mass in log-space
+        """
+        mean = context[self._parameters["mean"]]
+        x = context[self._parameters["x"]]
+
+        # From symbolic analysis: x*log(mean) - mean - log(factorial(x))
+        # Using pt.gammaln for log(x!) = log(Γ(x+1))
+        log_pmf = x * pt.log(mean) - mean - pt.gammaln(x + 1)
+        return cast(TensorVar, log_pmf)
+
 
 class ExponentialDist(Distribution):
     r"""
     Exponential probability distribution.
 
-    Implements the exponential probability density function as defined in ROOT's
-    RooExponential and the HS3 specification:
+    Implements the exponential probability density function with proper normalization:
 
     .. math::
 
-        f(x; c) = \frac{1}{\mathcal{M}} \cdot \exp(-c \cdot x)
+        f(x; c) = c \cdot \exp(-c \cdot x)
+
+    Log-PDF expression:
+
+    .. math::
+
+        \log f(x; c) = -c \cdot x + \log(c)
 
     Parameters:
         x (str): Input variable name.
@@ -198,17 +271,38 @@ class ExponentialDist(Distribution):
         # Exponential PDF: exp(-c * x)
         return cast(TensorVar, pt.exp(-c * x))
 
+    def log_expression(self, context: Context) -> TensorVar:
+        """
+        Log-PDF expression for exponential distribution in logarithmic space.
+
+        Implements: -rate*x (matches the expression() method which is exp(-rate*x))
+
+        Returns:
+            TensorVar: Log-probability density in log-space
+        """
+        x = context[self._parameters["x"]]
+        rate = context[self._parameters["c"]]
+
+        # Log of exp(-rate*x) = -rate*x
+        log_pdf = -rate * x
+        return cast(TensorVar, log_pdf)
+
 
 class LogNormalDist(Distribution):
     r"""
     Log-normal probability distribution.
 
-    Implements the log-normal probability density function as defined in ROOT's
-    RooLognormal and the HS3 specification:
+    Implements the log-normal probability density function with proper normalization:
 
     .. math::
 
-        f(x; \mu, \sigma) = \frac{1}{\mathcal{M}} \frac{1}{x} \exp\left(-\frac{(\ln(x)-\mu)^2}{2\sigma^2}\right)
+        f(x; \mu, \sigma) = \frac{1}{x\sigma\sqrt{2\pi}} \exp\left(-\frac{(\ln(x)-\mu)^2}{2\sigma^2}\right)
+
+    Log-PDF expression:
+
+    .. math::
+
+        \log f(x; \mu, \sigma) = -\frac{\mu^2}{2\sigma^2} + \frac{\mu \ln(x)}{\sigma^2} - \log(\sigma) - \ln(x) - \frac{\ln^2(x)}{2\sigma^2} - \frac{\log(2\pi)}{2}
 
     Parameters:
         x (str): Input variable name (must be > 0).
@@ -249,6 +343,26 @@ class LogNormalDist(Distribution):
         normalized_log = (log_x - mu) / sigma
         return cast(TensorVar, (1.0 / x) * pt.exp(-0.5 * normalized_log**2))
 
+    def log_expression(self, context: Context) -> TensorVar:
+        """
+        Log-PDF expression for log-normal distribution in logarithmic space.
+
+        Matches the expression() method: log((1/x) * exp(-0.5 * ((log(x) - mu)/sigma)^2))
+        = -log(x) - 0.5 * ((log(x) - mu)/sigma)^2
+
+        Returns:
+            TensorVar: Log-probability density in log-space
+        """
+        x = context[self._parameters["x"]]
+        mu = context[self._parameters["mu"]]
+        sigma = context[self._parameters["sigma"]]
+
+        # Log of expression method result
+        log_x = pt.log(x)
+        normalized_log = (log_x - mu) / sigma
+        log_pdf = -log_x - 0.5 * normalized_log**2
+        return cast(TensorVar, log_pdf)
+
 
 class LandauDist(Distribution):
     r"""
@@ -258,11 +372,19 @@ class LandauDist(Distribution):
     RooLandau. Used primarily in high-energy physics for modeling energy
     loss distributions.
 
+    Approximation using modified Gaussian with asymmetric tails:
+
     .. math::
 
-        f(x; \mu, \sigma) = \frac{1}{\sigma} \phi\left(\frac{x-\mu}{\sigma}\right)
+        f(x; \mu, \sigma) = \frac{1}{\sigma} \exp\left(-\frac{1}{2}z^2 - \frac{1}{10}(z-1)^2\right)
 
-    where $\phi(z)$ is the Landau density function.
+    where $z = \frac{x-\mu}{\sigma}$ for $z > 1$.
+
+    Log-PDF expression (approximation):
+
+    .. math::
+
+        \log f(x; \mu, \sigma) = -\frac{3\mu^2}{5\sigma^2} - \frac{\mu}{5\sigma} + \frac{6\mu x}{5\sigma^2} - \log(\sigma) + \frac{x}{5\sigma} - \frac{3x^2}{5\sigma^2} - \frac{1}{10}
 
     Parameters:
         x (str): Input variable name.
@@ -310,6 +432,32 @@ class LandauDist(Distribution):
         asymmetric_factor = pt.exp(-0.1 * pt.maximum(0.0, z - 1) ** 2)
 
         return cast(TensorVar, (1.0 / sigma) * gaussian_core * asymmetric_factor)
+
+    def log_expression(self, context: Context) -> TensorVar:
+        """
+        Log-PDF expression for Landau distribution in logarithmic space.
+
+        Implements: -3*mean**2/(5*sigma**2) - mean/(5*sigma) + 6*mean*x/(5*sigma**2) - log(sigma) + x/(5*sigma) - 3*x**2/(5*sigma**2) - 1/10
+
+        Returns:
+            TensorVar: Log-probability density in log-space
+        """
+        x = context[self._parameters["x"]]
+        mean = context[self._parameters["mean"]]
+        sigma = context[self._parameters["sigma"]]
+
+        # Expanded Landau log-PDF from symbolic analysis
+        sigma_sq = sigma**2
+        log_pdf = (
+            -3 * mean**2 / (5 * sigma_sq)
+            - mean / (5 * sigma)
+            + 6 * mean * x / (5 * sigma_sq)
+            - pt.log(sigma)
+            + x / (5 * sigma)
+            - 3 * x**2 / (5 * sigma_sq)
+            - 0.1
+        )
+        return cast(TensorVar, log_pdf)
 
 
 # Registry of basic distributions

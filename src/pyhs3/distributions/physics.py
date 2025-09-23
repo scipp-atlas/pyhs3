@@ -43,6 +43,15 @@ class CrystalBallDist(Distribution):
         B &= \frac{n}{\alpha} - \alpha
         \end{align}
 
+    Log-PDF expression:
+
+    .. math::
+
+        \log f(m; m_0, \sigma, \alpha, n) = \begin{cases}
+        \log(A) - n \log\left(B - \frac{m - m_0}{\sigma}\right), & \text{for } \frac{m - m_0}{\sigma} < -\alpha \\
+        -\frac{1}{2} \left[\frac{m - m_0}{\sigma}\right]^2, & \text{otherwise}
+        \end{cases}
+
     Parameters:
         m: Observable variable
         m0: Peak position (mean)
@@ -100,6 +109,44 @@ class CrystalBallDist(Distribution):
             ),
         )
 
+    def log_expression(self, context: Context) -> TensorVar:
+        """
+        Log-PDF expression for Crystal Ball distribution in logarithmic space.
+
+        Implements piecewise log conversion:
+        - Tail: log(A) - n*log(B - t) for t < -alpha
+        - Core: -t**2/2 for t >= -alpha
+
+        Returns:
+            TensorVar: Log-probability density in log-space
+        """
+        m = context[self.m]
+        m0 = context[self.m0]
+        sigma = context[self.sigma]
+        alpha = context[self.alpha]
+        n = context[self.n]
+
+        # Calculate A and B per ROOT formula (same as expression method)
+        A = (n / alpha) ** n * pt.exp(-(alpha**2) / 2)
+        B = (n / alpha) - alpha
+
+        # Calculate normalized distance from peak
+        t = (m - m0) / sigma
+
+        # Convert each piece to log-space
+        log_tail = pt.log(A) - n * pt.log(B - t)  # log(A * (B - t)^(-n))
+        log_core = -(t**2) / 2  # log(exp(-t**2/2))
+
+        # Apply same switching condition in log-space
+        return cast(
+            TensorVar,
+            pt.switch(
+                t < -alpha,
+                log_tail,
+                log_core,
+            ),
+        )
+
 
 class AsymmetricCrystalBallDist(Distribution):
     r"""
@@ -127,6 +174,17 @@ class AsymmetricCrystalBallDist(Distribution):
         A_i &= \left(\frac{n_i}{\alpha_i}\right)^{n_i} \cdot \exp\left(-\frac{\alpha_i^2}{2}\right) \\
         B_i &= \frac{n_i}{\alpha_i} - \alpha_i
         \end{align}
+
+    Log-PDF expression:
+
+    .. math::
+
+        \log f(m; m_0, \sigma_L, \sigma_R, \alpha_L, \alpha_R, n_L, n_R) = \begin{cases}
+        \log(A_L) - n_L \log\left(B_L - \frac{m - m_0}{\sigma_L}\right), & \text{for } \frac{m - m_0}{\sigma_L} < -\alpha_L \\
+        -\frac{1}{2} \left[\frac{m - m_0}{\sigma_L}\right]^2, & \text{for } \frac{m - m_0}{\sigma_L} \leq 0 \\
+        -\frac{1}{2} \left[\frac{m - m_0}{\sigma_R}\right]^2, & \text{for } \frac{m - m_0}{\sigma_R} \leq \alpha_R \\
+        \log(A_R) - n_R \log\left(B_R + \frac{m - m_0}{\sigma_R}\right), & \text{otherwise}
+        \end{cases}
 
     Parameters:
         m: Observable variable
@@ -204,6 +262,62 @@ class AsymmetricCrystalBallDist(Distribution):
             ),
         )
 
+    def log_expression(self, context: Context) -> TensorVar:
+        """
+        Log-PDF expression for Asymmetric Crystal Ball distribution in logarithmic space.
+
+        Implements nested piecewise log conversion:
+        - Left tail: log(A_L) - n_L*log(B_L - t_L) for t_L < -alpha_L
+        - Left core: -t_L**2/2 for -alpha_L <= t_L <= 0
+        - Right core: -t_R**2/2 for 0 < t_R <= alpha_R
+        - Right tail: log(A_R) - n_R*log(B_R + t_R) for t_R > alpha_R
+
+        Returns:
+            TensorVar: Log-probability density in log-space
+        """
+        alpha_L = context[self.alpha_L]
+        alpha_R = context[self.alpha_R]
+        m = context[self.m]
+        m0 = context[self.m0]
+        n_L = context[self.n_L]
+        n_R = context[self.n_R]
+        sigma_L = context[self.sigma_L]
+        sigma_R = context[self.sigma_R]
+
+        # Calculate A_i and B_i per ROOT formula (same as expression method)
+        A_L = (n_L / alpha_L) ** n_L * pt.exp(-(alpha_L**2) / 2)
+        A_R = (n_R / alpha_R) ** n_R * pt.exp(-(alpha_R**2) / 2)
+        B_L = (n_L / alpha_L) - alpha_L
+        B_R = (n_R / alpha_R) - alpha_R
+
+        # Calculate normalized distance from peak for each side
+        t_L = (m - m0) / sigma_L
+        t_R = (m - m0) / sigma_R
+
+        # Convert each piece to log-space
+        log_left_tail = pt.log(A_L) - n_L * pt.log(
+            B_L - t_L
+        )  # log(A_L * (B_L - t_L)^(-n_L))
+        log_core_left = -(t_L**2) / 2  # log(exp(-t_L**2/2))
+        log_core_right = -(t_R**2) / 2  # log(exp(-t_R**2/2))
+        log_right_tail = pt.log(A_R) - n_R * pt.log(
+            B_R + t_R
+        )  # log(A_R * (B_R + t_R)^(-n_R))
+
+        # Apply same nested switching conditions in log-space
+        return cast(
+            TensorVar,
+            pt.switch(
+                t_L < -alpha_L,
+                log_left_tail,
+                pt.switch(
+                    t_L <= 0,
+                    log_core_left,
+                    pt.switch(t_R <= alpha_R, log_core_right, log_right_tail),
+                ),
+            ),
+        )
+
 
 class ArgusDist(Distribution):
     r"""
@@ -215,7 +329,13 @@ class ArgusDist(Distribution):
 
     .. math::
 
-        f(m; m_0, c, p) = \frac{1}{\mathcal{M}} \cdot m \cdot \left[ 1 - \left( \frac{m}{m_0} \right)^2 \right]^p \cdot \exp\left[ c \cdot \left(1 - \left(\frac{m}{m_0}\right)^2 \right) \right]
+        f(m; m_0, c, p) = m \cdot \left[ 1 - \left( \frac{m}{m_0} \right)^2 \right]^p \cdot \exp\left[ c \cdot \left(1 - \left(\frac{m}{m_0}\right)^2 \right) \right]
+
+    Log-PDF expression:
+
+    .. math::
+
+        \log f(m; m_0, c, p) = -\frac{c m^2}{m_0^2} + c + p \log\left(1 - \frac{m^2}{m_0^2}\right) + \log(m)
 
     Parameters:
         mass (str): Input variable name (invariant mass).
@@ -260,6 +380,33 @@ class ArgusDist(Distribution):
         exp_term = pt.exp(c * bracket_term)
 
         return cast(TensorVar, m * power_term * exp_term)
+
+    def log_expression(self, context: Context) -> TensorVar:
+        """
+        Log-PDF expression for ARGUS distribution in logarithmic space.
+
+        Implements: -slope*mass**2/resonance**2 + slope + power*log(1 - mass**2/resonance**2) + log(mass)
+
+        Returns:
+            TensorVar: Log-probability density in log-space
+        """
+        mass = context[self._parameters["mass"]]
+        resonance = context[self._parameters["resonance"]]
+        slope = context[self._parameters["slope"]]
+        power = context[self._parameters["power"]]
+
+        # Expanded ARGUS log-PDF from symbolic analysis
+        resonance_sq = resonance**2
+        bracket_term = 1.0 - mass**2 / resonance_sq
+
+        log_pdf = (
+            -slope * mass**2 / resonance_sq
+            + slope
+            + power * pt.log(bracket_term)
+            + pt.log(mass)
+        )
+
+        return cast(TensorVar, log_pdf)
 
 
 # Export list of physics distribution classes

@@ -68,6 +68,11 @@ class FastVerticalInterpHistPdf2Dist(Distribution):
 
         return cast(TensorVar, result)
 
+    def log_expression(self, _context: Context) -> TensorVar:
+        """Log-PDF expression - NEEDS IMPLEMENTATION."""
+        msg = f"log_expression not implemented for {self.type}"
+        raise NotImplementedError(msg)
+
 
 class GGZZBackgroundDist(Distribution):
     r"""
@@ -116,6 +121,11 @@ class GGZZBackgroundDist(Distribution):
         exp_term = pt.exp(-a3 * m4l)
 
         return cast(TensorVar, a1 * power_term * exp_term)
+
+    def log_expression(self, _context: Context) -> TensorVar:
+        """Log-PDF expression - NEEDS IMPLEMENTATION."""
+        msg = f"log_expression not implemented for {self.type}"
+        raise NotImplementedError(msg)
 
 
 class QQZZBackgroundDist(Distribution):
@@ -170,6 +180,11 @@ class QQZZBackgroundDist(Distribution):
 
         return cast(TensorVar, a1 * power_term * exp_term)
 
+    def log_expression(self, _context: Context) -> TensorVar:
+        """Log-PDF expression - NEEDS IMPLEMENTATION."""
+        msg = f"log_expression not implemented for {self.type}"
+        raise NotImplementedError(msg)
+
 
 class FastVerticalInterpHistPdf2D2Dist(Distribution):
     r"""
@@ -221,6 +236,11 @@ class FastVerticalInterpHistPdf2D2Dist(Distribution):
             result = result * (1.0 + 0.1 * coef)  # Simplified morphing
 
         return cast(TensorVar, result)
+
+    def log_expression(self, _context: Context) -> TensorVar:
+        """Log-PDF expression - NEEDS IMPLEMENTATION."""
+        msg = f"log_expression not implemented for {self.type}"
+        raise NotImplementedError(msg)
 
 
 # Registry of CMS-specific distributions

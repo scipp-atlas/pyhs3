@@ -2777,7 +2777,7 @@ class TestMixtureDist:
             "coeff3": pt.constant(30.0),
         }
 
-        n_observed = 50
+        n_observed = pt.constant(50.0)
         result = dist.extended_likelihood(context, n_observed)
         f = function([], result)
         likelihood_val = f()
@@ -2800,4 +2800,38 @@ class TestMixtureDist:
         with pytest.raises(
             RuntimeError, match="extended_likelihood only valid when extended=True"
         ):
-            dist.extended_likelihood(context, 50)
+            dist.extended_likelihood(context, pt.constant(50.0))
+
+    def test_mixture_dist_log_expression(self):
+        """Test log_expression method returns log of expression."""
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+        )
+
+        context = {
+            "pdf1": pt.constant(1.0),
+            "pdf2": pt.constant(2.0),
+            "pdf3": pt.constant(3.0),
+            "coeff1": pt.constant(0.2),
+            "coeff2": pt.constant(0.3),
+            "coeff3": pt.constant(0.5),
+        }
+
+        # Get both log_expression and expression results
+        log_result = dist.log_expression(context)
+        expr_result = dist.expression(context)
+
+        f_log = function([], log_result)
+        f_expr = function([], expr_result)
+
+        log_val = f_log()
+        expr_val = f_expr()
+
+        # log_expression should equal log(expression)
+        expected_log = np.log(expr_val)
+        assert np.isclose(log_val, expected_log), (
+            f"log_expression={log_val}, log(expression)={expected_log}"
+        )

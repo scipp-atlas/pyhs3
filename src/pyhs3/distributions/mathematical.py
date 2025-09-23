@@ -111,11 +111,8 @@ class GenericDist(Distribution):
         Returns:
             TensorVar: Log-probability density in log-space
         """
-        # Get the original expression result
-        expr_result = self.expression(context)
-
-        # Return log of the expression
-        return cast(TensorVar, pt.log(expr_result))
+        # For generic distributions, take log of the expression
+        return cast(TensorVar, pt.log(self.expression(context)))
 
 
 class PolynomialDist(Distribution):

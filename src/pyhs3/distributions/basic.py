@@ -383,7 +383,7 @@ class LandauDist(Distribution):
 
     where $z = \frac{x-\mu}{\sigma}$ for $z > 1$.
 
-    Log-PDF expression (approximation):
+    Log-PDF expression:
 
     .. math::
 
@@ -401,6 +401,10 @@ class LandauDist(Distribution):
 
     HS3 Reference:
         Note: Landau distribution is not explicitly defined in the current HS3 specification.
+
+    ROOT Reference:
+        :rootref:`RooLandau <classRooLandau.html>`
+
     """
 
     type: Literal["landau_dist"] = "landau_dist"

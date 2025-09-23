@@ -67,12 +67,12 @@ class TestDistribution:
         context = {}
 
         # Test with no data
-        result = dist.extended_likelihood(context, data=None)
+        result = dist.extended_likelihood(context, None)
         f = function([], result)
         assert np.isclose(f(), 1.0)
 
         # Test with data
-        result = dist.extended_likelihood(context, data=pt.constant(10.0))
+        result = dist.extended_likelihood(context, pt.constant(10.0))
         f = function([], result)
         assert np.isclose(f(), 1.0)
 

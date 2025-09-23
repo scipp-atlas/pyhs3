@@ -43,15 +43,6 @@ class CrystalBallDist(Distribution):
         B &= \frac{n}{\alpha} - \alpha
         \end{align}
 
-    Log-PDF expression:
-
-    .. math::
-
-        \log f(m; m_0, \sigma, \alpha, n) = \begin{cases}
-        \log(A) - n \log\left(B - \frac{m - m_0}{\sigma}\right), & \text{for } \frac{m - m_0}{\sigma} < -\alpha \\
-        -\frac{1}{2} \left[\frac{m - m_0}{\sigma}\right]^2, & \text{otherwise}
-        \end{cases}
-
     Parameters:
         m: Observable variable
         m0: Peak position (mean)
@@ -136,17 +127,6 @@ class AsymmetricCrystalBallDist(Distribution):
         A_i &= \left(\frac{n_i}{\alpha_i}\right)^{n_i} \cdot \exp\left(-\frac{\alpha_i^2}{2}\right) \\
         B_i &= \frac{n_i}{\alpha_i} - \alpha_i
         \end{align}
-
-    Log-PDF expression:
-
-    .. math::
-
-        \log f(m; m_0, \sigma_L, \sigma_R, \alpha_L, \alpha_R, n_L, n_R) = \begin{cases}
-        \log(A_L) - n_L \log\left(B_L - \frac{m - m_0}{\sigma_L}\right), & \text{for } \frac{m - m_0}{\sigma_L} < -\alpha_L \\
-        -\frac{1}{2} \left[\frac{m - m_0}{\sigma_L}\right]^2, & \text{for } \frac{m - m_0}{\sigma_L} \leq 0 \\
-        -\frac{1}{2} \left[\frac{m - m_0}{\sigma_R}\right]^2, & \text{for } \frac{m - m_0}{\sigma_R} \leq \alpha_R \\
-        \log(A_R) - n_R \log\left(B_R + \frac{m - m_0}{\sigma_R}\right), & \text{otherwise}
-        \end{cases}
 
     Parameters:
         m: Observable variable
@@ -236,12 +216,6 @@ class ArgusDist(Distribution):
     .. math::
 
         f(m; m_0, c, p) = m \cdot \left[ 1 - \left( \frac{m}{m_0} \right)^2 \right]^p \cdot \exp\left[ c \cdot \left(1 - \left(\frac{m}{m_0}\right)^2 \right) \right]
-
-    Log-PDF expression:
-
-    .. math::
-
-        \log f(m; m_0, c, p) = -\frac{c m^2}{m_0^2} + c + p \log\left(1 - \frac{m^2}{m_0^2}\right) + \log(m)
 
     Parameters:
         mass (str): Input variable name (invariant mass).

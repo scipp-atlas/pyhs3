@@ -58,11 +58,6 @@ class MixtureDist(Distribution):
         ref_coef_norm (list[str] | None): Optional list of coefficient names for custom normalization.
             Only valid when using N coefficients (extended=True).
 
-    Methods:
-        log_expression(): Primary method returning log-PDF in logarithmic space.
-        expression(): Derived method returning PDF (converts from log-space).
-        extended_likelihood(): Returns extended likelihood contribution in log-space.
-
     ROOT Reference:
         :rootref:`RooAddPdf <classRooAddPdf.html>`
     """
@@ -226,62 +221,6 @@ class MixtureDist(Distribution):
 
         return cast(TensorVar, mixturesum)
 
-    def log_expression(self, context: Context) -> TensorVar:
-        """
-        Log-PDF of mixture distribution in logarithmic space.
-
-        Computes log(mixture_sum) where mixture_sum is the weighted combination
-        of component distributions. All operations performed in log-space for
-        numerical stability.
-
-        Args:
-            context: Mapping of names to pytensor variables
-
-        Returns:
-            TensorVar: Log-probability density in log-space
-        """
-        n_coeffs = len(self.coefficients)
-        n_summands = len(self.summands)
-
-        if n_coeffs == n_summands:
-            # N coefficients case: direct summation with normalization
-            mixturesum = pt.constant(0.0)
-
-            # Calculate the mixture sum
-            for i, coeff in enumerate(self.coefficients):
-                mixturesum += context[coeff] * context[self.summands[i]]
-
-            # Handle normalization
-            if self.ref_coef_norm is not None:
-                # Custom normalization using specified coefficients
-                norm_sum = pt.constant(0.0)
-                for norm_coeff in self.ref_coef_norm:
-                    norm_sum += context[norm_coeff]
-                mixturesum = mixturesum / norm_sum
-            else:
-                # Standard normalization: divide by sum of all coefficients
-                coeffsum = pt.constant(0.0)
-                for coeff in self.coefficients:
-                    coeffsum += context[coeff]
-                mixturesum = mixturesum / coeffsum
-
-        else:
-            # N-1 coefficients case: traditional approach with automatic last term
-            mixturesum = pt.constant(0.0)
-            coeffsum = pt.constant(0.0)
-
-            # Sum the first N-1 terms
-            for i, coeff in enumerate(self.coefficients):
-                coeffsum += context[coeff]
-                mixturesum += context[coeff] * context[self.summands[i]]
-
-            # Add the last term with remaining coefficient
-            last_index = len(self.summands) - 1
-            f_last = context[self.summands[last_index]]
-            mixturesum += (1 - coeffsum) * f_last
-
-        return cast(TensorVar, pt.log(mixturesum))
-
     def expected_yield(self, context: Context) -> TensorVar:
         """
         Compute the total expected yield nu in the extended case.
@@ -389,24 +328,6 @@ class ProductDist(Distribution):
 
         pt_factors = pt.stack([context[factor] for factor in self.factors])
         return cast(TensorVar, pt.prod(pt_factors, axis=0))  # type: ignore[no-untyped-call]
-
-    def log_expression(self, context: Context) -> TensorVar:
-        """
-        Log-PDF of product distribution in logarithmic space.
-
-        Computes log(product) = sum(log(factors)) for numerical stability.
-
-        Args:
-            context: Mapping of names to pytensor variables
-
-        Returns:
-            TensorVar: Log-probability density in log-space
-        """
-        if not self.factors:
-            return cast(TensorVar, pt.constant(0.0))  # log(1) = 0
-
-        log_factors = pt.stack([pt.log(context[factor]) for factor in self.factors])
-        return cast(TensorVar, pt.sum(log_factors, axis=0))  # type: ignore[no-untyped-call]
 
 
 # Registry of composite distributions

@@ -28,12 +28,6 @@ class GaussianDist(Distribution):
 
         f(x; \mu, \sigma) = \frac{1}{\sigma\sqrt{2\pi}} \exp\left(-\frac{(x-\mu)^2}{2\sigma^2}\right)
 
-    Log-PDF expression:
-
-    .. math::
-
-        \log f(x; \mu, \sigma) = -\frac{\mu^2}{2\sigma^2} + \frac{\mu x}{\sigma^2} - \log(\sigma) - \frac{x^2}{2\sigma^2} - \frac{\log(2\pi)}{2}
-
     Parameters:
         mean (str): Parameter name for the mean (μ).
         sigma (str): Parameter name for the standard deviation (sigma).
@@ -129,12 +123,6 @@ class PoissonDist(Distribution):
 
         P(k; \lambda) = \frac{\lambda^k e^{-\lambda}}{k!}
 
-    Log-PMF expression:
-
-    .. math::
-
-        \log P(k; \lambda) = k \log(\lambda) - \lambda - \log(k!)
-
     Parameters:
         mean (str): Parameter name for the rate parameter (λ).
         x (str): Input variable name (discrete count).
@@ -170,17 +158,11 @@ class ExponentialDist(Distribution):
     r"""
     Exponential probability distribution.
 
-    Implements the exponential probability density function with proper normalization:
+    Implements the exponential probability density function:
 
     .. math::
 
         f(x; c) = \exp(-c \cdot x)
-
-    Log-PDF expression:
-
-    .. math::
-
-        \log f(x; c) = -c \cdot x
 
     Parameters:
         x (str): Input variable name.
@@ -223,17 +205,11 @@ class LogNormalDist(Distribution):
     r"""
     Log-normal probability distribution.
 
-    Implements the log-normal probability density function with proper normalization:
+    Implements the log-normal probability density function:
 
     .. math::
 
         f(x; \mu, \sigma) = \frac{1}{x\sigma\sqrt{2\pi}} \exp\left(-\frac{(\ln(x)-\mu)^2}{2\sigma^2}\right)
-
-    Log-PDF expression:
-
-    .. math::
-
-        \log f(x; \mu, \sigma) = -\frac{\mu^2}{2\sigma^2} + \frac{\mu \ln(x)}{\sigma^2} - \log(\sigma) - \ln(x) - \frac{\ln^2(x)}{2\sigma^2} - \frac{\log(2\pi)}{2}
 
     Parameters:
         x (str): Input variable name (must be > 0).
@@ -291,12 +267,6 @@ class LandauDist(Distribution):
 
     where $z = \frac{x-\mu}{\sigma}$ for $z > 1$.
 
-    Log-PDF expression:
-
-    .. math::
-
-        \log f(x; \mu, \sigma) = -\frac{3\mu^2}{5\sigma^2} - \frac{\mu}{5\sigma} + \frac{6\mu x}{5\sigma^2} - \log(\sigma) + \frac{x}{5\sigma} - \frac{3x^2}{5\sigma^2} - \frac{1}{10}
-
     Parameters:
         x (str): Input variable name.
         mean (str): Location parameter.
@@ -312,7 +282,6 @@ class LandauDist(Distribution):
 
     ROOT Reference:
         :rootref:`RooLandau <classRooLandau.html>`
-
     """
 
     type: Literal["landau_dist"] = "landau_dist"

@@ -12,10 +12,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from pyhs3.context import Context
 from pyhs3.data import Axis
 from pyhs3.distributions.core import Distribution
-from pyhs3.typing.aliases import TensorVar
 
 
 class HistogramData(BaseModel):
@@ -57,11 +55,6 @@ class HistogramDist(Distribution):
 
     type: Literal["histogram_dist"] = "histogram_dist"
     data: HistogramData = Field(..., json_schema_extra={"preprocess": False})
-
-    def log_expression(self, _context: Context) -> TensorVar:
-        """Log-PDF expression - NEEDS IMPLEMENTATION."""
-        msg = f"log_expression not implemented for {self.type}"
-        raise NotImplementedError(msg)
 
 
 # Registry of histogram distributions

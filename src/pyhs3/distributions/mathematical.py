@@ -102,18 +102,6 @@ class GenericDist(Distribution):
 
         return cast(TensorVar, result)
 
-    def log_expression(self, context: Context) -> TensorVar:
-        """
-        Log-PDF expression for generic distribution in logarithmic space.
-
-        Takes the logarithm of the parsed mathematical expression.
-
-        Returns:
-            TensorVar: Log-probability density in log-space
-        """
-        # For generic distributions, take log of the expression
-        return cast(TensorVar, pt.log(self.expression(context)))
-
 
 class PolynomialDist(Distribution):
     r"""
@@ -159,18 +147,6 @@ class PolynomialDist(Distribution):
             result = result + coef if i == 0 else result + coef * x**i  # a_i * x^i
 
         return cast(TensorVar, result)
-
-    def log_expression(self, context: Context) -> TensorVar:
-        """
-        Log-PDF expression for polynomial distribution in logarithmic space.
-
-        Takes the logarithm of the polynomial: log(sum(a_i * x**i))
-
-        Returns:
-            TensorVar: Log-probability density in log-space
-        """
-        # For polynomial distributions, take log of the expression
-        return cast(TensorVar, pt.log(self.expression(context)))
 
 
 class BernsteinPolyDist(Distribution):
@@ -223,19 +199,6 @@ class BernsteinPolyDist(Distribution):
             result = result + coef * basis
 
         return cast(TensorVar, result)
-
-    def log_expression(self, context: Context) -> TensorVar:
-        """
-        Log-PDF expression for Bernstein polynomial distribution in logarithmic space.
-
-        Takes the logarithm of the Bernstein polynomial: log(sum(coef_i * B_i_n(x)))
-        where B_i_n(x) are Bernstein basis polynomials.
-
-        Returns:
-            TensorVar: Log-probability density in log-space
-        """
-        # For Bernstein polynomial distributions, take log of the expression
-        return cast(TensorVar, pt.log(self.expression(context)))
 
 
 # Registry of mathematical distributions

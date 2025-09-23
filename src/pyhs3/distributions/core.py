@@ -7,6 +7,8 @@ standard and CMS-specific distribution implementations.
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytensor.tensor as pt
 
 from pyhs3.base import Evaluable
@@ -25,24 +27,21 @@ class Distribution(Evaluable):
     Inherits parameter processing functionality from Evaluable.
     """
 
-    def log_expression(self, _context: Context) -> TensorVar:
+    def log_expression(self, context: Context) -> TensorVar:
         """
         Log-PDF expression in logarithmic space (PRIMARY METHOD).
 
-        All distributions should implement their core logic here for numerical stability.
-        This is the primary method for probability distributions.
+        Default implementation takes the logarithm of expression().
+        PyTensor handles optimization and simplification automatically.
+        Subclasses can override for custom log-space implementations.
 
         Args:
-            _context: Mapping of names to pytensor variables
+            context: Mapping of names to pytensor variables
 
         Returns:
             TensorVar: Log-probability density in log-space
-
-        Raises:
-            NotImplementedError: Must be implemented by subclasses
         """
-        msg = f"log_expression not implemented for {self.type}"
-        raise NotImplementedError(msg)
+        return cast(TensorVar, pt.log(self.expression(context)))
 
     def extended_likelihood(
         self, _context: Context, _data: TensorVar | None = None

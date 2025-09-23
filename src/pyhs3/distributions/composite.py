@@ -20,6 +20,9 @@ from pydantic import (
 )
 
 from pyhs3.context import Context
+
+# Import for Poisson extended likelihood calculation
+from pyhs3.distributions.basic import PoissonDist
 from pyhs3.distributions.core import Distribution
 from pyhs3.typing.aliases import TensorVar
 
@@ -260,14 +263,14 @@ class MixtureDist(Distribution):
         """
         Poisson term for the extended likelihood.
 
-        Computes: log Pois(N_obs | nu) = N_obs * log(nu) - nu
+        Computes: Pois(N_obs | nu) = exp(N_obs * log(nu) - nu)
 
         Args:
             context: Mapping of names to pytensor variables
-            data: Tensor containing observed event count (if None, returns 0.0)
+            data: Tensor containing observed event count (if None, returns 1.0)
 
         Returns:
-            Log Poisson probability for extended likelihood
+            Poisson probability for extended likelihood (normal space)
 
         Raises:
             RuntimeError: If called on non-extended PDF
@@ -278,14 +281,15 @@ class MixtureDist(Distribution):
 
         if data is None:
             # No data provided, return no contribution
-            return pt.constant(0.0)
+            return pt.constant(1.0)
 
         nu = self.expected_yield(context)
         n_obs = data  # data should contain the observed count
 
-        # log(Pois(N|nu)), dropping the constant -log(N!)
-        log_pois = n_obs * pt.log(nu) - nu
-        return cast(TensorVar, log_pois)
+        # Use the existing PoissonDist implementation for correctness
+        poisson_dist = PoissonDist(name="temp_poisson", mean="nu", x="n_obs")
+        poisson_context = Context({"nu": nu, "n_obs": n_obs})
+        return poisson_dist.expression(poisson_context)
 
 
 class ProductDist(Distribution):

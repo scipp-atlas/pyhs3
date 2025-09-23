@@ -66,17 +66,17 @@ class Distribution(Evaluable):
         self, _context: Context, _data: TensorVar | None = None
     ) -> TensorVar:
         """
-        Extended likelihood contribution in log-space.
+        Extended likelihood contribution in normal space.
 
-        Returns log-likelihood term for extended ML fitting.
+        Returns likelihood term for extended ML fitting.
         Override only when the distribution contributes extended terms.
-        Default: no contribution (returns 0.0 in log-space).
+        Default: no contribution (returns 1.0 in normal space).
 
         Args:
             context: Mapping of names to pytensor variables
             data: Optional data tensor for data-dependent terms
 
         Returns:
-            TensorVar: Log-likelihood contribution (default: 0.0 = no contribution)
+            TensorVar: Likelihood contribution (default: 1.0 = no contribution)
         """
-        return pt.constant(0.0)
+        return pt.constant(1.0)

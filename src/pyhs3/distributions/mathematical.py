@@ -122,6 +122,9 @@ class PolynomialDist(Distribution):
         The degree of the polynomial is determined by the length of the coefficients array.
         ROOT uses a lowestOrder parameter to handle default coefficients, but for simplicity
         we require all coefficients to be explicitly specified.
+
+    ROOT Reference:
+        :rootref:`RooPolynomial <classRooPolynomial.html>`
     """
 
     type: Literal["polynomial_dist"] = "polynomial_dist"
@@ -169,6 +172,9 @@ class BernsteinPolyDist(Distribution):
     Note:
         The input variable is expected to be normalized to the [0,1] interval.
         The normalization to this interval is typically handled by the domain.
+
+    ROOT Reference:
+        :rootref:`RooBernstein <classRooBernstein.html>`
     """
 
     type: Literal["bernstein_poly_dist"] = "bernstein_poly_dist"

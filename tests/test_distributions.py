@@ -2782,8 +2782,9 @@ class TestMixtureDist:
         f = function([], result)
         likelihood_val = f()
 
-        # Expected: log(Pois(50 | 60)) = 50 * log(60) - 60
-        expected = 50 * np.log(60) - 60
+        # Expected: Pois(50 | 60) = exp(50 * log(60) - 60 - log(50!))
+        log_pois = 50 * np.log(60) - 60 - math.lgamma(50 + 1)
+        expected = np.exp(log_pois)
         assert np.isclose(likelihood_val, expected)
 
     def test_mixture_dist_extended_likelihood_non_extended_error(self):
@@ -2801,6 +2802,26 @@ class TestMixtureDist:
             RuntimeError, match="extended_likelihood only valid when extended=True"
         ):
             dist.extended_likelihood(context, pt.constant(50.0))
+
+    def test_mixture_dist_extended_likelihood_no_data(self):
+        """Test extended_likelihood method when data is None."""
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+        )
+        context = {
+            "coeff1": pt.constant(10.0),
+            "coeff2": pt.constant(20.0),
+            "coeff3": pt.constant(30.0),
+        }
+
+        # Test with data=None - should return 1.0 (no contribution)
+        result = dist.extended_likelihood(context, data=None)
+        f = function([], result)
+        likelihood_val = f()
+        assert np.isclose(likelihood_val, 1.0)
 
     def test_mixture_dist_log_expression(self):
         """Test log_expression method returns log of expression."""

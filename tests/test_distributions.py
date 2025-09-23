@@ -61,6 +61,21 @@ class TestDistribution:
         ):
             dist.expression({})
 
+    def test_distribution_extended_likelihood_default(self):
+        """Test that base distribution extended_likelihood method returns 1.0."""
+        dist = Distribution(name="test", type="test")
+        context = {}
+
+        # Test with no data
+        result = dist.extended_likelihood(context, data=None)
+        f = function([], result)
+        assert np.isclose(f(), 1.0)
+
+        # Test with data
+        result = dist.extended_likelihood(context, data=pt.constant(10.0))
+        f = function([], result)
+        assert np.isclose(f(), 1.0)
+
 
 class TestProductDist:
     """Test ProductDist implementation."""

@@ -230,13 +230,13 @@ class ExponentialDist(Distribution):
 
     .. math::
 
-        f(x; c) = c \cdot \exp(-c \cdot x)
+        f(x; c) = \exp(-c \cdot x)
 
     Log-PDF expression:
 
     .. math::
 
-        \log f(x; c) = -c \cdot x + \log(c)
+        \log f(x; c) = -c \cdot x
 
     Parameters:
         x (str): Input variable name.
@@ -249,6 +249,9 @@ class ExponentialDist(Distribution):
 
     HS3 Reference:
         :hs3:label:`exponential_dist <hs3.exponential-distribution>`
+
+    ROOT Reference:
+        :rootref:`RooExponential <classRooExponential.html>`
     """
 
     type: Literal["exponential_dist"] = "exponential_dist"

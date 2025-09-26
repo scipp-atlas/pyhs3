@@ -58,8 +58,8 @@ class TestHistFactoryDist:
 
         # Check that the distribution can be created
         assert dist.name == "test_channel"
-        assert len(dist.samples[0]["modifiers"]) == 1
-        assert dist.samples[0]["modifiers"][0]["type"] == "normfactor"
+        assert len(dist.samples[0].modifiers) == 1
+        assert dist.samples[0].modifiers[0].type == "normfactor"
 
     def test_normsys_modifier(self):
         """Test HistFactoryDist with normsys modifier."""
@@ -83,11 +83,11 @@ class TestHistFactoryDist:
 
         # Check that the distribution can be created
         assert dist.name == "test_channel"
-        modifier = dist.samples[0]["modifiers"][0]
-        assert modifier["type"] == "normsys"
-        assert modifier["constraint"] == "Gauss"
-        assert modifier["data"]["hi"] == 1.1
-        assert modifier["data"]["lo"] == 0.9
+        modifier = dist.samples[0].modifiers[0]
+        assert modifier.type == "normsys"
+        assert modifier.constraint == "Gauss"
+        assert modifier.data.hi == 1.1
+        assert modifier.data.lo == 0.9
 
     def test_histosys_modifier(self):
         """Test HistFactoryDist with histosys modifier."""
@@ -114,11 +114,11 @@ class TestHistFactoryDist:
 
         # Check that the distribution can be created
         assert dist.name == "test_channel"
-        modifier = dist.samples[0]["modifiers"][0]
-        assert modifier["type"] == "histosys"
-        assert modifier["constraint"] == "Gauss"
-        assert len(modifier["data"]["hi"]["contents"]) == 2
-        assert len(modifier["data"]["lo"]["contents"]) == 2
+        modifier = dist.samples[0].modifiers[0]
+        assert modifier.type == "histosys"
+        assert modifier.constraint == "Gauss"
+        assert len(modifier.data.hi.contents) == 2
+        assert len(modifier.data.lo.contents) == 2
 
     def test_multiple_modifiers(self):
         """Test HistFactoryDist with multiple modifiers on one sample."""
@@ -143,9 +143,9 @@ class TestHistFactoryDist:
 
         # Check that the distribution can be created
         assert dist.name == "test_channel"
-        assert len(dist.samples[0]["modifiers"]) == 2
-        assert dist.samples[0]["modifiers"][0]["type"] == "normfactor"
-        assert dist.samples[0]["modifiers"][1]["type"] == "normsys"
+        assert len(dist.samples[0].modifiers) == 2
+        assert dist.samples[0].modifiers[0].type == "normfactor"
+        assert dist.samples[0].modifiers[1].type == "normsys"
 
     def test_multiple_samples(self):
         """Test HistFactoryDist with multiple samples."""
@@ -175,8 +175,8 @@ class TestHistFactoryDist:
         # Check that the distribution can be created
         assert dist.name == "test_channel"
         assert len(dist.samples) == 2
-        assert dist.samples[0]["name"] == "signal"
-        assert dist.samples[1]["name"] == "background"
+        assert dist.samples[0].name == "signal"
+        assert dist.samples[1].name == "background"
 
     def test_bin_count_calculation(self):
         """Test calculation of total bins from axes."""
@@ -235,7 +235,7 @@ class TestHistFactoryDist:
         context = Context({})  # Empty context for testing
 
         with pytest.raises(ValueError, match="has 3 bins, expected 2"):
-            dist._process_sample(context, samples[0], 2)
+            dist._process_sample(context, dist.samples[0], 2)
 
 
 class TestInterpolationFunctions:

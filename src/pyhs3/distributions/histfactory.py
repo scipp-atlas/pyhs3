@@ -8,12 +8,16 @@ with samples and modifiers as defined in the HS3 specification.
 from __future__ import annotations
 
 import math
-from typing import Any, Literal, cast
+from collections.abc import Iterator
+from typing import Annotated, Any, Literal, cast
 
 import pytensor.tensor as pt
+from pydantic import BaseModel, Field, PrivateAttr, RootModel, model_validator
 
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
+from pyhs3.domains import Axis
+from pyhs3.exceptions import custom_error_msg
 from pyhs3.typing.aliases import TensorVar
 
 
@@ -140,6 +144,234 @@ def apply_interpolation(
     return interpolate_lin(alpha, nom, hi, lo)
 
 
+class BinnedAxis(Axis):
+    """
+    Binned axis specification for HistFactory distributions.
+
+    Extends the base Axis class to support binned data structures used in
+    HistFactory models. Supports both explicit bin edges and uniform binning.
+    """
+
+    nbins: int | None = Field(default=None, description="Number of bins")
+    edges: list[float] | None = Field(default=None, description="Explicit bin edges")
+
+    @model_validator(mode="after")
+    def validate_binning(self) -> BinnedAxis:
+        """Ensure either nbins or edges is provided, but not both."""
+        if self.nbins is None and self.edges is None:
+            msg = f"BinnedAxis '{self.name}' must specify either 'nbins' or 'edges'"
+            raise ValueError(msg)
+        if self.nbins is not None and self.edges is not None:
+            msg = f"BinnedAxis '{self.name}' cannot specify both 'nbins' and 'edges'"
+            raise ValueError(msg)
+        if self.edges is not None and len(self.edges) < 2:
+            msg = f"BinnedAxis '{self.name}' must have at least 2 edges"
+            raise ValueError(msg)
+        return self
+
+    def get_nbins(self) -> int:
+        """Get the number of bins."""
+        if self.nbins is not None:
+            return self.nbins
+        if self.edges is not None:
+            return len(self.edges) - 1
+        msg = f"BinnedAxis '{self.name}' has no binning information"
+        raise ValueError(msg)
+
+
+class ModifierData(BaseModel):
+    """Base class for modifier data."""
+
+
+class SampleData(BaseModel):
+    """Sample data containing bin contents and errors."""
+
+    contents: list[float]
+    errors: list[float] | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def validate_lengths(self) -> SampleData:
+        """Ensure contents and errors have same length if both provided."""
+        if self.errors is not None and len(self.contents) != len(self.errors):
+            msg = f"Sample data contents ({len(self.contents)}) and errors ({len(self.errors)}) must have same length"
+            raise ValueError(msg)
+        return self
+
+
+class NormSysData(ModifierData):
+    """Data for normsys modifier."""
+
+    hi: float
+    lo: float
+    interpolation: str = Field(default="lin")
+
+
+class HistoSysData(ModifierData):
+    """Data for histosys modifier."""
+
+    hi: SampleData
+    lo: SampleData
+    interpolation: str = Field(default="lin")
+
+
+class ShapeSysData(ModifierData):
+    """Data for shapesys modifier."""
+
+    vals: list[float]
+
+
+class Modifier(BaseModel):
+    """Base class for all HistFactory modifiers."""
+
+    type: str
+    parameter: str | None = Field(default=None)
+    parameters: list[str] | None = Field(default=None)
+    constraint: Literal["Gauss", "Poisson", "LogNormal"] | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def validate_parameters(self) -> Modifier:
+        """Ensure either parameter or parameters is provided."""
+        if self.parameter is None and self.parameters is None:
+            msg = f"Modifier '{self.type}' must specify either 'parameter' or 'parameters'"
+            raise ValueError(msg)
+        if self.parameter is not None and self.parameters is not None:
+            msg = f"Modifier '{self.type}' cannot specify both 'parameter' and 'parameters'"
+            raise ValueError(msg)
+        return self
+
+
+class NormFactorModifier(Modifier):
+    """Normalization factor modifier (simple scaling by parameter value)."""
+
+    type: Literal["normfactor"] = "normfactor"
+    parameter: str
+
+
+class NormSysModifier(Modifier):
+    """Normalization systematic modifier (with hi/lo interpolation)."""
+
+    type: Literal["normsys"] = "normsys"
+    parameter: str
+    constraint: Literal["Gauss", "Poisson", "LogNormal"] = "Gauss"
+    data: NormSysData
+
+
+class HistoSysModifier(Modifier):
+    """Additive correlated shape systematic modifier."""
+
+    type: Literal["histosys"] = "histosys"
+    parameter: str
+    constraint: Literal["Gauss", "Poisson", "LogNormal"] = "Gauss"
+    data: HistoSysData
+
+
+class ShapeFactorModifier(Modifier):
+    """Uncorrelated multiplicative bin-by-bin scaling modifier."""
+
+    type: Literal["shapefactor"] = "shapefactor"
+    parameters: list[str]
+
+
+class ShapeSysModifier(Modifier):
+    """Uncorrelated shape systematic with Poisson constraints."""
+
+    type: Literal["shapesys"] = "shapesys"
+    parameter: str
+    constraint: Literal["Gauss", "Poisson", "LogNormal"] = "Poisson"
+    data: ShapeSysData
+
+
+class StatErrorModifier(Modifier):
+    """Statistical uncertainty modifier (Barlow-Beeston method)."""
+
+    type: Literal["staterror"] = "staterror"
+    parameters: list[str]
+    constraint: Literal["Gauss", "Poisson", "LogNormal"] = "Poisson"
+
+
+# Union type for all modifier types using discriminated union
+ModifierType = Annotated[
+    NormFactorModifier
+    | NormSysModifier
+    | HistoSysModifier
+    | ShapeFactorModifier
+    | ShapeSysModifier
+    | StatErrorModifier,
+    Field(discriminator="type"),
+    custom_error_msg(
+        {
+            "union_tag_invalid": "Unknown modifier type '{tag}' does not match any supported modifier types"
+        }
+    ),
+]
+
+
+class Modifiers(RootModel[list[ModifierType]]):
+    """
+    Collection of modifiers for a HistFactory sample.
+
+    Manages a set of modifier instances, providing list-like access and
+    validation. Handles modifier creation from configuration dictionaries
+    and maintains type safety through discriminated unions.
+    """
+
+    root: Annotated[
+        list[ModifierType],
+        custom_error_msg(
+            {
+                "union_tag_invalid": "Unknown modifier type '{tag}' does not match any supported modifier types"
+            }
+        ),
+    ] = Field(default_factory=list)
+
+    def __iter__(self) -> Iterator[ModifierType]:  # type: ignore[override]
+        return iter(self.root)
+
+    def __len__(self) -> int:
+        return len(self.root)
+
+    def __getitem__(self, index: int) -> ModifierType:
+        return self.root[index]
+
+
+class Sample(BaseModel):
+    """HistFactory sample specification."""
+
+    name: str
+    data: SampleData
+    modifiers: Modifiers = Field(default_factory=Modifiers)
+
+
+class Samples(RootModel[list[Sample]]):
+    """
+    Collection of samples for a HistFactory distribution.
+
+    Manages a set of sample instances, providing dict-like access by sample name
+    and list-like iteration. Handles sample validation and maintains name uniqueness.
+    """
+
+    root: list[Sample] = Field(default_factory=list)
+    _map: dict[str, Sample] = PrivateAttr(default_factory=dict)
+
+    def model_post_init(self, __context: Any, /) -> None:
+        """Initialize computed collections after Pydantic validation."""
+        self._map = {sample.name: sample for sample in self.root}
+
+    def __getitem__(self, item: str | int) -> Sample:
+        if isinstance(item, int):
+            return self.root[item]
+        return self._map[item]
+
+    def __contains__(self, item: str) -> bool:
+        return item in self._map
+
+    def __iter__(self) -> Iterator[Sample]:  # type: ignore[override]
+        return iter(self.root)
+
+    def __len__(self) -> int:
+        return len(self.root)
+
+
 class HistFactoryDist(Distribution):
     r"""
     HistFactory probability distribution.
@@ -179,8 +411,8 @@ class HistFactoryDist(Distribution):
     """
 
     type: Literal["histfactory_dist"] = "histfactory_dist"
-    axes: list[dict[str, Any]]
-    samples: list[dict[str, Any]]
+    axes: list[BinnedAxis] = Field(..., json_schema_extra={"preprocess": False})
+    samples: Samples = Field(..., json_schema_extra={"preprocess": False})
 
     def expression(self, context: Context) -> TensorVar:
         """
@@ -219,13 +451,7 @@ class HistFactoryDist(Distribution):
         """Calculate total number of bins across all axes."""
         total_bins = 1
         for axis in self.axes:
-            if "nbins" in axis:
-                total_bins *= axis["nbins"]
-            elif "edges" in axis:
-                total_bins *= len(axis["edges"]) - 1
-            else:
-                msg = f"Axis {axis.get('name', 'unnamed')} missing nbins or edges"
-                raise ValueError(msg)
+            total_bins *= axis.get_nbins()
         return total_bins
 
     def _compute_expected_rates(self, context: Context, total_bins: int) -> TensorVar:
@@ -245,13 +471,15 @@ class HistFactoryDist(Distribution):
         return cast(TensorVar, total_rates)
 
     def _process_sample(
-        self, context: Context, sample: dict[str, Any], total_bins: int
+        self, context: Context, sample: Sample, total_bins: int
     ) -> TensorVar:
         """Process a single sample with its modifiers."""
         # Get nominal bin contents
-        contents = sample["data"]["contents"]
+        contents = sample.data.contents
         if len(contents) != total_bins:
-            msg = f"Sample {sample.get('name', 'unnamed')} has {len(contents)} bins, expected {total_bins}"
+            msg = (
+                f"Sample {sample.name} has {len(contents)} bins, expected {total_bins}"
+            )
             raise ValueError(msg)
 
         nominal_rates = pt.as_tensor_variable(contents)
@@ -260,19 +488,22 @@ class HistFactoryDist(Distribution):
         modified_rates = nominal_rates
 
         # Apply additive modifiers first (histosys)
-        for modifier in sample.get("modifiers", []):
-            if modifier["type"] == "histosys":
+        for modifier in sample.modifiers:
+            if isinstance(modifier, HistoSysModifier):
                 modified_rates = self._apply_histosys(context, modified_rates, modifier)
 
         # Apply multiplicative modifiers (normfactor, normsys, shapefactor, etc.)
-        for modifier in sample.get("modifiers", []):
-            if modifier["type"] in [
-                "normfactor",
-                "normsys",
-                "shapefactor",
-                "shapesys",
-                "staterror",
-            ]:
+        for modifier in sample.modifiers:
+            if isinstance(
+                modifier,
+                (
+                    NormFactorModifier,
+                    NormSysModifier,
+                    ShapeFactorModifier,
+                    ShapeSysModifier,
+                    StatErrorModifier,
+                ),
+            ):
                 modified_rates = self._apply_multiplicative_modifier(
                     context, modified_rates, modifier
                 )
@@ -280,22 +511,21 @@ class HistFactoryDist(Distribution):
         return cast(TensorVar, modified_rates)
 
     def _apply_histosys(
-        self, context: Context, rates: TensorVar, modifier: dict[str, Any]
+        self, context: Context, rates: TensorVar, modifier: HistoSysModifier
     ) -> TensorVar:
         """Apply histosys (additive systematic) modifier."""
-        param_name = modifier["parameter"]
-        alpha = context[param_name]
+        alpha = context[modifier.parameter]
 
         # Get hi/lo variations
-        hi_contents = modifier["data"]["hi"]["contents"]
-        lo_contents = modifier["data"]["lo"]["contents"]
+        hi_contents = modifier.data.hi.contents
+        lo_contents = modifier.data.lo.contents
 
         hi_variation = pt.as_tensor_variable(hi_contents)
         lo_variation = pt.as_tensor_variable(lo_contents)
         zero_variation = pt.zeros_like(hi_variation)  # type: ignore[no-untyped-call]
 
-        # Apply interpolation method if specified
-        interpolation = modifier.get("interpolation", "lin")
+        # Apply interpolation method
+        interpolation = modifier.data.interpolation
         variation = apply_interpolation(
             interpolation, alpha, zero_variation, hi_variation, lo_variation
         )
@@ -303,44 +533,40 @@ class HistFactoryDist(Distribution):
         return cast(TensorVar, rates + variation)
 
     def _apply_multiplicative_modifier(
-        self, context: Context, rates: TensorVar, modifier: dict[str, Any]
+        self, context: Context, rates: TensorVar, modifier: ModifierType
     ) -> TensorVar:
         """Apply multiplicative modifiers (normfactor, normsys, etc.)."""
-        modifier_type = modifier["type"]
-
-        if modifier_type == "normfactor":
+        if isinstance(modifier, NormFactorModifier):
             return self._apply_normfactor(context, rates, modifier)
-        if modifier_type == "normsys":
+        if isinstance(modifier, NormSysModifier):
             return self._apply_normsys(context, rates, modifier)
-        if modifier_type == "shapefactor":
+        if isinstance(modifier, ShapeFactorModifier):
             return self._apply_shapefactor(context, rates, modifier)
-        if modifier_type == "shapesys":
+        if isinstance(modifier, ShapeSysModifier):
             return self._apply_shapesys(context, rates, modifier)
-        if modifier_type == "staterror":
+        if isinstance(modifier, StatErrorModifier):
             return self._apply_staterror(context, rates, modifier)
-        msg = f"Unknown multiplicative modifier type: {modifier_type}"
+        msg = f"Unknown multiplicative modifier type: {type(modifier)}"
         raise ValueError(msg)
 
     def _apply_normfactor(
-        self, context: Context, rates: TensorVar, modifier: dict[str, Any]
+        self, context: Context, rates: TensorVar, modifier: NormFactorModifier
     ) -> TensorVar:
         """Apply normfactor modifier (simple scaling by parameter)."""
-        param_name = modifier["parameter"]
-        mu = context[param_name]
+        mu = context[modifier.parameter]
         return cast(TensorVar, rates * mu)
 
     def _apply_normsys(
-        self, context: Context, rates: TensorVar, modifier: dict[str, Any]
+        self, context: Context, rates: TensorVar, modifier: NormSysModifier
     ) -> TensorVar:
         """Apply normsys modifier (systematic with hi/lo interpolation)."""
-        param_name = modifier["parameter"]
-        alpha = context[param_name]
+        alpha = context[modifier.parameter]
 
-        hi_factor = modifier["data"]["hi"]
-        lo_factor = modifier["data"]["lo"]
+        hi_factor = modifier.data.hi
+        lo_factor = modifier.data.lo
 
-        # Apply interpolation method if specified
-        interpolation = modifier.get("interpolation", "lin")
+        # Apply interpolation method
+        interpolation = modifier.data.interpolation
         nominal_factor = pt.constant(1.0)
         hi_factor_tensor = pt.constant(hi_factor)
         lo_factor_tensor = pt.constant(lo_factor)
@@ -352,23 +578,23 @@ class HistFactoryDist(Distribution):
         return cast(TensorVar, rates * factor)
 
     def _apply_shapefactor(
-        self, context: Context, rates: TensorVar, modifier: dict[str, Any]
+        self, context: Context, rates: TensorVar, modifier: ShapeFactorModifier
     ) -> TensorVar:
         """Apply shapefactor modifier (uncorrelated bin-by-bin scaling)."""
-        param_names = modifier["parameters"]
+        param_names = modifier.parameters
         factors = pt.stack([context[name] for name in param_names])
         return cast(TensorVar, rates * factors)
 
     def _apply_shapesys(
-        self, context: Context, rates: TensorVar, modifier: dict[str, Any]
+        self, context: Context, rates: TensorVar, modifier: ShapeSysModifier
     ) -> TensorVar:
         """Apply shapesys modifier (shape systematic with constraints)."""
-        if "parameters" in modifier:
-            param_names = modifier["parameters"]
+        if modifier.parameters:
+            param_names = modifier.parameters
             factors = pt.stack([context[name] for name in param_names])
-        elif "parameter" in modifier:
+        elif modifier.parameter:
             # Single parameter case
-            param_name = modifier["parameter"]
+            param_name = modifier.parameter
             factors = context[param_name]
         else:
             msg = "shapesys modifier missing parameter specification"
@@ -377,10 +603,10 @@ class HistFactoryDist(Distribution):
         return cast(TensorVar, rates * factors)
 
     def _apply_staterror(
-        self, context: Context, rates: TensorVar, modifier: dict[str, Any]
+        self, context: Context, rates: TensorVar, modifier: StatErrorModifier
     ) -> TensorVar:
         """Apply staterror modifier (Barlow-Beeston statistical uncertainties)."""
-        param_names = modifier["parameters"]
+        param_names = modifier.parameters
         # Staterror is bin-by-bin statistical uncertainty
         # Each bin gets its own gamma parameter
         factors = pt.stack([context[name] for name in param_names])
@@ -416,11 +642,10 @@ class HistFactoryDist(Distribution):
 
         # Collect all constraint terms from modifiers
         for sample in self.samples:
-            for modifier in sample.get("modifiers", []):
-                constraint = modifier.get("constraint")
-                if constraint:
+            for modifier in sample.modifiers:
+                if modifier.constraint:
                     log_prob = self._build_constraint_term(
-                        context, modifier, constraint
+                        context, modifier, modifier.constraint
                     )
                     if log_prob is not None:
                         constraint_log_probs.append(log_prob)
@@ -433,46 +658,65 @@ class HistFactoryDist(Distribution):
         return cast(TensorVar, total_log_prob)
 
     def _build_constraint_term(
-        self, context: Context, modifier: dict[str, Any], constraint: str
+        self, context: Context, modifier: ModifierType, constraint: str
     ) -> TensorVar | None:
         """Build a single constraint term (returns log probability)."""
-        if constraint == "Gauss":
-            # Gaussian constraint: N(0, 1)
-            param_name = modifier["parameter"]
-            alpha = context[param_name]
-            # Standard normal log probability: -0.5 * alpha^2 - 0.5 * log(2*pi)
-            log_prob = -0.5 * alpha**2 - 0.5 * math.log(2 * math.pi)
-            return cast(TensorVar, log_prob)
-        if constraint == "Poisson":
-            # Poisson constraint (for shapesys, staterror)
-            if "parameters" in modifier:
-                # Multiple parameters (e.g., staterror)
-                param_names = modifier["parameters"]
-                log_probs = []
-                for param_name in param_names:
-                    gamma = context[param_name]
-                    # For staterror, the auxiliary data is typically the nominal value
-                    # We'll use a simplified form: Pois(aux_data | gamma)
+        # Handle single parameter modifiers
+        if isinstance(modifier, (NormSysModifier, HistoSysModifier, ShapeSysModifier)):
+            param_name = modifier.parameter
+            param_value = context[param_name]
+
+            if constraint == "Gauss":
+                # Gaussian constraint: N(0, 1)
+                # Standard normal log probability: -0.5 * alpha^2 - 0.5 * log(2*pi)
+                log_prob = -0.5 * param_value**2 - 0.5 * math.log(2 * math.pi)
+                return cast(TensorVar, log_prob)
+            if constraint == "Poisson":
+                # Poisson constraint
+                aux_data = pt.constant(1.0)  # Placeholder - should be from data
+                log_prob = (
+                    aux_data * pt.log(param_value)
+                    - param_value
+                    - pt.gammaln(aux_data + 1)
+                )
+                return cast(TensorVar, log_prob)
+            if constraint == "LogNormal":
+                # LogNormal constraint: typically used for rate parameters
+                # Log-normal with location=0, scale=1: log(mu) ~ N(0, 1)
+                log_mu = pt.log(param_value)
+                log_prob = -0.5 * log_mu**2 - 0.5 * math.log(2 * math.pi) - log_mu
+                return cast(TensorVar, log_prob)
+
+        # Handle multiple parameter modifiers
+        elif isinstance(modifier, StatErrorModifier):
+            param_names = modifier.parameters
+            log_probs = []
+
+            for param_name in param_names:
+                param_value = context[param_name]
+
+                if constraint == "Gauss":
+                    # Gaussian constraint: N(0, 1)
+                    log_prob = -0.5 * param_value**2 - 0.5 * math.log(2 * math.pi)
+                elif constraint == "Poisson":
+                    # Poisson constraint
                     aux_data = pt.constant(1.0)  # Placeholder - should be from data
                     log_prob = (
-                        aux_data * pt.log(gamma) - gamma - pt.gammaln(aux_data + 1)
+                        aux_data * pt.log(param_value)
+                        - param_value
+                        - pt.gammaln(aux_data + 1)
                     )
-                    log_probs.append(log_prob)
+                elif constraint == "LogNormal":
+                    # LogNormal constraint
+                    log_mu = pt.log(param_value)
+                    log_prob = -0.5 * log_mu**2 - 0.5 * math.log(2 * math.pi) - log_mu
+                else:
+                    continue
+
+                log_probs.append(log_prob)
+
+            if log_probs:
                 return cast(TensorVar, pt.sum(pt.stack(log_probs)))  # type: ignore[no-untyped-call]
-            # Single parameter case
-            param_name = modifier["parameter"]
-            gamma = context[param_name]
-            aux_data = pt.constant(1.0)  # Placeholder
-            log_prob = aux_data * pt.log(gamma) - gamma - pt.gammaln(aux_data + 1)
-            return cast(TensorVar, log_prob)
-        if constraint == "LogNormal":
-            # LogNormal constraint: typically used for rate parameters
-            param_name = modifier["parameter"]
-            mu = context[param_name]
-            # Log-normal with location=0, scale=1: log(mu) ~ N(0, 1)
-            log_mu = pt.log(mu)
-            log_prob = -0.5 * log_mu**2 - 0.5 * math.log(2 * math.pi) - log_mu
-            return cast(TensorVar, log_prob)
 
         return None
 

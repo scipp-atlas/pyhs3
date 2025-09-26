@@ -667,7 +667,7 @@ class TestInterpolationFunction:
         # Test invalid code during initialization
         with pytest.raises(
             ValidationError,
-            match="Unknown interpolation code 99 in function 'bad_interp'. Valid codes are 0, 1, 2, 3, 4, 5 or 6.",
+            match=r"Unknown interpolation code 99 in function 'bad_interp'. Valid codes are 0, 1, 2, 3, 4, 5 or 6.",
         ):
             InterpolationFunction(
                 name="bad_interp",
@@ -682,7 +682,7 @@ class TestInterpolationFunction:
         # Test mix of valid and invalid codes
         with pytest.raises(
             ValidationError,
-            match="Unknown interpolation code -1 in function 'bad_interp2'. Valid codes are 0, 1, 2, 3, 4, 5 or 6.",
+            match=r"Unknown interpolation code -1 in function 'bad_interp2'. Valid codes are 0, 1, 2, 3, 4, 5 or 6.",
         ):
             InterpolationFunction(
                 name="bad_interp2",

@@ -80,12 +80,23 @@ intersphinx_mapping = get_intersphinx_mapping(
     }
 )
 
+# Add HS3 specification documentation
+intersphinx_mapping["hs3"] = (
+    "https://hep-statistics-serialization-standard.github.io/",
+    None,
+)
+
 nitpick_ignore = [
     ("py:class", "_io.StringIO"),
     ("py:class", "_io.BytesIO"),
 ]
 
 always_document_param_types = True
+
+# Napoleon configuration for custom sections
+napoleon_custom_sections = [
+    ("HS3 Reference", "references_style"),
+]
 
 # sphinx-copybutton configuration
 copybutton_prompt_text = r">>> |\.\.\. |\$ "

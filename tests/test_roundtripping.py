@@ -109,7 +109,7 @@ class TestDistributionRoundtripping:
             "name": "test_mixture",
             "summands": ["comp1", "comp2", "comp3"],
             "coefficients": ["c1", "c2"],
-            "extended": True,
+            "extended": False,
         }
 
         # Create from dict

@@ -17,7 +17,7 @@ from pyhs3.context import Context
 
 # Import existing distributions for constraint terms
 from pyhs3.distributions.core import Distribution
-from pyhs3.distributions.histfactory import interpolations, modifiers
+from pyhs3.distributions.histfactory import modifiers
 from pyhs3.distributions.histfactory.samples import Sample, Samples
 from pyhs3.domains import Axis
 from pyhs3.typing.aliases import TensorVar
@@ -187,125 +187,17 @@ class HistFactoryDist(Distribution):
         # Apply modifiers
         modified_rates = nominal_rates
 
-        # Apply additive modifiers first (histosys)
+        # Apply additive modifiers first
         for modifier in sample.modifiers:
-            if isinstance(modifier, modifiers.HistoSysModifier):
-                modified_rates = self._apply_histosys(context, modified_rates, modifier)
+            if modifier.is_additive:
+                modified_rates = modifier.apply(context, modified_rates)
 
-        # Apply multiplicative modifiers (normfactor, normsys, shapefactor, etc.)
+        # Apply multiplicative modifiers
         for modifier in sample.modifiers:
-            if isinstance(
-                modifier,
-                (
-                    modifiers.NormFactorModifier,
-                    modifiers.NormSysModifier,
-                    modifiers.ShapeFactorModifier,
-                    modifiers.ShapeSysModifier,
-                    modifiers.StatErrorModifier,
-                ),
-            ):
-                modified_rates = self._apply_multiplicative_modifier(
-                    context, modified_rates, modifier
-                )
+            if modifier.is_multiplicative:
+                modified_rates = modifier.apply(context, modified_rates)
 
         return cast(TensorVar, modified_rates)
-
-    def _apply_histosys(
-        self, context: Context, rates: TensorVar, modifier: modifiers.HistoSysModifier
-    ) -> TensorVar:
-        """Apply histosys (additive systematic) modifier."""
-        alpha = context[modifier.parameter]
-
-        # Get hi/lo variations
-        hi_contents = modifier.data.hi.contents
-        lo_contents = modifier.data.lo.contents
-
-        hi_variation = pt.as_tensor_variable(hi_contents)
-        lo_variation = pt.as_tensor_variable(lo_contents)
-        zero_variation = pt.zeros_like(hi_variation)  # type: ignore[no-untyped-call]
-
-        # Apply interpolation method
-        interpolation = modifier.data.interpolation
-        variation = interpolations.apply_interpolation(
-            interpolation, alpha, zero_variation, hi_variation, lo_variation
-        )
-
-        return cast(TensorVar, rates + variation)
-
-    def _apply_multiplicative_modifier(
-        self, context: Context, rates: TensorVar, modifier: modifiers.ModifierType
-    ) -> TensorVar:
-        """Apply multiplicative modifiers (normfactor, normsys, etc.)."""
-        if isinstance(modifier, modifiers.NormFactorModifier):
-            return self._apply_normfactor(context, rates, modifier)
-        if isinstance(modifier, modifiers.NormSysModifier):
-            return self._apply_normsys(context, rates, modifier)
-        if isinstance(modifier, modifiers.ShapeFactorModifier):
-            return self._apply_shapefactor(context, rates, modifier)
-        if isinstance(modifier, modifiers.ShapeSysModifier):
-            return self._apply_shapesys(context, rates, modifier)
-        if isinstance(modifier, modifiers.StatErrorModifier):
-            return self._apply_staterror(context, rates, modifier)
-        msg = f"Unknown multiplicative modifier type: {type(modifier)}"
-        raise ValueError(msg)
-
-    def _apply_normfactor(
-        self, context: Context, rates: TensorVar, modifier: modifiers.NormFactorModifier
-    ) -> TensorVar:
-        """Apply normfactor modifier (simple scaling by parameter)."""
-        mu = context[modifier.parameter]
-        return cast(TensorVar, rates * mu)
-
-    def _apply_normsys(
-        self, context: Context, rates: TensorVar, modifier: modifiers.NormSysModifier
-    ) -> TensorVar:
-        """Apply normsys modifier (systematic with hi/lo interpolation)."""
-        alpha = context[modifier.parameter]
-
-        hi_factor = modifier.data.hi
-        lo_factor = modifier.data.lo
-
-        # Apply interpolation method
-        interpolation = modifier.data.interpolation
-        nominal_factor = pt.constant(1.0)
-        hi_factor_tensor = pt.constant(hi_factor)
-        lo_factor_tensor = pt.constant(lo_factor)
-
-        factor = interpolations.apply_interpolation(
-            interpolation, alpha, nominal_factor, hi_factor_tensor, lo_factor_tensor
-        )
-
-        return cast(TensorVar, rates * factor)
-
-    def _apply_shapefactor(
-        self,
-        context: Context,
-        rates: TensorVar,
-        modifier: modifiers.ShapeFactorModifier,
-    ) -> TensorVar:
-        """Apply shapefactor modifier (uncorrelated bin-by-bin scaling)."""
-        param_names = modifier.parameters
-        factors = pt.stack([context[name] for name in param_names])
-        return cast(TensorVar, rates * factors)
-
-    def _apply_shapesys(
-        self, context: Context, rates: TensorVar, modifier: modifiers.ShapeSysModifier
-    ) -> TensorVar:
-        """Apply shapesys modifier (shape systematic with constraints)."""
-        # Single parameter case
-        param_name = modifier.parameter
-        factors = context[param_name]
-        return cast(TensorVar, rates * factors)
-
-    def _apply_staterror(
-        self, context: Context, rates: TensorVar, modifier: modifiers.StatErrorModifier
-    ) -> TensorVar:
-        """Apply staterror modifier (Barlow-Beeston statistical uncertainties)."""
-        param_names = modifier.parameters
-        # Staterror is bin-by-bin statistical uncertainty
-        # Each bin gets its own gamma parameter
-        factors = pt.stack([context[name] for name in param_names])
-        return cast(TensorVar, rates * factors)
 
     def _build_main_model(
         self, context: Context, expected_rates: TensorVar
@@ -331,36 +223,7 @@ class HistFactoryDist(Distribution):
         )
         main_log_prob = pt.sum(log_probs)  # type: ignore[no-untyped-call]
 
-        # Add auxiliary data terms from constraint modifiers
-        aux_log_probs = []
-        for sample in self.samples:
-            for modifier in sample.modifiers:
-                parameters = getattr(modifier, "parameters", None)
-                if modifier.constraint and parameters:
-                    # For modifiers with constraints, add auxiliary Poisson terms
-                    aux_data_list = modifier.auxdata
-                    if isinstance(aux_data_list, list):
-                        # For staterror, add Poisson(aux_data | parameter) terms
-                        for param_name, aux_data in zip(
-                            parameters, aux_data_list, strict=False
-                        ):
-                            aux_observed = pt.constant(aux_data)
-                            aux_expected = context[param_name]
-                            aux_log_prob = (
-                                aux_observed * pt.log(aux_expected)
-                                - aux_expected
-                                - pt.gammaln(aux_observed + 1)
-                            )
-                            aux_log_probs.append(aux_log_prob)
-
-        # Combine main and auxiliary terms
-        if aux_log_probs:
-            total_aux_log_prob = pt.sum(pt.stack(aux_log_probs))  # type: ignore[no-untyped-call]
-            total_log_prob = main_log_prob + total_aux_log_prob
-        else:
-            total_log_prob = main_log_prob
-
-        return cast(TensorVar, total_log_prob)
+        return cast(TensorVar, main_log_prob)
 
     def _build_constraint_model(self, context: Context) -> TensorVar | None:
         """Build constraint model for nuisance parameters."""
@@ -371,7 +234,7 @@ class HistFactoryDist(Distribution):
             for modifier in sample.modifiers:
                 if modifier.constraint:
                     log_prob = self._build_constraint_term(
-                        context, modifier, modifier.constraint
+                        context, modifier, modifier.constraint, sample
                     )
                     if log_prob is not None:
                         constraint_log_probs.append(log_prob)
@@ -384,7 +247,11 @@ class HistFactoryDist(Distribution):
         return cast(TensorVar, total_log_prob)
 
     def _build_constraint_term(
-        self, context: Context, modifier: modifiers.ModifierType, constraint: str
+        self,
+        context: Context,
+        modifier: modifiers.ModifierType,
+        constraint: str,
+        sample: Sample,
     ) -> TensorVar | None:
         """Build a single constraint term using existing PyHS3 distributions."""
         # Handle single parameter modifiers
@@ -400,7 +267,7 @@ class HistFactoryDist(Distribution):
             aux_data = modifier.auxdata
 
             return self._create_constraint_distribution(
-                constraint, param_name, aux_data, context, modifier
+                constraint, param_name, aux_data, context, modifier, sample
             )
 
         # Handle multiple parameter modifiers (staterror)
@@ -411,7 +278,7 @@ class HistFactoryDist(Distribution):
 
             for param_name, aux_data in zip(param_names, aux_data_list, strict=False):
                 log_prob = self._create_constraint_distribution(
-                    constraint, param_name, aux_data, context, modifier
+                    constraint, param_name, aux_data, context, modifier, sample
                 )
                 if log_prob is not None:
                     log_probs.append(log_prob)
@@ -428,6 +295,7 @@ class HistFactoryDist(Distribution):
         aux_data: float,
         context: Context,
         modifier: modifiers.ModifierType,
+        sample: Sample,
     ) -> TensorVar | None:
         """Create constraint term using existing PyHS3 distributions."""
         if constraint == "Gauss":
@@ -437,9 +305,13 @@ class HistFactoryDist(Distribution):
 
             # Get sigma based on modifier type
             if isinstance(modifier, modifiers.StatErrorModifier):
-                # For staterror, sigma comes from the uncertainty data
+                # For staterror, sigma = uncertainty / nominal_yield (relative uncertainty)
                 param_index = modifier.parameters.index(param_name)
-                sigma = modifier.data.uncertainties[param_index]
+                uncertainty = modifier.data.uncertainties[param_index]
+
+                # Get the nominal yield for this bin from the sample
+                nominal_yield = sample.data.contents[param_index]
+                sigma = uncertainty / nominal_yield
                 sigma_tensor = pt.constant(sigma)
             else:
                 # For normsys/histosys, use standard deviation of 1.0

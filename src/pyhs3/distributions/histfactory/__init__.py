@@ -7,7 +7,6 @@ with samples and modifiers as defined in the HS3 specification.
 
 from __future__ import annotations
 
-import math
 from typing import Literal, cast
 
 import pytensor.tensor as pt
@@ -17,7 +16,7 @@ from pyhs3.context import Context
 
 # Import existing distributions for constraint terms
 from pyhs3.distributions.core import Distribution
-from pyhs3.distributions.histfactory import modifiers
+from pyhs3.distributions.histfactory.modifiers import HasConstraint
 from pyhs3.distributions.histfactory.samples import Sample, Samples
 from pyhs3.domains import Axis
 from pyhs3.typing.aliases import TensorVar
@@ -135,17 +134,33 @@ class HistFactoryDist(Distribution):
         expected_rates = self._compute_expected_rates(context, total_bins)
 
         # Build main Poisson model for observed data (returns log probability)
-        main_log_prob = self._build_main_model(context, expected_rates)
+        main_prob = self._build_main_model(context, expected_rates)
 
         # Build constraint model for nuisance parameters (returns log probability)
-        constraint_log_prob = self._build_constraint_model(context)
+        constraint_prob = self._build_constraint_model(context)
 
         # Combine main and constraint models (sum log probabilities)
-        if constraint_log_prob is not None:
-            total_log_prob = main_log_prob + constraint_log_prob
-            return cast(TensorVar, total_log_prob)
+        if constraint_prob is not None:
+            total_prob = main_prob * constraint_prob
+            return cast(TensorVar, total_prob)
 
-        return main_log_prob
+        return main_prob
+
+    def log_expression(self, context: Context) -> TensorVar:
+        """
+        Build the HistFactory log likelihood expression.
+
+        This is a convenience method that returns the log of the likelihood.
+        For now, it delegates to the main expression method which already
+        returns log probabilities.
+
+        Args:
+            context: Mapping of parameter names to PyTensor variables
+
+        Returns:
+            PyTensor expression for the HistFactory log likelihood
+        """
+        return cast(TensorVar, pt.log(self.expression(context)))
 
     def _get_total_bins(self) -> int:
         """Calculate total number of bins across all axes."""
@@ -208,148 +223,46 @@ class HistFactoryDist(Distribution):
         Observed data must be provided in the context as '{name}_observed' where
         name is the HistFactory distribution name. This is a required parameter
         for likelihood evaluation.
+
+        Returns:
+            PyTensor expression for the Poisson probability (not log probability)
         """
         # Create a Poisson likelihood for the observed bin counts
         # Observed data is required - no defensive programming needed
         observed_data_param = f"{self.name}_observed"
         observed_data = context[observed_data_param]
 
-        # Build sum of individual Poisson likelihoods for each bin
-        # log P(observed_i | expected_i) = observed_i * log(expected_i) - expected_i - log(observed_i!)
+        # Build product of individual Poisson probabilities for each bin
+        # P(observed_i | expected_i) = exp(observed_i * log(expected_i) - expected_i - log(observed_i!))
         log_probs = (
             observed_data * pt.log(expected_rates)
             - expected_rates
             - pt.gammaln(observed_data + 1)
         )
-        main_log_prob = pt.sum(log_probs)  # type: ignore[no-untyped-call]
+        # Convert from log probabilities to probabilities
+        probs = pt.exp(log_probs)
+        main_prob = pt.prod(probs)  # type: ignore[no-untyped-call]
 
-        return cast(TensorVar, main_log_prob)
+        return cast(TensorVar, main_prob)
 
     def _build_constraint_model(self, context: Context) -> TensorVar | None:
         """Build constraint model for nuisance parameters."""
-        constraint_log_probs = []
+        constraint_probs = []
 
         # Collect all constraint terms from modifiers
         for sample in self.samples:
+            # Prepare sample data for constraint calculations
             for modifier in sample.modifiers:
-                if modifier.constraint:
-                    log_prob = self._build_constraint_term(
-                        context, modifier, modifier.constraint, sample
-                    )
-                    if log_prob is not None:
-                        constraint_log_probs.append(log_prob)
+                if isinstance(modifier, HasConstraint):
+                    prob = modifier.make_constraint(context, sample.data)
+                    if prob is not None:
+                        constraint_probs.append(prob)
 
-        if not constraint_log_probs:
+        if not constraint_probs:
             return None
 
-        # Sum all constraint log probabilities
-        total_log_prob = pt.sum(pt.stack(constraint_log_probs))  # type: ignore[no-untyped-call]
-        return cast(TensorVar, total_log_prob)
-
-    def _build_constraint_term(
-        self,
-        context: Context,
-        modifier: modifiers.ModifierType,
-        constraint: str,
-        sample: Sample,
-    ) -> TensorVar | None:
-        """Build a single constraint term using existing PyHS3 distributions."""
-        # Handle single parameter modifiers
-        if isinstance(
-            modifier,
-            (
-                modifiers.NormSysModifier,
-                modifiers.HistoSysModifier,
-                modifiers.ShapeSysModifier,
-            ),
-        ):
-            param_name = modifier.parameter
-            aux_data = modifier.auxdata
-
-            return self._create_constraint_distribution(
-                constraint, param_name, aux_data, context, modifier, sample
-            )
-
-        # Handle multiple parameter modifiers (staterror)
-        if isinstance(modifier, modifiers.StatErrorModifier):
-            param_names = modifier.parameters
-            aux_data_list = modifier.auxdata
-            log_probs = []
-
-            for param_name, aux_data in zip(param_names, aux_data_list, strict=False):
-                log_prob = self._create_constraint_distribution(
-                    constraint, param_name, aux_data, context, modifier, sample
-                )
-                if log_prob is not None:
-                    log_probs.append(log_prob)
-
-            if log_probs:
-                return cast(TensorVar, pt.sum(pt.stack(log_probs)))  # type: ignore[no-untyped-call]
-
-        return None
-
-    def _create_constraint_distribution(
-        self,
-        constraint: str,
-        param_name: str,
-        aux_data: float,
-        context: Context,
-        modifier: modifiers.ModifierType,
-        sample: Sample,
-    ) -> TensorVar | None:
-        """Create constraint term using existing PyHS3 distributions."""
-        if constraint == "Gauss":
-            # Gaussian constraint: Normal(auxdata | mean=parameter, std=sigma)
-            param_value = context[param_name]
-            aux_tensor = pt.constant(aux_data)
-
-            # Get sigma based on modifier type
-            if isinstance(modifier, modifiers.StatErrorModifier):
-                # For staterror, sigma = uncertainty / nominal_yield (relative uncertainty)
-                param_index = modifier.parameters.index(param_name)
-                uncertainty = modifier.data.uncertainties[param_index]
-
-                # Get the nominal yield for this bin from the sample
-                nominal_yield = sample.data.contents[param_index]
-                sigma = uncertainty / nominal_yield
-                sigma_tensor = pt.constant(sigma)
-            else:
-                # For normsys/histosys, use standard deviation of 1.0
-                sigma_tensor = pt.constant(1.0)
-
-            # Gaussian log probability: -0.5 * ((aux - param)/sigma)^2 - 0.5 * log(2*pi*sigma^2)
-            diff = (aux_tensor - param_value) / sigma_tensor
-            log_prob = -0.5 * diff**2 - 0.5 * pt.log(2 * math.pi * sigma_tensor**2)
-            return cast(TensorVar, log_prob)
-
-        if constraint == "Poisson":
-            # Poisson constraint with auxiliary data
-            param_value = context[param_name]
-            aux_tensor = pt.constant(aux_data)
-
-            # For shapesys modifiers, pyhf uses scaled constraint:
-            # Poisson(aux_data | param_value * aux_data)
-            # For other modifiers, use direct constraint:
-            # Poisson(aux_data | param_value)
-            if isinstance(modifier, modifiers.ShapeSysModifier):
-                # Scaled constraint for shapesys
-                rate = param_value * aux_tensor
-            else:
-                # Direct constraint for other modifiers
-                rate = param_value
-
-            # Poisson log probability: k * log(lambda) - lambda - log(k!)
-            log_prob = aux_tensor * pt.log(rate) - rate - pt.gammaln(aux_tensor + 1)
-            return cast(TensorVar, log_prob)
-
-        if constraint == "LogNormal":
-            # LogNormal constraint: log(param) ~ N(0, 1)
-            param_value = context[param_name]
-            log_mu = pt.log(param_value)
-            log_prob = -0.5 * log_mu**2 - 0.5 * math.log(2 * math.pi) - log_mu
-            return cast(TensorVar, log_prob)
-
-        return None
+        # Multiply all constraint probabilities and take log
+        return cast(TensorVar, pt.prod(pt.stack(constraint_probs)))  # type: ignore[no-untyped-call]
 
 
 # Registry of histfactory distributions

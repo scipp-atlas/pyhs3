@@ -11,9 +11,16 @@ import pytensor.tensor as pt
 import pytest
 from pytensor import function
 
+try:
+    import pyhf
+
+    HAS_PYHF = True
+except ImportError:
+    HAS_PYHF = False
+
 from pyhs3.context import Context
 from pyhs3.distributions import HistFactoryDist
-from pyhs3.distributions.histfactory import (
+from pyhs3.distributions.histfactory.interpolations import (
     apply_interpolation,
     interpolate_lin,
     interpolate_log,
@@ -50,7 +57,13 @@ class TestHistFactoryDist:
             {
                 "name": "signal",
                 "data": {"contents": [5.0, 3.0], "errors": [1.0, 1.0]},
-                "modifiers": [{"type": "normfactor", "parameter": "mu_signal"}],
+                "modifiers": [
+                    {
+                        "name": "mu_signal",
+                        "type": "normfactor",
+                        "parameter": "mu_signal",
+                    }
+                ],
             }
         ]
 
@@ -70,6 +83,7 @@ class TestHistFactoryDist:
                 "data": {"contents": [10.0, 8.0], "errors": [2.0, 2.0]},
                 "modifiers": [
                     {
+                        "name": "bkg_norm_sys",
                         "type": "normsys",
                         "parameter": "bkg_norm_sys",
                         "constraint": "Gauss",
@@ -98,6 +112,7 @@ class TestHistFactoryDist:
                 "data": {"contents": [5.0, 3.0], "errors": [1.0, 1.0]},
                 "modifiers": [
                     {
+                        "name": "signal_shape_sys",
                         "type": "histosys",
                         "parameter": "signal_shape_sys",
                         "constraint": "Gauss",
@@ -128,8 +143,13 @@ class TestHistFactoryDist:
                 "name": "signal",
                 "data": {"contents": [5.0, 3.0], "errors": [1.0, 1.0]},
                 "modifiers": [
-                    {"type": "normfactor", "parameter": "mu_signal"},
                     {
+                        "name": "mu_signal",
+                        "type": "normfactor",
+                        "parameter": "mu_signal",
+                    },
+                    {
+                        "name": "lumi_sys",
                         "type": "normsys",
                         "parameter": "lumi_sys",
                         "constraint": "Gauss",
@@ -154,13 +174,20 @@ class TestHistFactoryDist:
             {
                 "name": "signal",
                 "data": {"contents": [5.0, 3.0], "errors": [1.0, 1.0]},
-                "modifiers": [{"type": "normfactor", "parameter": "mu_signal"}],
+                "modifiers": [
+                    {
+                        "name": "mu_signal",
+                        "type": "normfactor",
+                        "parameter": "mu_signal",
+                    }
+                ],
             },
             {
                 "name": "background",
                 "data": {"contents": [10.0, 8.0], "errors": [2.0, 2.0]},
                 "modifiers": [
                     {
+                        "name": "bkg_norm_sys",
                         "type": "normsys",
                         "parameter": "bkg_norm_sys",
                         "constraint": "Gauss",
@@ -332,7 +359,13 @@ class TestHistFactoryExpression:
             {
                 "name": "signal",
                 "data": {"contents": [5.0, 3.0], "errors": [1.0, 1.0]},
-                "modifiers": [{"type": "normfactor", "parameter": "mu_signal"}],
+                "modifiers": [
+                    {
+                        "name": "mu_signal",
+                        "type": "normfactor",
+                        "parameter": "mu_signal",
+                    }
+                ],
             }
         ]
 
@@ -362,6 +395,413 @@ class TestHistFactoryExpression:
         assert np.isfinite(result)
         assert isinstance(result, (float, np.floating, np.ndarray))
 
+
+@pytest.mark.skipif(not HAS_PYHF, reason="pyhf not available")
+class TestPyhfPrecisionValidation:
+    """Test precision validation against pyhf to prevent regressions."""
+
+    def test_normsys_precision_vs_pyhf(self):
+        """Test that normsys constraint achieves perfect precision vs pyhf."""
+
+        # Test parameters that previously achieved 0.0 difference
+        mu = 1.0
+        bkg_norm = 0.5
+        observed = 15.0
+
+        # pyhf model
+        pyhf_spec = {
+            "channels": [
+                {
+                    "name": "singlechannel",
+                    "samples": [
+                        {
+                            "name": "signal",
+                            "data": [10],
+                            "modifiers": [
+                                {"name": "mu", "type": "normfactor", "data": None}
+                            ],
+                        },
+                        {
+                            "name": "background",
+                            "data": [20],
+                            "modifiers": [
+                                {
+                                    "name": "bkg_norm",
+                                    "type": "normsys",
+                                    "data": {"hi": 1.1, "lo": 0.9},
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ]
+        }
+
+        pyhf_model = pyhf.Model(pyhf_spec)
+        pyhf_params = [mu, bkg_norm]
+        pyhf_data = [int(observed), *pyhf_model.config.auxdata]
+
+        pyhf_expected = pyhf_model.expected_actualdata(pyhf_params)
+        pyhf_logpdf = pyhf_model.logpdf(pyhf_params, pyhf_data).item()
+
+        # pyhs3 model
+        axes = [{"name": "observable", "min": 0.0, "max": 1.0, "nbins": 1}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {"contents": [10.0], "errors": [1.0]},
+                "modifiers": [{"name": "mu", "type": "normfactor", "parameter": "mu"}],
+            },
+            {
+                "name": "background",
+                "data": {"contents": [20.0], "errors": [1.0]},
+                "modifiers": [
+                    {
+                        "name": "bkg_norm",
+                        "type": "normsys",
+                        "parameter": "bkg_norm",
+                        "constraint": "Gauss",
+                        "data": {"hi": 1.1, "lo": 0.9},
+                    }
+                ],
+            },
+        ]
+
+        dist = HistFactoryDist(name="singlechannel", axes=axes, samples=samples)
+
+        # Create context
+        mu_var = pt.dscalar("mu")
+        bkg_norm_var = pt.dscalar("bkg_norm")
+        observed_data_var = pt.dvector("singlechannel_observed")
+
+        context = Context(
+            {
+                "mu": mu_var,
+                "bkg_norm": bkg_norm_var,
+                "singlechannel_observed": observed_data_var,
+            }
+        )
+
+        # Get pyhs3 results
+        expected_rates = dist._compute_expected_rates(context, 1)
+        total_expr = dist.log_expression(context)
+
+        rates_func = function([mu_var, bkg_norm_var], expected_rates)
+        total_func = function([mu_var, bkg_norm_var, observed_data_var], total_expr)
+
+        pyhs3_expected = rates_func(mu, bkg_norm)
+        pyhs3_logpdf = total_func(mu, bkg_norm, np.array([observed]))
+
+        # Validate precision (use tight tolerances to prevent regression)
+        assert pyhs3_expected[0] == pytest.approx(pyhf_expected[0], abs=1e-14), (
+            f"Expected rates differ: pyhf={pyhf_expected[0]}, pyhs3={pyhs3_expected[0]}"
+        )
+        assert float(pyhs3_logpdf) == pytest.approx(pyhf_logpdf, abs=1e-14), (
+            f"Log PDF differs: pyhf={pyhf_logpdf}, pyhs3={float(pyhs3_logpdf)}"
+        )
+
+    def test_histosys_precision_vs_pyhf(self):
+        """Test that histosys constraint achieves perfect precision vs pyhf."""
+
+        # Test parameters that should achieve high precision
+        mu = 1.0
+        alpha = 0.5
+        observed = 12.0
+
+        # pyhf model with histosys
+        pyhf_spec = {
+            "channels": [
+                {
+                    "name": "singlechannel",
+                    "samples": [
+                        {
+                            "name": "signal",
+                            "data": [10],
+                            "modifiers": [
+                                {"name": "mu", "type": "normfactor", "data": None}
+                            ],
+                        },
+                        {
+                            "name": "background",
+                            "data": [20],
+                            "modifiers": [
+                                {
+                                    "name": "alpha",
+                                    "type": "histosys",
+                                    "data": {"hi_data": [25], "lo_data": [15]},
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ]
+        }
+
+        pyhf_model = pyhf.Model(pyhf_spec)
+        # pyhf parameter order is ['alpha', 'mu'], not ['mu', 'alpha']
+        pyhf_params = [alpha, mu]  # Correct order: [alpha, mu]
+        pyhf_data = [int(observed), *pyhf_model.config.auxdata]
+
+        pyhf_expected = pyhf_model.expected_actualdata(pyhf_params)
+        pyhf_logpdf = pyhf_model.logpdf(pyhf_params, pyhf_data).item()
+
+        # pyhs3 model with histosys
+        axes = [{"name": "observable", "min": 0.0, "max": 1.0, "nbins": 1}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {"contents": [10.0], "errors": [1.0]},
+                "modifiers": [{"name": "mu", "type": "normfactor", "parameter": "mu"}],
+            },
+            {
+                "name": "background",
+                "data": {"contents": [20.0], "errors": [1.0]},
+                "modifiers": [
+                    {
+                        "name": "alpha",
+                        "type": "histosys",
+                        "parameter": "alpha",
+                        "constraint": "Gauss",
+                        "data": {
+                            "hi": {"contents": [25.0]},
+                            "lo": {"contents": [15.0]},
+                        },
+                    }
+                ],
+            },
+        ]
+
+        dist = HistFactoryDist(name="singlechannel", axes=axes, samples=samples)
+
+        # Create context
+        mu_var = pt.dscalar("mu")
+        alpha_var = pt.dscalar("alpha")
+        observed_data_var = pt.dvector("singlechannel_observed")
+
+        context = Context(
+            {
+                "mu": mu_var,
+                "alpha": alpha_var,
+                "singlechannel_observed": observed_data_var,
+            }
+        )
+
+        # Get pyhs3 results
+        expected_rates = dist._compute_expected_rates(context, 1)
+        total_expr = dist.log_expression(context)
+
+        rates_func = function([mu_var, alpha_var], expected_rates)
+        total_func = function([mu_var, alpha_var, observed_data_var], total_expr)
+
+        pyhs3_expected = rates_func(mu, alpha)
+        pyhs3_logpdf = total_func(mu, alpha, np.array([observed]))
+
+        # Validate precision (use tight tolerances to prevent regression)
+        assert pyhs3_expected[0] == pytest.approx(pyhf_expected[0], abs=1e-12), (
+            f"Expected rates differ: pyhf={pyhf_expected[0]}, pyhs3={pyhs3_expected[0]}"
+        )
+        assert float(pyhs3_logpdf) == pytest.approx(pyhf_logpdf, abs=1e-12), (
+            f"Log PDF differs: pyhf={pyhf_logpdf}, pyhs3={float(pyhs3_logpdf)}"
+        )
+
+    def test_staterror_precision_vs_pyhf(self):
+        """Test that staterror constraint achieves perfect precision vs pyhf."""
+
+        # Test parameters that should achieve high precision (use less extreme values)
+        mu = 1.0
+        staterror_bin_0 = 1.0  # Use nominal value to avoid extreme constraint
+        observed = 30.0  # Use expected value to avoid extreme Poisson
+
+        # pyhf model with staterror
+        pyhf_spec = {
+            "channels": [
+                {
+                    "name": "singlechannel",
+                    "samples": [
+                        {
+                            "name": "signal",
+                            "data": [10],
+                            "modifiers": [
+                                {"name": "mu", "type": "normfactor", "data": None}
+                            ],
+                        },
+                        {
+                            "name": "background",
+                            "data": [20],
+                            "modifiers": [
+                                {
+                                    "name": "staterror_bin_0",
+                                    "type": "staterror",
+                                    "data": [0.1],
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ]
+        }
+
+        pyhf_model = pyhf.Model(pyhf_spec)
+        pyhf_params = [mu, staterror_bin_0]
+        pyhf_data = [int(observed), *pyhf_model.config.auxdata]
+
+        pyhf_expected = pyhf_model.expected_actualdata(pyhf_params)
+        pyhf_logpdf = pyhf_model.logpdf(pyhf_params, pyhf_data).item()
+
+        # pyhs3 model with staterror
+        axes = [{"name": "observable", "min": 0.0, "max": 1.0, "nbins": 1}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {"contents": [10.0], "errors": [1.0]},
+                "modifiers": [{"name": "mu", "type": "normfactor", "parameter": "mu"}],
+            },
+            {
+                "name": "background",
+                "data": {"contents": [20.0], "errors": [2.0]},
+                "modifiers": [
+                    {
+                        "name": "staterror_bin_0",
+                        "type": "staterror",
+                        "parameters": ["staterror_bin_0"],
+                        "constraint": "Gauss",
+                        "data": {"uncertainties": [0.1]},
+                    }
+                ],
+            },
+        ]
+
+        dist = HistFactoryDist(name="singlechannel", axes=axes, samples=samples)
+
+        # Create context
+        mu_var = pt.dscalar("mu")
+        staterror_bin_0_var = pt.dscalar("staterror_bin_0")
+        observed_data_var = pt.dvector("singlechannel_observed")
+
+        context = Context(
+            {
+                "mu": mu_var,
+                "staterror_bin_0": staterror_bin_0_var,
+                "singlechannel_observed": observed_data_var,
+            }
+        )
+
+        # Get pyhs3 results
+        expected_rates = dist._compute_expected_rates(context, 1)
+        total_expr = dist.log_expression(context)
+
+        rates_func = function([mu_var, staterror_bin_0_var], expected_rates)
+        total_func = function(
+            [mu_var, staterror_bin_0_var, observed_data_var], total_expr
+        )
+
+        pyhs3_expected = rates_func(mu, staterror_bin_0)
+        pyhs3_logpdf = total_func(mu, staterror_bin_0, np.array([observed]))
+
+        # Validate precision (use reasonable tolerances for staterror)
+        assert pyhs3_expected[0] == pytest.approx(pyhf_expected[0], abs=1e-12), (
+            f"Expected rates differ: pyhf={pyhf_expected[0]}, pyhs3={pyhs3_expected[0]}"
+        )
+        assert float(pyhs3_logpdf) == pytest.approx(pyhf_logpdf, abs=1e-12), (
+            f"Log PDF differs: pyhf={pyhf_logpdf}, pyhs3={float(pyhs3_logpdf)}"
+        )
+
+    def test_shapesys_precision_vs_pyhf(self):
+        """Test that shapesys constraint achieves perfect precision vs pyhf."""
+
+        # Test parameters that should achieve high precision
+        mu = 1.0
+        gamma_0 = 0.9
+        observed = 16.0
+
+        # pyhf model with shapesys
+        pyhf_spec = {
+            "channels": [
+                {
+                    "name": "singlechannel",
+                    "samples": [
+                        {
+                            "name": "signal",
+                            "data": [10],
+                            "modifiers": [
+                                {"name": "mu", "type": "normfactor", "data": None}
+                            ],
+                        },
+                        {
+                            "name": "background",
+                            "data": [20],
+                            "modifiers": [
+                                {"name": "shape_bkg", "type": "shapesys", "data": [25]}
+                            ],
+                        },
+                    ],
+                }
+            ]
+        }
+
+        pyhf_model = pyhf.Model(pyhf_spec)
+        pyhf_params = [mu, gamma_0]
+        pyhf_data = [int(observed), *pyhf_model.config.auxdata]
+
+        pyhf_expected = pyhf_model.expected_actualdata(pyhf_params)
+        pyhf_logpdf = pyhf_model.logpdf(pyhf_params, pyhf_data).item()
+
+        # pyhs3 model with shapesys
+        axes = [{"name": "observable", "min": 0.0, "max": 1.0, "nbins": 1}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {"contents": [10.0], "errors": [1.0]},
+                "modifiers": [{"name": "mu", "type": "normfactor", "parameter": "mu"}],
+            },
+            {
+                "name": "background",
+                "data": {"contents": [20.0], "errors": [1.0]},
+                "modifiers": [
+                    {
+                        "name": "shape_bkg",
+                        "type": "shapesys",
+                        "parameters": ["gamma_0"],
+                        "constraint": "Poisson",
+                        "data": {"vals": [25]},
+                    }
+                ],
+            },
+        ]
+
+        dist = HistFactoryDist(name="singlechannel", axes=axes, samples=samples)
+
+        # Create context
+        mu_var = pt.dscalar("mu")
+        gamma_0_var = pt.dscalar("gamma_0")
+        observed_data_var = pt.dvector("singlechannel_observed")
+
+        context = Context(
+            {
+                "mu": mu_var,
+                "gamma_0": gamma_0_var,
+                "singlechannel_observed": observed_data_var,
+            }
+        )
+
+        # Get pyhs3 results
+        expected_rates = dist._compute_expected_rates(context, 1)
+        total_expr = dist.log_expression(context)
+
+        rates_func = function([mu_var, gamma_0_var], expected_rates)
+        total_func = function([mu_var, gamma_0_var, observed_data_var], total_expr)
+
+        pyhs3_expected = rates_func(mu, gamma_0)
+        pyhs3_logpdf = total_func(mu, gamma_0, np.array([observed]))
+
+        # Validate precision (use reasonable tolerances for shapesys)
+        assert pyhs3_expected[0] == pytest.approx(pyhf_expected[0], abs=1e-12), (
+            f"Expected rates differ: pyhf={pyhf_expected[0]}, pyhs3={pyhs3_expected[0]}"
+        )
+        assert float(pyhs3_logpdf) == pytest.approx(pyhf_logpdf, abs=1e-12), (
+            f"Log PDF differs: pyhf={pyhf_logpdf}, pyhs3={float(pyhs3_logpdf)}"
+        )
+
     def test_expression_with_constraints(self):
         """Test HistFactory expression with constrained modifiers."""
 
@@ -372,6 +812,7 @@ class TestHistFactoryExpression:
                 "data": {"contents": [10.0, 8.0], "errors": [2.0, 2.0]},
                 "modifiers": [
                     {
+                        "name": "bkg_norm_sys",
                         "type": "normsys",
                         "parameter": "bkg_norm_sys",
                         "constraint": "Gauss",
@@ -421,7 +862,13 @@ class TestHistFactoryExpression:
             {
                 "name": "signal",
                 "data": {"contents": [2.0, 1.5], "errors": [0.5, 0.5]},
-                "modifiers": [{"type": "normfactor", "parameter": "mu_signal"}],
+                "modifiers": [
+                    {
+                        "name": "mu_signal",
+                        "type": "normfactor",
+                        "parameter": "mu_signal",
+                    }
+                ],
             },
             {
                 "name": "background",

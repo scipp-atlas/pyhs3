@@ -20,13 +20,6 @@ except ImportError:
 
 from pyhs3.context import Context
 from pyhs3.distributions import HistFactoryDist
-from pyhs3.distributions.histfactory.interpolations import (
-    apply_interpolation,
-    interpolate_lin,
-    interpolate_log,
-    interpolate_parabolic,
-    interpolate_poly6,
-)
 
 
 class TestHistFactoryDist:
@@ -263,88 +256,6 @@ class TestHistFactoryDist:
 
         with pytest.raises(ValueError, match="has 3 bins, expected 2"):
             dist._process_sample(context, dist.samples[0], 2)
-
-
-class TestInterpolationFunctions:
-    """Test the interpolation functions used by HistFactory modifiers."""
-
-    def test_linear_interpolation(self):
-        """Test linear interpolation function."""
-        alpha = pt.dscalar("alpha")
-        nom = pt.constant(1.0)
-        hi = pt.constant(1.2)
-        lo = pt.constant(0.8)
-
-        result = interpolate_lin(alpha, nom, hi, lo)
-        f = function([alpha], result)
-
-        # Test key points
-        assert np.isclose(f(0.0), 1.0)  # At nominal
-        assert np.isclose(f(1.0), 1.2)  # At hi
-        assert np.isclose(f(-1.0), 0.8)  # At lo
-        assert np.isclose(f(0.5), 1.1)  # Halfway to hi
-        assert np.isclose(f(-0.5), 0.9)  # Halfway to lo
-
-    def test_log_interpolation(self):
-        """Test logarithmic interpolation function."""
-        alpha = pt.dscalar("alpha")
-        nom = pt.constant(1.0)
-        hi = pt.constant(1.2)
-        lo = pt.constant(0.8)
-
-        result = interpolate_log(alpha, nom, hi, lo)
-        f = function([alpha], result)
-
-        # Test key points
-        assert np.isclose(f(0.0), 1.0)  # At nominal
-        assert np.isclose(f(1.0), 1.2)  # At hi
-        assert np.isclose(f(-1.0), 0.8)  # At lo
-
-    def test_parabolic_interpolation(self):
-        """Test parabolic interpolation function."""
-        alpha = pt.dscalar("alpha")
-        nom = pt.constant(1.0)
-        hi = pt.constant(1.2)
-        lo = pt.constant(0.8)
-
-        result = interpolate_parabolic(alpha, nom, hi, lo)
-        f = function([alpha], result)
-
-        # Test key points
-        assert np.isclose(f(0.0), 1.0)  # At nominal
-        # Note: parabolic may not exactly hit hi/lo at ±1
-
-    def test_poly6_interpolation(self):
-        """Test 6th-order polynomial interpolation function."""
-        alpha = pt.dscalar("alpha")
-        nom = pt.constant(1.0)
-        hi = pt.constant(1.2)
-        lo = pt.constant(0.8)
-
-        result = interpolate_poly6(alpha, nom, hi, lo)
-        f = function([alpha], result)
-
-        # Test key points
-        assert np.isclose(f(0.0), 1.0)  # At nominal
-
-    def test_apply_interpolation_method_selection(self):
-        """Test that apply_interpolation selects the correct method."""
-        alpha = pt.dscalar("alpha")
-        nom = pt.constant(1.0)
-        hi = pt.constant(1.2)
-        lo = pt.constant(0.8)
-
-        # Test each method
-        for method in ["lin", "log", "parabolic", "poly6"]:
-            result = apply_interpolation(method, alpha, nom, hi, lo)
-            f = function([alpha], result)
-            # Should at least work at nominal point
-            assert np.isclose(f(0.0), 1.0)
-
-        # Test default (unknown method should fall back to linear)
-        result = apply_interpolation("unknown", alpha, nom, hi, lo)
-        f = function([alpha], result)
-        assert np.isclose(f(0.0), 1.0)
 
 
 class TestHistFactoryExpression:

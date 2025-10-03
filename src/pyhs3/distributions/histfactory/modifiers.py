@@ -189,29 +189,24 @@ class NormSysModifier(HasConstraint, ParameterModifier):
         """Create constraint term using PyTensor operations."""
 
         name = f"constraint_{self.name}"
-        constraint_dist: Distribution | None = None
+        constraint_dist: Distribution
 
         if self.constraint == "Gauss":
             # Gaussian constraint: Normal(auxdata | mean=parameter, std=sigma)
             constraint_dist = GaussianDist(
                 name=name, x=0.0, mean=self.parameter, sigma=1.0
             )
-
-        if self.constraint == "Poisson":
+        elif self.constraint == "Poisson":
             constraint_dist = PoissonDist(name=name, x=1.0, mean=self.parameter)
-
-        if self.constraint == "LogNormal":
+        elif self.constraint == "LogNormal":
             # LogNormal constraint: log(param) ~ N(0, 1)
             constraint_dist = LogNormalDist(
                 name=name, x=1.0, mu=self.parameter, sigma=1.0
             )
 
-        if constraint_dist:
-            # Use the distribution's constants to augment the context
-            augmented_context = {**context, **constraint_dist.constants}
-            return constraint_dist.expression(Context(augmented_context))
-
-        return pt.constant(1.0)
+        # Use the distribution's constants to augment the context
+        augmented_context = {**context, **constraint_dist.constants}
+        return constraint_dist.expression(Context(augmented_context))
 
 
 class HistoSysModifier(HasConstraint, ParameterModifier):
@@ -255,28 +250,23 @@ class HistoSysModifier(HasConstraint, ParameterModifier):
         """Create constraint term using PyTensor operations."""
 
         name = f"constraint_{self.name}"
-        constraint_dist: Distribution | None = None
+        constraint_dist: Distribution
 
         if self.constraint == "Gauss":
             # Gaussian constraint: Normal(auxdata | mean=parameter, std=sigma)
             constraint_dist = GaussianDist(
                 name=name, x=0.0, mean=self.parameter, sigma=1.0
             )
-
-        if self.constraint == "Poisson":
+        elif self.constraint == "Poisson":
             constraint_dist = PoissonDist(name=name, x=1.0, mean=self.parameter)
-
-        if self.constraint == "LogNormal":
+        elif self.constraint == "LogNormal":
             constraint_dist = LogNormalDist(
                 name=name, x=1.0, mu=self.parameter, sigma=1.0
             )
 
-        if constraint_dist:
-            # Use the distribution's constants to augment the context
-            augmented_context = {**context, **constraint_dist.constants}
-            return constraint_dist.expression(Context(augmented_context))
-
-        return pt.constant(1.0)
+        # Use the distribution's constants to augment the context
+        augmented_context = {**context, **constraint_dist.constants}
+        return constraint_dist.expression(Context(augmented_context))
 
 
 class ShapeFactorModifier(ParametersModifier):

@@ -48,6 +48,7 @@ class HistoSysData(ModifierData):
 
     @model_validator(mode="after")
     def validate_lengths(self) -> HistoSysData:
+        """Validate that hi and lo contents have the same length."""
         if len(self.hi.contents) != len(self.lo.contents):
             msg = f"histosys data contents for hi ({len(self.hi.contents)}) and lo ({len(self.lo.contents)}) must have same length"
             raise ValueError(msg)
@@ -139,6 +140,7 @@ class NormFactorModifier(ParameterModifier):
 
     @property
     def auxdata(self) -> float:
+        """Auxiliary data value for normfactor (always 0.0)."""
         # normfactor has no auxiliary measurement associated
         # return a neutral value (not used by constraint builders)
         return 0.0
@@ -160,6 +162,7 @@ class NormSysModifier(HasConstraint, ParameterModifier):
 
     @property
     def auxdata(self) -> float:
+        """Auxiliary data value for normsys (always 0.0)."""
         # For normsys with Gaussian constraint the aux data is typically 0.
         # Keep this simple and return 0.0 (the constraint builder will
         # interpret as needed).
@@ -223,6 +226,7 @@ class HistoSysModifier(HasConstraint, ParameterModifier):
 
     @property
     def auxdata(self) -> float:
+        """Auxiliary data value for histosys (always 0.0)."""
         # histosys typical auxiliary measurement around 0
         return 0.0
 
@@ -286,6 +290,7 @@ class ShapeFactorModifier(ParametersModifier):
 
     @property
     def auxdata(self) -> list[float]:
+        """Auxiliary data values for shapefactor (empty list)."""
         # shapefactor doesn't produce aux measurements per se; return empty list
         return []
 
@@ -306,6 +311,7 @@ class ShapeSysModifier(HasConstraint, ParametersModifier):
 
     @property
     def auxdata(self) -> list[float]:
+        """Auxiliary data values for shapesys (from data vals)."""
         # shapesys typically uses auxiliary counts derived from the sample data and uncertainties.
         return self.data.vals
 
@@ -368,6 +374,7 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
 
     @property
     def auxdata(self) -> list[float]:
+        """Auxiliary data values for staterror (list of 1.0)."""
         # For staterror, each auxiliary measurement is typically 1.0 (or derived).
         return [1.0] * len(self.parameters)
 

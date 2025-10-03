@@ -146,22 +146,6 @@ class HistFactoryDist(Distribution):
 
         return main_prob
 
-    def log_expression(self, context: Context) -> TensorVar:
-        """
-        Build the HistFactory log likelihood expression.
-
-        This is a convenience method that returns the log of the likelihood.
-        For now, it delegates to the main expression method which already
-        returns log probabilities.
-
-        Args:
-            context: Mapping of parameter names to PyTensor variables
-
-        Returns:
-            PyTensor expression for the HistFactory log likelihood
-        """
-        return cast(TensorVar, pt.log(self.expression(context)))
-
     def _get_total_bins(self) -> int:
         """Calculate total number of bins across all axes."""
         total_bins = 1

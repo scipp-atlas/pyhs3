@@ -34,6 +34,8 @@ class NormSysData(ModifierData):
 
 
 class HistoSysDataContents(BaseModel):
+    """Contents data for histosys modifier."""
+
     contents: list[float]
 
 

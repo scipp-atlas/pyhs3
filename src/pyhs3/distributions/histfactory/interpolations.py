@@ -313,7 +313,7 @@ def interpolate_code2(
     return cast(
         TensorVar,
         pt.where(  # type: ignore[no-untyped-call]
-            alpha >= 1,
+            alpha > 1,
             high_ext,
             pt.where(alpha < -1, low_ext, quad_result),  # type: ignore[no-untyped-call]
         ),

@@ -61,6 +61,21 @@ class TestDistribution:
         ):
             dist.expression({})
 
+    def test_distribution_extended_likelihood_default(self):
+        """Test that base distribution extended_likelihood method returns 1.0."""
+        dist = Distribution(name="test", type="test")
+        context = {}
+
+        # Test with no data
+        result = dist.extended_likelihood(context, None)
+        f = function([], result)
+        assert np.isclose(f(), 1.0)
+
+        # Test with data
+        result = dist.extended_likelihood(context, pt.constant(10.0))
+        f = function([], result)
+        assert np.isclose(f(), 1.0)
+
 
 class TestProductDist:
     """Test ProductDist implementation."""
@@ -2777,13 +2792,14 @@ class TestMixtureDist:
             "coeff3": pt.constant(30.0),
         }
 
-        n_observed = 50
+        n_observed = pt.constant(50.0)
         result = dist.extended_likelihood(context, n_observed)
         f = function([], result)
         likelihood_val = f()
 
-        # Expected: log(Pois(50 | 60)) = 50 * log(60) - 60
-        expected = 50 * np.log(60) - 60
+        # Expected: Pois(50 | 60) = exp(50 * log(60) - 60 - log(50!))
+        log_pois = 50 * np.log(60) - 60 - math.lgamma(50 + 1)
+        expected = np.exp(log_pois)
         assert np.isclose(likelihood_val, expected)
 
     def test_mixture_dist_extended_likelihood_non_extended_error(self):
@@ -2800,4 +2816,58 @@ class TestMixtureDist:
         with pytest.raises(
             RuntimeError, match="extended_likelihood only valid when extended=True"
         ):
-            dist.extended_likelihood(context, 50)
+            dist.extended_likelihood(context, pt.constant(50.0))
+
+    def test_mixture_dist_extended_likelihood_no_data(self):
+        """Test extended_likelihood method when data is None."""
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+        )
+        context = {
+            "coeff1": pt.constant(10.0),
+            "coeff2": pt.constant(20.0),
+            "coeff3": pt.constant(30.0),
+        }
+
+        # Test with data=None - should return 1.0 (no contribution)
+        result = dist.extended_likelihood(context, data=None)
+        f = function([], result)
+        likelihood_val = f()
+        assert np.isclose(likelihood_val, 1.0)
+
+    def test_mixture_dist_log_expression(self):
+        """Test log_expression method returns log of expression."""
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+        )
+
+        context = {
+            "pdf1": pt.constant(1.0),
+            "pdf2": pt.constant(2.0),
+            "pdf3": pt.constant(3.0),
+            "coeff1": pt.constant(0.2),
+            "coeff2": pt.constant(0.3),
+            "coeff3": pt.constant(0.5),
+        }
+
+        # Get both log_expression and expression results
+        log_result = dist.log_expression(context)
+        expr_result = dist.expression(context)
+
+        f_log = function([], log_result)
+        f_expr = function([], expr_result)
+
+        log_val = f_log()
+        expr_val = f_expr()
+
+        # log_expression should equal log(expression)
+        expected_log = np.log(expr_val)
+        assert np.isclose(log_val, expected_log), (
+            f"log_expression={log_val}, log(expression)={expected_log}"
+        )

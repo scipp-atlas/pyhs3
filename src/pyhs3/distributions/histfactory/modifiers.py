@@ -203,7 +203,7 @@ class NormSysModifier(HasConstraint, ParameterModifier):
         if self.constraint == "LogNormal":
             # LogNormal constraint: log(param) ~ N(0, 1)
             constraint_dist = LogNormalDist(
-                name=name, x=0.0, mu=self.parameter, sigma=1.0
+                name=name, x=1.0, mu=self.parameter, sigma=1.0
             )
 
         if constraint_dist:
@@ -268,7 +268,7 @@ class HistoSysModifier(HasConstraint, ParameterModifier):
 
         if self.constraint == "LogNormal":
             constraint_dist = LogNormalDist(
-                name=name, x=0.0, mu=self.parameter, sigma=1.0
+                name=name, x=1.0, mu=self.parameter, sigma=1.0
             )
 
         if constraint_dist:

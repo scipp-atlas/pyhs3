@@ -20,12 +20,12 @@ class SampleData(BaseModel):
     """Sample data containing bin contents and errors."""
 
     contents: list[float]
-    errors: list[float] | None = Field(default=None)
+    errors: list[float]
 
     @model_validator(mode="after")
     def validate_lengths(self) -> SampleData:
-        """Ensure contents and errors have same length if both provided."""
-        if self.errors is not None and len(self.contents) != len(self.errors):
+        """Ensure contents and errors have same length."""
+        if len(self.contents) != len(self.errors):
             msg = f"Sample data contents ({len(self.contents)}) and errors ({len(self.errors)}) must have same length"
             raise ValueError(msg)
         return self

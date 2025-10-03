@@ -20,6 +20,9 @@ from pydantic import (
 )
 
 from pyhs3.context import Context
+
+# Import for Poisson extended likelihood calculation
+from pyhs3.distributions.basic import PoissonDist
 from pyhs3.distributions.core import Distribution
 from pyhs3.typing.aliases import TensorVar
 
@@ -253,18 +256,18 @@ class MixtureDist(Distribution):
 
         return cast(TensorVar, nu)
 
-    def extended_likelihood(self, context: Context, n_observed: int) -> TensorVar:
+    def extended_likelihood(
+        self, context: Context, data: TensorVar | None = None
+    ) -> TensorVar:
         """
         Poisson term for the extended likelihood.
 
-        Computes: log Pois(N_obs | nu) = N_obs * log(nu) - nu
-
         Args:
             context: Mapping of names to pytensor variables
-            n_observed: Number of observed events
+            data: Tensor containing observed event count (if None, returns 1.0)
 
         Returns:
-            Log Poisson probability for extended likelihood
+            pytensor.tensor.variable.TensorVariable: :func:`PoissonDist.expression` object
 
         Raises:
             RuntimeError: If called on non-extended PDF
@@ -273,12 +276,17 @@ class MixtureDist(Distribution):
             msg = "extended_likelihood only valid when extended=True"
             raise RuntimeError(msg)
 
-        nu = self.expected_yield(context)
-        n_obs = pt.constant(n_observed, dtype="float64")
+        if data is None:
+            # No data provided, return no contribution
+            return pt.constant(1.0)
 
-        # log(Pois(N|nu)), dropping the constant -log(N!)
-        log_pois = n_obs * pt.log(nu) - nu
-        return cast(TensorVar, log_pois)
+        nu = self.expected_yield(context)
+        n_obs = data  # data should contain the observed count
+
+        # Use the existing PoissonDist implementation for correctness
+        poisson_dist = PoissonDist(name="temp_poisson", mean="nu", x="n_obs")
+        poisson_context = Context({"nu": nu, "n_obs": n_obs})
+        return poisson_dist.expression(poisson_context)
 
 
 class ProductDist(Distribution):

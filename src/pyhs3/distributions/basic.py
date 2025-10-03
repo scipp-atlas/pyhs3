@@ -158,12 +158,11 @@ class ExponentialDist(Distribution):
     r"""
     Exponential probability distribution.
 
-    Implements the exponential probability density function as defined in ROOT's
-    RooExponential and the HS3 specification:
+    Implements the exponential probability density function:
 
     .. math::
 
-        f(x; c) = \frac{1}{\mathcal{M}} \cdot \exp(-c \cdot x)
+        f(x; c) = \exp(-c \cdot x)
 
     Parameters:
         x (str): Input variable name.
@@ -176,6 +175,9 @@ class ExponentialDist(Distribution):
 
     HS3 Reference:
         :hs3:label:`exponential_dist <hs3.exponential-distribution>`
+
+    ROOT Reference:
+        :rootref:`RooExponential <classRooExponential.html>`
     """
 
     type: Literal["exponential_dist"] = "exponential_dist"
@@ -203,12 +205,11 @@ class LogNormalDist(Distribution):
     r"""
     Log-normal probability distribution.
 
-    Implements the log-normal probability density function as defined in ROOT's
-    RooLognormal and the HS3 specification:
+    Implements the log-normal probability density function:
 
     .. math::
 
-        f(x; \mu, \sigma) = \frac{1}{\mathcal{M}} \frac{1}{x} \exp\left(-\frac{(\ln(x)-\mu)^2}{2\sigma^2}\right)
+        f(x; \mu, \sigma) = \frac{1}{x\sigma\sqrt{2\pi}} \exp\left(-\frac{(\ln(x)-\mu)^2}{2\sigma^2}\right)
 
     Parameters:
         x (str): Input variable name (must be > 0).
@@ -258,11 +259,13 @@ class LandauDist(Distribution):
     RooLandau. Used primarily in high-energy physics for modeling energy
     loss distributions.
 
+    Approximation using modified Gaussian with asymmetric tails:
+
     .. math::
 
-        f(x; \mu, \sigma) = \frac{1}{\sigma} \phi\left(\frac{x-\mu}{\sigma}\right)
+        f(x; \mu, \sigma) = \frac{1}{\sigma} \exp\left(-\frac{1}{2}z^2 - \frac{1}{10}(z-1)^2\right)
 
-    where $\phi(z)$ is the Landau density function.
+    where $z = \frac{x-\mu}{\sigma}$ for $z > 1$.
 
     Parameters:
         x (str): Input variable name.
@@ -276,6 +279,9 @@ class LandauDist(Distribution):
 
     HS3 Reference:
         Note: Landau distribution is not explicitly defined in the current HS3 specification.
+
+    ROOT Reference:
+        :rootref:`RooLandau <classRooLandau.html>`
     """
 
     type: Literal["landau_dist"] = "landau_dist"

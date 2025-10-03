@@ -215,7 +215,7 @@ class ArgusDist(Distribution):
 
     .. math::
 
-        f(m; m_0, c, p) = \frac{1}{\mathcal{M}} \cdot m \cdot \left[ 1 - \left( \frac{m}{m_0} \right)^2 \right]^p \cdot \exp\left[ c \cdot \left(1 - \left(\frac{m}{m_0}\right)^2 \right) \right]
+        f(m; m_0, c, p) = m \cdot \left[ 1 - \left( \frac{m}{m_0} \right)^2 \right]^p \cdot \exp\left[ c \cdot \left(1 - \left(\frac{m}{m_0}\right)^2 \right) \right]
 
     Parameters:
         mass (str): Input variable name (invariant mass).

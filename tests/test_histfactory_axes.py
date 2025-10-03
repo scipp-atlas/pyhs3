@@ -7,6 +7,7 @@ Test BinnedAxis discriminated union functionality with BinnedAxisRange and Binne
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from pyhs3.distributions.histfactory.axes import (
     Axes,
@@ -45,7 +46,7 @@ class TestBinnedAxisRange:
     def test_binned_axis_range_invalid_range(self):
         """Test BinnedAxisRange raises error when min >= max."""
         with pytest.raises(
-            ValueError, match=r"Axis 'x': max (5.0) must be >= min (10.0)"
+            ValidationError, match=r"Axis 'x': max \(5\.0\) must be >= min \(10\.0\)"
         ):
             BinnedAxisRange(name="x", min=10.0, max=5.0, nbins=5)
 
@@ -196,7 +197,7 @@ class TestBinnedAxisDiscriminatedUnion:
 
         # Invalid range
         with pytest.raises(
-            ValueError, match=r"Axis 'x': max (5.0) must be >= min (10.0)"
+            ValidationError, match=r"Axis 'x': max \(5\.0\) must be >= min \(10\.0\)"
         ):
             BinnedAxis.model_validate(
                 {"name": "x", "min": 10.0, "max": 5.0, "nbins": 5}

@@ -198,7 +198,7 @@ class NormSysModifier(HasConstraint, ParameterModifier):
             )
         elif self.constraint == "Poisson":
             constraint_dist = PoissonDist(name=name, x=1.0, mean=self.parameter)
-        elif self.constraint == "LogNormal":
+        else:  # self.constraint == "LogNormal"
             # LogNormal constraint: log(param) ~ N(0, 1)
             constraint_dist = LogNormalDist(
                 name=name, x=1.0, mu=self.parameter, sigma=1.0
@@ -259,7 +259,7 @@ class HistoSysModifier(HasConstraint, ParameterModifier):
             )
         elif self.constraint == "Poisson":
             constraint_dist = PoissonDist(name=name, x=1.0, mean=self.parameter)
-        elif self.constraint == "LogNormal":
+        else:  # self.constraint == "LogNormal"
             constraint_dist = LogNormalDist(
                 name=name, x=1.0, mu=self.parameter, sigma=1.0
             )

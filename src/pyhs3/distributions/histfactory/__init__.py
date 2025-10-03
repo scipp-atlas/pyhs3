@@ -10,51 +10,16 @@ from __future__ import annotations
 from typing import Literal, cast
 
 import pytensor.tensor as pt
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from pyhs3.context import Context
 
 # Import existing distributions for constraint terms
 from pyhs3.distributions.core import Distribution
+from pyhs3.distributions.histfactory.axes import Axes, BinnedAxis
 from pyhs3.distributions.histfactory.modifiers import HasConstraint
 from pyhs3.distributions.histfactory.samples import Sample, Samples
-from pyhs3.domains import Axis
 from pyhs3.typing.aliases import TensorVar
-
-
-class BinnedAxis(Axis):
-    """
-    Binned axis specification for HistFactory distributions.
-
-    Extends the base Axis class to support binned data structures used in
-    HistFactory models. Supports both explicit bin edges and uniform binning.
-    """
-
-    nbins: int | None = Field(default=None, description="Number of bins")
-    edges: list[float] | None = Field(default=None, description="Explicit bin edges")
-
-    @model_validator(mode="after")
-    def validate_binning(self) -> BinnedAxis:
-        """Ensure either nbins or edges is provided, but not both."""
-        if self.nbins is None and self.edges is None:
-            msg = f"BinnedAxis '{self.name}' must specify either 'nbins' or 'edges'"
-            raise ValueError(msg)
-        if self.nbins is not None and self.edges is not None:
-            msg = f"BinnedAxis '{self.name}' cannot specify both 'nbins' and 'edges'"
-            raise ValueError(msg)
-        if self.edges is not None and len(self.edges) < 2:
-            msg = f"BinnedAxis '{self.name}' must have at least 2 edges"
-            raise ValueError(msg)
-        return self
-
-    def get_nbins(self) -> int:
-        """Get the number of bins."""
-        if self.nbins is not None:
-            return self.nbins
-        if self.edges is not None:
-            return len(self.edges) - 1
-        msg = f"BinnedAxis '{self.name}' has no binning information"
-        raise ValueError(msg)
 
 
 class HistFactoryDist(Distribution):
@@ -110,7 +75,7 @@ class HistFactoryDist(Distribution):
     """
 
     type: Literal["histfactory_dist"] = "histfactory_dist"
-    axes: list[BinnedAxis] = Field(..., json_schema_extra={"preprocess": False})
+    axes: Axes = Field(..., json_schema_extra={"preprocess": False})
     samples: Samples = Field(..., json_schema_extra={"preprocess": False})
 
     def expression(self, context: Context) -> TensorVar:
@@ -148,10 +113,7 @@ class HistFactoryDist(Distribution):
 
     def _get_total_bins(self) -> int:
         """Calculate total number of bins across all axes."""
-        total_bins = 1
-        for axis in self.axes:
-            total_bins *= axis.get_nbins()
-        return total_bins
+        return self.axes.get_total_bins()
 
     def _compute_expected_rates(self, context: Context, total_bins: int) -> TensorVar:
         """
@@ -256,6 +218,8 @@ distributions: dict[str, type[Distribution]] = {
 
 # Define what should be exported from this module
 __all__ = [
+    "Axes",
+    "BinnedAxis",
     "HistFactoryDist",
     "distributions",
 ]

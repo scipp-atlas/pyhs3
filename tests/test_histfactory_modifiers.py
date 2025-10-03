@@ -485,7 +485,6 @@ class TestModifierConstraintTypes:
         assert isinstance(constraint_val, (float, np.floating, np.ndarray))
         assert constraint_val > 0
 
-    @pytest.mark.xfail(reason="LogNormal constraint implementation needs debugging")
     def test_normsys_lognormal_constraint(self):
         """Test normsys with LogNormal constraint."""
         data = NormSysData(hi=1.1, lo=0.9)

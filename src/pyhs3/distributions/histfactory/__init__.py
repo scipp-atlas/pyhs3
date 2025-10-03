@@ -201,8 +201,7 @@ class HistFactoryDist(Distribution):
             for modifier in sample.modifiers:
                 if isinstance(modifier, HasConstraint):
                     prob = modifier.make_constraint(context, sample.data)
-                    if prob is not None:
-                        constraint_probs.append(prob)
+                    constraint_probs.append(prob)
 
         if not constraint_probs:
             return None

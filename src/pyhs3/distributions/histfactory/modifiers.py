@@ -92,10 +92,8 @@ class HasConstraint(ABC):
     constraint: Literal["Gauss", "Poisson", "LogNormal"] | None
 
     @abstractmethod
-    def make_constraint(
-        self, context: Context, sample_data: SampleData
-    ) -> TensorVar | None:
-        """Create constraint term for this modifier if it has constraints."""
+    def make_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
+        """Create constraint term for this modifier."""
 
 
 # Parameterized modifier base (single parameter)
@@ -187,7 +185,7 @@ class NormSysModifier(HasConstraint, ParameterModifier):
 
         return cast("TensorVar", rates * factor)
 
-    def make_constraint(self, context: Context, _: SampleData) -> TensorVar | None:
+    def make_constraint(self, context: Context, _: SampleData) -> TensorVar:
         """Create constraint term using PyTensor operations."""
 
         name = f"constraint_{self.name}"
@@ -253,7 +251,7 @@ class HistoSysModifier(HasConstraint, ParameterModifier):
 
         return cast("TensorVar", rates + variation)
 
-    def make_constraint(self, context: Context, _: SampleData) -> TensorVar | None:
+    def make_constraint(self, context: Context, _: SampleData) -> TensorVar:
         """Create constraint term using PyTensor operations."""
 
         name = f"constraint_{self.name}"
@@ -322,9 +320,7 @@ class ShapeSysModifier(HasConstraint, ParametersModifier):
         factors = pt.stack([context[name] for name in param_names])
         return cast("TensorVar", rates * factors)
 
-    def make_constraint(
-        self, context: Context, sample_data: SampleData
-    ) -> TensorVar | None:
+    def make_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
         """Create constraint term using PyTensor operations."""
 
         name = f"constraint_{self.name}"
@@ -387,9 +383,7 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
         factors = pt.stack([context[name] for name in param_names])
         return cast("TensorVar", rates * factors)
 
-    def make_constraint(
-        self, context: Context, sample_data: SampleData
-    ) -> TensorVar | None:
+    def make_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
         """Create constraint term using PyTensor operations."""
 
         # Barlow-Beeston method: per-bin Gaussian constraints with relative uncertainties

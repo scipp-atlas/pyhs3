@@ -14,6 +14,7 @@ from pyhs3.distributions.histfactory.axes import (
     BinnedAxis,
     BinnedAxisEdges,
     BinnedAxisRange,
+    get_binned_axis_discriminator,
 )
 
 
@@ -293,3 +294,135 @@ class TestAxes:
         assert isinstance(axes[0].root, BinnedAxisRange)
         assert isinstance(axes[1].root, BinnedAxisEdges)
         assert isinstance(axes[2].root, BinnedAxisRange)
+
+
+class TestBinnedAxisDiscriminator:
+    """Test get_binned_axis_discriminator function."""
+
+    def test_discriminator_with_dict_inputs(self):
+        """Test discriminator function with dictionary inputs."""
+        # Test with nbins present - should select 'range'
+        dict_with_nbins = {"name": "x", "min": 0.0, "max": 10.0, "nbins": 5}
+        assert get_binned_axis_discriminator(dict_with_nbins) == "range"
+
+        # Test with edges present - should select 'edges'
+        dict_with_edges = {"name": "x", "edges": [0.0, 5.0, 10.0]}
+        assert get_binned_axis_discriminator(dict_with_edges) == "edges"
+
+        # Test with both present - nbins takes precedence, should select 'range'
+        dict_with_both = {
+            "name": "x",
+            "min": 0.0,
+            "max": 10.0,
+            "nbins": 5,
+            "edges": [0.0, 5.0, 10.0],
+        }
+        assert get_binned_axis_discriminator(dict_with_both) == "range"
+
+        # Test with neither present - should default to 'range'
+        dict_with_neither = {"name": "x", "min": 0.0, "max": 10.0}
+        assert get_binned_axis_discriminator(dict_with_neither) == "range"
+
+    def test_discriminator_with_object_instances(self):
+        """Test discriminator function with actual object instances."""
+        # Test with BinnedAxisRange instance - should select 'range'
+        range_instance = BinnedAxisRange(name="x", min=0.0, max=10.0, nbins=5)
+        assert get_binned_axis_discriminator(range_instance) == "range"
+
+        # Test with BinnedAxisEdges instance - should select 'edges'
+        edges_instance = BinnedAxisEdges(name="x", edges=[0.0, 5.0, 10.0])
+        assert get_binned_axis_discriminator(edges_instance) == "edges"
+
+    def test_discriminator_with_generic_objects(self):
+        """Test discriminator function with generic objects that have relevant attributes."""
+
+        # Create a mock object that has nbins attribute
+        class MockRangeObject:
+            def __init__(self):
+                self.nbins = 5
+                self.name = "mock_range"
+
+        mock_range = MockRangeObject()
+        assert get_binned_axis_discriminator(mock_range) == "range"
+
+        # Create a mock object that has edges attribute
+        class MockEdgesObject:
+            def __init__(self):
+                self.edges = [0.0, 5.0, 10.0]
+                self.name = "mock_edges"
+
+        mock_edges = MockEdgesObject()
+        assert get_binned_axis_discriminator(mock_edges) == "edges"
+
+        # Create a mock object that has both attributes - nbins takes precedence
+        class MockBothObject:
+            def __init__(self):
+                self.nbins = 5
+                self.edges = [0.0, 5.0, 10.0]
+                self.name = "mock_both"
+
+        mock_both = MockBothObject()
+        assert get_binned_axis_discriminator(mock_both) == "range"
+
+        # Create a mock object that has neither attribute - should default to 'range'
+        class MockNeitherObject:
+            def __init__(self):
+                self.name = "mock_neither"
+
+        mock_neither = MockNeitherObject()
+        assert get_binned_axis_discriminator(mock_neither) == "range"
+
+    def test_discriminator_serialization_roundtrip(self):
+        """Test that discriminator works correctly during serialization round-trips."""
+        # Test BinnedAxisRange round-trip
+        range_data = {"name": "x", "min": 0.0, "max": 10.0, "nbins": 5}
+        range_axis = BinnedAxis.model_validate(range_data)
+
+        # Serialize and deserialize
+        serialized = range_axis.model_dump()
+        reconstructed = BinnedAxis.model_validate(serialized)
+
+        # Verify the discriminator works during both validation and serialization
+        assert isinstance(range_axis.root, BinnedAxisRange)
+        assert isinstance(reconstructed.root, BinnedAxisRange)
+        assert range_axis.root.nbins == reconstructed.root.nbins == 5
+
+        # Test BinnedAxisEdges round-trip
+        edges_data = {"name": "y", "edges": [0.0, 2.5, 5.0, 10.0]}
+        edges_axis = BinnedAxis.model_validate(edges_data)
+
+        # Serialize and deserialize
+        serialized = edges_axis.model_dump()
+        reconstructed = BinnedAxis.model_validate(serialized)
+
+        # Verify the discriminator works during both validation and serialization
+        assert isinstance(edges_axis.root, BinnedAxisEdges)
+        assert isinstance(reconstructed.root, BinnedAxisEdges)
+        assert (
+            edges_axis.root.edges == reconstructed.root.edges == [0.0, 2.5, 5.0, 10.0]
+        )
+
+    def test_discriminator_handles_serialization_input(self):
+        """Test that discriminator specifically handles model instances during serialization."""
+        # Create instances
+        range_instance = BinnedAxisRange(name="x", min=0.0, max=10.0, nbins=5)
+        edges_instance = BinnedAxisEdges(name="y", edges=[0.0, 5.0, 10.0])
+
+        # Test that discriminator correctly identifies them as model instances
+        # (This simulates what happens during serialization)
+        assert get_binned_axis_discriminator(range_instance) == "range"
+        assert get_binned_axis_discriminator(edges_instance) == "edges"
+
+        # Verify that these instances can be wrapped in BinnedAxis for serialization
+        wrapped_range = BinnedAxis(root=range_instance)
+        wrapped_edges = BinnedAxis(root=edges_instance)
+
+        # Test serialization works correctly
+        range_serialized = wrapped_range.model_dump()
+        edges_serialized = wrapped_edges.model_dump()
+
+        # Verify serialized data has correct structure
+        assert "nbins" in range_serialized
+        assert range_serialized["nbins"] == 5
+        assert "edges" in edges_serialized
+        assert edges_serialized["edges"] == [0.0, 5.0, 10.0]

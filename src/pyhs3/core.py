@@ -404,7 +404,9 @@ class Model:
 
                 elif node_type == "function":
                     # Functions are evaluated by design
-                    self.functions[node_name] = functions[node_name].expression(context)
+                    result = functions[node_name].expression(context)
+                    result.name = node_name  # Name the result so other functions can reference it
+                    self.functions[node_name] = result
 
                 else:  # node_type == "distribution"
                     # Distributions are evaluated by design

@@ -74,8 +74,22 @@ def parse_expression(expr_str: str) -> sp.Expr:
         factorial_notation,
     )
 
+    # Provide global_dict with Symbol, Integer, etc. so that:
+    # 1. auto_number transformation can work properly
+    # 2. Unknown variables become Symbols (not Functions)
+    global_dict = {
+        "Symbol": sp.Symbol,
+        "Integer": sp.Integer,
+        "Float": sp.Float,
+        "Rational": sp.Rational,
+    }
+
     try:
-        return sympy_parser.parse_expr(expr_str, transformations=transformations)
+        return sympy_parser.parse_expr(
+            expr_str,
+            transformations=transformations,
+            global_dict=global_dict,
+        )
     except Exception as exc:
         msg = f"Failed to parse expression '{expr_str}': {exc}"
         raise ExpressionParseError(msg) from exc

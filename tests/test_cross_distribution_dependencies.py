@@ -88,7 +88,7 @@ def test_cross_distribution_parameter_sharing():
     model = ws_pyhs3.model()
 
     # Verify model was created successfully (no circular dependencies)
-    assert len(model.parameters) > 0
+    assert len(model.parameters) == 7
     assert len(model.distributions) == 2
     assert len(model.modifiers) == 3
 
@@ -111,15 +111,16 @@ def test_cross_distribution_parameter_sharing():
     assert "mean2" in lumi_modifier.dependencies
 
     # Verify modifier has unique name in dependency graph
-    assert lumi_modifier.name == "normfactor/Lumi"
-    assert "normfactor/Lumi" in model.modifiers
+    assert lumi_modifier.name == "model_singlechannel/background/normfactor/Lumi"
+    assert "model_singlechannel/background/normfactor/Lumi" in model.modifiers
+    assert "mean2" in model.parameters
 
     # Verify other modifiers are also properly named
-    assert "normfactor/mu" in model.modifiers
-    assert "shapesys/uncorr_bkguncrt" in model.modifiers
-
-    # Verify parameter exists in model
-    assert "mean2" in model.parameters
+    assert "model_singlechannel/signal/normfactor/mu" in model.modifiers
+    assert "mu" in model.parameters
+    assert "model_singlechannel/background/shapesys/uncorr_bkguncrt" in model.modifiers
+    assert "uncorr_bkguncrt_0" in model.parameters
+    assert "uncorr_bkguncrt_1" in model.parameters
 
 
 def test_histfactory_modifier_unique_naming():
@@ -186,13 +187,14 @@ def test_histfactory_modifier_unique_naming():
     model = ws_pyhs3.model()
 
     # Verify no circular dependencies by successful model creation
-    assert len(model.parameters) > 0
+    assert len(model.parameters) == 3  # should be Lumi, mu, data
     assert len(model.distributions) == 1
-    assert len(model.modifiers) == 2  # Only unique modifiers (Lumi and mu)
+    assert len(model.modifiers) == 3
 
     # Verify modifiers have unique names in graph
-    assert "normfactor/Lumi" in model.modifiers
-    assert "normfactor/mu" in model.modifiers
+    assert "model_test/sample1/normfactor/Lumi" in model.modifiers
+    assert "model_test/sample2/normfactor/Lumi" in model.modifiers
+    assert "model_test/sample2/normfactor/mu" in model.modifiers
 
     # Verify parameters exist separately
     assert "Lumi" in model.parameters
@@ -204,7 +206,6 @@ def test_histfactory_modifier_unique_naming():
         mod.name: mod.dependencies for mod in hf_dist.get_internal_nodes()
     }
 
-    assert "normfactor/Lumi" in modifier_names
-    assert "normfactor/mu" in modifier_names
-    assert modifier_names["normfactor/Lumi"] == {"Lumi"}
-    assert modifier_names["normfactor/mu"] == {"mu"}
+    assert modifier_names["model_test/sample1/normfactor/Lumi"] == {"Lumi"}
+    assert modifier_names["model_test/sample2/normfactor/Lumi"] == {"Lumi"}
+    assert modifier_names["model_test/sample2/normfactor/mu"] == {"mu"}

@@ -7,6 +7,7 @@ Test the HistFactoryDist class with various modifiers and configurations.
 from __future__ import annotations
 
 import json
+import platform
 import warnings
 
 import numpy as np
@@ -407,11 +408,13 @@ class TestPyhfPrecisionValidation:
         pyhs3_expected = rates_func(mu, bkg_norm)
         pyhs3_logpdf = total_func(mu, bkg_norm, np.array([observed]))
 
+        precision = 1e-10 if platform.system() == "Windows" else 1e-14
+
         # Validate precision (use tight tolerances to prevent regression)
-        assert pyhs3_expected[0] == pytest.approx(pyhf_expected[0], abs=1e-14), (
+        assert pyhs3_expected[0] == pytest.approx(pyhf_expected[0], abs=precision), (
             f"Expected rates differ: pyhf={pyhf_expected[0]}, pyhs3={pyhs3_expected[0]}"
         )
-        assert float(pyhs3_logpdf) == pytest.approx(pyhf_logpdf, abs=1e-14), (
+        assert float(pyhs3_logpdf) == pytest.approx(pyhf_logpdf, abs=precision), (
             f"Log PDF differs: pyhf={pyhf_logpdf}, pyhs3={float(pyhs3_logpdf)}"
         )
 

@@ -715,12 +715,6 @@ class HistogramFunction(Function):
         ..., json_schema_extra={"preprocess": False}, repr=False
     )
 
-    def _expression(self, _: Context) -> TensorVar:
-        """
-        Not implemented.
-        """
-        raise NotImplementedError()
-
 
 class RooRecursiveFractionFunction(Function):
     r"""

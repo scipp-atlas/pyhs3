@@ -6,7 +6,8 @@ Test the HistFactoryDist class with various modifiers and configurations.
 
 from __future__ import annotations
 
-import platform
+import json
+import warnings
 
 import numpy as np
 import pytensor.tensor as pt
@@ -20,8 +21,9 @@ try:
 except ImportError:
     HAS_PYHF = False
 
+import pyhs3
 from pyhs3.context import Context
-from pyhs3.distributions import HistFactoryDist
+from pyhs3.distributions import HistFactoryDistChannel
 
 
 class TestHistFactoryDist:
@@ -38,7 +40,7 @@ class TestHistFactoryDist:
             }
         ]
 
-        dist = HistFactoryDist(name="test_channel", axes=axes, samples=samples)
+        dist = HistFactoryDistChannel(name="test_channel", axes=axes, samples=samples)
 
         assert dist.name == "test_channel"
         assert dist.type == "histfactory_dist"
@@ -62,7 +64,7 @@ class TestHistFactoryDist:
             }
         ]
 
-        dist = HistFactoryDist(name="test_channel", axes=axes, samples=samples)
+        dist = HistFactoryDistChannel(name="test_channel", axes=axes, samples=samples)
 
         # Check that the distribution can be created
         assert dist.name == "test_channel"
@@ -88,7 +90,7 @@ class TestHistFactoryDist:
             }
         ]
 
-        dist = HistFactoryDist(name="test_channel", axes=axes, samples=samples)
+        dist = HistFactoryDistChannel(name="test_channel", axes=axes, samples=samples)
 
         # Check that the distribution can be created
         assert dist.name == "test_channel"
@@ -120,7 +122,7 @@ class TestHistFactoryDist:
             }
         ]
 
-        dist = HistFactoryDist(name="test_channel", axes=axes, samples=samples)
+        dist = HistFactoryDistChannel(name="test_channel", axes=axes, samples=samples)
 
         # Check that the distribution can be created
         assert dist.name == "test_channel"
@@ -154,7 +156,7 @@ class TestHistFactoryDist:
             }
         ]
 
-        dist = HistFactoryDist(name="test_channel", axes=axes, samples=samples)
+        dist = HistFactoryDistChannel(name="test_channel", axes=axes, samples=samples)
 
         # Check that the distribution can be created
         assert dist.name == "test_channel"
@@ -192,7 +194,7 @@ class TestHistFactoryDist:
             },
         ]
 
-        dist = HistFactoryDist(name="test_channel", axes=axes, samples=samples)
+        dist = HistFactoryDistChannel(name="test_channel", axes=axes, samples=samples)
 
         # Check that the distribution can be created
         assert dist.name == "test_channel"
@@ -203,7 +205,7 @@ class TestHistFactoryDist:
     def test_bin_count_calculation(self):
         """Test calculation of total bins from axes."""
         # Single axis
-        dist1 = HistFactoryDist(
+        dist1 = HistFactoryDistChannel(
             name="test1",
             axes=[{"name": "x", "min": 0.0, "max": 10.0, "nbins": 5}],
             samples=[
@@ -217,7 +219,7 @@ class TestHistFactoryDist:
         assert dist1._get_total_bins() == 5
 
         # Multiple axes (should multiply)
-        dist2 = HistFactoryDist(
+        dist2 = HistFactoryDistChannel(
             name="test2",
             axes=[
                 {"name": "x", "min": 0.0, "max": 10.0, "nbins": 3},
@@ -250,7 +252,7 @@ class TestHistFactoryDist:
             }
         ]
 
-        dist = HistFactoryDist(name="test_channel", axes=axes, samples=samples)
+        dist = HistFactoryDistChannel(name="test_channel", axes=axes, samples=samples)
 
         # This should raise an error when trying to process the sample
 
@@ -282,7 +284,7 @@ class TestHistFactoryExpression:
             }
         ]
 
-        dist = HistFactoryDist(name="test_channel", axes=axes, samples=samples)
+        dist = HistFactoryDistChannel(name="test_channel", axes=axes, samples=samples)
 
         # Create context with parameters
         mu_signal = pt.dscalar("mu_signal")
@@ -380,7 +382,7 @@ class TestPyhfPrecisionValidation:
             },
         ]
 
-        dist = HistFactoryDist(name="singlechannel", axes=axes, samples=samples)
+        dist = HistFactoryDistChannel(name="singlechannel", axes=axes, samples=samples)
 
         # Create context
         mu_var = pt.dscalar("mu")
@@ -406,13 +408,10 @@ class TestPyhfPrecisionValidation:
         pyhs3_logpdf = total_func(mu, bkg_norm, np.array([observed]))
 
         # Validate precision (use tight tolerances to prevent regression)
-        # Use more lenient tolerance on Windows due to numerical precision differences
-        tolerance = 1e-12 if platform.system() == "Windows" else 1e-14
-
-        assert pyhs3_expected[0] == pytest.approx(pyhf_expected[0], abs=tolerance), (
+        assert pyhs3_expected[0] == pytest.approx(pyhf_expected[0], abs=1e-14), (
             f"Expected rates differ: pyhf={pyhf_expected[0]}, pyhs3={pyhs3_expected[0]}"
         )
-        assert float(pyhs3_logpdf) == pytest.approx(pyhf_logpdf, abs=tolerance), (
+        assert float(pyhs3_logpdf) == pytest.approx(pyhf_logpdf, abs=1e-14), (
             f"Log PDF differs: pyhf={pyhf_logpdf}, pyhs3={float(pyhs3_logpdf)}"
         )
 
@@ -487,7 +486,7 @@ class TestPyhfPrecisionValidation:
             },
         ]
 
-        dist = HistFactoryDist(name="singlechannel", axes=axes, samples=samples)
+        dist = HistFactoryDistChannel(name="singlechannel", axes=axes, samples=samples)
 
         # Create context
         mu_var = pt.dscalar("mu")
@@ -587,7 +586,7 @@ class TestPyhfPrecisionValidation:
             },
         ]
 
-        dist = HistFactoryDist(name="singlechannel", axes=axes, samples=samples)
+        dist = HistFactoryDistChannel(name="singlechannel", axes=axes, samples=samples)
 
         # Create context
         mu_var = pt.dscalar("mu")
@@ -685,7 +684,7 @@ class TestPyhfPrecisionValidation:
             },
         ]
 
-        dist = HistFactoryDist(name="singlechannel", axes=axes, samples=samples)
+        dist = HistFactoryDistChannel(name="singlechannel", axes=axes, samples=samples)
 
         # Create context
         mu_var = pt.dscalar("mu")
@@ -738,7 +737,7 @@ class TestPyhfPrecisionValidation:
             }
         ]
 
-        dist = HistFactoryDist(name="test_channel", axes=axes, samples=samples)
+        dist = HistFactoryDistChannel(name="test_channel", axes=axes, samples=samples)
 
         # Create context with parameters
         bkg_norm_sys = pt.dscalar("bkg_norm_sys")
@@ -793,7 +792,7 @@ class TestPyhfPrecisionValidation:
             },
         ]
 
-        dist = HistFactoryDist(name="test_channel", axes=axes, samples=samples)
+        dist = HistFactoryDistChannel(name="test_channel", axes=axes, samples=samples)
 
         # Create context
         mu_signal = pt.dscalar("mu_signal")
@@ -815,3 +814,126 @@ class TestPyhfPrecisionValidation:
 
         result = f(mu_val, obs_val)
         assert np.isfinite(result)
+
+
+@pytest.mark.parametrize(
+    ("pars"),
+    [[i, j, k] for i in [0.1, 1.0] for j in [0.1, 1.0] for k in [0.1, 1.0]],
+)
+def test_simplemodel_pyhf(pars, datadir):
+    """
+    To convert the pyhf simplemodel in HiFa JSON to HS3 JSON:
+
+        $ pyhf xml2json <hifa.json> --output-dir hs3
+        $ cd hs3
+        $ hist2workspace FitConfig.xml
+        $ root -b config/FitConfig_combined_measurement_model.root
+        root [1] combined
+        (RooWorkspace *) 0x1362aac00
+        root [2] auto mytool = RooJSONFactoryWSTool(*combined);
+        root [3] mytool.exportJSON("<hs3.json>")
+        (bool) true
+    """
+    ws_pyhf = pyhf.Workspace(
+        json.loads(
+            datadir.joinpath(
+                "simplemodel_uncorrelated-background_hifa.json"
+            ).read_text()
+        )
+    )
+    model_pyhf = ws_pyhf.model()
+    data_pyhf = ws_pyhf.data(model_pyhf)
+
+    ws_pyhs3 = pyhs3.Workspace(
+        **json.loads(
+            datadir.joinpath("simplemodel_uncorrelated-background_hs3.json").read_text()
+        )
+    )
+    model_pyhs3 = ws_pyhs3.model()
+
+    # Get observed data
+    obs_data = None
+    for data_item in ws_pyhs3.data.root:
+        if data_item.name == "obsData_singlechannel":
+            obs_data = data_item.contents
+            break
+
+    # Map pyhf parameters to pyhs3 parameters
+    # pyhf_params = model_pyhf.config.par_names
+    # ['mu', 'uncorr_bkguncrt[0]', 'uncorr_bkguncrt[1]']
+
+    # Get default parameter values from workspace
+    default_values = {}
+    if ws_pyhs3.parameter_points:
+        for param_obj in ws_pyhs3.parameter_points[0].parameters:
+            default_values[param_obj.name] = param_obj.value
+
+    # Create parameter dictionary for pyhs3
+    pyhs3_params = {
+        "model_singlechannel_observed": obs_data,
+        "mu": pars[0],  # pyhf: 'mu' -> pyhs3: 'mu'
+        "uncorr_bkguncrt_0": pars[
+            1
+        ],  # pyhf: 'uncorr_bkguncrt[0]' -> pyhs3: 'uncorr_bkguncrt_0'
+        "uncorr_bkguncrt_1": pars[
+            2
+        ],  # pyhf: 'uncorr_bkguncrt[1]' -> pyhs3: 'uncorr_bkguncrt_1'
+    }
+
+    # Add additional parameters with default values
+    # Special handling for const parameters: use their default values, not test parameters
+    for param_name in model_pyhs3.parameters:
+        if param_name not in pyhs3_params:
+            # Check if this parameter is marked as const in any parameter point
+            is_const = False
+            default_val = 1.0
+
+            if ws_pyhs3.parameter_points:
+                for param_point in ws_pyhs3.parameter_points:
+                    for param_obj in param_point.parameters:
+                        if param_obj.name == param_name:
+                            default_val = param_obj.value
+                            is_const = hasattr(param_obj, "const") and param_obj.const
+                            break
+                    if is_const:
+                        break
+
+            # Use default value for const parameters, or fallback value for others
+            pyhs3_params[param_name] = default_val
+
+    pyhf_result = model_pyhf.pdf(pars, data_pyhf)
+    pyhs3_result = model_pyhs3.pdf("model_singlechannel", **pyhs3_params)
+
+    # Compare PDF values - extract scalar from arrays if needed
+    pyhf_scalar = (
+        pyhf_result[0]
+        if hasattr(pyhf_result, "__len__") and len(pyhf_result) == 1
+        else pyhf_result
+    )
+    pyhs3_scalar = (
+        float(pyhs3_result)
+        if hasattr(pyhs3_result, "shape") and pyhs3_result.shape == ()
+        else pyhs3_result
+    )
+
+    assert pyhs3_scalar == pytest.approx(pyhf_scalar)
+
+    # Test logpdf (suppress warnings for log(0) = -inf)
+    pyhf_logresult = model_pyhf.logpdf(pars, data_pyhf)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        pyhs3_logresult = model_pyhs3.logpdf("model_singlechannel", **pyhs3_params)
+
+    # Compare logpdf values - extract scalar from arrays if needed
+    pyhf_log_scalar = (
+        pyhf_logresult[0]
+        if hasattr(pyhf_logresult, "__len__") and len(pyhf_logresult) == 1
+        else pyhf_logresult
+    )
+    pyhs3_log_scalar = (
+        float(pyhs3_logresult)
+        if hasattr(pyhs3_logresult, "shape") and pyhs3_logresult.shape == ()
+        else pyhs3_logresult
+    )
+
+    assert pyhs3_log_scalar == pytest.approx(pyhf_log_scalar)

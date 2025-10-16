@@ -15,6 +15,7 @@ from pyhs3.distributions.histfactory import interpolations
 
 # Import existing distributions for constraint terms
 from pyhs3.exceptions import custom_error_msg
+from pyhs3.networks import HasDependencies
 from pyhs3.typing.aliases import TensorVar
 
 if TYPE_CHECKING:
@@ -68,7 +69,7 @@ class StatErrorData(ModifierData):
 
 
 # base modifier
-class Modifier(BaseModel, ABC):
+class Modifier(BaseModel, HasDependencies, ABC):
     """Base class for modifier effects (multiplicative or additive)."""
 
     name: str
@@ -84,6 +85,15 @@ class Modifier(BaseModel, ABC):
     def is_additive(self) -> bool:
         """Whether this modifier applies additively to rates."""
         return self.application == "additive"
+
+    @property
+    @abstractmethod
+    def dependencies(self) -> set[str]:
+        """Return parameter names this modifier depends on."""
+
+    @abstractmethod
+    def expression(self, context: Context) -> TensorVar:
+        """Return the modifier's contribution (additive term or multiplicative factor)."""
 
 
 class HasConstraint(ABC):
@@ -103,6 +113,11 @@ class ParameterModifier(Modifier, ABC):
     parameter: str
 
     @property
+    def dependencies(self) -> set[str]:
+        """Return parameter names this modifier depends on."""
+        return {self.parameter}
+
+    @property
     @abstractmethod
     def auxdata(self) -> float:
         """Auxiliary data value associated with this modifier (single float)."""
@@ -117,6 +132,11 @@ class ParametersModifier(Modifier, ABC):
     """Base for modifiers that use multiple parameter names (one per bin)."""
 
     parameters: list[str]
+
+    @property
+    def dependencies(self) -> set[str]:
+        """Return parameter names this modifier depends on."""
+        return set(self.parameters)
 
     @property
     @abstractmethod
@@ -143,6 +163,10 @@ class NormFactorModifier(ParameterModifier):
         # return a neutral value (not used by constraint builders)
         return 0.0
 
+    def expression(self, context: Context) -> TensorVar:
+        """Return multiplicative factor for normfactor."""
+        return context[self.parameter]
+
     def apply(self, context: Context, rates: TensorVar) -> TensorVar:
         """Apply normfactor modifier (simple scaling by parameter)."""
 
@@ -165,6 +189,23 @@ class NormSysModifier(HasConstraint, ParameterModifier):
         # Keep this simple and return 0.0 (the constraint builder will
         # interpret as needed).
         return 0.0
+
+    def expression(self, context: Context) -> TensorVar:
+        """Return multiplicative factor for normsys."""
+        alpha = context[self.parameter]
+
+        hi_factor = self.data.hi
+        lo_factor = self.data.lo
+
+        # Apply interpolation method
+        interpolation = self.data.interpolation
+        nominal_factor = pt.constant(1.0)
+        hi_factor_tensor = pt.constant(hi_factor)
+        lo_factor_tensor = pt.constant(lo_factor)
+
+        return interpolations.apply_interpolation(
+            interpolation, alpha, nominal_factor, hi_factor_tensor, lo_factor_tensor
+        )
 
     def apply(self, context: Context, rates: TensorVar) -> TensorVar:
         """Apply normsys modifier (systematic with hi/lo interpolation)."""
@@ -222,6 +263,15 @@ class HistoSysModifier(HasConstraint, ParameterModifier):
         """Auxiliary data value for histosys (always 0.0)."""
         # histosys typical auxiliary measurement around 0
         return 0.0
+
+    def expression(self, context: Context) -> TensorVar:
+        """Return the histosys parameter value for dependency graph evaluation.
+
+        For histosys modifiers, the actual additive variation calculation happens in apply()
+        since it depends on the nominal rates. This method returns just the parameter value
+        for the dependency graph to track parameter dependencies correctly.
+        """
+        return context[self.parameter]
 
     def apply(self, context: Context, rates: TensorVar) -> TensorVar:
         """Apply histosys (additive systematic) modifier."""
@@ -282,6 +332,12 @@ class ShapeFactorModifier(ParametersModifier):
         # shapefactor doesn't produce aux measurements per se; return empty list
         return []
 
+    def expression(self, context: Context) -> TensorVar:
+        """Return multiplicative factors for shapefactor."""
+        param_names = self.parameters
+        factors = pt.stack([context[name] for name in param_names])
+        return cast("TensorVar", factors)
+
     def apply(self, context: Context, rates: TensorVar) -> TensorVar:
         """Apply shapefactor modifier (uncorrelated bin-by-bin scaling)."""
         param_names = self.parameters
@@ -302,6 +358,12 @@ class ShapeSysModifier(HasConstraint, ParametersModifier):
         """Auxiliary data values for shapesys (from data vals)."""
         # shapesys typically uses auxiliary counts derived from the sample data and uncertainties.
         return self.data.vals
+
+    def expression(self, context: Context) -> TensorVar:
+        """Return multiplicative factors for shapesys."""
+        param_names = self.parameters
+        factors = pt.stack([context[name] for name in param_names])
+        return cast("TensorVar", factors)
 
     def apply(self, context: Context, rates: TensorVar) -> TensorVar:
         """Apply shapesys modifier (shape systematic with constraints)."""
@@ -363,6 +425,12 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
         """Auxiliary data values for staterror (list of 1.0)."""
         # For staterror, each auxiliary measurement is typically 1.0 (or derived).
         return [1.0] * len(self.parameters)
+
+    def expression(self, context: Context) -> TensorVar:
+        """Return multiplicative factors for staterror."""
+        param_names = self.parameters
+        factors = pt.stack([context[name] for name in param_names])
+        return cast("TensorVar", factors)
 
     def apply(self, context: Context, rates: TensorVar) -> TensorVar:
         """Apply staterror modifier (Barlow-Beeston statistical uncertainties)."""

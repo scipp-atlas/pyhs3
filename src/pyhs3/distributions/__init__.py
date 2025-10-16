@@ -43,7 +43,7 @@ ProductDist = composite.ProductDist
 HistogramDist = histogram.HistogramDist
 
 # HistFactory distributions
-HistFactoryDist = histfactory.HistFactoryDist
+HistFactoryDistChannel = histfactory.HistFactoryDistChannel
 
 # Mathematical distributions
 GenericDist = mathematical.GenericDist
@@ -75,7 +75,7 @@ __all__ = [
     "GGZZBackgroundDist",
     "GaussianDist",
     "GenericDist",
-    "HistFactoryDist",
+    "HistFactoryDistChannel",
     "HistogramDist",
     "LandauDist",
     "LogNormalDist",
@@ -116,7 +116,7 @@ DistributionType = Annotated[
     # Histogram distributions
     | histogram.HistogramDist
     # HistFactory distributions
-    | histfactory.HistFactoryDist
+    | histfactory.HistFactoryDistChannel
     # Mathematical distributions
     | mathematical.GenericDist
     | mathematical.PolynomialDist
@@ -162,6 +162,11 @@ class Distributions(RootModel[list[DistributionType]]):
     def model_post_init(self, __context: Any, /) -> None:
         """Initialize computed collections after Pydantic validation."""
         self._map = {dist.name: dist for dist in self.root}
+
+    def get(
+        self, item: str, default: Distribution | None = None
+    ) -> Distribution | None:
+        return self._map.get(item, default)
 
     def __getitem__(self, item: str) -> Distribution:
         return self._map[item]

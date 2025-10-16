@@ -441,7 +441,7 @@ class Model:
                     outputs=dist,
                     mode=compilation_mode,
                     on_unused_input="ignore",
-                ),  # type: ignore[no-untyped-call]
+                ),
             )
         return self._compiled_functions[name]
 
@@ -479,7 +479,7 @@ class Model:
 
         func = cast(
             Callable[..., npt.NDArray[np.float64]],
-            function(inputs=inputs, outputs=dist),  # type: ignore[no-untyped-call]
+            function(inputs=inputs, outputs=dist),
         )
         return func(**keyword_values)
 
@@ -541,7 +541,7 @@ class Model:
             else:
                 filename = base_filename
 
-        pydotprint(  # type: ignore[no-untyped-call]
+        pydotprint(
             dist, outfile=filename, format=fmt, with_ids=True, high_contrast=True
         )
         return filename

@@ -49,10 +49,8 @@ class Distribution(Evaluable, ABC):
             TensorVar: Main probability density
 
         Raises:
-            NotImplementedError: Must be implemented by subclasses
+            TypeError: Must be implemented by subclasses
         """
-        msg = f"Distribution type={self.type} likelihood not implemented."
-        raise NotImplementedError(msg)
 
     def expression(self, context: Context) -> TensorVar:
         """

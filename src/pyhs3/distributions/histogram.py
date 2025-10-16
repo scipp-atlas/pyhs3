@@ -10,13 +10,10 @@ from __future__ import annotations
 
 from typing import Literal
 
-import pytensor.tensor as pt
 from pydantic import BaseModel, ConfigDict, Field
 
-from pyhs3.context import Context
 from pyhs3.data import Axis
 from pyhs3.distributions.core import Distribution
-from pyhs3.typing.aliases import TensorVar
 
 
 class HistogramData(BaseModel):
@@ -59,26 +56,10 @@ class HistogramDist(Distribution):
     type: Literal["histogram_dist"] = "histogram_dist"
     data: HistogramData = Field(..., json_schema_extra={"preprocess": False})
 
-    def likelihood(self, _context: Context) -> TensorVar:
-        """
-        Evaluate the histogram probability density.
-
-        Note:
-            Current implementation returns constant 1.0 as placeholder.
-            Full histogram PDF implementation pending.
-
-        Args:
-            _context: Context (unused in current implementation)
-
-        Returns:
-            TensorVar: Constant value of 1.0
-        """
-        return pt.constant(1.0)
-
 
 # Registry of histogram distributions
 distributions: dict[str, type[Distribution]] = {
-    "histogram_dist": HistogramDist,
+    "histogram_dist": HistogramDist,  # type: ignore[type-abstract]
 }
 
 # Define what should be exported from this module

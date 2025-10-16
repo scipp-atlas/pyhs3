@@ -305,6 +305,41 @@ HistFactory is a major use case, with dedicated support:
 - Interpolation between variations
 - Integration with modifiers
 
+**Modifier Naming in Dependency Graph:**
+
+Modifiers themselves have simple names (e.g., ``"lumi"``), but when incorporated into the dependency graph by ``histfactory_dist``, they are given unique identifiers by prepending the full context path. This design distinguishes individual modifier instances while allowing parameters to indicate correlation:
+
+- **Modifier names** in JSON/specification: Simple names like ``"lumi"``
+- **Internal graph node names**: Full path like ``"{dist_name}/{sample_name}/{modifier_type}/{modifier_name}"``
+- **Parameter names**: Indicate correlation - modifiers sharing the same parameter name are correlated
+
+.. code-block:: python
+
+    # Example: Two modifiers with the same name "lumi" in different samples
+    {
+        "name": "lumi",  # Simple modifier name
+        "parameter": "lumi",  # Shared parameter = correlated
+        "type": "normsys",
+        # ...
+    }
+
+    # Internally becomes node: "SR/signal/normsys/lumi" in the dependency graph
+
+    {
+        "name": "lumi",  # Same modifier name (different sample)
+        "parameter": "lumi",  # Same parameter = correlated
+        "type": "normsys",
+        # ...
+    }
+
+    # Internally becomes node: "CR/background/normsys/lumi" in the dependency graph
+
+This design allows:
+
+- Each modifier instance to be uniquely identified in the dependency graph
+- Correlations to be expressed naturally through shared parameter names
+- Clear separation between modifier identity and parameter correlation structure
+
 Error Handling
 --------------
 

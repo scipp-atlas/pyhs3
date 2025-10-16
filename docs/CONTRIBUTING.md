@@ -3,6 +3,10 @@
 We welcome contributions to pyhs3! This guide will help you get started with
 contributing to the project.
 
+See the
+[Scientific Python Developer Guide](https://learn.scientific-python.org/development/)
+for a detailed description of best practices for developing scientific packages.
+
 ## Getting Started
 
 ### Prerequisites
@@ -13,7 +17,30 @@ Before contributing, ensure you have:
 - Git
 - A GitHub account
 
-### Setting Up Your Development Environment
+### Quick Development
+
+The fastest way to start with development is to use nox. If you don't have nox,
+you can use `pipx run nox` to run it without installing, or `pipx install nox`.
+If you don't have pipx (pip for applications), then you can install with
+`pip install pipx` (the only case where installing an application with regular
+pip is reasonable). If you use macOS, then pipx and nox are both in brew, use
+`brew install pipx nox`.
+
+To use, run `nox`. This will lint and test using every installed version of
+Python on your system, skipping ones that are not installed. You can also run
+specific jobs:
+
+```console
+$ nox -s lint  # Lint only
+$ nox -s tests  # Python tests
+$ nox -s docs -- --serve  # Build and serve the docs
+$ nox -s build  # Make an SDist and wheel
+```
+
+Nox handles everything for you, including setting up a temporary virtual
+environment for each run.
+
+### Setting Up Your Development Environment Manually
 
 1. **Fork and clone the repository**
 
@@ -24,29 +51,35 @@ Before contributing, ensure you have:
 
 2. **Create a development environment**
 
-   We recommend using a virtual environment:
+   You can set up a development environment by running:
 
    ```bash
    python -m venv .venv
    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   ```
-
-3. **Install the package in development mode**
-
-   ```bash
    pip install -e .[dev,test,docs]
    ```
 
-4. **Set up pre-commit hooks**
-
-   We use pre-commit to ensure code quality:
+   If you have the
+   [Python Launcher for Unix](https://github.com/brettcannon/python-launcher),
+   you can instead do:
 
    ```bash
-   pip install pre-commit
-   pre-commit install
+   py -m venv .venv
+   py -m install -e .[dev]
    ```
 
-   This will automatically run linting and formatting checks before each commit.
+3. **Set up pre-commit hooks**
+
+   You should prepare pre-commit, which will help you by checking that commits
+   pass required checks:
+
+   ```bash
+   pip install pre-commit  # or brew install pre-commit on macOS
+   pre-commit install  # Will install a pre-commit hook into the git repo
+   ```
+
+   You can also/alternatively run `pre-commit run` (changes only) or
+   `pre-commit run --all-files` to check even without installing the hook.
 
 ## Code Standards
 
@@ -81,11 +114,30 @@ def calculate_logpdf(x: float, mean: float, sigma: float) -> float:
 All contributions must include tests. See [testing](testing.rst) for detailed
 information on writing and running tests.
 
+Quick testing commands:
+
+```bash
+pytest  # Run all tests
+pytest --cov=pyhs3  # Run tests with coverage
+```
+
 ### Documentation
 
 - All public APIs must have docstrings
 - Update relevant documentation files when adding features
 - Use numpy-style docstrings
+
+You can build the docs using:
+
+```bash
+nox -s docs
+```
+
+You can see a preview with:
+
+```bash
+nox -s docs -- --serve
+```
 
 ## Git Workflow
 
@@ -177,7 +229,5 @@ contributors.
 - [Testing Guide](testing.rst) - Comprehensive testing guide
 - [Development Guide](development.rst) - Development workflow and tools
 - [Architecture Overview](architecture.rst) - Codebase architecture overview
-- [.github/CONTRIBUTING.md](https://github.com/scipp-atlas/pyhs3/blob/main/.github/CONTRIBUTING.md) -
-  Quick reference guide
 - [Scientific Python Developer Guide](https://learn.scientific-python.org/development/) -
   Detailed best practices

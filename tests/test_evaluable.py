@@ -621,6 +621,13 @@ class TestContext:
         context = Context({}, {"param1": pt.constant(2.0)})
         assert context["param1"] is not None
 
+    def test_context_copy(self):
+        """Test Context copy"""
+        context = Context({"param1": pt.constant(1.0)})
+        copied = context.copy()
+        copied._parameters["param1"] = pt.constant(2.0)
+        assert context["param1"].value != copied["param1"].value
+
 
 class TestEvaluableAdvanced:
     """Test advanced Evaluable functionality and edge cases."""

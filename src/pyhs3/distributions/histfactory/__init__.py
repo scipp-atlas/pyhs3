@@ -72,6 +72,18 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         - shapesys: Uncorrelated shape systematic with Poisson constraints
         - staterror: Statistical uncertainty via Barlow-Beeston method
 
+    Modifier Naming in Dependency Graph:
+        Modifiers have simple names (e.g., "lumi") in the HS3 specification, but are
+        given unique identifiers in the dependency graph by prepending the full context:
+        ``{dist_name}/{sample_name}/{modifier_type}/{modifier_name}``
+
+        This design distinguishes individual modifier instances while allowing parameters
+        to indicate correlation - modifiers sharing the same parameter name are correlated.
+
+        Example: Two modifiers both named "lumi" in different samples will have unique
+        graph nodes like "SR/signal/normsys/lumi" and "CR/background/normsys/lumi", but
+        if they share the same parameter name, they are correlated.
+
     HS3 Reference:
         :hs3:label:`histfactory_dist <hs3.histfactory-distribution>`
     """

@@ -471,7 +471,7 @@ class Model:
                     outputs=dist_expression,
                     mode=compilation_mode,
                     on_unused_input="ignore",
-                    trust_input=True,
+                    # trust_input=True,
                 ),
             )
         return self._compiled_functions[name]

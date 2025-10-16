@@ -716,6 +716,19 @@ class HistogramFunction(Function):
     )
 
     def expression(self, _: Context) -> TensorVar:
+        """
+        Evaluate the histogram function.
+
+        Note:
+            Current implementation returns constant 1.0 as placeholder.
+            Full histogram lookup implementation pending.
+
+        Args:
+            _: Context (unused in current implementation)
+
+        Returns:
+            TensorVar: Constant value of 1.0
+        """
         return pt.constant(1.0)
 
 

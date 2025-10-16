@@ -60,6 +60,19 @@ class HistogramDist(Distribution):
     data: HistogramData = Field(..., json_schema_extra={"preprocess": False})
 
     def likelihood(self, _context: Context) -> TensorVar:
+        """
+        Evaluate the histogram probability density.
+
+        Note:
+            Current implementation returns constant 1.0 as placeholder.
+            Full histogram PDF implementation pending.
+
+        Args:
+            _context: Context (unused in current implementation)
+
+        Returns:
+            TensorVar: Constant value of 1.0
+        """
         return pt.constant(1.0)
 
 

@@ -166,6 +166,16 @@ class Distributions(RootModel[list[DistributionType]]):
     def get(
         self, item: str, default: Distribution | None = None
     ) -> Distribution | None:
+        """
+        Get a distribution by name with optional default.
+
+        Args:
+            item: Distribution name to look up
+            default: Default value if distribution not found
+
+        Returns:
+            The distribution if found, otherwise the default value
+        """
         return self._map.get(item, default)
 
     def __getitem__(self, item: str) -> Distribution:

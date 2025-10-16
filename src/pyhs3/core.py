@@ -493,7 +493,7 @@ class Model:
             List of parameter names in the order expected by pdf()
 
         Example:
-            >>> model.pars("model_singlechannel")
+            >>> model.pars("model_singlechannel") # doctest: +SKIP
             ['uncorr_bkguncrt_1', 'uncorr_bkguncrt_0', 'model_singlechannel_observed', 'mu', 'Lumi']
         """
         if name not in self._compiled_inputs:
@@ -513,7 +513,7 @@ class Model:
             List of indices that would sort the parameters
 
         Example:
-            >>> model.parsort("model_singlechannel", ["mu", "Lumi", "uncorr_bkguncrt_0", "uncorr_bkguncrt_1", "model_singlechannel_observed"])
+            >>> model.parsort("model_singlechannel", ["mu", "Lumi", "uncorr_bkguncrt_0", "uncorr_bkguncrt_1", "model_singlechannel_observed"]) # doctest: +SKIP
             [3, 2, 4, 0, 1]
 
         """

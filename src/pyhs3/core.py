@@ -5,7 +5,7 @@ import logging
 import os
 import sys
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Literal, TypeAlias, TypeVar, cast
 
@@ -315,6 +315,7 @@ class Model:
         self.distributions: dict[str, TensorVar] = {}
         self.mode = mode
         self._compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]] = {}
+        self._compiled_inputs: dict[str, list[TensorVar]] = {}
 
         # Build dependency graph with proper entity identification
         self._build_dependency_graph(functions, distributions, progress)
@@ -431,6 +432,9 @@ class Model:
             dist = self.distributions[name]
             inputs = [var for var in graph_inputs([dist]) if var.name is not None]
 
+            # Cache the inputs list for consistent ordering
+            self._compiled_inputs[name] = cast(list[TensorVar], inputs)
+
             # Use the specified PyTensor mode
             compilation_mode = self.mode
 
@@ -456,32 +460,10 @@ class Model:
         Returns:
             npt.NDArray[np.float64]: The evaluated PDF value.
         """
-        if self.mode != "FAST_COMPILE":
-            # Use compiled function for better performance
-            func = self._get_compiled_function(name)
-            inputs = [
-                var
-                for var in graph_inputs([self.distributions[name]])
-                if var.name is not None
-            ]
-            positional_values = []
-            for var in inputs:
-                assert var.name is not None
-                positional_values.append(parametervalues[var.name])
-            return func(*positional_values)
-        # Use original uncompiled approach
-        dist = self.distributions[name]
-        inputs = [var for var in graph_inputs([dist]) if var.name is not None]
-        keyword_values: dict[str, float] = {}
-        for var in inputs:
-            assert var.name is not None
-            keyword_values[var.name] = parametervalues[var.name]
-
-        func = cast(
-            Callable[..., npt.NDArray[np.float64]],
-            function(inputs=inputs, outputs=dist),
-        )
-        return func(**keyword_values)
+        # Use compiled function for better performance
+        func = self._get_compiled_function(name)
+        positional_values = self._reorder_params(name, parametervalues)
+        return func(*positional_values)
 
     def logpdf(self, name: str, **parametervalues: float) -> npt.NDArray[np.float64]:
         """
@@ -495,6 +477,65 @@ class Model:
             npt.NDArray[np.float64]: The log of the PDF.
         """
         return np.log(self.pdf(name, **parametervalues))
+
+    def pars(self, name: str) -> list[str]:
+        """
+        Get the ordered list of input parameter names for a distribution.
+
+        This method returns the parameter names in the exact order expected
+        by the compiled PDF function. This is useful when you need to know
+        the order of parameters for programmatic access.
+
+        Args:
+            name: Distribution name
+
+        Returns:
+            List of parameter names in the order expected by pdf()
+
+        Example:
+            >>> model.pars("model_singlechannel") # doctest: +SKIP
+            ['uncorr_bkguncrt_1', 'uncorr_bkguncrt_0', 'model_singlechannel_observed', 'mu', 'Lumi']
+        """
+        if name not in self._compiled_inputs:
+            # Trigger compilation to populate cache
+            self._get_compiled_function(name)
+        return [var.name for var in self._compiled_inputs[name] if var.name is not None]
+
+    def parsort(self, name: str, names: list[str]) -> list[int]:
+        """
+        Similar to numpy's argsort, returns the indices that would sort the parameters.
+
+        Args:
+            name: Distribution name
+            names: Parameter names to sort
+
+        Returns:
+            List of indices that would sort the parameters
+
+        Example:
+            >>> model.parsort("model_singlechannel", ["mu", "Lumi", "uncorr_bkguncrt_0", "uncorr_bkguncrt_1", "model_singlechannel_observed"]) # doctest: +SKIP
+            [3, 2, 4, 0, 1]
+
+        """
+        return [names.index(par) for par in self.pars(name)]
+
+    def _reorder_params(
+        self,
+        name: str,
+        params: Mapping[str, float | npt.NDArray[np.float64]],
+    ) -> list[float | npt.NDArray[np.float64]]:
+        """
+        Reorder parameters to match the expected input order for a distribution.
+
+        Args:
+            name: Distribution name
+            params: Dictionary of parameter values
+
+        Returns:
+            List of values in the correct order for the compiled function
+        """
+        input_order = self.pars(name)
+        return [params[param_name] for param_name in input_order]
 
     def visualize_graph(
         self,

@@ -232,31 +232,19 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
 
         # Apply additive modifiers first
         for modifier in sample.modifiers:
-            if modifier.is_additive:
-                # Try to use pre-computed additive result, fallback to apply method
-                modifier_graph_name = (
-                    f"{self.name}/{sample.name}/{modifier.type}/{modifier.name}"
-                )
-                if modifier_graph_name in context:
-                    additive_term = context[modifier_graph_name]
-                    modified_rates = modified_rates + additive_term
-                else:
-                    # Fallback to original apply method
-                    modified_rates = modifier.apply(context, modified_rates)
+            modifier_graph_name = (
+                f"{self.name}/{sample.name}/{modifier.type}/{modifier.name}"
+            )
 
-        # Apply multiplicative modifiers
-        for modifier in sample.modifiers:
-            if modifier.is_multiplicative:
-                # Try to use pre-computed multiplicative factors, fallback to apply method
-                modifier_graph_name = (
-                    f"{self.name}/{sample.name}/{modifier.type}/{modifier.name}"
-                )
-                if modifier_graph_name in context:
-                    multiplicative_factor = context[modifier_graph_name]
-                    modified_rates = modified_rates * multiplicative_factor
-                else:
-                    # Fallback to original apply method
-                    modified_rates = modifier.apply(context, modified_rates)
+            # Try to use pre-computed result, fallback to apply method
+            if modifier_graph_name in context:
+                if modifier.is_additive:
+                    modified_rates += context[modifier_graph_name]
+                else:  # modifier.is_multiplicative
+                    modified_rates *= context[modifier_graph_name]
+            else:
+                # Fallback to original apply method
+                modified_rates = modifier.apply(context, modified_rates)
 
         return cast(TensorVar, modified_rates)
 

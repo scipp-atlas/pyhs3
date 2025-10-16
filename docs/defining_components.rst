@@ -301,6 +301,55 @@ Error Handling and Debugging
     print("Constants:", list(dist.constants.keys()))  # Generated constant names
     print("Constant values:", dist._constants_values)  # Stored numeric values
 
+Extended Likelihoods
+---------------------
+
+Every distribution can optionally provide an extended likelihood contribution by overriding the ``extended_likelihood()`` method inherited from the ``Distribution`` base class.
+
+**Default Behavior:**
+
+By default, distributions return no extended likelihood contribution (``1.0`` in normal space):
+
+.. code-block:: python
+
+    def extended_likelihood(
+        self, _context: Context, _data: TensorVar | None = None
+    ) -> TensorVar:
+        """
+        Extended likelihood contribution in normal space.
+
+        Returns likelihood term for extended ML fitting.
+        Override only when the distribution contributes extended terms.
+        Default: no contribution (returns 1.0 in normal space).
+        """
+        return pt.constant(1.0)
+
+**Custom Extended Likelihood:**
+
+Override this method when your distribution should contribute an extended term:
+
+.. code-block:: python
+
+    class PoissonDist(Distribution):
+        type: Literal["poisson_dist"] = "poisson_dist"
+        x: str | float
+        mean: str | float
+
+        def extended_likelihood(
+            self, context: Context, data: TensorVar | None = None
+        ) -> TensorVar:
+            """Poisson extended likelihood: exp(-mean)."""
+            mean_val = context[self._parameters["mean"]]
+            # Extended term for Poisson: e^(-λ)
+            return pt.exp(-mean_val)
+
+**Key Points:**
+
+- Extended likelihood terms are returned in **normal space** (not log space)
+- The base class default returns ``1.0`` (neutral multiplicative term)
+- Only override when your distribution has a non-trivial extended contribution
+- The ``data`` parameter allows for data-dependent extended terms if needed
+
 Best Practices
 --------------
 

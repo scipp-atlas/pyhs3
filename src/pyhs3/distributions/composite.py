@@ -273,8 +273,7 @@ class MixtureDist(Distribution):
             RuntimeError: If called on non-extended PDF
         """
         if not self.extended:
-            msg = "extended_likelihood only valid when extended=True"
-            raise RuntimeError(msg)
+            return pt.constant(1.0)
 
         if data is None:
             # No data provided, return no contribution

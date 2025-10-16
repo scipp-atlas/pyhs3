@@ -2821,10 +2821,10 @@ class TestMixtureDist:
 
         context = {"coeff1": pt.constant(10.0), "coeff2": pt.constant(20.0)}
 
-        with pytest.raises(
-            RuntimeError, match="extended_likelihood only valid when extended=True"
-        ):
-            dist.extended_likelihood(context, pt.constant(50.0))
+        extended_likelihood = dist.extended_likelihood(context, pt.constant(50.0))
+        assert isinstance(extended_likelihood, pt.variable.TensorConstant)
+        assert extended_likelihood.value == 1.0
+        assert extended_likelihood.type == pt.TensorType(dtype=np.float32, shape=())
 
     def test_mixture_dist_extended_likelihood_no_data(self):
         """Test extended_likelihood method when data is None."""

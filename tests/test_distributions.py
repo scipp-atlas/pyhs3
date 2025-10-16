@@ -60,7 +60,14 @@ class TestDistribution:
     def test_distribution_extended_likelihood_default(self):
         """Test that base distribution extended_likelihood method returns 1.0."""
         # Use a concrete distribution (GaussianDist) to test the default behavior
-        dist = GaussianDist(name="test", mean=0.0, sigma=1.0, x="x")
+        dist = Distribution(name="test", type="test")
+
+        # Create a minimal concrete implementation
+        class TestDist(Distribution):
+            def likelihood(self, _context):
+                return pt.constant(0.5)
+
+        dist = TestDist(name="test", type="test")
         context = {}
 
         # Test with no data

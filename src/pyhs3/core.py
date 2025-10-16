@@ -468,6 +468,9 @@ class Model:
         """
         Get or create a compiled PyTensor function for the specified distribution.
 
+        The distribution expression already includes both the main likelihood
+        and extended likelihood terms, so no additional combination is needed.
+
         Args:
             name (str): Name of the distribution.
 
@@ -475,30 +478,12 @@ class Model:
             Callable: Compiled PyTensor function.
         """
         if name not in self._compiled_functions:
-            dist = self.distributions[name]
-
-            # Find the distribution object to call extended_likelihood
-            dist_obj = self._distribution_objects.get(name)
-
-            # Build combined expression: main * extended_likelihood
-            if dist_obj:
-                # Build context for extended likelihood evaluation
-                context_data = {
-                    **self.parameters,
-                    **self.functions,
-                    **self.distributions,
-                    **self.modifiers,
-                }
-                context = Context(parameters=context_data)
-                extended_term = dist_obj.extended_likelihood(context)
-                # Always combine - don't try to evaluate during graph construction
-                combined_expression = dist * extended_term
-            else:
-                combined_expression = dist
+            # Get the distribution expression (already includes extended_likelihood)
+            dist_expression = self.distributions[name]
 
             inputs = [
                 var
-                for var in explicit_graph_inputs([combined_expression])
+                for var in explicit_graph_inputs([dist_expression])
                 if var.name is not None
             ]
 
@@ -512,7 +497,7 @@ class Model:
                 Callable[..., npt.NDArray[np.float64]],
                 function(
                     inputs=inputs,
-                    outputs=combined_expression,
+                    outputs=dist_expression,
                     mode=compilation_mode,
                     on_unused_input="ignore",
                     name=name,

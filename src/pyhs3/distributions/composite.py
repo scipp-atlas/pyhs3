@@ -167,7 +167,7 @@ class MixtureDist(Distribution):
 
         return extended
 
-    def _expression(self, context: Context) -> TensorVar:
+    def likelihood(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the mixture distribution.
 
@@ -313,7 +313,7 @@ class ProductDist(Distribution):
     type: Literal["product_dist"] = "product_dist"
     factors: list[str]
 
-    def _expression(self, context: Context) -> TensorVar:
+    def likelihood(self, context: Context) -> TensorVar:
         """
         Evaluate the product distribution.
 

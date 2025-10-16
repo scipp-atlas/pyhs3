@@ -14,7 +14,14 @@ import numpy.typing as npt
 import pytensor.tensor as pt
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pytensor.compile.function import function
-from pytensor.graph.basic import applys_between, graph_inputs
+from packaging.version import Version
+
+# https://github.com/pymc-devs/pytensor/commit/f1a2ac660efdbb3527e9a6b4d71a16e3d1c81b07
+if Version(pytensor.__version__) >= Version("2.33.0"):
+    from pytensor.graph.traversal import applys_between, graph_inputs
+else:
+    from pytensor.graph.basic import applys_between, graph_inputs
+
 from rich.progress import (
     BarColumn,
     Progress,

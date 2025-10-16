@@ -12,11 +12,9 @@ from typing import Any, Literal, TypeAlias, TypeVar, cast
 import numpy as np
 import numpy.typing as npt
 import pytensor.tensor as pt
-from packaging.version import Version
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pytensor.compile.function import function
 from pytensor.graph.traversal import applys_between, graph_inputs
-
 from rich.progress import (
     BarColumn,
     Progress,

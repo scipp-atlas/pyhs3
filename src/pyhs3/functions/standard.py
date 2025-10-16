@@ -186,6 +186,7 @@ class GenericFunction(Function):
         Returns:
             TensorVar: PyTensor expression representing the parsed mathematical expression.
         """
+
         # Get required variables using the parameters determined during initialization
         variables = [context[name] for name in self._parameters.values()]
 
@@ -713,6 +714,9 @@ class HistogramFunction(Function):
     data: HistogramData = Field(
         ..., json_schema_extra={"preprocess": False}, repr=False
     )
+
+    def expression(self, _: Context) -> TensorVar:
+        return pt.constant(1.0)
 
 
 class RooRecursiveFractionFunction(Function):

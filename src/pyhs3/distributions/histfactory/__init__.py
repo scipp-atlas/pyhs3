@@ -7,7 +7,7 @@ with samples and modifiers as defined in the HS3 specification.
 
 from __future__ import annotations
 
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import pytensor.tensor as pt
 from pydantic import Field
@@ -17,18 +17,20 @@ from pyhs3.context import Context
 # Import existing distributions for constraint terms
 from pyhs3.distributions.core import Distribution
 from pyhs3.distributions.histfactory.axes import Axes, BinnedAxis
-from pyhs3.distributions.histfactory.modifiers import HasConstraint
+from pyhs3.distributions.histfactory.modifiers import HasConstraint, Modifier
 from pyhs3.distributions.histfactory.samples import Sample, Samples
+from pyhs3.networks import HasDependencies, HasInternalNodes
 from pyhs3.typing.aliases import TensorVar
 
 
-class HistFactoryDist(Distribution):
+class HistFactoryDistChannel(Distribution, HasInternalNodes):
     r"""
-    HistFactory probability distribution.
+    HistFactory probability distribution for a single channel/region.
 
     Implements binned statistical models consisting of histograms (step functions)
-    with various modifiers as defined in the HS3 specification. Each HistFactory
-    distribution describes one "channel" or "region" of a binned measurement.
+    with various modifiers as defined in the HS3 specification. Each HistFactoryDistChannel
+    represents one independent measurement channel/region with its own observed data.
+    Multiple channels can be combined in a workspace to form a complete HistFactory model.
 
     The total likelihood consists of:
     1. **Main likelihood**: Poisson likelihood for observed bin counts vs expected rates
@@ -78,6 +80,53 @@ class HistFactoryDist(Distribution):
     axes: Axes = Field(..., json_schema_extra={"preprocess": False})
     samples: Samples = Field(..., json_schema_extra={"preprocess": False})
 
+    def get_internal_nodes(self) -> list[Any]:
+        """
+        Return all internal nodes that need to be in the dependency graph.
+
+        Modifiers can have the same name across different samples/types (e.g., "Lumi"
+        appearing in multiple places), but the dependency graph requires unique node
+        identifiers. We create wrapper objects that provide unique names while
+        delegating to the original modifier's functionality.
+        """
+        nodes = []
+
+        for sample in self.samples:
+            for modifier in sample.modifiers:
+                # Create unique node name: {dist_name}/{sample_name}/{modifier_type}/{modifier_name}
+                # This ensures uniqueness even when modifier names are reused across samples
+                node_name = f"{self.name}/{sample.name}/{modifier.type}/{modifier.name}"
+
+                # Create a lightweight wrapper that provides the unique name for the dependency graph
+                # while delegating all functionality to the original modifier
+                class ModifierNode(HasDependencies):
+                    def __init__(self, name: str, modifier: Modifier):
+                        self.name = name
+                        self._modifier = modifier
+
+                    @property
+                    def dependencies(self) -> set[str]:
+                        return self._modifier.dependencies
+
+                    def expression(self, context: Context) -> TensorVar:
+                        return self._modifier.expression(context)
+
+                nodes.append(ModifierNode(node_name, modifier))
+
+        return nodes
+
+    @property
+    def parameters(self) -> set[str]:
+        """Return all parameters used by this HistFactory distribution."""
+        params = set()
+        # HistFactory distribution requires observed data parameter
+        params.add(f"{self.name}_observed")
+        # Collect parameters from all modifiers
+        for sample in self.samples:
+            for modifier in sample.modifiers:
+                params.update(modifier.dependencies)
+        return params
+
     def expression(self, context: Context) -> TensorVar:
         """
         Build the HistFactory likelihood expression.
@@ -98,18 +147,36 @@ class HistFactoryDist(Distribution):
         # Process all samples and compute expected rates
         expected_rates = self._compute_expected_rates(context, total_bins)
 
-        # Build main Poisson model for observed data (returns log probability)
-        main_prob = self._build_main_model(context, expected_rates)
+        # Build main Poisson model for observed data
+        return self._build_main_model(context, expected_rates)
 
-        # Build constraint model for nuisance parameters (returns log probability)
-        constraint_prob = self._build_constraint_model(context)
+    def extended_likelihood(
+        self, context: Context, _data: TensorVar | None = None
+    ) -> TensorVar:
+        """
+        Build constraint model for nuisance parameters.
 
-        # Combine main and constraint models (sum log probabilities)
-        if constraint_prob is not None:
-            total_prob = main_prob * constraint_prob
-            return cast(TensorVar, total_prob)
+        Args:
+            context: Mapping of parameter names to PyTensor variables
+            data: Not used for HistFactory constraints (observed data is in main model)
 
-        return main_prob
+        Returns:
+            PyTensor expression for the constraint likelihood terms
+        """
+        constraint_probs = []
+
+        # Collect all constraint terms from modifiers
+        for sample in self.samples:
+            for modifier in sample.modifiers:
+                if isinstance(modifier, HasConstraint):
+                    prob = modifier.make_constraint(context, sample.data)
+                    constraint_probs.append(prob)
+
+        if not constraint_probs:
+            return pt.constant(1.0)
+
+        # Multiply all constraint probabilities
+        return cast(TensorVar, pt.prod(pt.stack(constraint_probs)))  # type: ignore[no-untyped-call]
 
     def _get_total_bins(self) -> int:
         """Calculate total number of bins across all axes."""
@@ -145,18 +212,36 @@ class HistFactoryDist(Distribution):
 
         nominal_rates = pt.as_tensor_variable(contents)
 
-        # Apply modifiers
+        # Apply modifiers using pre-computed results where possible
         modified_rates = nominal_rates
 
         # Apply additive modifiers first
         for modifier in sample.modifiers:
             if modifier.is_additive:
-                modified_rates = modifier.apply(context, modified_rates)
+                # Try to use pre-computed additive result, fallback to apply method
+                modifier_graph_name = (
+                    f"{self.name}/{sample.name}/{modifier.type}/{modifier.name}"
+                )
+                if modifier_graph_name in context:
+                    additive_term = context[modifier_graph_name]
+                    modified_rates = modified_rates + additive_term
+                else:
+                    # Fallback to original apply method
+                    modified_rates = modifier.apply(context, modified_rates)
 
         # Apply multiplicative modifiers
         for modifier in sample.modifiers:
             if modifier.is_multiplicative:
-                modified_rates = modifier.apply(context, modified_rates)
+                # Try to use pre-computed multiplicative factors, fallback to apply method
+                modifier_graph_name = (
+                    f"{self.name}/{sample.name}/{modifier.type}/{modifier.name}"
+                )
+                if modifier_graph_name in context:
+                    multiplicative_factor = context[modifier_graph_name]
+                    modified_rates = modified_rates * multiplicative_factor
+                else:
+                    # Fallback to original apply method
+                    modified_rates = modifier.apply(context, modified_rates)
 
         return cast(TensorVar, modified_rates)
 
@@ -191,34 +276,16 @@ class HistFactoryDist(Distribution):
 
         return cast(TensorVar, main_prob)
 
-    def _build_constraint_model(self, context: Context) -> TensorVar | None:
-        """Build constraint model for nuisance parameters."""
-        constraint_probs = []
-
-        # Collect all constraint terms from modifiers
-        for sample in self.samples:
-            # Prepare sample data for constraint calculations
-            for modifier in sample.modifiers:
-                if isinstance(modifier, HasConstraint):
-                    prob = modifier.make_constraint(context, sample.data)
-                    constraint_probs.append(prob)
-
-        if not constraint_probs:
-            return None
-
-        # Multiply all constraint probabilities and take log
-        return cast(TensorVar, pt.prod(pt.stack(constraint_probs)))  # type: ignore[no-untyped-call]
-
 
 # Registry of histfactory distributions
 distributions: dict[str, type[Distribution]] = {
-    "histfactory_dist": HistFactoryDist,
+    "histfactory_dist": HistFactoryDistChannel,
 }
 
 # Define what should be exported from this module
 __all__ = [
     "Axes",
     "BinnedAxis",
-    "HistFactoryDist",
+    "HistFactoryDistChannel",
     "distributions",
 ]

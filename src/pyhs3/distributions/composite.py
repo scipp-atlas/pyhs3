@@ -285,7 +285,7 @@ class MixtureDist(Distribution):
 
         # Use the existing PoissonDist implementation for correctness
         poisson_dist = PoissonDist(name="temp_poisson", mean="nu", x="n_obs")
-        poisson_context = Context({"nu": nu, "n_obs": n_obs})
+        poisson_context = Context(parameters={"nu": nu, "n_obs": n_obs})
         return poisson_dist.expression(poisson_context)
 
 

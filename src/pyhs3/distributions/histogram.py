@@ -10,10 +10,13 @@ from __future__ import annotations
 
 from typing import Literal
 
+import pytensor.tensor as pt
 from pydantic import BaseModel, ConfigDict, Field
 
+from pyhs3.context import Context
 from pyhs3.data import Axis
 from pyhs3.distributions.core import Distribution
+from pyhs3.typing.aliases import TensorVar
 
 
 class HistogramData(BaseModel):
@@ -55,6 +58,9 @@ class HistogramDist(Distribution):
 
     type: Literal["histogram_dist"] = "histogram_dist"
     data: HistogramData = Field(..., json_schema_extra={"preprocess": False})
+
+    def expression(self, _context: Context) -> TensorVar:
+        return pt.constant(1.0)
 
 
 # Registry of histogram distributions

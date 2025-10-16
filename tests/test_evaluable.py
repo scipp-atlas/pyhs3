@@ -578,14 +578,18 @@ class TestContext:
 
         tensor1 = pt.constant(1.0)
         tensor2 = pt.constant(2.0)
+        tensor3 = pt.constant(3.0)
         data = {"x": tensor1, "y": tensor2}
-        context = Context(data)
+        context = Context(data, {"aux": tensor3})
 
         # Test items()
         items = list(context.items())
-        assert len(items) == 2
+        assert len(items) == 3
         assert ("x", tensor1) in items
         assert ("y", tensor2) in items
+        assert ("aux", tensor3) in items
+        assert context.parameters
+        assert context.auxiliaries
 
     def test_context_empty(self):
         """Test Context with empty data."""

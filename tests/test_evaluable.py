@@ -612,6 +612,11 @@ class TestContext:
         ):
             Context({"param1": pt.constant(1.0)}, {"param1": pt.constant(2.0)})
 
+    def test_context_getitem_auxiliary(self):
+        """Test Context __getitem__ works for auxiliary"""
+        context = Context({}, {"param1": pt.constant(2.0)})
+        assert context["param1"] is not None
+
 
 class TestEvaluableAdvanced:
     """Test advanced Evaluable functionality and edge cases."""

@@ -7,6 +7,7 @@ standard and CMS-specific distribution implementations.
 
 from __future__ import annotations
 
+from abc import abstractmethod
 from typing import cast
 
 import pytensor.tensor as pt
@@ -24,43 +25,75 @@ class Distribution(Evaluable):
     handling parameter management, constant generation, and symbolic
     expression evaluation using PyTensor.
 
+    Distributions separate the main probability model (likelihood) from
+    additional extended likelihood terms (e.g., constraints). The complete
+    probability is the product of both terms.
+
     Inherits parameter processing functionality from Evaluable.
     """
 
-    def expression(self, _context: Context) -> TensorVar:
+    @abstractmethod
+    def likelihood(self, context: Context) -> TensorVar:
         """
-        Distribution-specific expression implementation.
+        Main probability model for the distribution.
 
-        Note: This method will eventually be derived from log_expression().
-        For now, subclasses should implement this method directly.
-
-        Args:
-            _context: Mapping of names to pytensor variables
-
-        Returns:
-            TensorVar: Distribution expression
-
-        Raises:
-            NotImplementedError: Must be implemented by subclasses
-        """
-        msg = f"Distribution type={self.type} is not implemented."
-        raise NotImplementedError(msg)
-
-    def log_expression(self, context: Context) -> TensorVar:
-        """
-        Log-PDF expression in logarithmic space.
-
-        Default implementation takes the logarithm of expression().
-        PyTensor handles optimization and simplification automatically.
-        Subclasses can override for custom log-space implementations.
+        This is the core probability density function (PDF) for the distribution.
+        For example, the Poisson probability for observed data, Gaussian PDF, etc.
+        Must be implemented by all subclasses.
 
         Args:
             context: Mapping of names to pytensor variables
 
         Returns:
-            TensorVar: Log-probability density in log-space
+            TensorVar: Main probability density
+
+        Raises:
+            NotImplementedError: Must be implemented by subclasses
         """
-        return cast(TensorVar, pt.log(self.expression(context)))
+        msg = f"Distribution type={self.type} likelihood not implemented."
+        raise NotImplementedError(msg)
+
+    def expression(self, context: Context) -> TensorVar:
+        """
+        Complete probability combining main likelihood with extended terms.
+
+        Returns the product of likelihood() and extended_likelihood().
+        This provides the complete probability for the distribution.
+
+        Subclasses typically do not need to override this method - just
+        implement likelihood() and optionally extended_likelihood().
+
+        Args:
+            context: Mapping of names to pytensor variables
+
+        Returns:
+            TensorVar: Complete probability density
+        """
+        return cast(
+            TensorVar, self.likelihood(context) * self.extended_likelihood(context)
+        )
+
+    def log_expression(self, context: Context) -> TensorVar:
+        """
+        Log-probability combining main likelihood with extended terms.
+
+        Returns the sum of log(likelihood()) and log(extended_likelihood()).
+        This is mathematically equivalent to log(likelihood * extended_likelihood)
+        but can be more numerically stable.
+
+        PyTensor handles optimization and simplification automatically.
+
+        Args:
+            context: Mapping of names to pytensor variables
+
+        Returns:
+            TensorVar: Log-probability density
+        """
+        return cast(
+            TensorVar,
+            pt.log(self.likelihood(context))
+            + pt.log(self.extended_likelihood(context)),
+        )
 
     def extended_likelihood(
         self, _context: Context, _data: TensorVar | None = None
@@ -68,8 +101,10 @@ class Distribution(Evaluable):
         """
         Extended likelihood contribution in normal space.
 
-        Returns likelihood term for extended ML fitting.
-        Override only when the distribution contributes extended terms.
+        Returns additional likelihood terms for extended ML fitting.
+        Override only when the distribution contributes extended terms like
+        constraint terms (HistFactory) or Poisson yield terms (MixtureDist).
+
         Default: no contribution (returns 1.0 in normal space).
 
         Args:

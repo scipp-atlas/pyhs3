@@ -59,7 +59,7 @@ class HistogramDist(Distribution):
     type: Literal["histogram_dist"] = "histogram_dist"
     data: HistogramData = Field(..., json_schema_extra={"preprocess": False})
 
-    def expression(self, _context: Context) -> TensorVar:
+    def likelihood(self, _context: Context) -> TensorVar:
         return pt.constant(1.0)
 
 

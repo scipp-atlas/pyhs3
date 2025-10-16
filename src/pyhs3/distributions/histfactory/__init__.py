@@ -139,19 +139,18 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
                 params.update(modifier.dependencies)
         return params
 
-    def expression(self, context: Context) -> TensorVar:
+    def likelihood(self, context: Context) -> TensorVar:
         """
-        Build the HistFactory likelihood expression.
+        Build the HistFactory main Poisson likelihood.
 
-        This creates a simultaneous distribution combining:
-        1. Main model: Poisson distribution for observed bin counts
-        2. Constraint model: Gaussian/Poisson constraints for nuisance parameters
+        Returns the Poisson probability for observed bin counts vs expected rates.
+        Does NOT include constraint terms - those are added via extended_likelihood().
 
         Args:
             context: Mapping of parameter names to PyTensor variables
 
         Returns:
-            PyTensor expression for the HistFactory likelihood
+            PyTensor expression for the main Poisson model probability
         """
         # Extract binning information
         total_bins = self._get_total_bins()

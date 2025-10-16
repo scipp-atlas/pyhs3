@@ -59,7 +59,7 @@ class TestDistribution:
         assert dist.name == "test_dist"
         assert dist.type == "test"
 
-    def test_distribution_expression_not_implemented(self):
+    def test_distribution_likelihood_not_implemented(self):
         """Test that abstract likelihood method must be implemented."""
         # Distribution is now abstract and cannot be instantiated without likelihood()
         with pytest.raises(TypeError, match=r"Can't instantiate abstract class"):

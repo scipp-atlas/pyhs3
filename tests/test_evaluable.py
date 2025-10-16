@@ -605,6 +605,13 @@ class TestContext:
         with pytest.raises(KeyError):
             _ = context["nonexistent_key"]
 
+    def test_context_overlapping_names(self):
+        """Test Context with overlapping names is disallowed"""
+        with pytest.raises(
+            ValueError, match=r"Parameter names cannot overlap between .*"
+        ):
+            Context({"param1": pt.constant(1.0)}, {"param1": pt.constant(2.0)})
+
 
 class TestEvaluableAdvanced:
     """Test advanced Evaluable functionality and edge cases."""

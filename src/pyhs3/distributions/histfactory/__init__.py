@@ -112,6 +112,10 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
                 # Create a lightweight wrapper that provides the unique name for the dependency graph
                 # while delegating all functionality to the original modifier
                 class ModifierNode(HasDependencies):
+                    """
+                    Wrapper Modifier to provide a globally unique internal name for the dependency graph.
+                    """
+
                     def __init__(self, name: str, modifier: Modifier):
                         self.name = name
                         self._modifier = modifier

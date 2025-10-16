@@ -34,7 +34,7 @@ from pyhs3.exceptions import WorkspaceValidationError
 from pyhs3.functions import Functions
 from pyhs3.likelihoods import Likelihoods
 from pyhs3.metadata import Metadata
-from pyhs3.networks import HasInternalNodes, build_dependency_graph
+from pyhs3.networks import build_dependency_graph
 from pyhs3.parameter_points import ParameterPoints, ParameterSet
 from pyhs3.typing.aliases import TensorVar
 
@@ -357,7 +357,7 @@ class Model:
         in topological order.
         """
         # Build dependency graph using the networks module
-        graph, constants_map = build_dependency_graph(
+        graph, constants_map, modifiers_map = build_dependency_graph(
             self.parameterset, functions, distributions
         )
 
@@ -439,17 +439,8 @@ class Model:
 
                 elif node_type == "modifier":
                     # Modifiers are evaluated and stored for later use by distributions
-                    # Find the modifier object by name from the internal nodes
-                    modifier_obj = None
-                    for dist in distributions:
-                        if isinstance(dist, HasInternalNodes):
-                            for node in dist.get_internal_nodes():
-                                if node.name == node_name:
-                                    modifier_obj = node
-                                    break
-                            if modifier_obj:
-                                break
-
+                    # Use pre-built modifiers map for efficient O(1) lookup
+                    modifier_obj = modifiers_map.get(node_name)
                     if modifier_obj:
                         self.modifiers[node_name] = modifier_obj.expression(context)
 

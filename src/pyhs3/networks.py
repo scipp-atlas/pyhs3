@@ -268,12 +268,13 @@ def build_entity_mappings(
 
 def build_dependency_graph(
     parameterset: Any, functions: Any, distributions: Any
-) -> tuple[NamedDiGraph, dict[str, TensorVar]]:
+) -> tuple[NamedDiGraph, dict[str, TensorVar], dict[str, Any]]:
     """
     Build a complete dependency graph for model entities.
 
     Creates a directed graph representing dependencies between parameters,
-    functions, and distributions. Also returns constants mapping for later use.
+    functions, and distributions. Also returns constants mapping and modifiers
+    mapping for efficient lookup during graph evaluation.
     Unknown parameter references are automatically created as parameter nodes.
 
     Args:
@@ -282,7 +283,7 @@ def build_dependency_graph(
         distributions: Collection of distribution definitions
 
     Returns:
-        Tuple of (dependency graph, constants mapping)
+        Tuple of (dependency graph, constants mapping, modifiers mapping)
 
     Raises:
         ValueError: If circular dependencies exist during topological sort
@@ -300,11 +301,17 @@ def build_dependency_graph(
     # Collect all entities including internal nodes
     all_entities = list(functions) + list(distributions)
 
+    # Build modifiers map for efficient lookup
+    modifiers_map: dict[str, Any] = {}
+
     # Collect internal nodes from distributions that have them
     for dist in distributions:
         if isinstance(dist, HasInternalNodes):
             internal_nodes = dist.get_internal_nodes()
             all_entities.extend(internal_nodes)
+            # Add modifiers to the map for O(1) lookup later
+            for node in internal_nodes:
+                modifiers_map[node.name] = node
 
     # Add edges for dependencies
     for entity in all_entities:
@@ -320,4 +327,4 @@ def build_dependency_graph(
             # Add edge: dependency -> entity (param/func/dist feeds into entity)
             graph.add_named_edge(param_name, entity.name, None)
 
-    return graph, constants_map
+    return graph, constants_map, modifiers_map

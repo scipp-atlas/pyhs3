@@ -31,7 +31,7 @@ class HistogramData(BaseModel):
     contents: list[float] = Field(..., repr=False)
 
 
-class HistogramDist(Distribution):
+class HistogramDist(Distribution):  # pylint: disable=abstract-method
     r"""
     Histogram probability distribution.
 

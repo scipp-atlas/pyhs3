@@ -294,7 +294,7 @@ class TestBuildDependencyGraph:
         distributions = [dist]
 
         # Build graph
-        graph, constants_map = build_dependency_graph(
+        graph, constants_map, _modifiers_map = build_dependency_graph(
             parameterset, functions, distributions
         )
 
@@ -328,7 +328,7 @@ class TestBuildDependencyGraph:
         distributions = []
 
         # Should succeed - unknown entities are auto-created as parameters
-        graph, _constants_map = build_dependency_graph(
+        graph, _constants_map, _modifiers_map = build_dependency_graph(
             parameterset, functions, distributions
         )
 
@@ -350,7 +350,7 @@ class TestBuildDependencyGraph:
         distributions = []
 
         # build_dependency_graph should succeed (just builds the graph)
-        graph, _constants_map = build_dependency_graph(
+        graph, _constants_map, _modifiers_map = build_dependency_graph(
             parameterset, functions, distributions
         )
 
@@ -371,7 +371,7 @@ class TestBuildDependencyGraph:
         dist = GaussianDist(name="test_dist", mean="func2", sigma=1.0, x="base_param")
         distributions = [dist]
 
-        graph, _constants_map = build_dependency_graph(
+        graph, _constants_map, _modifiers_map = build_dependency_graph(
             parameterset, functions, distributions
         )
 

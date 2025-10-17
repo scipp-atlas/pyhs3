@@ -46,24 +46,34 @@ class TestDistribution:
 
     def test_distribution_base_class(self):
         """Test Distribution base class initialization."""
-        dist = Distribution(
+
+        # Create a minimal concrete implementation to test base class functionality
+        class TestDist(Distribution):
+            def likelihood(self, _context):
+                return pt.constant(1.0)
+
+        dist = TestDist(
             name="test_dist",
             type="test",
         )
         assert dist.name == "test_dist"
         assert dist.type == "test"
 
-    def test_distribution_expression_not_implemented(self):
-        """Test that base distribution expression method raises NotImplementedError."""
-        dist = Distribution(name="test", type="unknown")
-        with pytest.raises(
-            NotImplementedError, match=r"Distribution type=unknown is not implemented."
-        ):
-            dist.expression({})
+    def test_distribution_likelihood_not_implemented(self):
+        """Test that abstract likelihood method must be implemented."""
+        # Distribution is now abstract and cannot be instantiated without likelihood()
+        with pytest.raises(TypeError, match=r"Can't instantiate abstract class"):
+            Distribution(name="test", type="unknown")
 
     def test_distribution_extended_likelihood_default(self):
         """Test that base distribution extended_likelihood method returns 1.0."""
-        dist = Distribution(name="test", type="test")
+
+        # Create a minimal concrete implementation
+        class TestDist(Distribution):
+            def likelihood(self, _context):
+                return pt.constant(0.5)
+
+        dist = TestDist(name="test", type="test")
         context = {}
 
         # Test with no data
@@ -2813,10 +2823,10 @@ class TestMixtureDist:
 
         context = {"coeff1": pt.constant(10.0), "coeff2": pt.constant(20.0)}
 
-        with pytest.raises(
-            RuntimeError, match="extended_likelihood only valid when extended=True"
-        ):
-            dist.extended_likelihood(context, pt.constant(50.0))
+        extended_likelihood = dist.extended_likelihood(context, pt.constant(50.0))
+        assert isinstance(extended_likelihood, pt.variable.TensorConstant)
+        assert extended_likelihood.value == 1.0
+        assert extended_likelihood.type == pt.TensorType(dtype=np.float32, shape=())
 
     def test_mixture_dist_extended_likelihood_no_data(self):
         """Test extended_likelihood method when data is None."""

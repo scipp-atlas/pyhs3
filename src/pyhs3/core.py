@@ -310,9 +310,14 @@ class Model:
         """
         self.parameterset = parameterset
         self.domain = domain
+        self._distribution_objects = (
+            distributions  # Store original distribution objects
+        )
+        self._function_objects = functions  # Store original function objects
         self.parameters: dict[str, TensorVar] = {}
         self.functions: dict[str, TensorVar] = {}
         self.distributions: dict[str, TensorVar] = {}
+        self.modifiers: dict[str, TensorVar] = {}
         self.mode = mode
         self._compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]] = {}
         self._compiled_inputs: dict[str, list[TensorVar]] = {}
@@ -334,7 +339,7 @@ class Model:
         in topological order.
         """
         # Build dependency graph using the networks module
-        graph, constants_map = build_dependency_graph(
+        graph, constants_map, modifiers_map = build_dependency_graph(
             self.parameterset, functions, distributions
         )
 
@@ -360,7 +365,7 @@ class Model:
             for node_idx in sorted_nodes:
                 node_data = graph[node_idx]
                 node_type: Literal[
-                    "parameter", "constant", "function", "distribution"
+                    "parameter", "constant", "function", "distribution", "modifier"
                 ] = node_data["type"]
                 node_name = node_data["name"]
 
@@ -381,8 +386,9 @@ class Model:
                     **self.parameters,
                     **self.functions,
                     **self.distributions,
+                    **self.modifiers,
                 }
-                context = Context(context_data)
+                context = Context(parameters=context_data)
 
                 if node_type == "parameter":
                     # Create parameter tensor with domain bounds applied
@@ -394,7 +400,13 @@ class Model:
                     param_point = (
                         self.parameterset.get(node_name) if self.parameterset else None
                     )
-                    param_kind = param_point.kind if param_point else pt.scalar
+                    # Default to vector for observed data parameters, scalar for others
+                    if param_point:
+                        param_kind = param_point.kind
+                    elif "_observed" in node_name:
+                        param_kind = pt.vector
+                    else:
+                        param_kind = pt.scalar
                     self.parameters[node_name] = create_bounded_tensor(
                         node_name, domain_bounds, param_kind
                     )
@@ -406,6 +418,13 @@ class Model:
                 elif node_type == "function":
                     # Functions are evaluated by design
                     self.functions[node_name] = functions[node_name].expression(context)
+
+                elif node_type == "modifier":
+                    # Modifiers are evaluated and stored for later use by distributions
+                    # Use pre-built modifiers map for efficient O(1) lookup
+                    modifier_obj = modifiers_map.get(node_name)
+                    if modifier_obj:
+                        self.modifiers[node_name] = modifier_obj.expression(context)
 
                 else:  # node_type == "distribution"
                     # Distributions are evaluated by design
@@ -422,6 +441,9 @@ class Model:
         """
         Get or create a compiled PyTensor function for the specified distribution.
 
+        The distribution expression already includes both the main likelihood
+        and extended likelihood terms, so no additional combination is needed.
+
         Args:
             name (str): Name of the distribution.
 
@@ -429,8 +451,12 @@ class Model:
             Callable: Compiled PyTensor function.
         """
         if name not in self._compiled_functions:
-            dist = self.distributions[name]
-            inputs = [var for var in graph_inputs([dist]) if var.name is not None]
+            # Get the distribution expression (already includes extended_likelihood)
+            dist_expression = self.distributions[name]
+
+            inputs = [
+                var for var in graph_inputs([dist_expression]) if var.name is not None
+            ]
 
             # Cache the inputs list for consistent ordering
             self._compiled_inputs[name] = cast(list[TensorVar], inputs)
@@ -442,9 +468,10 @@ class Model:
                 Callable[..., npt.NDArray[np.float64]],
                 function(
                     inputs=inputs,
-                    outputs=dist,
+                    outputs=dist_expression,
                     mode=compilation_mode,
                     on_unused_input="ignore",
+                    # trust_input=True,
                 ),
             )
         return self._compiled_functions[name]

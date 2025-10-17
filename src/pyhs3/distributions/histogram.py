@@ -31,7 +31,7 @@ class HistogramData(BaseModel):
     contents: list[float] = Field(..., repr=False)
 
 
-class HistogramDist(Distribution):
+class HistogramDist(Distribution):  # pylint: disable=abstract-method
     r"""
     Histogram probability distribution.
 
@@ -59,7 +59,7 @@ class HistogramDist(Distribution):
 
 # Registry of histogram distributions
 distributions: dict[str, type[Distribution]] = {
-    "histogram_dist": HistogramDist,
+    "histogram_dist": HistogramDist,  # type: ignore[type-abstract]
 }
 
 # Define what should be exported from this module

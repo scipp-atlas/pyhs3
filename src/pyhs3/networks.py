@@ -14,8 +14,7 @@ import rustworkx as rx
 
 from pyhs3.base import Evaluable
 from pyhs3.distributions.core import Distribution
-from pyhs3.functions.core import Function
-from pyhs3.typing.aliases import TensorVar
+from pyhs3.typing.aliases import EntityType, TensorVar
 
 # Import after defining the ABCs to avoid circular imports
 T = TypeVar("T")
@@ -200,7 +199,7 @@ class NamedDiGraph:
 
 def build_entity_mappings(
     parameterset: Any, functions: Any, distributions: Any
-) -> tuple[dict[str, str], dict[str, TensorVar]]:
+) -> tuple[dict[str, EntityType], dict[str, TensorVar]]:
     """
     Build mappings of entity names to types and constants.
 
@@ -215,7 +214,7 @@ def build_entity_mappings(
     Returns:
         Tuple of (entity_types mapping, constants mapping)
     """
-    entity_types: dict[str, str] = {}
+    entity_types: dict[str, EntityType] = {}
     constants_map: dict[str, TensorVar] = {}
 
     # Collect all entities including internal nodes
@@ -231,6 +230,7 @@ def build_entity_mappings(
     for param in parameterset:
         entity_types[param.name] = "parameter"
 
+    entity_type: EntityType
     # Map all entity names and their dependencies
     for entity in all_entities:
         # Get dependencies and determine entity type based on inheritance
@@ -247,11 +247,8 @@ def build_entity_mappings(
 
             if isinstance(entity, Distribution):
                 entity_type = "distribution"
-            elif isinstance(entity, Function):
+            else:  # isinstance(entity, Function):
                 entity_type = "function"
-            else:
-                # Fallback for unknown types
-                entity_type = "unknown"
 
         for param_name in deps:
             entity_types.setdefault(param_name, "parameter")

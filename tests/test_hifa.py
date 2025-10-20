@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import json
-
-import pytest
-
 import pyhf
+import pytest
 import pyhs3
-
 
 @pytest.mark.xfail(reason="To be implemented")
 @pytest.mark.parametrize(

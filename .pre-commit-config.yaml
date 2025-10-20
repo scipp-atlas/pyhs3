@@ -2,7 +2,8 @@ ci:
   autoupdate_commit_msg: "chore: update pre-commit hooks"
   autofix_commit_msg: "style: pre-commit fixes"
   skip: [mypy]
-
+  autoupdate_schedule: monthly
+  
 exclude: ^.cruft.json|.copier-answers.yml|src/pyhs3/roadmap.py|example.py$
 
 repos:

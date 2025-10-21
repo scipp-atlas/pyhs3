@@ -25,6 +25,12 @@ except ImportError:
 import pyhs3
 from pyhs3.context import Context
 from pyhs3.distributions import HistFactoryDistChannel
+from pyhs3.distributions.histfactory.modifiers import (
+    HistoSysModifier,
+    NormSysModifier,
+    ShapeFactorModifier,
+    StatErrorModifier,
+)
 
 
 class TestHistFactoryDist:
@@ -823,7 +829,7 @@ class TestPyhfPrecisionValidation:
     ("pars"),
     [[i, j, k] for i in [0.1, 1.0] for j in [0.1, 1.0] for k in [0.1, 1.0]],
 )
-def test_simplemodel_pyhf(pars, datadir):
+def test_simplemodel_uncorrelated_pyhf(pars, datadir):
     """
     To convert the pyhf simplemodel in HiFa JSON to HS3 JSON:
 
@@ -881,28 +887,8 @@ def test_simplemodel_pyhf(pars, datadir):
         "uncorr_bkguncrt_1": np.array(
             pars[2]
         ),  # pyhf: 'uncorr_bkguncrt[1]' -> pyhs3: 'uncorr_bkguncrt_1'
+        "Lumi": np.array(1.0),
     }
-
-    # Add additional parameters with default values
-    # Special handling for const parameters: use their default values, not test parameters
-    for param_name in model_pyhs3.parameters:
-        if param_name not in pyhs3_params:
-            # Check if this parameter is marked as const in any parameter point
-            is_const = False
-            default_val = 1.0
-
-            if ws_pyhs3.parameter_points:
-                for param_point in ws_pyhs3.parameter_points:
-                    for param_obj in param_point.parameters:
-                        if param_obj.name == param_name:
-                            default_val = param_obj.value
-                            is_const = hasattr(param_obj, "const") and param_obj.const
-                            break
-                    if is_const:
-                        break
-
-            # Use default value for const parameters, or fallback value for others
-            pyhs3_params[param_name] = np.array(default_val)
 
     pyhf_result = model_pyhf.pdf(pars, data_pyhf)
     pyhs3_result = model_pyhs3.pdf("model_singlechannel", **pyhs3_params)
@@ -940,3 +926,270 @@ def test_simplemodel_pyhf(pars, datadir):
     )
 
     assert pyhs3_log_scalar == pytest.approx(pyhf_log_scalar)
+
+
+@pytest.mark.parametrize(
+    ("pars"),
+    [[i, j] for i in [0.1, 1.0] for j in [-1.0, 0.0, 1.0]],
+)
+def test_simplemodel_correlated_pyhf(pars, datadir):
+    """
+    Test correlated background model with histosys modifier.
+
+    This covers the additive modifier path in HistFactoryDistChannel._process_sample.
+    """
+    ws_pyhf = pyhf.Workspace(
+        json.loads(
+            datadir.joinpath("simplemodel_correlated-background_hifa.json").read_text()
+        )
+    )
+    model_pyhf = ws_pyhf.model()
+    data_pyhf = ws_pyhf.data(model_pyhf)
+
+    ws_pyhs3 = pyhs3.Workspace(
+        **json.loads(
+            datadir.joinpath("simplemodel_correlated-background_hs3.json").read_text()
+        )
+    )
+    model_pyhs3 = ws_pyhs3.model()
+
+    # Get observed data
+    obs_data = None
+    for data_item in ws_pyhs3.data.root:
+        if data_item.name == "obsData_singlechannel":
+            obs_data = data_item.contents
+            break
+
+    # Map pyhf parameters to pyhs3 parameters
+    # pyhf_params = model_pyhf.config.par_names
+    # ['correlated_bkg_uncertainty', 'mu']
+
+    # Get default parameter values from workspace
+    default_values = {}
+    if ws_pyhs3.parameter_points:
+        for param_obj in ws_pyhs3.parameter_points[0].parameters:
+            default_values[param_obj.name] = param_obj.value
+
+    # Create parameter dictionary for pyhs3
+    pyhs3_params = {
+        "model_singlechannel_observed": np.array(obs_data),
+        "alpha_correlated_bkg_uncertainty": np.array(pars[1]),  # histosys parameter
+        "mu": np.array(pars[0]),  # signal strength
+        "Lumi": np.array(1.0),
+    }
+
+    # pyhf expects parameters in a specific order
+    pyhf_pars = [pars[1], pars[0]]  # [correlated_bkg_uncertainty, mu]
+    pyhf_result = model_pyhf.pdf(pyhf_pars, data_pyhf)
+    pyhs3_result = model_pyhs3.pdf("model_singlechannel", **pyhs3_params)
+
+    # Compare PDF values - extract scalar from arrays if needed
+    pyhf_scalar = (
+        pyhf_result[0]
+        if hasattr(pyhf_result, "__len__") and len(pyhf_result) == 1
+        else pyhf_result
+    )
+    pyhs3_scalar = (
+        float(pyhs3_result)
+        if hasattr(pyhs3_result, "shape") and pyhs3_result.shape == ()
+        else pyhs3_result
+    )
+
+    assert pyhs3_scalar == pytest.approx(pyhf_scalar)
+
+    # Test logpdf (suppress warnings for log(0) = -inf)
+    pyhf_logresult = model_pyhf.logpdf(pyhf_pars, data_pyhf)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        pyhs3_logresult = model_pyhs3.logpdf("model_singlechannel", **pyhs3_params)
+
+    # Compare logpdf values - extract scalar from arrays if needed
+    pyhf_log_scalar = (
+        pyhf_logresult[0]
+        if hasattr(pyhf_logresult, "__len__") and len(pyhf_logresult) == 1
+        else pyhf_logresult
+    )
+    pyhs3_log_scalar = (
+        float(pyhs3_logresult)
+        if hasattr(pyhs3_logresult, "shape") and pyhs3_logresult.shape == ()
+        else pyhs3_logresult
+    )
+
+    assert pyhs3_log_scalar == pytest.approx(pyhf_log_scalar)
+
+
+class TestHistFactoryAdditiveModifierPath:
+    """Test the additive modifier path in HistFactoryDistChannel._process_sample."""
+
+    def test_additive_modifier_from_context(self):
+        """Test that additive modifiers are correctly applied when pre-computed in context."""
+        axes = [{"name": "x", "min": 0.0, "max": 10.0, "nbins": 2}]
+        samples = [
+            {
+                "name": "background",
+                "data": {"contents": [50.0, 52.0], "errors": [1.0, 1.0]},
+                "modifiers": [
+                    {
+                        "name": "shape_sys",
+                        "type": "histosys",
+                        "parameter": "alpha_shape",
+                        "constraint": "Gauss",
+                        "data": {
+                            "hi": {"contents": [55.0, 45.0]},
+                            "lo": {"contents": [45.0, 55.0]},
+                        },
+                    }
+                ],
+            }
+        ]
+
+        dist = HistFactoryDistChannel(name="test_channel", axes=axes, samples=samples)
+
+        # Create context with pre-computed modifier result
+        # This simulates the dependency graph having already computed the modifier's contribution
+        modifier_graph_name = "test_channel/background/histosys/shape_sys"
+        observed_data = pt.dvector("test_channel_observed")
+
+        # Pre-compute the additive variation (this would normally be done by the dependency graph)
+        # At alpha=0.5, interpolation gives halfway between nominal and hi
+        additive_variation = pt.constant([2.5, -3.5])  # (55-50)/2, (45-52)/2
+
+        context = Context(
+            {
+                "test_channel_observed": observed_data,
+                "alpha_shape": pt.constant(0.5),
+                modifier_graph_name: additive_variation,  # Pre-computed result in context
+            }
+        )
+
+        # Get the expression - this should use the pre-computed value from context
+        expr = dist.log_expression(context)
+
+        # Compile function
+        f = function([observed_data], expr)
+
+        # Test evaluation
+        obs_val = np.array([53.0, 49.0])  # Close to expected [52.5, 48.5]
+        result = f(obs_val)
+
+        # Should return a finite log probability
+        assert np.isfinite(result)
+
+
+class TestModifierExpressions:
+    """Test modifier expression methods for dependency graph evaluation."""
+
+    def test_normsys_expression(self):
+        """Test NormSysModifier.expression() method."""
+
+        modifier = NormSysModifier(
+            name="test_normsys",
+            parameter="alpha_test",
+            data={"hi": 1.1, "lo": 0.9},
+        )
+
+        # Create context with parameter
+        alpha_test = pt.dscalar("alpha_test")
+        context = Context({"alpha_test": alpha_test})
+
+        # Get expression
+        expr = modifier.expression(context)
+
+        # Compile and test
+        f = function([alpha_test], expr)
+
+        # Test at different parameter values
+        assert f(0.0) == pytest.approx(1.0)  # nominal
+        assert f(1.0) == pytest.approx(1.1)  # +1 sigma
+        assert f(-1.0) == pytest.approx(0.9)  # -1 sigma
+
+    def test_histosys_expression(self):
+        """Test HistoSysModifier.expression() method."""
+
+        modifier = HistoSysModifier(
+            name="test_histosys",
+            parameter="alpha_shape",
+            data={
+                "hi": {"contents": [6.0, 4.0]},
+                "lo": {"contents": [4.0, 6.0]},
+            },
+        )
+
+        # Create context with parameter
+        alpha_shape = pt.dscalar("alpha_shape")
+        context = Context({"alpha_shape": alpha_shape})
+
+        # Get expression (should return parameter value for dependency tracking)
+        expr = modifier.expression(context)
+
+        # Compile and test
+        f = function([alpha_shape], expr)
+
+        # HistoSys expression returns the parameter value for dependency tracking
+        assert f(0.0) == pytest.approx(0.0)
+        assert f(0.5) == pytest.approx(0.5)
+        assert f(1.0) == pytest.approx(1.0)
+
+    def test_shapefactor_expression(self):
+        """Test ShapeFactorModifier.expression() method."""
+
+        modifier = ShapeFactorModifier(
+            name="test_shapefactor",
+            parameters=["gamma_0", "gamma_1"],
+        )
+
+        # Create context with parameters
+        gamma_0 = pt.dscalar("gamma_0")
+        gamma_1 = pt.dscalar("gamma_1")
+        context = Context({"gamma_0": gamma_0, "gamma_1": gamma_1})
+
+        # Get expression
+        expr = modifier.expression(context)
+
+        # Compile and test
+        f = function([gamma_0, gamma_1], expr)
+
+        # Test with various values
+        result = f(1.0, 1.0)
+        assert len(result) == 2
+        assert result[0] == pytest.approx(1.0)
+        assert result[1] == pytest.approx(1.0)
+
+        result = f(0.8, 1.2)
+        assert result[0] == pytest.approx(0.8)
+        assert result[1] == pytest.approx(1.2)
+
+    def test_staterror_expression(self):
+        """Test StatErrorModifier.expression() method."""
+
+        modifier = StatErrorModifier(
+            name="test_staterror",
+            parameters=["staterror_bin_0", "staterror_bin_1"],
+            data={"uncertainties": [0.1, 0.15]},
+        )
+
+        # Create context with parameters
+        staterror_bin_0 = pt.dscalar("staterror_bin_0")
+        staterror_bin_1 = pt.dscalar("staterror_bin_1")
+        context = Context(
+            {
+                "staterror_bin_0": staterror_bin_0,
+                "staterror_bin_1": staterror_bin_1,
+            }
+        )
+
+        # Get expression
+        expr = modifier.expression(context)
+
+        # Compile and test
+        f = function([staterror_bin_0, staterror_bin_1], expr)
+
+        # Test with various values
+        result = f(1.0, 1.0)
+        assert len(result) == 2
+        assert result[0] == pytest.approx(1.0)
+        assert result[1] == pytest.approx(1.0)
+
+        result = f(0.95, 1.05)
+        assert result[0] == pytest.approx(0.95)
+        assert result[1] == pytest.approx(1.05)

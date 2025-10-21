@@ -79,7 +79,7 @@ class SumFunction(Function):
     type: Literal["sum"] = Field(default="sum", repr=False)
     summands: list[str] = Field(..., repr=False)
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Evaluate the sum function.
 
@@ -109,7 +109,7 @@ class ProductFunction(Function):
     type: Literal["product"] = Field(default="product", repr=False)
     factors: list[int | float | str] = Field(..., repr=False)
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Evaluate the product function.
 
@@ -176,7 +176,7 @@ class GenericFunction(Function):
         self._parameters = {var: var for var in independent_vars}
         return self
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Evaluate the generic function expression.
 
@@ -464,7 +464,7 @@ class InterpolationFunction(Function):
             ),
         )
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         r"""
         Evaluate the interpolation function.
 
@@ -581,7 +581,7 @@ class ProcessNormalizationFunction(Function):
     )
     otherFactorList: list[str] = Field(default_factory=list, repr=False)
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Evaluate the process normalization function.
 
@@ -652,7 +652,7 @@ class CMSAsymPowFunction(Function):
     kappaHigh: str | float | int = Field(..., repr=False)
     theta: str = Field(..., repr=False)
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Evaluate the AsymPow function.
 
@@ -714,6 +714,12 @@ class HistogramFunction(Function):
         ..., json_schema_extra={"preprocess": False}, repr=False
     )
 
+    def _expression(self, _: Context) -> TensorVar:
+        """
+        Not implemented.
+        """
+        raise NotImplementedError()
+
 
 class RooRecursiveFractionFunction(Function):
     r"""
@@ -740,7 +746,7 @@ class RooRecursiveFractionFunction(Function):
     coefficients: list[int | float | str] = Field(alias="list", repr=False)
     recursive: bool = Field(default=True, repr=False)
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Evaluate the recursive fraction function.
 

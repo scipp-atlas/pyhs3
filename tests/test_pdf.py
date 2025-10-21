@@ -60,20 +60,20 @@ def test_rf501_simultaneouspdf(datadir):
 
     physicspdfval = model.pdf(
         "model",
-        x=model.parameterset["x"].value,
-        f=model.parameterset["f"].value,
-        mean=model.parameterset["mean"].value,
-        sigma=model.parameterset["sigma"].value,
-        mean2=model.parameterset["mean2"].value,
-        sigma2=model.parameterset["sigma2"].value,
+        x=np.array(model.parameterset["x"].value),
+        f=np.array(model.parameterset["f"].value),
+        mean=np.array(model.parameterset["mean"].value),
+        sigma=np.array(model.parameterset["sigma"].value),
+        mean2=np.array(model.parameterset["mean2"].value),
+        sigma2=np.array(model.parameterset["sigma2"].value),
     )
     physicspdfvalctl = model.pdf(
         "model_ctl",
-        x=model.parameterset["x"].value,
-        f_ctl=model.parameterset["f_ctl"].value,
-        mean_ctl=model.parameterset["mean_ctl"].value,
-        mean2_ctl=model.parameterset["mean2_ctl"].value,
-        sigma=model.parameterset["sigma"].value,
+        x=np.array(model.parameterset["x"].value),
+        f_ctl=np.array(model.parameterset["f_ctl"].value),
+        mean_ctl=np.array(model.parameterset["mean_ctl"].value),
+        mean2_ctl=np.array(model.parameterset["mean2_ctl"].value),
+        sigma=np.array(model.parameterset["sigma"].value),
     )
 
     assert np.allclose(physicspdfval, 1.3298076)
@@ -199,7 +199,7 @@ def test_combine_long_exercise_logpdf_evaluation(datadir):
     )
 
     # Get default parameter values
-    default_params = {par.name: par.value for par in model.parameterset}
+    default_params = {par.name: np.array(par.value) for par in model.parameterset}
 
     # Test logPDF evaluation at default parameter values
     default_logpdf_val = model.logpdf("pdf_binsignal_region", **default_params)
@@ -209,11 +209,11 @@ def test_combine_long_exercise_logpdf_evaluation(datadir):
 
     # Test logPDF evaluation with different r values (parameter of interest)
     params_r05 = default_params.copy()
-    params_r05["r"] = 0.5  # Signal strength = 0.5
+    params_r05["r"] = np.array(0.5)  # Signal strength = 0.5
     logpdf_val_r05 = model.logpdf("pdf_binsignal_region", **params_r05)
 
     params_r20 = default_params.copy()
-    params_r20["r"] = 2.0  # Signal strength = 2.0
+    params_r20["r"] = np.array(2.0)  # Signal strength = 2.0
     logpdf_val_r20 = model.logpdf("pdf_binsignal_region", **params_r20)
 
     # Verify logPDFs are finite

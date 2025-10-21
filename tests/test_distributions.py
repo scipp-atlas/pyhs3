@@ -30,6 +30,7 @@ from pyhs3.distributions import (
     GaussianDist,
     GenericDist,
     GGZZBackgroundDist,
+    HistogramDist,
     LandauDist,
     LogNormalDist,
     MixtureDist,
@@ -44,26 +45,22 @@ from pyhs3.distributions import (
 class TestDistribution:
     """Test the base Distribution class."""
 
-    def test_distribution_base_class(self):
-        """Test Distribution base class initialization."""
-        dist = Distribution(
-            name="test_dist",
-            type="test",
-        )
-        assert dist.name == "test_dist"
-        assert dist.type == "test"
-
-    def test_distribution_expression_not_implemented(self):
-        """Test that base distribution expression method raises NotImplementedError."""
-        dist = Distribution(name="test", type="unknown")
+    def test_distribution_base_class_is_abstract(self):
+        """Test that Distribution base class cannot be instantiated directly."""
+        # Distribution is now abstract with _expression() as abstract method
         with pytest.raises(
-            NotImplementedError, match=r"Distribution type=unknown is not implemented."
+            TypeError,
+            match=r"Can't instantiate abstract class Distribution.*_expression",
         ):
-            dist.expression({})
+            Distribution(
+                name="test_dist",
+                type="test",
+            )
 
     def test_distribution_extended_likelihood_default(self):
         """Test that base distribution extended_likelihood method returns 1.0."""
-        dist = Distribution(name="test", type="test")
+        # Use a concrete distribution (GaussianDist) to test the default behavior
+        dist = GaussianDist(name="test", mean=0.0, sigma=1.0, x="x")
         context = {}
 
         # Test with no data
@@ -553,7 +550,7 @@ class TestPoissonDist:
         assert "observed" in model.parameters
 
         # Verify we can evaluate the PMF
-        pdf_value = model.pdf("count_dist", rate=2.5, observed=3.0)
+        pdf_value = model.pdf("count_dist", rate=np.array(2.5), observed=np.array(3.0))
         assert pdf_value is not None
         assert pdf_value > 0.0
 
@@ -703,7 +700,7 @@ class TestNumericParameters:
         assert "test_gauss" in model.distributions
 
         # Verify we can evaluate the distribution
-        pdf_value = model.pdf("test_gauss", mu=0.0)
+        pdf_value = model.pdf("test_gauss", mu=np.array(0.0))
         assert pdf_value is not None
         assert pdf_value > 0  # Should be a valid probability
 
@@ -1192,7 +1189,7 @@ class TestUniformDist:
         assert "obs" in model.parameters
 
         # Verify we can evaluate the PDF
-        pdf_value = model.pdf("uniform_dist", obs=0.5)
+        pdf_value = model.pdf("uniform_dist", obs=np.array(0.5))
         assert pdf_value is not None
         assert pdf_value == 1.0
 
@@ -1374,7 +1371,7 @@ class TestExponentialDist:
         assert "rate" in model.parameters
 
         # Verify we can evaluate the PDF: exp(-0.5 * 1.0) = exp(-0.5)
-        pdf_value = model.pdf("exp_decay", time=1.0, rate=0.5)
+        pdf_value = model.pdf("exp_decay", time=np.array(1.0), rate=np.array(0.5))
         assert pdf_value is not None
         expected = np.exp(-0.5)
         np.testing.assert_allclose(pdf_value, expected, rtol=1e-6)
@@ -1598,7 +1595,12 @@ class TestLogNormalDist:
         assert "log_width" in model.parameters
 
         # Verify we can evaluate the PDF at x=1, mu=0, sigma=1: should give 1.0
-        pdf_value = model.pdf("lognorm_dist", mass=1.0, log_mean=0.0, log_width=1.0)
+        pdf_value = model.pdf(
+            "lognorm_dist",
+            mass=np.array(1.0),
+            log_mean=np.array(0.0),
+            log_width=np.array(1.0),
+        )
         assert pdf_value is not None
         expected = 1.0
         np.testing.assert_allclose(pdf_value, expected, rtol=1e-6)
@@ -1741,7 +1743,9 @@ class TestPolynomialDist:
         assert "p1" in model.parameters
 
         # Verify we can evaluate the PDF: 1 + 2*1 = 3
-        pdf_value = model.pdf("poly_bkg", mass=1.0, p0=1.0, p1=2.0)
+        pdf_value = model.pdf(
+            "poly_bkg", mass=np.array(1.0), p0=np.array(1.0), p1=np.array(2.0)
+        )
         assert pdf_value is not None
         expected = 3.0
         np.testing.assert_allclose(pdf_value, expected, rtol=1e-6)
@@ -1904,7 +1908,11 @@ class TestArgusDist:
 
         # Verify we can evaluate the PDF
         pdf_value = model.pdf(
-            "argus_bkg", mbc=5.0, m_B=5.279, c_slope=-10.0, p_power=0.5
+            "argus_bkg",
+            mbc=np.array(5.0),
+            m_B=np.array(5.279),
+            c_slope=np.array(-10.0),
+            p_power=np.array(0.5),
         )
         assert pdf_value is not None
         assert pdf_value >= 0.0  # Should be non-negative
@@ -2871,3 +2879,18 @@ class TestMixtureDist:
         assert np.isclose(log_val, expected_log), (
             f"log_expression={log_val}, log(expression)={expected_log}"
         )
+
+
+class TestHistogramDist:
+    """Test HistogramDist implementation."""
+
+    def test_histogram_function_creation(self):
+        """Test HistogramDist can be created and configured."""
+        func = HistogramDist(name="test_histogram", data={"axes": [], "contents": []})
+        assert func.name == "test_histogram"
+
+    def test_histogram_function_not_implemented(self):
+        """Test HistogramDist not implemented."""
+        func = HistogramDist(name="test_histogram", data={"axes": [], "contents": []})
+        with pytest.raises(NotImplementedError):
+            func.expression({})

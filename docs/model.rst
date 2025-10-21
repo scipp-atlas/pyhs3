@@ -161,27 +161,76 @@ PyHS3 automatically discovers parameters from your distributions and functions. 
 Evaluating Models
 ----------------
 
-The primary use of models is to evaluate probability density functions:
+The primary use of models is to evaluate probability density functions. PyHS3 provides both type-safe and convenience methods for PDF evaluation:
+
+Type-Safe API (Recommended for Production)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The :meth:`~pyhs3.Model.pdf` and :meth:`~pyhs3.Model.logpdf` methods require all parameter values to be numpy arrays. This ensures type safety and enables performance optimizations:
 
 .. code-block:: python
 
-   # Evaluate PDF at specific parameter values
-   pdf_value = model.pdf("gaussian_model", observable=0.0, mu=0.0, sigma=1.0)
+   import numpy as np
+
+   # All parameters must be numpy arrays
+   pdf_value = model.pdf(
+       "gaussian_model", observable=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0)
+   )
    print(f"PDF(0.0) = {pdf_value}")
 
    # Evaluate at different points
-   pdf_at_1 = model.pdf("gaussian_model", observable=1.0, mu=0.0, sigma=1.0)
-   pdf_at_2 = model.pdf("gaussian_model", observable=2.0, mu=0.0, sigma=1.0)
+   pdf_at_1 = model.pdf(
+       "gaussian_model", observable=np.array(1.0), mu=np.array(0.0), sigma=np.array(1.0)
+   )
+   pdf_at_2 = model.pdf(
+       "gaussian_model", observable=np.array(2.0), mu=np.array(0.0), sigma=np.array(1.0)
+   )
 
    print(f"PDF(1.0) = {pdf_at_1}")
    print(f"PDF(2.0) = {pdf_at_2}")
 
-   # Vectorized evaluation
+   # Log PDF evaluation
+   logpdf_value = model.logpdf(
+       "gaussian_model", observable=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0)
+   )
+
+Convenience API (For Testing and Interactive Use)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The :meth:`~pyhs3.Model.pdf_unsafe` and :meth:`~pyhs3.Model.logpdf_unsafe` methods automatically convert Python floats and lists to numpy arrays. Use these for convenience in testing or interactive sessions:
+
+.. code-block:: python
+
+   # Floats are automatically converted to numpy arrays
+   pdf_value = model.pdf_unsafe("gaussian_model", observable=0.0, mu=0.0, sigma=1.0)
+   print(f"PDF(0.0) = {pdf_value}")
+
+   # Lists are also supported (converted to 1-d arrays)
+   pdf_values = model.pdf_unsafe("gaussian_model", observable=1.5, mu=0.0, sigma=1.0)
+
+   # Log PDF with automatic conversion
+   logpdf_value = model.logpdf_unsafe("gaussian_model", observable=0.0, mu=0.0, sigma=1.0)
+
+.. warning::
+   The ``*_unsafe`` methods have a small performance overhead due to type conversion.
+   For production code or performance-critical loops, prefer :meth:`~pyhs3.Model.pdf` and :meth:`~pyhs3.Model.logpdf` with pre-converted numpy arrays.
+
+Vectorized Evaluation
+~~~~~~~~~~~~~~~~~~~~~
+
+For evaluating PDFs across multiple points, use numpy arrays:
+
+.. code-block:: python
+
    import numpy as np
 
+   # Evaluate at multiple points
    x_values = np.linspace(-3, 3, 100)
    pdf_values = [
-       model.pdf("gaussian_model", observable=x, mu=0.0, sigma=1.0) for x in x_values
+       model.pdf(
+           "gaussian_model", observable=np.array(x), mu=np.array(0.0), sigma=np.array(1.0)
+       )
+       for x in x_values
    ]
 
 Model Compilation and Performance

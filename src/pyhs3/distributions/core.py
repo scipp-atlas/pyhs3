@@ -7,6 +7,7 @@ standard and CMS-specific distribution implementations.
 
 from __future__ import annotations
 
+from abc import ABC
 from typing import cast
 
 import pytensor.tensor as pt
@@ -16,7 +17,7 @@ from pyhs3.context import Context
 from pyhs3.typing.aliases import TensorVar
 
 
-class Distribution(Evaluable):
+class Distribution(Evaluable, ABC):
     """
     Base class for probability distributions in HS3.
 
@@ -25,26 +26,8 @@ class Distribution(Evaluable):
     expression evaluation using PyTensor.
 
     Inherits parameter processing functionality from Evaluable.
+    Subclasses must implement _expression() to define computation logic.
     """
-
-    def expression(self, _context: Context) -> TensorVar:
-        """
-        Distribution-specific expression implementation.
-
-        Note: This method will eventually be derived from log_expression().
-        For now, subclasses should implement this method directly.
-
-        Args:
-            _context: Mapping of names to pytensor variables
-
-        Returns:
-            TensorVar: Distribution expression
-
-        Raises:
-            NotImplementedError: Must be implemented by subclasses
-        """
-        msg = f"Distribution type={self.type} is not implemented."
-        raise NotImplementedError(msg)
 
     def log_expression(self, context: Context) -> TensorVar:
         """

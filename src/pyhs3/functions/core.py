@@ -8,11 +8,10 @@ generic functions with mathematical expressions, and interpolation functions.
 from __future__ import annotations
 
 import logging
+from abc import ABC
 from typing import TypeVar
 
 from pyhs3.base import Evaluable
-from pyhs3.context import Context
-from pyhs3.typing.aliases import TensorVar
 
 log = logging.getLogger(__name__)
 
@@ -20,7 +19,7 @@ log = logging.getLogger(__name__)
 FuncT = TypeVar("FuncT", bound="Function")
 
 
-class Function(Evaluable):
+class Function(Evaluable, ABC):
     """
     Base class for functions in HS3.
 
@@ -28,17 +27,5 @@ class Function(Evaluable):
     handling parameter management and constant generation.
 
     Inherits parameter processing functionality from Evaluable.
+    Subclasses must implement _expression() to define computation logic.
     """
-
-    def expression(self, _: Context) -> TensorVar:
-        """
-        Evaluate the function expression.
-
-        Args:
-            context: Mapping of names to pytensor variables
-
-        Returns:
-            PyTensor expression representing the function result
-        """
-        msg = f"Function type {self.type} not implemented"
-        raise NotImplementedError(msg)

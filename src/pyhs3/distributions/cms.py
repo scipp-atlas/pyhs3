@@ -41,7 +41,7 @@ class FastVerticalInterpHistPdf2Dist(Distribution):
     x: str | float | int
     coefList: list[str]
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the fast vertical interpolation histogram PDF.
 
@@ -96,7 +96,7 @@ class GGZZBackgroundDist(Distribution):
     a2: str | float | int
     a3: str | float | int
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the ggZZ background PDF.
 
@@ -147,7 +147,7 @@ class QQZZBackgroundDist(Distribution):
     a3: str | float | int
     a4: str | float | int
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the qqZZ background PDF.
 
@@ -195,7 +195,7 @@ class FastVerticalInterpHistPdf2D2Dist(Distribution):
     y: str | float | int
     coefList: list[str]
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the 2D fast vertical interpolation histogram PDF.
 

@@ -42,7 +42,7 @@ class GaussianDist(Distribution):
     sigma: str | float | int
     x: str | float | int
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the Gaussian PDF.
 
@@ -92,7 +92,7 @@ class UniformDist(Distribution):
     type: Literal["uniform_dist"] = "uniform_dist"
     x: list[str]
 
-    def expression(self, _context: Context) -> TensorVar:
+    def _expression(self, _context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the uniform PDF.
 
@@ -135,7 +135,7 @@ class PoissonDist(Distribution):
     mean: str | float | int
     x: str | float | int
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the Poisson PMF.
 
@@ -184,7 +184,7 @@ class ExponentialDist(Distribution):
     x: str | float | int
     c: str | float | int
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the exponential PDF.
 
@@ -231,7 +231,7 @@ class LogNormalDist(Distribution):
     mu: str | float | int
     sigma: str | float | int
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the log-normal PDF.
 
@@ -289,7 +289,7 @@ class LandauDist(Distribution):
     mean: str | float | int
     sigma: str | float | int
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the Landau PDF.
 

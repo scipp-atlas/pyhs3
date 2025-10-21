@@ -81,7 +81,7 @@ class GenericDist(Distribution):
         self._parameters = {var: var for var in independent_vars}
         return self
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Evaluate the generic distribution using expression parsing.
 
@@ -131,7 +131,7 @@ class PolynomialDist(Distribution):
     x: str | float | int
     coefficients: list[str]
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the polynomial PDF.
 
@@ -181,7 +181,7 @@ class BernsteinPolyDist(Distribution):
     x: str | float | int
     coefficients: list[str | float | int]
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the Bernstein polynomial PDF.
 

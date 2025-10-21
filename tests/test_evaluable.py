@@ -17,27 +17,37 @@ from pydantic import Field
 
 from pyhs3.base import Evaluable, find_field_definition_line
 from pyhs3.context import Context
+from pyhs3.typing.aliases import TensorVar
+
+
+# Test helper: concrete Evaluable subclass for testing
+class ConcreteEvaluable(Evaluable):
+    """Concrete Evaluable implementation for testing."""
+
+    def _expression(self, _: Context) -> TensorVar:
+        """Dummy implementation for testing."""
+        return pt.constant(1.0)
 
 
 class TestEvaluable:
     """Test the base Evaluable class functionality."""
 
     def test_evaluable_base_creation(self):
-        """Test basic Evaluable creation."""
-        evaluable = Evaluable(name="test", type="test")
+        """Test basic Evaluable creation with concrete subclass."""
+        evaluable = ConcreteEvaluable(name="test", type="test")
         assert evaluable.name == "test"
         assert evaluable.type == "test"
         assert evaluable.parameters == set()
         assert evaluable.constants == {}
 
-    def test_evaluable_expression_not_implemented(self):
-        """Test that base evaluable expression method raises NotImplementedError."""
-        evaluable = Evaluable(name="test", type="unknown")
+    def test_evaluable_base_class_is_abstract(self):
+        """Test that Evaluable base class cannot be instantiated directly."""
+        # Evaluable is now abstract with _expression() as abstract method
         with pytest.raises(
-            NotImplementedError,
-            match="Component type unknown expression not implemented",
+            TypeError,
+            match=r"Can't instantiate abstract class Evaluable.*_expression",
         ):
-            evaluable.expression({})
+            Evaluable(name="test", type="unknown")
 
 
 class TestAutoParameterProcessing:
@@ -46,7 +56,7 @@ class TestAutoParameterProcessing:
     def test_string_parameter_processing(self):
         """Test processing of string parameters."""
 
-        class TestDistribution(Evaluable):
+        class TestDistribution(ConcreteEvaluable):
             type: Literal["test"] = "test"
             param1: str
             param2: str
@@ -62,7 +72,7 @@ class TestAutoParameterProcessing:
     def test_numeric_parameter_processing(self):
         """Test processing of numeric parameters."""
 
-        class TestDistribution(Evaluable):
+        class TestDistribution(ConcreteEvaluable):
             type: Literal["test"] = "test"
             param1: float
             param2: int
@@ -81,7 +91,7 @@ class TestAutoParameterProcessing:
     def test_mixed_parameter_processing(self):
         """Test processing of mixed str/numeric parameters."""
 
-        class TestDistribution(Evaluable):
+        class TestDistribution(ConcreteEvaluable):
             type: Literal["test"] = "test"
             param1: str | float
             param2: str | int
@@ -103,7 +113,7 @@ class TestAutoParameterProcessing:
     def test_union_type_ordering(self):
         """Test that union type ordering doesn't matter (float | str, int | str, etc.)."""
 
-        class TestDistribution(Evaluable):
+        class TestDistribution(ConcreteEvaluable):
             type: Literal["test"] = "test"
             param1: float | str  # Different order
             param2: int | str  # Different order
@@ -128,7 +138,7 @@ class TestAutoParameterProcessing:
     def test_string_list_parameter_processing(self):
         """Test processing of list[str] parameters."""
 
-        class TestDistribution(Evaluable):
+        class TestDistribution(ConcreteEvaluable):
             type: Literal["test"] = "test"
             factors: list[str]
 
@@ -146,7 +156,7 @@ class TestAutoParameterProcessing:
     def test_mixed_list_parameter_processing(self):
         """Test processing of list[str | float] parameters."""
 
-        class TestDistribution(Evaluable):
+        class TestDistribution(ConcreteEvaluable):
             type: Literal["test"] = "test"
             coeffs: list[str | float]
 
@@ -169,7 +179,7 @@ class TestAutoParameterProcessing:
     def test_get_parameter_list_reconstruction(self):
         """Test reconstruction of parameter lists from flattened storage."""
 
-        class TestDistribution(Evaluable):
+        class TestDistribution(ConcreteEvaluable):
             type: Literal["test"] = "test"
             factors: list[str | float]
 
@@ -195,7 +205,7 @@ class TestPreprocessExclusions:
     def test_base_class_field_exclusion(self):
         """Test that base Evaluable fields are excluded from preprocessing."""
 
-        class TestDistribution(Evaluable):
+        class TestDistribution(ConcreteEvaluable):
             type: Literal["test"] = "test"
             param1: str  # This should be processed
 
@@ -209,7 +219,7 @@ class TestPreprocessExclusions:
     def test_explicit_preprocess_false(self):
         """Test fields explicitly marked with preprocess=False."""
 
-        class TestDistribution(Evaluable):
+        class TestDistribution(ConcreteEvaluable):
             type: Literal["test"] = "test"
             param1: str  # Should be processed
             config_field: float = Field(
@@ -230,7 +240,7 @@ class TestPreprocessExclusions:
     def test_boolean_field_exclusion(self):
         """Test that boolean fields are automatically excluded."""
 
-        class TestDistribution(Evaluable):
+        class TestDistribution(ConcreteEvaluable):
             type: Literal["test"] = "test"
             param1: str
             enabled: bool  # Should be excluded automatically
@@ -245,7 +255,7 @@ class TestPreprocessExclusions:
     def test_none_value_exclusion(self):
         """Test that fields with None values are skipped."""
 
-        class TestDistribution(Evaluable):
+        class TestDistribution(ConcreteEvaluable):
             type: Literal["test"] = "test"
             param1: str
             param2: str | None = None
@@ -260,7 +270,7 @@ class TestPreprocessExclusions:
     def test_manual_override_skips_auto_processing(self):
         """Test that manually set _parameters skips auto-processing."""
 
-        class TestDistribution(Evaluable):
+        class TestDistribution(ConcreteEvaluable):
             type: Literal["test"] = "test"
             param1: str
             param2: str
@@ -284,7 +294,7 @@ class TestErrorConditions:
     def test_unsupported_field_type_error(self):
         """Test error for unsupported field types."""
 
-        class TestDistribution(Evaluable):
+        class TestDistribution(ConcreteEvaluable):
             type: Literal["test"] = "test"
             param1: str
             unsupported_field: dict  # Unsupported type
@@ -305,7 +315,7 @@ class TestErrorConditions:
     def test_unsupported_field_with_location_info(self):
         """Test error includes file location when available."""
 
-        class TestDistribution(Evaluable):
+        class TestDistribution(ConcreteEvaluable):
             type: Literal["test"] = "test"
             unsupported_field: complex  # Unsupported type
 
@@ -321,7 +331,7 @@ class TestErrorConditions:
     def test_parameter_processing_methods(self):
         """Test individual parameter processing methods."""
 
-        class TestEvaluable(Evaluable):
+        class TestEvaluable(ConcreteEvaluable):
             type: Literal["test"] = "test"
             test_param: str
             numeric_param: float
@@ -340,7 +350,7 @@ class TestErrorConditions:
     def test_process_parameter_list_methods(self):
         """Test parameter list processing methods."""
 
-        class TestEvaluable(Evaluable):
+        class TestEvaluable(ConcreteEvaluable):
             type: Literal["test"] = "test"
             test_list: list[str | float]
 
@@ -356,7 +366,7 @@ class TestErrorConditions:
     def test_empty_parameter_list(self):
         """Test processing empty parameter lists."""
 
-        class TestDistribution(Evaluable):
+        class TestDistribution(ConcreteEvaluable):
             type: Literal["test"] = "test"
             empty_list: list[str] = Field(default_factory=list)
 
@@ -369,7 +379,7 @@ class TestErrorConditions:
     def test_numeric_only_lists_skipped(self):
         """Test that list[float] and list[int] are skipped."""
 
-        class TestDistribution(Evaluable):
+        class TestDistribution(ConcreteEvaluable):
             type: Literal["test"] = "test"
             param1: str
             float_list: list[float] = Field(default_factory=list)
@@ -391,7 +401,7 @@ class TestConstants:
     def test_constants_property_conversion(self):
         """Test that constants property converts stored values to PyTensor constants."""
 
-        class TestDistribution(Evaluable):
+        class TestDistribution(ConcreteEvaluable):
             type: Literal["test"] = "test"
             param1: float
             param2: int
@@ -602,7 +612,7 @@ class TestEvaluableAdvanced:
     def test_evaluable_manual_parameter_override(self):
         """Test Evaluable when _parameters is manually set (skips auto-processing)."""
 
-        class TestEvaluableOverride(Evaluable):
+        class TestEvaluableOverride(ConcreteEvaluable):
             type: Literal["test"] = "test"
             param1: str
             param2: float
@@ -634,7 +644,7 @@ class TestEvaluableAdvanced:
     def test_evaluable_unsupported_field_error_with_location(self):
         """Test error message includes location when find_field_definition_line succeeds."""
 
-        class TestUnsupportedField(Evaluable):
+        class TestUnsupportedField(ConcreteEvaluable):
             type: Literal["test"] = "test"
             unsupported_field: set[str]  # set is not supported
 
@@ -652,7 +662,7 @@ class TestEvaluableAdvanced:
     def test_evaluable_union_single_typing_arg(self):
         """Test union type handling with a simple single union type."""
 
-        class TestUnionSingle(Evaluable):
+        class TestUnionSingle(ConcreteEvaluable):
             type: Literal["test"] = "test"
             # Test a regular supported union type
             param1: str | float
@@ -666,7 +676,7 @@ class TestEvaluableAdvanced:
     def test_evaluable_str_float_union_handling(self):
         """Test str/float union type handling."""
 
-        class TestStrFloatUnion(Evaluable):
+        class TestStrFloatUnion(ConcreteEvaluable):
             type: Literal["test"] = "test"
             mixed_param: str | float
 
@@ -683,7 +693,7 @@ class TestEvaluableAdvanced:
     def test_evaluable_union_single_typing_arg_coverage(self):
         """Test union type handling code path with integer/string union."""
 
-        class TestIntStrUnion(Evaluable):
+        class TestIntStrUnion(ConcreteEvaluable):
             type: Literal["test"] = "test"
             # Test int | str union type
             mixed_param: int | str
@@ -705,7 +715,7 @@ class TestProcessListFieldCoverage:
     def test_process_list_field_union_without_str_and_numeric(self):
         """Test union subargs that don't contain both str and numeric types."""
 
-        class TestUnionWithoutStrNumeric(Evaluable):
+        class TestUnionWithoutStrNumeric(ConcreteEvaluable):
             type: Literal["test"] = "test"
             # Create a list with union that doesn't match the condition
             # This tests the falsey case for: str in subargs and (float in subargs or int in subargs)
@@ -728,7 +738,7 @@ class TestErrorLocationCoverage:
     def test_error_without_location(self):
         """Test error message when find_field_definition_line returns None."""
 
-        class TestNoLocation(Evaluable):
+        class TestNoLocation(ConcreteEvaluable):
             type: Literal["test"] = "test"
             unsupported_field: dict  # unsupported type
 

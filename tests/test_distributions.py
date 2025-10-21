@@ -30,6 +30,7 @@ from pyhs3.distributions import (
     GaussianDist,
     GenericDist,
     GGZZBackgroundDist,
+    HistogramDist,
     LandauDist,
     LogNormalDist,
     MixtureDist,
@@ -44,26 +45,22 @@ from pyhs3.distributions import (
 class TestDistribution:
     """Test the base Distribution class."""
 
-    def test_distribution_base_class(self):
-        """Test Distribution base class initialization."""
-        dist = Distribution(
-            name="test_dist",
-            type="test",
-        )
-        assert dist.name == "test_dist"
-        assert dist.type == "test"
-
-    def test_distribution_expression_not_implemented(self):
-        """Test that base distribution expression method raises NotImplementedError."""
-        dist = Distribution(name="test", type="unknown")
+    def test_distribution_base_class_is_abstract(self):
+        """Test that Distribution base class cannot be instantiated directly."""
+        # Distribution is now abstract with _expression() as abstract method
         with pytest.raises(
-            NotImplementedError, match=r"Distribution type=unknown is not implemented."
+            TypeError,
+            match=r"Can't instantiate abstract class Distribution.*_expression",
         ):
-            dist.expression({})
+            Distribution(
+                name="test_dist",
+                type="test",
+            )
 
     def test_distribution_extended_likelihood_default(self):
         """Test that base distribution extended_likelihood method returns 1.0."""
-        dist = Distribution(name="test", type="test")
+        # Use a concrete distribution (GaussianDist) to test the default behavior
+        dist = GaussianDist(name="test", mean=0.0, sigma=1.0, x="x")
         context = {}
 
         # Test with no data
@@ -2882,3 +2879,18 @@ class TestMixtureDist:
         assert np.isclose(log_val, expected_log), (
             f"log_expression={log_val}, log(expression)={expected_log}"
         )
+
+
+class TestHistogramDist:
+    """Test HistogramDist implementation."""
+
+    def test_histogram_function_creation(self):
+        """Test HistogramDist can be created and configured."""
+        func = HistogramDist(name="test_histogram", data={"axes": [], "contents": []})
+        assert func.name == "test_histogram"
+
+    def test_histogram_function_not_implemented(self):
+        """Test HistogramDist not implemented."""
+        func = HistogramDist(name="test_histogram", data={"axes": [], "contents": []})
+        with pytest.raises(NotImplementedError):
+            func.expression({})

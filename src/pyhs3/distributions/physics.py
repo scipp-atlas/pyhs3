@@ -65,7 +65,7 @@ class CrystalBallDist(Distribution):
     n: str
     sigma: str
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Evaluate the single-sided Crystal Ball distribution.
 
@@ -157,7 +157,7 @@ class AsymmetricCrystalBallDist(Distribution):
     sigma_R: str
     sigma_L: str
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Evaluate the Crystal Ball distribution.
 
@@ -238,7 +238,7 @@ class ArgusDist(Distribution):
     slope: str | float | int
     power: str | float | int
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the ARGUS PDF.
 

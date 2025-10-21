@@ -14,7 +14,7 @@ import numpy.typing as npt
 import pytensor.tensor as pt
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pytensor.compile.function import function
-from pytensor.graph.traversal import applys_between, graph_inputs
+from pytensor.graph.traversal import applys_between, explicit_graph_inputs
 from rich.progress import (
     BarColumn,
     Progress,
@@ -448,7 +448,9 @@ class Model:
         """
         if name not in self._compiled_functions:
             dist = self.distributions[name]
-            inputs = [var for var in graph_inputs([dist]) if var.name is not None]
+            inputs = [
+                var for var in explicit_graph_inputs([dist]) if var.name is not None
+            ]
 
             # Cache the inputs list for consistent ordering
             self._compiled_inputs[name] = cast(list[TensorVar], inputs)
@@ -742,7 +744,7 @@ class Model:
             raise ValueError(msg)
 
         dist = self.distributions[name]
-        inputs = list(graph_inputs([dist]))
+        inputs = list(explicit_graph_inputs([dist]))
 
         # Count different types of operations
         applies = list(applys_between(inputs, [dist]))

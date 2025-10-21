@@ -1653,16 +1653,6 @@ class TestHistogramFunction:
     """Test HistogramFunction implementation."""
 
     def test_histogram_function_creation(self):
-        """Test HistogramFunction can be created and configured."""
-        func = HistogramFunction(
-            name="test_histogram", data={"axes": [], "contents": []}
-        )
-        assert func.name == "test_histogram"
-
-    def test_histogram_function_not_implemented(self):
         """Test HistogramFunction not implemented."""
-        func = HistogramFunction(
-            name="test_histogram", data={"axes": [], "contents": []}
-        )
-        with pytest.raises(NotImplementedError):
-            func.expression({})
+        with pytest.raises(TypeError):
+            HistogramFunction(name="test_histogram", data={"axes": [], "contents": []})

@@ -783,6 +783,6 @@ functions: dict[str, type[Function]] = {
     "interpolation": InterpolationFunction,
     "CMS::process_normalization": ProcessNormalizationFunction,
     "CMS::asympow": CMSAsymPowFunction,
-    "histogram": HistogramFunction,
+    "histogram": HistogramFunction,  # type: ignore[type-abstract]
     "roorecursivefraction_dist": RooRecursiveFractionFunction,
 }

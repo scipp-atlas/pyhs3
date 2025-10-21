@@ -52,7 +52,7 @@ class Distribution(Evaluable, ABC):
             TypeError: Must be implemented by subclasses
         """
 
-    def expression(self, context: Context) -> TensorVar:
+    def _expression(self, context: Context) -> TensorVar:
         """
         Complete probability combining main likelihood with extended terms.
 

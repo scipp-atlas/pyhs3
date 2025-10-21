@@ -50,7 +50,7 @@ class TestDistribution:
         # Distribution is now abstract with _expression() as abstract method
         with pytest.raises(
             TypeError,
-            match=r"Can't instantiate abstract class Distribution.*_expression",
+            match=r"Can't instantiate abstract class Distribution.*'likelihood'",
         ):
             Distribution(
                 name="test_dist",
@@ -59,8 +59,6 @@ class TestDistribution:
 
     def test_distribution_extended_likelihood_default(self):
         """Test that base distribution extended_likelihood method returns 1.0."""
-        # Use a concrete distribution (GaussianDist) to test the default behavior
-        dist = Distribution(name="test", type="test")
 
         # Create a minimal concrete implementation
         class TestDist(Distribution):
@@ -2892,12 +2890,6 @@ class TestHistogramDist:
     """Test HistogramDist implementation."""
 
     def test_histogram_function_creation(self):
-        """Test HistogramDist can be created and configured."""
-        func = HistogramDist(name="test_histogram", data={"axes": [], "contents": []})
-        assert func.name == "test_histogram"
-
-    def test_histogram_function_not_implemented(self):
         """Test HistogramDist not implemented."""
-        func = HistogramDist(name="test_histogram", data={"axes": [], "contents": []})
-        with pytest.raises(NotImplementedError):
-            func.expression({})
+        with pytest.raises(TypeError):
+            HistogramDist(name="test_histogram", data={"axes": [], "contents": []})

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import inspect
 import types
+from abc import ABC, abstractmethod
 from typing import Any, cast, get_args, get_origin
 
 import pytensor.tensor as pt
@@ -37,7 +38,7 @@ def find_field_definition_line(cls: type, field_name: str) -> str | None:
     return None
 
 
-class Evaluable(BaseModel):
+class Evaluable(BaseModel, ABC):
     """Base class for HS3 distributions and functions with automatic parameter preprocessing.
 
     This class provides automatic parameter processing that eliminates the need for manual
@@ -171,6 +172,8 @@ class Evaluable(BaseModel):
             >>> class TestEvaluable(Evaluable):
             ...     type: Literal["test"] = "test"
             ...     some_param: str | float
+            ...     def _expression(self, _: Context) -> TensorVar:
+            ...         return None
             >>>
             >>> # String parameter
             >>> eval1 = TestEvaluable(name="test1", some_param="alpha")
@@ -212,6 +215,8 @@ class Evaluable(BaseModel):
             >>> class TestEvaluable(Evaluable):
             ...     type: Literal["test"] = "test"
             ...     factors: list[str | float]
+            ...     def _expression(self, _: Context) -> TensorVar:
+            ...         return None
             >>>
             >>> eval1 = TestEvaluable(name="test", factors=["param1", 2.0, "param2"])
             >>> names, values = eval1.process_parameter_list("factors")
@@ -258,6 +263,8 @@ class Evaluable(BaseModel):
             >>> class TestEvaluable(Evaluable):
             ...     type: Literal["test"] = "test"
             ...     factors: list[str | float]
+            ...     def _expression(self, _: Context) -> TensorVar:
+            ...         return None
             >>>
             >>> eval1 = TestEvaluable(name="test", factors=["a", 1.0, "b"])
             >>> context = {
@@ -410,15 +417,34 @@ class Evaluable(BaseModel):
         msg += ' If this is not a parameter to preprocess, add `json_schema_extra={"preprocess": False}`.'
         raise RuntimeError(msg)
 
-    def expression(self, _: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
-        Base expression method - should be overridden by subclasses.
+        Evaluate and return a named PyTensor expression.
+
+        This is a template method that calls _expression() to get the result,
+        then automatically sets the name on the result before returning.
 
         Args:
             context: Mapping of names to PyTensor variables
 
         Returns:
-            PyTensor expression representing the component
+            Named PyTensor expression representing the component
         """
-        msg = f"Component type {self.type} expression not implemented"
-        raise NotImplementedError(msg)
+        result = self._expression(context)
+        result.name = self.name
+        return result
+
+    @abstractmethod
+    def _expression(self, context: Context) -> TensorVar:
+        """
+        Subclass-specific expression implementation.
+
+        Subclasses must implement this method to define their computation logic.
+        The result will be automatically named by the expression() method.
+
+        Args:
+            context: Mapping of names to PyTensor variables
+
+        Returns:
+            PyTensor expression representing the component (will be named automatically)
+        """

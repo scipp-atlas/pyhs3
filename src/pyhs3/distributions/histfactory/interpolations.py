@@ -337,7 +337,7 @@ def interpolate_code4p(
 
     # For |alpha| >= alpha0, use linear extrapolation
     linear_hi = nom + alpha * hi_delta
-    linear_lo = nom + alpha * lo_delta
+    linear_lo = nom - alpha * lo_delta
 
     # For |alpha| < alpha0, use polynomial (similar to code4 but additive)
     # Calculate polynomial coefficients for boundary matching

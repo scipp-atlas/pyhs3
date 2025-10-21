@@ -440,9 +440,9 @@ class Model:
                 elif node_type == "modifier":
                     # Modifiers are evaluated and stored for later use by distributions
                     # Use pre-built modifiers map for efficient O(1) lookup
-                    modifier_obj = modifiers_map.get(node_name)
-                    if modifier_obj:
-                        self.modifiers[node_name] = modifier_obj.expression(context)
+                    self.modifiers[node_name] = modifiers_map[node_name].expression(
+                        context
+                    )
 
                 else:  # node_type == "distribution"
                     # Distributions are evaluated by design

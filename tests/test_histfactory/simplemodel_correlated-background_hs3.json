@@ -61,29 +61,6 @@
       "samples": [
         {
           "data": {
-            "contents": [50, 52],
-            "errors": [7.0, 7.2]
-          },
-          "modifiers": [
-            {
-              "name": "Lumi",
-              "parameter": "Lumi",
-              "type": "normfactor"
-            },
-            {
-              "constraint": "Poisson",
-              "data": {
-                "vals": [3.0, 7.0]
-              },
-              "name": "uncorr_bkguncrt",
-              "type": "shapesys",
-              "parameters": ["uncorr_bkguncrt_0", "uncorr_bkguncrt_1"]
-            }
-          ],
-          "name": "background"
-        },
-        {
-          "data": {
             "contents": [12, 11],
             "errors": [3.5, 3.3]
           },
@@ -100,6 +77,34 @@
             }
           ],
           "name": "signal"
+        },
+        {
+          "data": {
+            "contents": [50, 52],
+            "errors": [7.0, 7.2]
+          },
+          "modifiers": [
+            {
+              "name": "Lumi",
+              "parameter": "Lumi",
+              "type": "normfactor"
+            },
+            {
+              "constraint": "Gauss",
+              "data": {
+                "hi": {
+                  "contents": [45, 55]
+                },
+                "lo": {
+                  "contents": [55, 45]
+                }
+              },
+              "name": "correlated_bkg_uncertainty",
+              "parameter": "alpha_correlated_bkg_uncertainty",
+              "type": "histosys"
+            }
+          ],
+          "name": "background"
         }
       ],
       "type": "histfactory_dist"
@@ -109,14 +114,9 @@
     {
       "axes": [
         {
-          "max": 1.3,
-          "min": 0.0,
-          "name": "uncorr_bkguncrt_0"
-        },
-        {
-          "max": 1.6730769230769231,
-          "min": 0.0,
-          "name": "uncorr_bkguncrt_1"
+          "max": 5.0,
+          "min": -5.0,
+          "name": "alpha_correlated_bkg_uncertainty"
         }
       ],
       "name": "simPdf_asimovData_nuisance_parameters",
@@ -136,14 +136,9 @@
     {
       "axes": [
         {
-          "max": 1.3,
-          "min": 0.0,
-          "name": "uncorr_bkguncrt_0"
-        },
-        {
-          "max": 1.6730769230769231,
-          "min": 0.0,
-          "name": "uncorr_bkguncrt_1"
+          "max": 5.0,
+          "min": -5.0,
+          "name": "alpha_correlated_bkg_uncertainty"
         }
       ],
       "name": "simPdf_obsData_nuisance_parameters",
@@ -168,14 +163,9 @@
           "name": "Lumi"
         },
         {
-          "max": 1.3,
-          "min": 0.0,
-          "name": "uncorr_bkguncrt_0"
-        },
-        {
-          "max": 1.6730769230769231,
-          "min": 0.0,
-          "name": "uncorr_bkguncrt_1"
+          "max": 5.0,
+          "min": -5.0,
+          "name": "alpha_correlated_bkg_uncertainty"
         },
         {
           "max": 10.0,
@@ -214,12 +204,8 @@
           "value": 1.0
         },
         {
-          "name": "uncorr_bkguncrt_0",
-          "value": 1.0
-        },
-        {
-          "name": "uncorr_bkguncrt_1",
-          "value": 1.0
+          "name": "alpha_correlated_bkg_uncertainty",
+          "value": 0.0
         },
         {
           "name": "mu",
@@ -236,12 +222,8 @@
           "value": 1.0
         },
         {
-          "name": "uncorr_bkguncrt_0",
-          "value": 1.0
-        },
-        {
-          "name": "uncorr_bkguncrt_1",
-          "value": 1.0
+          "name": "alpha_correlated_bkg_uncertainty",
+          "value": 0.0
         },
         {
           "name": "mu",

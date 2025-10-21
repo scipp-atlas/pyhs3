@@ -68,6 +68,7 @@ This is how you use the ``pyhs3`` Python API to build a statistical model direct
    >>> import pyhs3
    >>> import scipy
    >>> import math
+   >>> import numpy as np
    >>> from pyhs3.distributions import GaussianDist
    >>> from pyhs3.parameter_points import ParameterPoint, ParameterSet
    >>> from pyhs3.domains import ProductDomain, Axis
@@ -115,10 +116,10 @@ This is how you use the ``pyhs3`` Python API to build a statistical model direct
        distributions: 1 (model)
        functions: 0 ()
    )
-   >>> parameters = {par.name: par.value for par in model.parameterset}
+   >>> parameters = {par.name: np.array(par.value) for par in model.parameterset}
    >>> result = -2 * model.logpdf("model", **parameters)
    >>> print(f"parameters: {parameters}")
-   parameters: {'x': 0.0, 'mu': 0.0, 'sigma': 1.0}
+   parameters: {'x': array(0.), 'mu': array(0.), 'sigma': array(1.)}
    >>> print(f"nll: {result:.8f}")
    nll: 1.83787707
    >>>
@@ -137,6 +138,7 @@ This is the same model built using HS3 JSON-like dictionary format:
    >>> import pyhs3
    >>> import scipy
    >>> import math
+   >>> import numpy as np
    >>> workspace_data = {
    ...     "metadata": {"hs3_version": "0.2"},
    ...     "distributions": [
@@ -180,10 +182,10 @@ This is the same model built using HS3 JSON-like dictionary format:
        distributions: 1 (model)
        functions: 0 ()
    )
-   >>> parameters = {par.name: par.value for par in model.parameterset}
+   >>> parameters = {par.name: np.array(par.value) for par in model.parameterset}
    >>> result = -2 * model.logpdf("model", **parameters)
    >>> print(f"parameters: {parameters}")
-   parameters: {'x': 0.0, 'mu': 0.0, 'sigma': 1.0}
+   parameters: {'x': array(0.), 'mu': array(0.), 'sigma': array(1.)}
    >>> print(f"nll: {result:.8f}")
    nll: 1.83787707
    >>> result_scipy = -2 * math.log(scipy.stats.norm.pdf(0, loc=0, scale=1))

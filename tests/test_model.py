@@ -60,7 +60,9 @@ class TestModelModes:
         assert model.mode == mode
 
         # Test that we can evaluate PDF with both modes
-        result = model.pdf("gauss", x=0.0, mu=0.0, sigma=1.0)
+        result = model.pdf(
+            "gauss", x=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0)
+        )
 
         # Should get a reasonable Gaussian PDF value at x=0, mu=0, sigma=1
         # This should be approximately 1/sqrt(2*pi) ≈ 0.3989
@@ -72,8 +74,12 @@ class TestModelModes:
         model_fast_compile = simple_workspace.model(mode="FAST_COMPILE")
 
         # Both should produce the same result for the same inputs
-        result_fast_run = model_fast_run.pdf("gauss", x=1.0, mu=0.5, sigma=1.2)
-        result_fast_compile = model_fast_compile.pdf("gauss", x=1.0, mu=0.5, sigma=1.2)
+        result_fast_run = model_fast_run.pdf(
+            "gauss", x=np.array(1.0), mu=np.array(0.5), sigma=np.array(1.2)
+        )
+        result_fast_compile = model_fast_compile.pdf(
+            "gauss", x=np.array(1.0), mu=np.array(0.5), sigma=np.array(1.2)
+        )
 
         # Results should be very close (within numerical precision)
         assert abs(result_fast_run - result_fast_compile) < 1e-10
@@ -194,7 +200,7 @@ class TestModelGraphSummary:
         assert "Compiled: No" in summary_before
 
         # Call pdf to trigger compilation
-        model.pdf("gauss", x=0.0, mu=0.0, sigma=1.0)
+        model.pdf("gauss", x=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0))
 
         # After calling pdf, should be compiled
         summary_after = model.graph_summary("gauss")
@@ -363,7 +369,9 @@ class TestModelWithoutParameterPoints:
 
         # We can't directly inspect bounds, but we can verify the parameters exist
         # and that the model can evaluate successfully
-        result = model.pdf("gauss", x=0.0, mu=0.0, sigma=1.0)
+        result = model.pdf(
+            "gauss", x=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0)
+        )
 
         # Should get a reasonable Gaussian PDF value
         assert 0.35 < result < 0.45
@@ -374,7 +382,9 @@ class TestModelWithoutParameterPoints:
 
         # All discovered parameters should be scalars (pt.scalar)
         # We can verify this by checking they accept scalar values in pdf evaluation
-        result = model.pdf("gauss", x=1.5, mu=-0.5, sigma=2.0)
+        result = model.pdf(
+            "gauss", x=np.array(1.5), mu=np.array(-0.5), sigma=np.array(2.0)
+        )
 
         # Should compute successfully with scalar inputs
         assert isinstance(result, int | float | np.ndarray)
@@ -439,7 +449,9 @@ class TestModelWithoutParameterPoints:
         assert "sigma" in model.parameters  # from parameterset
 
         # Should evaluate successfully
-        result = model.pdf("gauss", x=0.0, mu=0.0, sigma=1.0)
+        result = model.pdf(
+            "gauss", x=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0)
+        )
         assert 0.35 < result < 0.45
 
 
@@ -594,10 +606,14 @@ class TestWorkspaceWithLikelihoodsAndAnalyses:
         assert "sigma" in model.parameters
 
         # Should be able to evaluate PDFs
-        signal_result = model.pdf("signal_dist", x=1.0, mu=1.0, sigma=0.5)
+        signal_result = model.pdf(
+            "signal_dist", x=np.array(1.0), mu=np.array(1.0), sigma=np.array(0.5)
+        )
         assert signal_result > 0
 
-        background_result = model.pdf("background_dist", x=1.0, mu=1.0, sigma=0.5)
+        background_result = model.pdf(
+            "background_dist", x=np.array(1.0), mu=np.array(1.0), sigma=np.array(0.5)
+        )
         assert background_result > 0
 
     def test_workspace_json_roundtrip_with_likelihoods_analyses(
@@ -628,3 +644,200 @@ class TestWorkspaceWithLikelihoodsAndAnalyses:
         model = loaded_workspace.model()
         assert "signal_dist" in model.distributions
         assert "background_dist" in model.distributions
+
+
+class TestModelParameterOrdering:
+    """Test Model.pars() and Model.parsort() methods for parameter ordering."""
+
+    def test_pars_returns_parameter_list(self, simple_workspace):
+        """Test that pars() returns a list of parameter names."""
+        model = simple_workspace.model()
+        param_list = model.pars("gauss")
+
+        # Should return a list
+        assert isinstance(param_list, list)
+
+        # Should contain parameter names as strings
+        assert all(isinstance(p, str) for p in param_list)
+
+        # Should have parameters for the Gaussian distribution
+        assert len(param_list) >= 3  # At least x, mu, sigma
+
+    def test_pars_includes_all_distribution_parameters(self, simple_workspace):
+        """Test that pars() includes all parameters used by the distribution."""
+        model = simple_workspace.model()
+        param_list = model.pars("gauss")
+
+        # Should include the Gaussian parameters
+        assert "x" in param_list
+        assert "mu" in param_list
+        assert "sigma" in param_list
+
+    def test_pars_returns_consistent_order(self, simple_workspace):
+        """Test that pars() returns the same order on multiple calls."""
+        model = simple_workspace.model()
+
+        # Call pars() multiple times
+        param_list_1 = model.pars("gauss")
+        param_list_2 = model.pars("gauss")
+        param_list_3 = model.pars("gauss")
+
+        # Should return identical lists
+        assert param_list_1 == param_list_2
+        assert param_list_2 == param_list_3
+
+    def test_pars_triggers_compilation(self, simple_workspace):
+        """Test that pars() triggers compilation if not already compiled."""
+        model = simple_workspace.model(mode="FAST_RUN")
+
+        # Before calling pars, distribution should not be compiled
+        assert "gauss" not in model._compiled_functions
+
+        # Call pars - should trigger compilation
+        param_list = model.pars("gauss")
+
+        # After calling pars, distribution should be compiled
+        assert "gauss" in model._compiled_functions
+        assert "gauss" in model._compiled_inputs
+
+        # Should return valid parameter list
+        assert isinstance(param_list, list)
+        assert len(param_list) > 0
+
+    def test_pars_order_matches_pdf_inputs(self, simple_workspace):
+        """Test that pars() order matches what pdf() expects."""
+        model = simple_workspace.model()
+        param_list = model.pars("gauss")
+
+        # Create parameter dictionary in the order returned by pars()
+        params = {param: np.array(1.0 if param != "x" else 0.0) for param in param_list}
+
+        # pdf() should accept these parameters successfully
+        result = model.pdf("gauss", **params)
+        assert isinstance(result, int | float | np.ndarray)
+        assert float(result) > 0
+
+    def test_parsort_returns_index_list(self, simple_workspace):
+        """Test that parsort() returns a list of indices."""
+        model = simple_workspace.model()
+        param_names = ["mu", "x", "sigma"]
+
+        indices = model.parsort("gauss", param_names)
+
+        # Should return a list
+        assert isinstance(indices, list)
+
+        # Should contain integers
+        assert all(isinstance(i, int) for i in indices)
+
+        # Should have same length as input
+        assert len(indices) == len(param_names)
+
+    def test_parsort_returns_valid_indices(self, simple_workspace):
+        """Test that parsort() returns valid indices into the input list."""
+        model = simple_workspace.model()
+        param_names = ["sigma", "mu", "x"]
+
+        indices = model.parsort("gauss", param_names)
+
+        # All indices should be valid for the input list
+        assert all(0 <= idx < len(param_names) for idx in indices)
+
+        # All indices should be unique
+        assert len(set(indices)) == len(indices)
+
+    def test_parsort_reorders_to_match_pars(self, simple_workspace):
+        """Test that parsort() indices reorder params to match pars()."""
+        model = simple_workspace.model()
+
+        # Get the expected order from pars()
+        expected_order = model.pars("gauss")
+
+        # Create a shuffled list of parameters
+        param_names = ["sigma", "x", "mu"]
+
+        # Get the indices that would sort param_names to match expected_order
+        indices = model.parsort("gauss", param_names)
+
+        # Apply the indices to reorder param_names
+        reordered = [param_names[i] for i in indices]
+
+        # The reordered list should match the parameters that are in both lists
+        # (pars() might have additional parameters)
+        for param in param_names:
+            if param in expected_order:
+                reordered_idx = reordered.index(param)
+                expected_idx = expected_order.index(param)
+                # The relative order should be preserved
+                for other_param in param_names:
+                    if other_param in expected_order and other_param != param:
+                        other_reordered_idx = reordered.index(other_param)
+                        other_expected_idx = expected_order.index(other_param)
+                        # If param comes before other_param in expected_order,
+                        # it should also come before in reordered
+                        if expected_idx < other_expected_idx:
+                            assert reordered_idx < other_reordered_idx
+
+    def test_parsort_example_from_docstring(self, simple_workspace):
+        """Test the example from the parsort() docstring."""
+        model = simple_workspace.model()
+
+        # Get expected parameter order
+        pars_order = model.pars("gauss")
+
+        # Create input list with specific order
+        input_names = ["mu", "x", "sigma"]
+
+        # Get indices
+        indices = model.parsort("gauss", input_names)
+
+        # Verify that applying indices reorders correctly
+        # The indices should tell us where each element of pars_order can be found in input_names
+        for i, par in enumerate(pars_order):
+            if par in input_names:
+                # indices[i] should point to where par is in input_names
+                assert input_names[indices[i]] == par
+
+    def test_pars_and_parsort_work_together(self, simple_workspace):
+        """Test that pars() and parsort() work together correctly."""
+        model = simple_workspace.model()
+
+        # Get the canonical parameter order
+        expected_order = model.pars("gauss")
+
+        # Create values in arbitrary order
+        arbitrary_order = ["sigma", "mu", "x"]
+        values = [
+            np.array(2.0),
+            np.array(0.5),
+            np.array(1.0),
+        ]  # Corresponding to sigma=2.0, mu=0.5, x=1.0
+
+        # Use parsort to get indices
+        indices = model.parsort("gauss", arbitrary_order)
+
+        # Reorder values using the indices
+        reordered_values = [values[i] for i in indices]
+
+        # Create parameter dict using expected order and reordered values
+        param_dict = dict(zip(expected_order, reordered_values, strict=False))
+
+        # This should work correctly with pdf()
+        result = model.pdf("gauss", **param_dict)
+        assert float(result) > 0
+
+    def test_pars_nonexistent_distribution_raises_error(self, simple_workspace):
+        """Test that pars() raises error for nonexistent distribution."""
+        model = simple_workspace.model()
+
+        # Should raise an error when distribution doesn't exist
+        with pytest.raises(KeyError):
+            model.pars("nonexistent_dist")
+
+    def test_parsort_nonexistent_distribution_raises_error(self, simple_workspace):
+        """Test that parsort() raises error for nonexistent distribution."""
+        model = simple_workspace.model()
+
+        # Should raise an error when distribution doesn't exist
+        with pytest.raises(KeyError):
+            model.parsort("nonexistent_dist", ["x", "mu"])

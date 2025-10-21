@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 
+import pyhf
 import pytest
 
-import pyhf
 import pyhs3
 
 

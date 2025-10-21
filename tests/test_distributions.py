@@ -50,7 +50,7 @@ class TestDistribution:
         # Distribution is now abstract with _expression() as abstract method
         with pytest.raises(
             TypeError,
-            match=r"Can't instantiate abstract class Distribution.*'likelihood'",
+            match=r"Can't instantiate abstract class Distribution.*likelihood",
         ):
             Distribution(
                 name="test_dist",

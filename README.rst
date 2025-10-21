@@ -119,7 +119,7 @@ This is how you use the ``pyhs3`` Python API to build a statistical model direct
    >>> parameters = {par.name: np.array(par.value) for par in model.parameterset}
    >>> result = -2 * model.logpdf("model", **parameters)
    >>> print(f"parameters: {parameters}")
-   parameters: {'x': 0.0, 'mu': 0.0, 'sigma': 1.0}
+   parameters: {'x': array(0.), 'mu': array(0.), 'sigma': array(1.)}
    >>> print(f"nll: {result:.8f}")
    nll: 1.83787707
    >>>
@@ -185,7 +185,7 @@ This is the same model built using HS3 JSON-like dictionary format:
    >>> parameters = {par.name: np.array(par.value) for par in model.parameterset}
    >>> result = -2 * model.logpdf("model", **parameters)
    >>> print(f"parameters: {parameters}")
-   parameters: {'x': 0.0, 'mu': 0.0, 'sigma': 1.0}
+   parameters: {'x': array(0.), 'mu': array(0.), 'sigma': array(1.)}
    >>> print(f"nll: {result:.8f}")
    nll: 1.83787707
    >>> result_scipy = -2 * math.log(scipy.stats.norm.pdf(0, loc=0, scale=1))

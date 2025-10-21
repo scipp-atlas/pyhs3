@@ -18,6 +18,7 @@ from pyhs3.distributions.histfactory.interpolations import (
     interpolate_code0,
     interpolate_code1,
     interpolate_code2,
+    interpolate_code4p,
     interpolate_exp,
     interpolate_lin,
     interpolate_log,
@@ -734,6 +735,68 @@ class TestInterpolationPyhfComparison:
                 assert result_m1.eval() == pytest.approx(lo), (
                     f"Method {method} failed at alpha=-1"
                 )
+
+    def test_code4p_extrapolation_region(self):
+        """Test code4p linear extrapolation for |alpha| >= 1.
+
+        code4p uses simple linear extrapolation: nom + alpha * (hi/lo - nom)
+        This is different from code2's quadratic-based extrapolation.
+        """
+        nom = 100.0
+        hi = 120.0
+        lo = 80.0
+
+        nom_t = pt.constant(nom)
+        hi_t = pt.constant(hi)
+        lo_t = pt.constant(lo)
+
+        hi_delta = hi - nom  # 20
+        lo_delta = lo - nom  # -20
+
+        # Test positive extrapolation (alpha >= 1)
+        # Expected: nom + alpha * hi_delta
+        for alpha_val in [1.0, 1.5, 2.0]:
+            alpha = pt.constant(alpha_val)
+            result = interpolate_code4p(alpha, nom_t, hi_t, lo_t, alpha0=1.0)
+
+            # At alpha >= 1, code4p uses linear extrapolation
+            expected = nom + alpha_val * hi_delta
+
+            assert result.eval() == pytest.approx(expected), (
+                f"code4p linear extrapolation failed at alpha={alpha_val}"
+            )
+
+        # Test negative extrapolation (alpha <= -1)
+        # Expected: nom - alpha * lo_delta (note the minus sign from bug fix!)
+        for alpha_val in [-1.0, -1.5, -2.0]:
+            alpha = pt.constant(alpha_val)
+            result = interpolate_code4p(alpha, nom_t, hi_t, lo_t, alpha0=1.0)
+
+            # At alpha <= -1, code4p uses: nom - alpha * lo_delta
+            # This gives: nom - (-1.5) * (-20) = nom - 30 = 70 at alpha=-1.5
+            expected = nom - alpha_val * lo_delta
+
+            assert result.eval() == pytest.approx(expected), (
+                f"code4p linear extrapolation failed at alpha={alpha_val}: "
+                f"got {result.eval()}, expected {expected}"
+            )
+
+        # Specifically test the bug that was fixed
+        # At alpha=-1.0, should give: nom - (-1.0) * lo_delta = 100 - (-1)*(-20) = 80 = lo
+        alpha_m1 = pt.constant(-1.0)
+        result = interpolate_code4p(alpha_m1, nom_t, hi_t, lo_t, alpha0=1.0)
+
+        assert result.eval() == pytest.approx(lo), (
+            "code4p at alpha=-1 should give lo value (bug fix verification)"
+        )
+
+        # At alpha=1.0, should give: nom + 1.0 * hi_delta = 100 + 20 = 120 = hi
+        alpha_1 = pt.constant(1.0)
+        result = interpolate_code4p(alpha_1, nom_t, hi_t, lo_t, alpha0=1.0)
+
+        assert result.eval() == pytest.approx(hi), (
+            "code4p at alpha=1 should give hi value"
+        )
 
     def test_vector_interpolation_consistency(self):
         """Test that vector interpolation gives same results as scalar interpolation."""

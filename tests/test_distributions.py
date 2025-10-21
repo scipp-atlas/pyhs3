@@ -30,6 +30,7 @@ from pyhs3.distributions import (
     GaussianDist,
     GenericDist,
     GGZZBackgroundDist,
+    HistogramDist,
     LandauDist,
     LogNormalDist,
     MixtureDist,
@@ -2878,3 +2879,18 @@ class TestMixtureDist:
         assert np.isclose(log_val, expected_log), (
             f"log_expression={log_val}, log(expression)={expected_log}"
         )
+
+
+class TestHistogramDist:
+    """Test HistogramDist implementation."""
+
+    def test_histogram_function_creation(self):
+        """Test HistogramDist can be created and configured."""
+        func = HistogramDist(name="test_histogram", data={"axes": [], "contents": []})
+        assert func.name == "test_histogram"
+
+    def test_histogram_function_not_implemented(self):
+        """Test HistogramDist not implemented."""
+        func = HistogramDist(name="test_histogram", data={"axes": [], "contents": []})
+        with pytest.raises(NotImplementedError):
+            func.expression({})

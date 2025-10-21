@@ -20,6 +20,7 @@ from pyhs3.functions import (
     Function,
     Functions,
     GenericFunction,
+    HistogramFunction,
     InterpolationFunction,
     ProcessNormalizationFunction,
     ProductFunction,
@@ -1646,3 +1647,22 @@ class TestRooRecursiveFractionFunction:
         # Should handle division by zero gracefully (0/0 case)
         # In practice this would be NaN, but we just test that it doesn't crash
         assert np.isfinite(result_val) or np.isnan(result_val)
+
+
+class TestHistogramFunction:
+    """Test HistogramFunction implementation."""
+
+    def test_histogram_function_creation(self):
+        """Test HistogramFunction can be created and configured."""
+        func = HistogramFunction(
+            name="test_histogram", data={"axes": [], "contents": []}
+        )
+        assert func.name == "test_histogram"
+
+    def test_histogram_function_not_implemented(self):
+        """Test HistogramFunction not implemented."""
+        func = HistogramFunction(
+            name="test_histogram", data={"axes": [], "contents": []}
+        )
+        with pytest.raises(NotImplementedError):
+            func.expression({})

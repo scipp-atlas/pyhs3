@@ -873,14 +873,14 @@ def test_simplemodel_pyhf(pars, datadir):
 
     # Create parameter dictionary for pyhs3
     pyhs3_params = {
-        "model_singlechannel_observed": obs_data,
-        "mu": pars[0],  # pyhf: 'mu' -> pyhs3: 'mu'
-        "uncorr_bkguncrt_0": pars[
-            1
-        ],  # pyhf: 'uncorr_bkguncrt[0]' -> pyhs3: 'uncorr_bkguncrt_0'
-        "uncorr_bkguncrt_1": pars[
-            2
-        ],  # pyhf: 'uncorr_bkguncrt[1]' -> pyhs3: 'uncorr_bkguncrt_1'
+        "model_singlechannel_observed": np.array(obs_data),
+        "mu": np.array(pars[0]),  # pyhf: 'mu' -> pyhs3: 'mu'
+        "uncorr_bkguncrt_0": np.array(
+            pars[1]
+        ),  # pyhf: 'uncorr_bkguncrt[0]' -> pyhs3: 'uncorr_bkguncrt_0'
+        "uncorr_bkguncrt_1": np.array(
+            pars[2]
+        ),  # pyhf: 'uncorr_bkguncrt[1]' -> pyhs3: 'uncorr_bkguncrt_1'
     }
 
     # Add additional parameters with default values
@@ -902,7 +902,7 @@ def test_simplemodel_pyhf(pars, datadir):
                         break
 
             # Use default value for const parameters, or fallback value for others
-            pyhs3_params[param_name] = default_val
+            pyhs3_params[param_name] = np.array(default_val)
 
     pyhf_result = model_pyhf.pdf(pars, data_pyhf)
     pyhs3_result = model_pyhs3.pdf("model_singlechannel", **pyhs3_params)

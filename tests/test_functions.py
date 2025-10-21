@@ -32,22 +32,17 @@ from pyhs3.functions.standard import CMSAsymPowFunction, RooRecursiveFractionFun
 class TestFunction:
     """Test the base Function class."""
 
-    def test_function_base_class(self):
-        """Test Function base class initialization."""
-        func = Function(
-            name="test_func",
-            type="test",
-        )
-        assert func.name == "test_func"
-        assert func.type == "test"
-
-    def test_function_expression_not_implemented(self):
-        """Test that base Function expression method raises NotImplementedError."""
-        func = Function(name="test", type="unknown")
+    def test_function_base_class_is_abstract(self):
+        """Test that Function base class cannot be instantiated directly."""
+        # Function is now abstract with _expression() as abstract method
         with pytest.raises(
-            NotImplementedError, match="Function type unknown not implemented"
+            TypeError,
+            match=r"Can't instantiate abstract class Function.*_expression",
         ):
-            func.expression({})
+            Function(
+                name="test_func",
+                type="test",
+            )
 
 
 class TestProductFunction:
@@ -1247,6 +1242,63 @@ class TestFunctionIntegration:
         )
         # InterpolationFunction with empty high/low lists but vars should depend on nominal + vars
         assert set(interp_func.parameters) == {"nominal", "param1", "param2"}
+
+    def test_function_referencing_function_in_workspace(self):
+        """Test function referencing another function in workspace (issue #41).
+
+        Regression test for issue #41 where a function referencing another
+        function by name would fail during model building.
+        """
+        test_data = {
+            "metadata": {"hs3_version": "0.2"},
+            "parameter_points": [
+                {
+                    "name": "test_params",
+                    "parameters": [
+                        {"name": "x", "value": 2.0},
+                        {"name": "y", "value": 3.0},
+                    ],
+                }
+            ],
+            "functions": [
+                {
+                    "type": "generic_function",
+                    "name": "func1",
+                    "expression": "x + y",
+                },
+                {
+                    "type": "generic_function",
+                    "name": "func2",
+                    "expression": "func1 + 5",
+                },
+            ],
+            "distributions": [],
+            "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
+        }
+
+        # This should not raise an error
+        ws = Workspace(**test_data)
+        model = ws.model(domain="test_domain", parameter_set="test_params")
+
+        # Verify both functions exist in the model
+        assert "func1" in model.functions
+        assert "func2" in model.functions
+
+        # Verify evaluation works correctly
+        # func1 should evaluate to x + y = 2 + 3 = 5
+        # func2 should evaluate to func1 + 5 = 5 + 5 = 10
+        param_tensors = [model.parameters["x"], model.parameters["y"]]
+        param_vals = [2.0, 3.0]
+
+        # Test func1
+        f1 = function(param_tensors, model.functions["func1"])
+        result1 = f1(*param_vals)
+        assert np.isclose(result1, 5.0), f"func1 should be 5.0, got {result1}"
+
+        # Test func2 - this is the key test from issue #41
+        f2 = function(param_tensors, model.functions["func2"])
+        result2 = f2(*param_vals)
+        assert np.isclose(result2, 10.0), f"func2 should be 10.0, got {result2}"
 
 
 class TestCMSAsymPowFunction:

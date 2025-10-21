@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import inspect
 import types
+from abc import abstractmethod
 from typing import Any, cast, get_args, get_origin
 
 import pytensor.tensor as pt
@@ -410,15 +411,35 @@ class Evaluable(BaseModel):
         msg += ' If this is not a parameter to preprocess, add `json_schema_extra={"preprocess": False}`.'
         raise RuntimeError(msg)
 
-    def expression(self, _: Context) -> TensorVar:
+    def expression(self, context: Context) -> TensorVar:
         """
-        Base expression method - should be overridden by subclasses.
+        Evaluate and return a named PyTensor expression.
+
+        This is a template method that calls _expression() to get the result,
+        then automatically sets the name on the result before returning.
 
         Args:
             context: Mapping of names to PyTensor variables
 
         Returns:
-            PyTensor expression representing the component
+            Named PyTensor expression representing the component
         """
-        msg = f"Component type {self.type} expression not implemented"
-        raise NotImplementedError(msg)
+        result = self._expression(context)
+        result.name = self.name
+        return result
+
+    @abstractmethod
+    def _expression(self, context: Context) -> TensorVar:
+        """
+        Subclass-specific expression implementation.
+
+        Subclasses must implement this method to define their computation logic.
+        The result will be automatically named by the expression() method.
+
+        Args:
+            context: Mapping of names to PyTensor variables
+
+        Returns:
+            PyTensor expression representing the component (will be named automatically)
+        """
+        ...

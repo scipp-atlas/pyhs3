@@ -230,21 +230,8 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         # Apply modifiers using pre-computed results where possible
         modified_rates = nominal_rates
 
-        # Apply additive modifiers first
         for modifier in sample.modifiers:
-            modifier_graph_name = (
-                f"{self.name}/{sample.name}/{modifier.type}/{modifier.name}"
-            )
-
-            # Try to use pre-computed result, fallback to apply method
-            if modifier_graph_name in context:
-                if modifier.is_additive:
-                    modified_rates += context[modifier_graph_name]
-                else:  # modifier.is_multiplicative
-                    modified_rates *= context[modifier_graph_name]
-            else:
-                # Fallback to original apply method
-                modified_rates = modifier.apply(context, modified_rates)
+            modified_rates = modifier.apply(context, modified_rates)
 
         return cast(TensorVar, modified_rates)
 

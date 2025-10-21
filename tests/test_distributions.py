@@ -553,7 +553,7 @@ class TestPoissonDist:
         assert "observed" in model.parameters
 
         # Verify we can evaluate the PMF
-        pdf_value = model.pdf("count_dist", rate=2.5, observed=3.0)
+        pdf_value = model.pdf("count_dist", rate=np.array(2.5), observed=np.array(3.0))
         assert pdf_value is not None
         assert pdf_value > 0.0
 
@@ -703,7 +703,7 @@ class TestNumericParameters:
         assert "test_gauss" in model.distributions
 
         # Verify we can evaluate the distribution
-        pdf_value = model.pdf("test_gauss", mu=0.0)
+        pdf_value = model.pdf("test_gauss", mu=np.array(0.0))
         assert pdf_value is not None
         assert pdf_value > 0  # Should be a valid probability
 
@@ -1192,7 +1192,7 @@ class TestUniformDist:
         assert "obs" in model.parameters
 
         # Verify we can evaluate the PDF
-        pdf_value = model.pdf("uniform_dist", obs=0.5)
+        pdf_value = model.pdf("uniform_dist", obs=np.array(0.5))
         assert pdf_value is not None
         assert pdf_value == 1.0
 
@@ -1374,7 +1374,7 @@ class TestExponentialDist:
         assert "rate" in model.parameters
 
         # Verify we can evaluate the PDF: exp(-0.5 * 1.0) = exp(-0.5)
-        pdf_value = model.pdf("exp_decay", time=1.0, rate=0.5)
+        pdf_value = model.pdf("exp_decay", time=np.array(1.0), rate=np.array(0.5))
         assert pdf_value is not None
         expected = np.exp(-0.5)
         np.testing.assert_allclose(pdf_value, expected, rtol=1e-6)
@@ -1598,7 +1598,12 @@ class TestLogNormalDist:
         assert "log_width" in model.parameters
 
         # Verify we can evaluate the PDF at x=1, mu=0, sigma=1: should give 1.0
-        pdf_value = model.pdf("lognorm_dist", mass=1.0, log_mean=0.0, log_width=1.0)
+        pdf_value = model.pdf(
+            "lognorm_dist",
+            mass=np.array(1.0),
+            log_mean=np.array(0.0),
+            log_width=np.array(1.0),
+        )
         assert pdf_value is not None
         expected = 1.0
         np.testing.assert_allclose(pdf_value, expected, rtol=1e-6)
@@ -1741,7 +1746,9 @@ class TestPolynomialDist:
         assert "p1" in model.parameters
 
         # Verify we can evaluate the PDF: 1 + 2*1 = 3
-        pdf_value = model.pdf("poly_bkg", mass=1.0, p0=1.0, p1=2.0)
+        pdf_value = model.pdf(
+            "poly_bkg", mass=np.array(1.0), p0=np.array(1.0), p1=np.array(2.0)
+        )
         assert pdf_value is not None
         expected = 3.0
         np.testing.assert_allclose(pdf_value, expected, rtol=1e-6)
@@ -1904,7 +1911,11 @@ class TestArgusDist:
 
         # Verify we can evaluate the PDF
         pdf_value = model.pdf(
-            "argus_bkg", mbc=5.0, m_B=5.279, c_slope=-10.0, p_power=0.5
+            "argus_bkg",
+            mbc=np.array(5.0),
+            m_B=np.array(5.279),
+            c_slope=np.array(-10.0),
+            p_power=np.array(0.5),
         )
         assert pdf_value is not None
         assert pdf_value >= 0.0  # Should be non-negative

@@ -172,6 +172,8 @@ class Evaluable(BaseModel, ABC):
             >>> class TestEvaluable(Evaluable):
             ...     type: Literal["test"] = "test"
             ...     some_param: str | float
+            ...     def _expression(self, _: Context) -> TensorVar:
+            ...         return None
             >>>
             >>> # String parameter
             >>> eval1 = TestEvaluable(name="test1", some_param="alpha")
@@ -213,6 +215,8 @@ class Evaluable(BaseModel, ABC):
             >>> class TestEvaluable(Evaluable):
             ...     type: Literal["test"] = "test"
             ...     factors: list[str | float]
+            ...     def _expression(self, _: Context) -> TensorVar:
+            ...         return None
             >>>
             >>> eval1 = TestEvaluable(name="test", factors=["param1", 2.0, "param2"])
             >>> names, values = eval1.process_parameter_list("factors")
@@ -259,6 +263,8 @@ class Evaluable(BaseModel, ABC):
             >>> class TestEvaluable(Evaluable):
             ...     type: Literal["test"] = "test"
             ...     factors: list[str | float]
+            ...     def _expression(self, _: Context) -> TensorVar:
+            ...         return None
             >>>
             >>> eval1 = TestEvaluable(name="test", factors=["a", 1.0, "b"])
             >>> context = {

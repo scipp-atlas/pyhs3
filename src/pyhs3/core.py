@@ -494,8 +494,8 @@ class Model:
             :meth:`logpdf_unsafe`: Log PDF with automatic type conversion
 
         Example:
-            >>> model.pdf_unsafe("gauss", x=1.5, mu=0.0, sigma=1.0)  # floats ok
-            >>> model.pdf_unsafe("gauss", x=[1.5], mu=0.0, sigma=1.0)  # lists ok
+            >>> model.pdf_unsafe("gauss", x=1.5, mu=0.0, sigma=1.0)  # floats ok  # doctest: +SKIP
+            >>> model.pdf_unsafe("gauss", x=[1.5], mu=0.0, sigma=1.0)  # lists ok  # doctest: +SKIP
         """
         # Convert all parameter values to numpy arrays
         converted_params = {
@@ -528,7 +528,7 @@ class Model:
 
         Example:
             >>> import numpy as np
-            >>> model.pdf("gauss", x=np.array(1.5), mu=np.array(0.0), sigma=np.array(1.0))
+            >>> model.pdf("gauss", x=np.array(1.5), mu=np.array(0.0), sigma=np.array(1.0))  # doctest: +SKIP
         """
         # Use compiled function for better performance
         func = self._get_compiled_function(name)
@@ -560,7 +560,7 @@ class Model:
             :meth:`pdf_unsafe`: PDF with automatic type conversion
 
         Example:
-            >>> model.logpdf_unsafe("gauss", x=1.5, mu=0.0, sigma=1.0)  # floats ok
+            >>> model.logpdf_unsafe("gauss", x=1.5, mu=0.0, sigma=1.0)  # floats ok  # doctest: +SKIP
         """
         return np.log(self.pdf_unsafe(name, **parametervalues))
 
@@ -589,7 +589,7 @@ class Model:
 
         Example:
             >>> import numpy as np
-            >>> model.logpdf("gauss", x=np.array(1.5), mu=np.array(0.0), sigma=np.array(1.0))
+            >>> model.logpdf("gauss", x=np.array(1.5), mu=np.array(0.0), sigma=np.array(1.0))  # doctest: +SKIP
         """
         return np.log(self.pdf(name, **parametervalues))
 

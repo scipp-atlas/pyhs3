@@ -60,7 +60,9 @@ class TestModelModes:
         assert model.mode == mode
 
         # Test that we can evaluate PDF with both modes
-        result = model.pdf("gauss", x=0.0, mu=0.0, sigma=1.0)
+        result = model.pdf(
+            "gauss", x=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0)
+        )
 
         # Should get a reasonable Gaussian PDF value at x=0, mu=0, sigma=1
         # This should be approximately 1/sqrt(2*pi) ≈ 0.3989
@@ -72,8 +74,12 @@ class TestModelModes:
         model_fast_compile = simple_workspace.model(mode="FAST_COMPILE")
 
         # Both should produce the same result for the same inputs
-        result_fast_run = model_fast_run.pdf("gauss", x=1.0, mu=0.5, sigma=1.2)
-        result_fast_compile = model_fast_compile.pdf("gauss", x=1.0, mu=0.5, sigma=1.2)
+        result_fast_run = model_fast_run.pdf(
+            "gauss", x=np.array(1.0), mu=np.array(0.5), sigma=np.array(1.2)
+        )
+        result_fast_compile = model_fast_compile.pdf(
+            "gauss", x=np.array(1.0), mu=np.array(0.5), sigma=np.array(1.2)
+        )
 
         # Results should be very close (within numerical precision)
         assert abs(result_fast_run - result_fast_compile) < 1e-10
@@ -194,7 +200,7 @@ class TestModelGraphSummary:
         assert "Compiled: No" in summary_before
 
         # Call pdf to trigger compilation
-        model.pdf("gauss", x=0.0, mu=0.0, sigma=1.0)
+        model.pdf("gauss", x=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0))
 
         # After calling pdf, should be compiled
         summary_after = model.graph_summary("gauss")
@@ -363,7 +369,9 @@ class TestModelWithoutParameterPoints:
 
         # We can't directly inspect bounds, but we can verify the parameters exist
         # and that the model can evaluate successfully
-        result = model.pdf("gauss", x=0.0, mu=0.0, sigma=1.0)
+        result = model.pdf(
+            "gauss", x=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0)
+        )
 
         # Should get a reasonable Gaussian PDF value
         assert 0.35 < result < 0.45
@@ -374,7 +382,9 @@ class TestModelWithoutParameterPoints:
 
         # All discovered parameters should be scalars (pt.scalar)
         # We can verify this by checking they accept scalar values in pdf evaluation
-        result = model.pdf("gauss", x=1.5, mu=-0.5, sigma=2.0)
+        result = model.pdf(
+            "gauss", x=np.array(1.5), mu=np.array(-0.5), sigma=np.array(2.0)
+        )
 
         # Should compute successfully with scalar inputs
         assert isinstance(result, int | float | np.ndarray)
@@ -439,7 +449,9 @@ class TestModelWithoutParameterPoints:
         assert "sigma" in model.parameters  # from parameterset
 
         # Should evaluate successfully
-        result = model.pdf("gauss", x=0.0, mu=0.0, sigma=1.0)
+        result = model.pdf(
+            "gauss", x=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0)
+        )
         assert 0.35 < result < 0.45
 
 
@@ -594,10 +606,14 @@ class TestWorkspaceWithLikelihoodsAndAnalyses:
         assert "sigma" in model.parameters
 
         # Should be able to evaluate PDFs
-        signal_result = model.pdf("signal_dist", x=1.0, mu=1.0, sigma=0.5)
+        signal_result = model.pdf(
+            "signal_dist", x=np.array(1.0), mu=np.array(1.0), sigma=np.array(0.5)
+        )
         assert signal_result > 0
 
-        background_result = model.pdf("background_dist", x=1.0, mu=1.0, sigma=0.5)
+        background_result = model.pdf(
+            "background_dist", x=np.array(1.0), mu=np.array(1.0), sigma=np.array(0.5)
+        )
         assert background_result > 0
 
     def test_workspace_json_roundtrip_with_likelihoods_analyses(
@@ -694,7 +710,7 @@ class TestModelParameterOrdering:
         param_list = model.pars("gauss")
 
         # Create parameter dictionary in the order returned by pars()
-        params = {param: 1.0 if param != "x" else 0.0 for param in param_list}
+        params = {param: np.array(1.0 if param != "x" else 0.0) for param in param_list}
 
         # pdf() should accept these parameters successfully
         result = model.pdf("gauss", **params)
@@ -791,7 +807,11 @@ class TestModelParameterOrdering:
 
         # Create values in arbitrary order
         arbitrary_order = ["sigma", "mu", "x"]
-        values = [2.0, 0.5, 1.0]  # Corresponding to sigma=2.0, mu=0.5, x=1.0
+        values = [
+            np.array(2.0),
+            np.array(0.5),
+            np.array(1.0),
+        ]  # Corresponding to sigma=2.0, mu=0.5, x=1.0
 
         # Use parsort to get indices
         indices = model.parsort("gauss", arbitrary_order)

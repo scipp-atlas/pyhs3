@@ -320,6 +320,24 @@ class Model:
         # Build dependency graph with proper entity identification
         self._build_dependency_graph(functions, distributions, progress)
 
+    @staticmethod
+    def _ensure_array(
+        value: float | list[float] | npt.NDArray[np.float64],
+    ) -> npt.NDArray[np.float64]:
+        """
+        Ensure a value is a numpy array with dtype float64.
+
+        Converts scalars to 0-d arrays and lists to 1-d arrays.
+        Existing numpy arrays are converted to float64 dtype if needed.
+
+        Args:
+            value: Input value (scalar, list, or array)
+
+        Returns:
+            NumPy array with dtype float64
+        """
+        return np.asarray(value, dtype=np.float64)
+
     def _build_dependency_graph(
         self,
         functions: Functions,
@@ -445,36 +463,133 @@ class Model:
                     outputs=dist,
                     mode=compilation_mode,
                     on_unused_input="ignore",
+                    name=name,
+                    trust_input=True,
                 ),
             )
         return self._compiled_functions[name]
 
-    def pdf(self, name: str, **parametervalues: float) -> npt.NDArray[np.float64]:
+    def pdf_unsafe(
+        self,
+        name: str,
+        **parametervalues: float | list[float] | npt.NDArray[np.float64],
+    ) -> npt.NDArray[np.float64]:
         """
-        Evaluates the probability density function of the specified distribution.
+        Evaluates the PDF with automatic type conversion (convenience method).
+
+        This method automatically converts parameter values to numpy arrays before
+        evaluation. Use this for convenience in testing or interactive use.
+
+        For performance-critical code, prefer :meth:`pdf` with pre-converted numpy arrays.
 
         Args:
             name (str): Name of the distribution to evaluate.
-            **parametervalues (float): Values for each distribution parameter.
+            **parametervalues: Values for each parameter (floats, lists, or arrays).
 
         Returns:
             npt.NDArray[np.float64]: The evaluated PDF value.
+
+        See Also:
+            :meth:`pdf`: Type-safe version requiring numpy arrays
+            :meth:`logpdf_unsafe`: Log PDF with automatic type conversion
+
+        Example:
+            >>> model.pdf_unsafe("gauss", x=1.5, mu=0.0, sigma=1.0)  # floats ok
+            >>> model.pdf_unsafe("gauss", x=[1.5], mu=0.0, sigma=1.0)  # lists ok
+        """
+        # Convert all parameter values to numpy arrays
+        converted_params = {
+            key: self._ensure_array(value) for key, value in parametervalues.items()
+        }
+        return self.pdf(name, **converted_params)
+
+    def pdf(
+        self, name: str, **parametervalues: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """
+        Evaluates the probability density function of the specified distribution.
+
+        This method requires all parameter values to be numpy arrays with dtype float64.
+        For automatic type conversion, use :meth:`pdf_unsafe` instead.
+
+        Args:
+            name (str): Name of the distribution to evaluate.
+            **parametervalues: Values for each parameter as numpy arrays.
+
+        Returns:
+            npt.NDArray[np.float64]: The evaluated PDF value.
+
+        Raises:
+            TypeError: If any parameter value is not a numpy array.
+
+        See Also:
+            :meth:`pdf_unsafe`: Convenience version with automatic type conversion
+            :meth:`logpdf`: Log PDF with strict type checking
+
+        Example:
+            >>> import numpy as np
+            >>> model.pdf("gauss", x=np.array(1.5), mu=np.array(0.0), sigma=np.array(1.0))
         """
         # Use compiled function for better performance
         func = self._get_compiled_function(name)
         positional_values = self._reorder_params(name, parametervalues)
         return func(*positional_values)
 
-    def logpdf(self, name: str, **parametervalues: float) -> npt.NDArray[np.float64]:
+    def logpdf_unsafe(
+        self,
+        name: str,
+        **parametervalues: float | list[float] | npt.NDArray[np.float64],
+    ) -> npt.NDArray[np.float64]:
         """
-        Evaluates the natural logarithm of the PDF.
+        Evaluates the log PDF with automatic type conversion (convenience method).
+
+        This method automatically converts parameter values to numpy arrays before
+        evaluation. Use this for convenience in testing or interactive use.
+
+        For performance-critical code, prefer :meth:`logpdf` with pre-converted numpy arrays.
 
         Args:
             name (str): Name of the distribution to evaluate.
-            **parametervalues (float): Values for each distribution parameter.
+            **parametervalues: Values for each parameter (floats, lists, or arrays).
 
         Returns:
             npt.NDArray[np.float64]: The log of the PDF.
+
+        See Also:
+            :meth:`logpdf`: Type-safe version requiring numpy arrays
+            :meth:`pdf_unsafe`: PDF with automatic type conversion
+
+        Example:
+            >>> model.logpdf_unsafe("gauss", x=1.5, mu=0.0, sigma=1.0)  # floats ok
+        """
+        return np.log(self.pdf_unsafe(name, **parametervalues))
+
+    def logpdf(
+        self, name: str, **parametervalues: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """
+        Evaluates the natural logarithm of the PDF.
+
+        This method requires all parameter values to be numpy arrays with dtype float64.
+        For automatic type conversion, use :meth:`logpdf_unsafe` instead.
+
+        Args:
+            name (str): Name of the distribution to evaluate.
+            **parametervalues: Values for each parameter as numpy arrays.
+
+        Returns:
+            npt.NDArray[np.float64]: The log of the PDF.
+
+        Raises:
+            TypeError: If any parameter value is not a numpy array.
+
+        See Also:
+            :meth:`logpdf_unsafe`: Convenience version with automatic type conversion
+            :meth:`pdf`: PDF with strict type checking
+
+        Example:
+            >>> import numpy as np
+            >>> model.logpdf("gauss", x=np.array(1.5), mu=np.array(0.0), sigma=np.array(1.0))
         """
         return np.log(self.pdf(name, **parametervalues))
 
@@ -522,14 +637,14 @@ class Model:
     def _reorder_params(
         self,
         name: str,
-        params: Mapping[str, float | npt.NDArray[np.float64]],
-    ) -> list[float | npt.NDArray[np.float64]]:
+        params: Mapping[str, npt.NDArray[np.float64]],
+    ) -> list[npt.NDArray[np.float64]]:
         """
         Reorder parameters to match the expected input order for a distribution.
 
         Args:
             name: Distribution name
-            params: Dictionary of parameter values
+            params: Dictionary of parameter values (numpy arrays)
 
         Returns:
             List of values in the correct order for the compiled function

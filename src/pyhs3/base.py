@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import inspect
 import types
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from typing import Any, cast, get_args, get_origin
 
 import pytensor.tensor as pt
@@ -38,7 +38,7 @@ def find_field_definition_line(cls: type, field_name: str) -> str | None:
     return None
 
 
-class Evaluable(BaseModel):
+class Evaluable(BaseModel, ABC):
     """Base class for HS3 distributions and functions with automatic parameter preprocessing.
 
     This class provides automatic parameter processing that eliminates the need for manual
@@ -442,4 +442,3 @@ class Evaluable(BaseModel):
         Returns:
             PyTensor expression representing the component (will be named automatically)
         """
-        ...

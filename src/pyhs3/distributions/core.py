@@ -7,6 +7,7 @@ standard and CMS-specific distribution implementations.
 
 from __future__ import annotations
 
+from abc import ABC
 from typing import cast
 
 import pytensor.tensor as pt
@@ -16,7 +17,7 @@ from pyhs3.context import Context
 from pyhs3.typing.aliases import TensorVar
 
 
-class Distribution(Evaluable):
+class Distribution(Evaluable, ABC):
     """
     Base class for probability distributions in HS3.
 

@@ -578,14 +578,18 @@ class TestContext:
 
         tensor1 = pt.constant(1.0)
         tensor2 = pt.constant(2.0)
+        tensor3 = pt.constant(3.0)
         data = {"x": tensor1, "y": tensor2}
-        context = Context(data)
+        context = Context(data, {"aux": tensor3})
 
         # Test items()
         items = list(context.items())
-        assert len(items) == 2
+        assert len(items) == 3
         assert ("x", tensor1) in items
         assert ("y", tensor2) in items
+        assert ("aux", tensor3) in items
+        assert context.parameters
+        assert context.auxiliaries
 
     def test_context_empty(self):
         """Test Context with empty data."""
@@ -604,6 +608,25 @@ class TestContext:
 
         with pytest.raises(KeyError):
             _ = context["nonexistent_key"]
+
+    def test_context_overlapping_names(self):
+        """Test Context with overlapping names is disallowed"""
+        with pytest.raises(
+            ValueError, match=r"Parameter names cannot overlap between .*"
+        ):
+            Context({"param1": pt.constant(1.0)}, {"param1": pt.constant(2.0)})
+
+    def test_context_getitem_auxiliary(self):
+        """Test Context __getitem__ works for auxiliary"""
+        context = Context({}, {"param1": pt.constant(2.0)})
+        assert context["param1"] is not None
+
+    def test_context_copy(self):
+        """Test Context copy"""
+        context = Context({"param1": pt.constant(1.0)})
+        copied = context.copy()
+        copied._parameters["param1"] = pt.constant(2.0)
+        assert context["param1"].value != copied["param1"].value
 
 
 class TestEvaluableAdvanced:

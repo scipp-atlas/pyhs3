@@ -65,11 +65,35 @@ Distributions represent probability density functions. The distribution system i
 - **Composite** (``composite.py``): Product, Mixture, Sum distributions
 - **Histogram** (``histogram.py``): Binned data distributions with interpolation
 
-Each distribution implements:
+**Distribution Architecture:**
 
-- Validation of input parameters
-- Conversion to PyTensor computational graph
-- Support for broadcasting over batch dimensions
+Each distribution separates the main probability model from extended likelihood terms:
+
+- **likelihood(context)**: Main probability density function (abstract - must implement)
+
+  - Core PDF/PMF implementation
+  - Examples: Gaussian PDF, Poisson PMF, exponential decay
+
+- **extended_likelihood(context, data)**: Additional constraint/extended terms (optional)
+
+  - Default: returns ``1.0`` (no additional terms)
+  - Override for constraint terms (HistFactory) or extended ML fits (MixtureDist)
+
+- **expression(context)**: Complete probability (concrete - do not override)
+
+  - Automatically combines: ``likelihood() * extended_likelihood()``
+  - Ensures distributions are self-contained
+
+- **log_expression(context)**: Log probability (concrete - do not override)
+
+  - Combines in log space: ``log(likelihood()) + log(extended_likelihood())``
+  - Used for numerical stability in optimization
+
+This architecture ensures:
+
+- Clear separation between main model and auxiliary terms
+- Self-contained distributions that work correctly in tests and direct usage
+- Automatic inclusion of constraint terms without manual Model-level combination
 
 Functions
 ~~~~~~~~~
@@ -305,6 +329,41 @@ HistFactory is a major use case, with dedicated support:
 - Interpolation between variations
 - Integration with modifiers
 
+**Modifier Naming in Dependency Graph:**
+
+Modifiers themselves have simple names (e.g., ``"lumi"``), but when incorporated into the dependency graph by ``histfactory_dist``, they are given unique identifiers by prepending the full context path. This design distinguishes individual modifier instances while allowing parameters to indicate correlation:
+
+- **Modifier names** in JSON/specification: Simple names like ``"lumi"``
+- **Internal graph node names**: Full path like ``"{dist_name}/{sample_name}/{modifier_type}/{modifier_name}"``
+- **Parameter names**: Indicate correlation - modifiers sharing the same parameter name are correlated
+
+.. code-block:: python
+
+    # Example: Two modifiers with the same name "lumi" in different samples
+    {
+        "name": "lumi",  # Simple modifier name
+        "parameter": "lumi",  # Shared parameter = correlated
+        "type": "normsys",
+        # ...
+    }
+
+    # Internally becomes node: "SR/signal/normsys/lumi" in the dependency graph
+
+    {
+        "name": "lumi",  # Same modifier name (different sample)
+        "parameter": "lumi",  # Same parameter = correlated
+        "type": "normsys",
+        # ...
+    }
+
+    # Internally becomes node: "CR/background/normsys/lumi" in the dependency graph
+
+This design allows:
+
+- Each modifier instance to be uniquely identified in the dependency graph
+- Correlations to be expressed naturally through shared parameter names
+- Clear separation between modifier identity and parameter correlation structure
+
 Error Handling
 --------------
 
@@ -324,9 +383,9 @@ Adding New Distributions
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. Create class inheriting from ``Distribution`` in appropriate file
-2. Implement validation in ``model_validate_extra``
-3. Implement ``_to_pytensor`` method
-4. Add to ``Distributions.model_validate`` discriminator
+2. Implement the ``likelihood()`` method (required)
+3. Optionally override ``extended_likelihood()`` for constraint/extended terms
+4. Add to distribution registry dictionary
 5. Write unit tests
 6. Update documentation
 
@@ -336,25 +395,30 @@ Example skeleton:
 
    from __future__ import annotations
 
+   from typing import Literal, cast
+   import pytensor.tensor as pt
+
    from pyhs3.distributions.core import Distribution
+   from pyhs3.context import Context
+   from pyhs3.typing.aliases import TensorVar
 
 
    class MyDistribution(Distribution):
        """My custom distribution."""
 
        type: Literal["my_dist"] = "my_dist"
-       param1: str
-       param2: str
+       param1: str | float  # Parameter name or numeric value
+       param2: str | float  # Parameter name or numeric value
 
-       def _to_pytensor(
-           self,
-           tensors: dict[str, TensorVariable],
-           distributions: dict[str, TensorVariable],
-           functions: dict[str, TensorVariable],
-       ) -> TensorVariable:
-           """Convert to PyTensor operation."""
-           # Implementation here
-           ...
+       def likelihood(self, context: Context) -> TensorVar:
+           """Main probability model implementation."""
+           # Get processed parameters from context
+           p1 = context[self._parameters["param1"]]
+           p2 = context[self._parameters["param2"]]
+
+           # Implement your PDF/PMF here
+           # Example: return some_probability_expression
+           return cast(TensorVar, pt.constant(1.0))  # Replace with actual implementation
 
 Adding New Functions
 ~~~~~~~~~~~~~~~~~~~~

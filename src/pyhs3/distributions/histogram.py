@@ -12,10 +12,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from pyhs3.context import Context
 from pyhs3.data import Axis
 from pyhs3.distributions.core import Distribution
-from pyhs3.typing.aliases import TensorVar
 
 
 class HistogramData(BaseModel):
@@ -33,7 +31,7 @@ class HistogramData(BaseModel):
     contents: list[float] = Field(..., repr=False)
 
 
-class HistogramDist(Distribution):
+class HistogramDist(Distribution):  # pylint: disable=abstract-method
     r"""
     Histogram probability distribution.
 
@@ -58,16 +56,10 @@ class HistogramDist(Distribution):
     type: Literal["histogram_dist"] = "histogram_dist"
     data: HistogramData = Field(..., json_schema_extra={"preprocess": False})
 
-    def _expression(self, _: Context) -> TensorVar:
-        """
-        Not implemented.
-        """
-        raise NotImplementedError()
-
 
 # Registry of histogram distributions
 distributions: dict[str, type[Distribution]] = {
-    "histogram_dist": HistogramDist,
+    "histogram_dist": HistogramDist,  # type: ignore[type-abstract]
 }
 
 # Define what should be exported from this module

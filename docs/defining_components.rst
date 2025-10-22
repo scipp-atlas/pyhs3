@@ -12,7 +12,7 @@ Creating a custom distribution or function requires:
 
 1. **Inherit** from ``Distribution`` or ``Function``
 2. **Define fields** with appropriate type annotations
-3. **Implement** the ``expression()`` method
+3. **Implement** the ``likelihood()`` method (distributions) or ``expression()`` method (functions)
 4. **Register** your component (optional)
 
 The ``Evaluable`` base class automatically handles parameter processing based on your field type annotations.
@@ -38,8 +38,8 @@ Here's a simple custom Gaussian distribution:
         mean: str | float  # Parameter name or numeric value
         sigma: str | float  # Parameter name or numeric value
 
-        def expression(self, context: Context) -> TensorVar:
-            """Evaluate the Gaussian PDF."""
+        def likelihood(self, context: Context) -> TensorVar:
+            """Evaluate the Gaussian PDF (main probability model)."""
             # Get processed parameters from context
             mean_val = context[self._parameters["mean"]]
             sigma_val = context[self._parameters["sigma"]]
@@ -158,7 +158,7 @@ Advanced Examples
         use_log_scale: bool = False
         tolerance: float = Field(default=1e-6, json_schema_extra={"preprocess": False})
 
-        def expression(self, context: Context) -> TensorVar:
+        def likelihood(self, context: Context) -> TensorVar:
             loc = context[self._parameters["location"]]
             scale = context[self._parameters["scale"]]
 
@@ -276,9 +276,9 @@ Error Handling and Debugging
    .. code-block:: python
 
        dist = MyDist(name="test", param="value")
-       # RuntimeError: Component type my_type expression not implemented
+       # TypeError: Can't instantiate abstract class MyDist without an implementation for abstract method 'likelihood'
 
-   **Fix:** Implement the ``expression()`` method.
+   **Fix:** Implement the ``likelihood()`` method for distributions or ``expression()`` method for functions.
 
 3. **Context key errors:**
 
@@ -300,6 +300,87 @@ Error Handling and Debugging
     print("Internal mapping:", dist._parameters)  # Field -> parameter mapping
     print("Constants:", list(dist.constants.keys()))  # Generated constant names
     print("Constant values:", dist._constants_values)  # Stored numeric values
+
+Distribution Architecture: likelihood() vs extended_likelihood()
+-----------------------------------------------------------------
+
+Distributions in pyhs3 separate the main probability model from extended likelihood terms through a clear three-method architecture:
+
+**Three Methods:**
+
+1. **likelihood(context)**: Main probability model (abstract - must implement)
+
+   .. code-block:: python
+
+       def likelihood(self, context: Context) -> TensorVar:
+           """Main probability density function."""
+           # Implement your PDF here
+           # Example: Gaussian PDF, Poisson PMF, etc.
+
+2. **extended_likelihood(context, data)**: Additional constraint/extended terms (optional - override when needed)
+
+   .. code-block:: python
+
+       def extended_likelihood(
+           self, context: Context, data: TensorVar | None = None
+       ) -> TensorVar:
+           """Extended likelihood contribution in normal space.
+
+           Default: returns 1.0 (no additional terms).
+           Override for: constraint terms (HistFactory), extended ML terms (MixtureDist).
+           """
+           return pt.constant(1.0)  # Default behavior
+
+3. **expression(context)**: Complete probability (concrete - do not override)
+
+   .. code-block:: python
+
+       def expression(self, context: Context) -> TensorVar:
+           """Complete probability = likelihood() * extended_likelihood()."""
+           return self.likelihood(context) * self.extended_likelihood(context)
+
+**When to Override extended_likelihood():**
+
+Override ``extended_likelihood()`` only when your distribution needs additional terms beyond the main PDF:
+
+- **HistFactory distributions**: Constraint terms for nuisance parameters (Gaussian/Poisson constraints)
+- **Mixture distributions**: Poisson yield terms for extended ML fits
+- **Most distributions**: Do not override (use default ``1.0``)
+
+**Example with Extended Likelihood:**
+
+.. code-block:: python
+
+    class HistFactoryDistChannel(Distribution):
+        type: Literal["histfactory_dist"] = "histfactory_dist"
+        # ... fields ...
+
+        def likelihood(self, context: Context) -> TensorVar:
+            """Main Poisson likelihood for observed bin counts."""
+            # Poisson probability for data
+            return poisson_prob(observed_data, expected_rates)
+
+        def extended_likelihood(
+            self, context: Context, data: TensorVar | None = None
+        ) -> TensorVar:
+            """Constraint terms for nuisance parameters."""
+            constraint_probs = []
+            for modifier in self.modifiers:
+                if hasattr(modifier, "make_constraint"):
+                    constraint_probs.append(modifier.make_constraint(context))
+            return (
+                pt.prod(pt.stack(constraint_probs))
+                if constraint_probs
+                else pt.constant(1.0)
+            )
+
+**Key Points:**
+
+- Distributions automatically combine ``likelihood() * extended_likelihood()`` via ``expression()``
+- Tests and direct usage get the complete probability automatically
+- Extended likelihood terms are in **normal space** (not log space)
+- ``log_expression()`` handles the conversion: ``log(likelihood()) + log(extended_likelihood())``
+- Most distributions only need to implement ``likelihood()``
 
 Best Practices
 --------------

@@ -50,7 +50,7 @@ class TestDistribution:
         # Distribution is now abstract with _expression() as abstract method
         with pytest.raises(
             TypeError,
-            match=r"Can't instantiate abstract class Distribution.*_expression",
+            match=r"Can't instantiate abstract class Distribution.*likelihood",
         ):
             Distribution(
                 name="test_dist",
@@ -59,8 +59,13 @@ class TestDistribution:
 
     def test_distribution_extended_likelihood_default(self):
         """Test that base distribution extended_likelihood method returns 1.0."""
-        # Use a concrete distribution (GaussianDist) to test the default behavior
-        dist = GaussianDist(name="test", mean=0.0, sigma=1.0, x="x")
+
+        # Create a minimal concrete implementation
+        class TestDist(Distribution):
+            def likelihood(self, _context):
+                return pt.constant(0.5)
+
+        dist = TestDist(name="test", type="test")
         context = {}
 
         # Test with no data
@@ -2821,10 +2826,10 @@ class TestMixtureDist:
 
         context = {"coeff1": pt.constant(10.0), "coeff2": pt.constant(20.0)}
 
-        with pytest.raises(
-            RuntimeError, match="extended_likelihood only valid when extended=True"
-        ):
-            dist.extended_likelihood(context, pt.constant(50.0))
+        extended_likelihood = dist.extended_likelihood(context, pt.constant(50.0))
+        assert isinstance(extended_likelihood, pt.variable.TensorConstant)
+        assert extended_likelihood.value == 1.0
+        assert extended_likelihood.type == pt.TensorType(dtype=np.float32, shape=())
 
     def test_mixture_dist_extended_likelihood_no_data(self):
         """Test extended_likelihood method when data is None."""
@@ -2885,12 +2890,6 @@ class TestHistogramDist:
     """Test HistogramDist implementation."""
 
     def test_histogram_function_creation(self):
-        """Test HistogramDist can be created and configured."""
-        func = HistogramDist(name="test_histogram", data={"axes": [], "contents": []})
-        assert func.name == "test_histogram"
-
-    def test_histogram_function_not_implemented(self):
         """Test HistogramDist not implemented."""
-        func = HistogramDist(name="test_histogram", data={"axes": [], "contents": []})
-        with pytest.raises(NotImplementedError):
-            func.expression({})
+        with pytest.raises(TypeError):
+            HistogramDist(name="test_histogram", data={"axes": [], "contents": []})

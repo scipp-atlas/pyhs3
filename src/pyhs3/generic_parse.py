@@ -109,6 +109,8 @@ def sympy_to_pytensor(
             "sqrt": pt.math.sqrt,
             "abs": pt.math.abs,
             "erf": pt.math.erf,
+            "min": pt.math.min,
+            "max": pt.math.max,
         }
 
         # Convert variable names to SymPy symbols
@@ -132,5 +134,5 @@ def sympy_to_pytensor(
         return cast(pt.variable.TensorVariable[TensorType, Any], result)
 
     except Exception as exc:
-        msg = f"Failed to convert expression to PyTensor: {exc}"
+        msg = f"Failed to convert expression to PyTensor: {sympy_expr}. {exc}"
         raise ExpressionEvaluationError(msg) from exc

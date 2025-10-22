@@ -61,28 +61,8 @@
       "samples": [
         {
           "data": {
-            "contents": [50, 52]
-          },
-          "modifiers": [
-            {
-              "name": "Lumi",
-              "parameter": "Lumi",
-              "type": "normfactor"
-            },
-            {
-              "constraint": "Poisson",
-              "data": {
-                "vals": [0.06, 0.1346153846153846]
-              },
-              "name": "uncorr_bkguncrt",
-              "type": "shapesys"
-            }
-          ],
-          "name": "background"
-        },
-        {
-          "data": {
-            "contents": [12, 11]
+            "contents": [12, 11],
+            "errors": [3.5, 3.3]
           },
           "modifiers": [
             {
@@ -97,6 +77,34 @@
             }
           ],
           "name": "signal"
+        },
+        {
+          "data": {
+            "contents": [50, 52],
+            "errors": [7.0, 7.2]
+          },
+          "modifiers": [
+            {
+              "name": "Lumi",
+              "parameter": "Lumi",
+              "type": "normfactor"
+            },
+            {
+              "constraint": "Gauss",
+              "data": {
+                "hi": {
+                  "contents": [45, 55]
+                },
+                "lo": {
+                  "contents": [55, 45]
+                }
+              },
+              "name": "correlated_bkg_uncertainty",
+              "parameter": "alpha_correlated_bkg_uncertainty",
+              "type": "histosys"
+            }
+          ],
+          "name": "background"
         }
       ],
       "type": "histfactory_dist"
@@ -106,14 +114,9 @@
     {
       "axes": [
         {
-          "max": 1.3,
-          "min": 0.0,
-          "name": "gamma_uncorr_bkguncrt_bin_0"
-        },
-        {
-          "max": 1.6730769230769231,
-          "min": 0.0,
-          "name": "gamma_uncorr_bkguncrt_bin_1"
+          "max": 5.0,
+          "min": -5.0,
+          "name": "alpha_correlated_bkg_uncertainty"
         }
       ],
       "name": "simPdf_asimovData_nuisance_parameters",
@@ -133,14 +136,9 @@
     {
       "axes": [
         {
-          "max": 1.3,
-          "min": 0.0,
-          "name": "gamma_uncorr_bkguncrt_bin_0"
-        },
-        {
-          "max": 1.6730769230769231,
-          "min": 0.0,
-          "name": "gamma_uncorr_bkguncrt_bin_1"
+          "max": 5.0,
+          "min": -5.0,
+          "name": "alpha_correlated_bkg_uncertainty"
         }
       ],
       "name": "simPdf_obsData_nuisance_parameters",
@@ -165,14 +163,9 @@
           "name": "Lumi"
         },
         {
-          "max": 1.3,
-          "min": 0.0,
-          "name": "gamma_uncorr_bkguncrt_bin_0"
-        },
-        {
-          "max": 1.6730769230769231,
-          "min": 0.0,
-          "name": "gamma_uncorr_bkguncrt_bin_1"
+          "max": 5.0,
+          "min": -5.0,
+          "name": "alpha_correlated_bkg_uncertainty"
         },
         {
           "max": 10.0,
@@ -198,61 +191,9 @@
   ],
   "metadata": {
     "hs3_version": "0.2",
-    "packages": [
-      {
-        "name": "ROOT",
-        "version": "6.32.06"
-      }
-    ]
+    "packages": []
   },
-  "misc": {
-    "ROOT_internal": {
-      "ModelConfigs": {
-        "simPdf_asimovData": {
-          "mcName": "ModelConfig",
-          "pdfName": "simPdf"
-        },
-        "simPdf_obsData": {
-          "mcName": "ModelConfig",
-          "pdfName": "simPdf"
-        }
-      },
-      "attributes": {
-        "Lumi": {
-          "tags": ["Constant"]
-        },
-        "nom_gamma_uncorr_bkguncrt_bin_0": {
-          "tags": ["Constant"]
-        },
-        "nom_gamma_uncorr_bkguncrt_bin_1": {
-          "tags": ["Constant"]
-        },
-        "singlechannel_model": {
-          "tags": ["BinnedLikelihood", "GenerateBinned"]
-        }
-      },
-      "combined_datasets": {
-        "asimovData": {
-          "index_cat": "channelCat",
-          "indices": [0],
-          "labels": ["singlechannel"]
-        },
-        "obsData": {
-          "index_cat": "channelCat",
-          "indices": [0],
-          "labels": ["singlechannel"]
-        }
-      },
-      "combined_distributions": {
-        "simPdf": {
-          "distributions": ["model_singlechannel"],
-          "index_cat": "channelCat",
-          "indices": [0],
-          "labels": ["singlechannel"]
-        }
-      }
-    }
-  },
+  "misc": {},
   "parameter_points": [
     {
       "name": "default_values",
@@ -263,12 +204,8 @@
           "value": 1.0
         },
         {
-          "name": "gamma_uncorr_bkguncrt_bin_0",
-          "value": 1.0
-        },
-        {
-          "name": "gamma_uncorr_bkguncrt_bin_1",
-          "value": 1.0
+          "name": "alpha_correlated_bkg_uncertainty",
+          "value": 0.0
         },
         {
           "name": "mu",
@@ -285,12 +222,8 @@
           "value": 1.0
         },
         {
-          "name": "gamma_uncorr_bkguncrt_bin_0",
-          "value": 1.0
-        },
-        {
-          "name": "gamma_uncorr_bkguncrt_bin_1",
-          "value": 1.0
+          "name": "alpha_correlated_bkg_uncertainty",
+          "value": 0.0
         },
         {
           "name": "mu",

@@ -167,7 +167,7 @@ class MixtureDist(Distribution):
 
         return extended
 
-    def _expression(self, context: Context) -> TensorVar:
+    def likelihood(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the mixture distribution.
 
@@ -273,8 +273,7 @@ class MixtureDist(Distribution):
             RuntimeError: If called on non-extended PDF
         """
         if not self.extended:
-            msg = "extended_likelihood only valid when extended=True"
-            raise RuntimeError(msg)
+            return pt.constant(1.0)
 
         if data is None:
             # No data provided, return no contribution
@@ -285,7 +284,7 @@ class MixtureDist(Distribution):
 
         # Use the existing PoissonDist implementation for correctness
         poisson_dist = PoissonDist(name="temp_poisson", mean="nu", x="n_obs")
-        poisson_context = Context({"nu": nu, "n_obs": n_obs})
+        poisson_context = Context(parameters={"nu": nu, "n_obs": n_obs})
         return poisson_dist.expression(poisson_context)
 
 
@@ -314,7 +313,7 @@ class ProductDist(Distribution):
     type: Literal["product_dist"] = "product_dist"
     factors: list[str]
 
-    def _expression(self, context: Context) -> TensorVar:
+    def likelihood(self, context: Context) -> TensorVar:
         """
         Evaluate the product distribution.
 

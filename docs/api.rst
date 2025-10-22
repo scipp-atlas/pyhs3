@@ -84,6 +84,7 @@ Distributions
    CrystalBallDist
    AsymmetricCrystalBallDist
    ArgusDist
+   HistFactoryDistChannel
    FastVerticalInterpHistPdf2Dist
    GGZZBackgroundDist
    QQZZBackgroundDist

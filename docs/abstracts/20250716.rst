@@ -1,0 +1,20 @@
+Graph Me If You Can: Modern Python Meets HEP Statistical Models
+===============================================================
+
+**Used for:** :cite:p:`Stark_20250716`
+
+**Abstract:**
+
+Statistical tooling in the scientific python ecosystem continues to advance, while at the same time ``ROOT`` has recently adopted the HEP Statistics Serialization Standard (HS3) as the way of serializing RooWorkspaces for any probability model that has been built. There is a gap between packages such as jax and ``scipy.stats`` and what ``HS3`` provides. This is where ``pyhs3`` comes in—a modern Python implementation of ``HS3`` designed with modern scientific python development practices. Prioritizing a developer-friendly interface and cross-platform compatibility, pyhs3 provides a python-callable function built from the computational graph encoded in serialized ``HS3`` probability models.
+
+The goal of this effort is to facilitate existing efforts in statistical inference (pyhf, zfit, cabinetry) and auto-differentiability (neos, MadJax, evermore, relaxed) by providing a common core for bidirectional translation of HS3-compatible workspaces.
+
+We'll discuss the design of the library, how the pieces are defined, how to extend or contribute to it, and proof-of-concept with a real-world workspace from the ATLAS :math:`HH\to bb\gamma\gamma` analysis. The talk presents the ``pyhs3`` package as a step towards a common 'inference API' and providing implementations of many mathematical probability distributions common in HEP.
+
+.. code-block:: latex
+
+    Statistical tooling in the scientific python ecosystem continues to advance, while at the same time \texttt{ROOT} has recently adopted the HEP Statistics Serialization Standard (HS3) as the way of serializing RooWorkspaces for any probability model that has been built. There is a gap between packages such as jax and \texttt{scipy.stats} and what \texttt{HS3} provides. This is where \texttt{pyhs3} comes in—a modern Python implementation of \texttt{HS3} designed with modern scientific python development practices. Prioritizing a developer-friendly interface and cross-platform compatibility, pyhs3 provides a python-callable function built from the computational graph encoded in serialized \texttt{HS3} probability models.
+
+    The goal of this effort is to facilitate existing efforts in statistical inference (pyhf, zfit, cabinetry) and auto-differentiability (neos, MadJax, evermore, relaxed) by providing a common core for bidirectional translation of HS3-compatible workspaces.
+
+    We'll discuss the design of the library, how the pieces are defined, how to extend or contribute to it, and proof-of-concept with a real-world workspace from the ATLAS $HH\to bb\gamma\gamma$ analysis. The talk presents the \texttt{pyhs3} package as a step towards a common 'inference API' and providing implementations of many mathematical probability distributions common in HEP.

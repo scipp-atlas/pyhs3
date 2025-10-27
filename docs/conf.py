@@ -26,6 +26,7 @@ extensions = [
     "sphinx_click.ext",
     "sphinx_issues",
     "sphinxcontrib.mermaid",
+    "sphinxcontrib.bibtex",
 ]
 
 # GitHub repo
@@ -102,3 +103,18 @@ napoleon_custom_sections = [
 copybutton_prompt_text = r">>> |\.\.\. |\$ "
 copybutton_prompt_is_regexp = True
 copybutton_here_doc_delimiter = "EOF"
+
+# bibtex configuration
+bibtex_bibfiles = [
+    "bib/talks.bib",
+]
+bibtex_default_style = "unsrt"
+
+# Add any paths that contain custom static files (such as style sheets) here,
+# relative to this directory. They are copied after the builtin static files,
+# so a file named "default.css" will overwrite the builtin "default.css".
+html_static_path = ["_static"]
+
+html_css_files = [
+    "css/custom.css",
+]

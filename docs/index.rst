@@ -12,6 +12,14 @@
 .. toctree::
    :hidden:
    :maxdepth: 2
+   :caption: Academics
+
+   abstracts
+   talks
+
+.. toctree::
+   :hidden:
+   :maxdepth: 2
    :caption: Contributing
 
    CONTRIBUTING

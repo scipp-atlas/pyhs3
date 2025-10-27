@@ -14,6 +14,7 @@
    :maxdepth: 2
    :caption: Academics
 
+   acknowledgements
    abstracts
    talks
 

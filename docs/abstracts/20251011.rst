@@ -1,0 +1,16 @@
+Efficient Statistical Modeling for Particle Physics Using Computational Graphs in Python
+========================================================================================
+
+**Used for:** :cite:ps:`Stark_20251028,Smith_20251011`
+
+**Abstract:**
+
+Statistical modeling is central to discovery in particle physics, yet the tools commonly used to define, share, and evaluate these models are often complex, fragmented, or tightly coupled to legacy systems. In parallel, the scientific Python community has developed a variety of statistical modeling tools that have been widely adopted for their performance and ease of use, but remain under-utilized in particle physics.  We attempt to bridge this gap with a lightweight python framework that calculates likelihood ratios through the construction and evaluation of computational graphs.  With modularity, auto-differentiability, and computational efficiency in mind, we designed the framework to integrate with modern scientific computing ecosystems while providing a clean, well-documented, and extendable API.  This implementation makes published particle physics results more transparent, reproducible, and accessible for reanalysis. We present the initial framework, validate its results against established calculations, examine its performance relative to existing systems, and outline future development plans.
+
+This work was supported by the U.S. Department of Energy (DOE) Office of High Energy Physics under Grant No. DE-SC0010107.
+
+.. code-block:: latex
+
+    Statistical modeling is central to discovery in particle physics, yet the tools commonly used to define, share, and evaluate these models are often complex, fragmented, or tightly coupled to legacy systems. In parallel, the scientific Python community has developed a variety of statistical modeling tools that have been widely adopted for their performance and ease of use, but remain under-utilized in particle physics.  We attempt to bridge this gap with a lightweight python framework that calculates likelihood ratios through the construction and evaluation of computational graphs.  With modularity, auto-differentiability, and computational efficiency in mind, we designed the framework to integrate with modern scientific computing ecosystems while providing a clean, well-documented, and extendable API.  This implementation makes published particle physics results more transparent, reproducible, and accessible for reanalysis. We present the initial framework, validate its results against established calculations, examine its performance relative to existing systems, and outline future development plans.
+
+    This work was supported by the U.S. Department of Energy (DOE) Office of High Energy Physics under Grant No. DE-SC0010107.

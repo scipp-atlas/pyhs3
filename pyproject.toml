@@ -63,6 +63,7 @@ docs = [
   "intersphinx_registry>=0.2411.17",
   "sphinx-issues",
   "sphinxcontrib-mermaid",
+  "sphinxcontrib-bibtex",
 ]
 
 [project.urls]

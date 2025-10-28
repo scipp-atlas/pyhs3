@@ -186,6 +186,7 @@ class GenericFunction(Function):
         Returns:
             TensorVar: PyTensor expression representing the parsed mathematical expression.
         """
+
         # Get required variables using the parameters determined during initialization
         variables = [context[name] for name in self._parameters.values()]
 
@@ -714,12 +715,6 @@ class HistogramFunction(Function):
         ..., json_schema_extra={"preprocess": False}, repr=False
     )
 
-    def _expression(self, _: Context) -> TensorVar:
-        """
-        Not implemented.
-        """
-        raise NotImplementedError()
-
 
 class RooRecursiveFractionFunction(Function):
     r"""
@@ -788,6 +783,6 @@ functions: dict[str, type[Function]] = {
     "interpolation": InterpolationFunction,
     "CMS::process_normalization": ProcessNormalizationFunction,
     "CMS::asympow": CMSAsymPowFunction,
-    "histogram": HistogramFunction,
+    "histogram": HistogramFunction,  # type: ignore[type-abstract]
     "roorecursivefraction_dist": RooRecursiveFractionFunction,
 }

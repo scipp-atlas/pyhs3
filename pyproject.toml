@@ -63,6 +63,7 @@ docs = [
   "intersphinx_registry>=0.2411.17",
   "sphinx-issues",
   "sphinxcontrib-mermaid",
+  "sphinxcontrib-bibtex",
 ]
 
 [project.urls]
@@ -88,6 +89,7 @@ addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config", "--doct
 xfail_strict = true
 filterwarnings = [
     "error",
+    "ignore:jsonschema.RefResolver is deprecated.*:DeprecationWarning",
 ]
 log_cli_level = "INFO"
 testpaths = [

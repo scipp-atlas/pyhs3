@@ -14,7 +14,15 @@ from typing import Annotated, Any, TypeVar
 from pydantic import Field, PrivateAttr, RootModel
 
 # Import modules instead of individual classes
-from pyhs3.distributions import basic, cms, composite, histogram, mathematical, physics
+from pyhs3.distributions import (
+    basic,
+    cms,
+    composite,
+    histfactory,
+    histogram,
+    mathematical,
+    physics,
+)
 from pyhs3.distributions.core import Distribution
 from pyhs3.exceptions import custom_error_msg
 
@@ -33,6 +41,9 @@ ProductDist = composite.ProductDist
 
 # Histogram distributions
 HistogramDist = histogram.HistogramDist
+
+# HistFactory distributions
+HistFactoryDistChannel = histfactory.HistFactoryDistChannel
 
 # Mathematical distributions
 GenericDist = mathematical.GenericDist
@@ -64,6 +75,7 @@ __all__ = [
     "GGZZBackgroundDist",
     "GaussianDist",
     "GenericDist",
+    "HistFactoryDistChannel",
     "HistogramDist",
     "LandauDist",
     "LogNormalDist",
@@ -82,6 +94,7 @@ DistT = TypeVar("DistT", bound="Distribution")
 registered_distributions: dict[str, type[Distribution]] = {
     **basic.distributions,
     **composite.distributions,
+    **histfactory.distributions,
     **histogram.distributions,
     **mathematical.distributions,
     **physics.distributions,
@@ -102,6 +115,8 @@ DistributionType = Annotated[
     | composite.ProductDist
     # Histogram distributions
     | histogram.HistogramDist
+    # HistFactory distributions
+    | histfactory.HistFactoryDistChannel
     # Mathematical distributions
     | mathematical.GenericDist
     | mathematical.PolynomialDist

@@ -1,0 +1,253 @@
+{
+  "analyses": [
+    {
+      "domains": [
+        "simPdf_asimovData_nuisance_parameters",
+        "simPdf_asimovData_parameters_of_interest"
+      ],
+      "likelihood": "simPdf_asimovData",
+      "name": "simPdf_asimovData",
+      "parameters_of_interest": ["mu"]
+    },
+    {
+      "domains": [
+        "simPdf_obsData_nuisance_parameters",
+        "simPdf_obsData_parameters_of_interest"
+      ],
+      "likelihood": "simPdf_obsData",
+      "name": "simPdf_obsData",
+      "parameters_of_interest": ["mu"]
+    }
+  ],
+  "data": [
+    {
+      "axes": [
+        {
+          "max": 2.0,
+          "min": 0.0,
+          "name": "obs_x_singlechannel",
+          "nbins": 2
+        }
+      ],
+      "contents": [62, 63],
+      "name": "asimovData_singlechannel",
+      "type": "binned"
+    },
+    {
+      "axes": [
+        {
+          "max": 2.0,
+          "min": 0.0,
+          "name": "obs_x_singlechannel",
+          "nbins": 2
+        }
+      ],
+      "contents": [51, 48],
+      "name": "obsData_singlechannel",
+      "type": "binned"
+    }
+  ],
+  "distributions": [
+    {
+      "axes": [
+        {
+          "max": 2.0,
+          "min": 0.0,
+          "name": "obs_x_singlechannel",
+          "nbins": 2
+        }
+      ],
+      "name": "model_singlechannel",
+      "samples": [
+        {
+          "data": {
+            "contents": [50, 52],
+            "errors": [7.0, 7.2]
+          },
+          "modifiers": [
+            {
+              "name": "Lumi",
+              "parameter": "Lumi",
+              "type": "normfactor"
+            },
+            {
+              "constraint": "Poisson",
+              "data": {
+                "vals": [3.0, 7.0]
+              },
+              "name": "uncorr_bkguncrt",
+              "type": "shapesys",
+              "parameters": ["uncorr_bkguncrt_0", "uncorr_bkguncrt_1"]
+            }
+          ],
+          "name": "background"
+        },
+        {
+          "data": {
+            "contents": [12, 11],
+            "errors": [3.5, 3.3]
+          },
+          "modifiers": [
+            {
+              "name": "Lumi",
+              "parameter": "Lumi",
+              "type": "normfactor"
+            },
+            {
+              "name": "mu",
+              "parameter": "mu",
+              "type": "normfactor"
+            }
+          ],
+          "name": "signal"
+        }
+      ],
+      "type": "histfactory_dist"
+    }
+  ],
+  "domains": [
+    {
+      "axes": [
+        {
+          "max": 1.3,
+          "min": 0.0,
+          "name": "uncorr_bkguncrt_0"
+        },
+        {
+          "max": 1.6730769230769231,
+          "min": 0.0,
+          "name": "uncorr_bkguncrt_1"
+        }
+      ],
+      "name": "simPdf_asimovData_nuisance_parameters",
+      "type": "product_domain"
+    },
+    {
+      "axes": [
+        {
+          "max": 10.0,
+          "min": 0.0,
+          "name": "mu"
+        }
+      ],
+      "name": "simPdf_asimovData_parameters_of_interest",
+      "type": "product_domain"
+    },
+    {
+      "axes": [
+        {
+          "max": 1.3,
+          "min": 0.0,
+          "name": "uncorr_bkguncrt_0"
+        },
+        {
+          "max": 1.6730769230769231,
+          "min": 0.0,
+          "name": "uncorr_bkguncrt_1"
+        }
+      ],
+      "name": "simPdf_obsData_nuisance_parameters",
+      "type": "product_domain"
+    },
+    {
+      "axes": [
+        {
+          "max": 10.0,
+          "min": 0.0,
+          "name": "mu"
+        }
+      ],
+      "name": "simPdf_obsData_parameters_of_interest",
+      "type": "product_domain"
+    },
+    {
+      "axes": [
+        {
+          "max": 10.0,
+          "min": 0.0,
+          "name": "Lumi"
+        },
+        {
+          "max": 1.3,
+          "min": 0.0,
+          "name": "uncorr_bkguncrt_0"
+        },
+        {
+          "max": 1.6730769230769231,
+          "min": 0.0,
+          "name": "uncorr_bkguncrt_1"
+        },
+        {
+          "max": 10.0,
+          "min": 0.0,
+          "name": "mu"
+        }
+      ],
+      "name": "default_domain",
+      "type": "product_domain"
+    }
+  ],
+  "likelihoods": [
+    {
+      "data": ["asimovData_singlechannel"],
+      "distributions": ["model_singlechannel"],
+      "name": "simPdf_asimovData"
+    },
+    {
+      "data": ["obsData_singlechannel"],
+      "distributions": ["model_singlechannel"],
+      "name": "simPdf_obsData"
+    }
+  ],
+  "metadata": {
+    "hs3_version": "0.2",
+    "packages": []
+  },
+  "misc": {},
+  "parameter_points": [
+    {
+      "name": "default_values",
+      "parameters": [
+        {
+          "const": true,
+          "name": "Lumi",
+          "value": 1.0
+        },
+        {
+          "name": "uncorr_bkguncrt_0",
+          "value": 1.0
+        },
+        {
+          "name": "uncorr_bkguncrt_1",
+          "value": 1.0
+        },
+        {
+          "name": "mu",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "name": "NominalParamValues",
+      "parameters": [
+        {
+          "const": true,
+          "name": "Lumi",
+          "value": 1.0
+        },
+        {
+          "name": "uncorr_bkguncrt_0",
+          "value": 1.0
+        },
+        {
+          "name": "uncorr_bkguncrt_1",
+          "value": 1.0
+        },
+        {
+          "name": "mu",
+          "value": 1.0
+        }
+      ]
+    }
+  ]
+}

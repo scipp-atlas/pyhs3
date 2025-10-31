@@ -4,6 +4,7 @@ import json
 import pickle
 from pathlib import Path
 
+import numpy as np
 from skhep_testdata import data_path as skhep_testdata_path
 
 import pyhs3 as hs3
@@ -193,37 +194,91 @@ def ws_json():
     return json.loads(fpath.read_text(encoding="utf-8"))
 
 
+def nz_weighted_entries(entries, weights):
+    weighted_array = []
+    non_zero_terms = []
+
+    for i in range(len(entries)):
+        weighted_array.append(entries[i][0] * weights[i])
+
+    for entry in weighted_array:
+        if abs(entry) > 1e-6:
+            non_zero_terms.append(entry)
+        # else:
+        #     non_zero_terms.append(0)
+
+    return sorted(non_zero_terms)
+
+
+def base_name(name):
+    return (
+        name.replace("AsimovData_", "")
+        .replace("combData", "")
+        .replace("binned_", "")
+        .strip("_")
+    )
+
+
 def main():
     ws = hs3.Workspace(**ws_json())
 
     cached_file = "ws.pkl"
 
-    if Path.exists(cached_file):
+    if Path(cached_file).exists():
         print("loading model...")
-        with Path.open(cached_file, "rb") as f:
+        with Path(cached_file).open("rb") as f:
             model = pickle.load(f)
 
     else:
         print("building model")
         model = ws.model()
 
-        with Path.open(cached_file, "wb") as f:
+        with Path(cached_file).open("wb") as f:
             pickle.dump(model, f)
 
-    asys = ws.analyses["CombinedPdf_combData"]
-    like = ws.likelihoods[asys.likelihood]
+    # asys = ws.analyses["CombinedPdf_combData"]
+    # like = ws.likelihoods[asys.likelihood]
 
     nlls = []
-    parameters = {par.name: par.value for par in model.parameterset}
+    # parameters = {par.name: par.value for par in model.parameterset}
 
-    for i, dist_name in enumerate(like.distributions):
-        print(f"building dist {dist_name} {i}/{len(like.distributions)}")
-        dist = ws.distributions[dist_name]
+    # for i, dist_name in enumerate(like.distributions):
+    #     print(f"building dist {dist_name} {i}/{len(like.distributions)}")
+    #     dist = ws.distributions[dist_name]
 
-        nlls.append(-2 * model.logpdf(dist.name, **parameters))
+    #     nlls.append(-2 * model.logpdf(dist.name, **parameters))
 
     with Path.open("nll_output_test.json", "w") as f:
+        nlls.append(sum(nlls[i] for i in range(len(nlls))))
         json.dump(nlls, f, indent=2)
+        print("NLLs output saved to nll_output_test.json")
+
+    data = ws.data["combDatabinned_Run2HM_2"]
+    nz = nz_weighted_entries(data.entries, data.weights)
+    occurrences = np.zeros(220)
+    ms = np.linspace(100, 200, 220)
+    for i in range(1, 220):
+        for m_obs in nz:
+            if (m_obs > ms[i - 1]) and (m_obs < ms[i + 1]):
+                occurrences[i] += 1
+
+    print(nz)
+    print(occurrences)
+
+    binned = [d for d in ws.data.root if getattr(d, "type", None) == "binned"]
+    unbinned = [d for d in ws.data.root if getattr(d, "type", None) == "unbinned"]
+
+    pairs = []
+    for b in binned:
+        base_b = base_name(b.name)
+        match = next((u for u in unbinned if base_name(u.name) == base_b), None)
+        if match:
+            pairs.append((b, match))
+
+    print(f"{'Binned Data':<45} | {'Unbinned Data'}")
+    print("-" * 80)
+    for b, u in pairs:
+        print(f"{b.name:<45} | {u}")
 
 
 if __name__ == "__main__":

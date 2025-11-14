@@ -78,6 +78,7 @@ jobs:
         run: python -m pytest --doctest-modules src/pyhs3
 
       - name: Test doctests in documentation
+        if: matrix.python-version == '3.13'
         run: python -m pytest README.rst docs
 
       - name: Upload coverage report

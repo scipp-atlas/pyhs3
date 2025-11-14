@@ -40,7 +40,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
-  "pytest >=6",
+  "pytest >=9",
   "pytest-cov >=3",
   "pyhf >= 0.7.6",
   "pydocstyle",
@@ -48,7 +48,7 @@ test = [
   "pydot",
 ]
 dev = [
-  "pytest >=6",
+  "pytest >=9",
   "pytest-cov >=3",
   "tbump>=6.7.0",
 ]
@@ -83,8 +83,8 @@ scripts.test = "pytest {args}"
 scripts.doctest = "pytest --doctest-modules src/pyhs3 {args}"
 installer = "uv"
 
-[tool.pytest.ini_options]
-minversion = "6.0"
+[tool.pytest]
+minversion = "9.0"
 addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config", "--doctest-glob=docs/*.rst"]
 xfail_strict = true
 filterwarnings = [

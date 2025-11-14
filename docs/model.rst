@@ -22,79 +22,84 @@ Creating Models
 
 Models are created from workspaces using the ``.model()`` method. The following example uses the :hs3:label:`gaussian_dist <hs3.gaussian-normal-distribution>` distribution type:
 
-.. code-block:: python
+.. doctest:: creatingModel
 
-   import pyhs3
-
-   # Create a workspace (see workspace tutorial)
-   workspace_data = {
-       "metadata": {"hs3_version": "0.2"},
-       "distributions": [
-           {
-               "name": "gaussian_model",
-               "type": "gaussian_dist",
-               "x": "observable",
-               "mean": "mu",
-               "sigma": "sigma",
-           }
-       ],
-       "parameter_points": [
-           {
-               "name": "default_params",
-               "parameters": [
-                   {"name": "observable", "value": 0.0},
-                   {"name": "mu", "value": 0.0},
-                   {"name": "sigma", "value": 1.0},
-               ],
-           }
-       ],
-       "domains": [
-           {
-               "name": "valid_range",
-               "type": "product_domain",
-               "axes": [
-                   {"name": "observable", "min": -5.0, "max": 5.0},
-                   {"name": "mu", "min": -2.0, "max": 2.0},
-                   {"name": "sigma", "min": 0.1, "max": 3.0},
-               ],
-           }
-       ],
-   }
-
-   ws = pyhs3.Workspace(**workspace_data)
-
-   # Create model with specific domain and parameter set
-   model = ws.model(domain="valid_range", parameter_set="default_params")
-
-   # Or use defaults (first domain and parameter set)
-   model = ws.model()
+   >>> import pyhs3
+   >>> # Create a workspace (see workspace tutorial)
+   >>> workspace_data = {
+   ...     "metadata": {"hs3_version": "0.2"},
+   ...     "distributions": [
+   ...         {
+   ...             "name": "gaussian_model",
+   ...             "type": "gaussian_dist",
+   ...             "x": "observable",
+   ...             "mean": "mu",
+   ...             "sigma": "sigma",
+   ...         }
+   ...     ],
+   ...     "parameter_points": [
+   ...         {
+   ...             "name": "default_params",
+   ...             "parameters": [
+   ...                 {"name": "observable", "value": 0.0},
+   ...                 {"name": "mu", "value": 0.0},
+   ...                 {"name": "sigma", "value": 1.0},
+   ...             ],
+   ...         }
+   ...     ],
+   ...     "domains": [
+   ...         {
+   ...             "name": "valid_range",
+   ...             "type": "product_domain",
+   ...             "axes": [
+   ...                 {"name": "observable", "min": -5.0, "max": 5.0},
+   ...                 {"name": "mu", "min": -2.0, "max": 2.0},
+   ...                 {"name": "sigma", "min": 0.1, "max": 3.0},
+   ...             ],
+   ...         }
+   ...     ],
+   ... }
+   >>> ws = pyhs3.Workspace(**workspace_data)
+   >>> # Create model with specific domain and parameter set
+   >>> model = ws.model(domain="valid_range", parameter_set="default_params")
+   <BLANKLINE>
+   >>> # Or use defaults (first domain and parameter set)
+   >>> model = ws.model()
+   <BLANKLINE>
 
 Exploring Model Structure
 -------------------------
 
 Once you have a model, you can explore its structure:
 
-.. code-block:: python
+.. doctest:: creatingModel
 
-   # Print model overview
-   print(model)  # Shows parameters, distributions, functions count
-
-   # Access model components
-   print("Parameters:")
-   for name, tensor in model.parameters.items():
-       print(f"  {name}: {tensor}")
-
-   print("\\nDistributions:")
-   for name, tensor in model.distributions.items():
-       print(f"  {name}: {tensor}")
-
-   print("\\nFunctions:")
-   for name, tensor in model.functions.items():
-       print(f"  {name}: {tensor}")
-
-   # Get detailed graph information for a specific distribution
-   summary = model.graph_summary("gaussian_model")
-   print(f"\\nGraph summary for gaussian_model:\\n{summary}")
+   >>> # Print model overview
+   >>> print(model)  # doctest: +ELLIPSIS
+   Model(
+       mode: ...
+       parameters: ... (...)
+       distributions: ... (...)
+       functions: ... (...)
+   )
+   >>> # Access model components
+   >>> print(f"Parameters: {sorted(model.parameters)}")
+   Parameters: ['mu', 'observable', 'sigma']
+   >>> print(f"Distributions: {sorted(model.distributions)}")
+   Distributions: ['gaussian_model']
+   >>> print(f"Functions: {sorted(model.functions)}")
+   Functions: []
+   >>> # Get detailed graph information for a specific distribution
+   >>> summary = model.graph_summary("gaussian_model")
+   >>> print(f"Graph summary for gaussian_model:")
+   Graph summary for gaussian_model:
+   >>> print(summary)  # doctest: +ELLIPSIS
+   Distribution 'gaussian_model':
+       Input variables: ...
+       Graph operations: ...
+       Operation types: ...
+       Mode: ...
+       Compiled: ...
 
 Understanding the Computational Graph
 ------------------------------------
@@ -108,55 +113,49 @@ PyHS3 models are built as computational graphs where:
 
 You can visualize the computational graph:
 
-.. code-block:: python
+.. doctest:: creatingModel
 
-   # Generate a visual graph (requires pydot)
-   try:
-       model.visualize_graph("gaussian_model", output_file="model_graph.png")
-       print("Graph saved to model_graph.png")
-   except ImportError:
-       print("Install pydot to visualize graphs: pip install pydot")
+   >>> # Generate a visual graph (requires pydot)
+   >>> result = model.visualize_graph("gaussian_model", fmt="png", outfile="model_graph.png")
+   The output file is available at model_graph.png
 
 Parameter Discovery and Bounds
 ------------------------------
 
 PyHS3 automatically discovers parameters from your distributions and functions. Parameters are created with domain bounds applied:
 
-.. code-block:: python
+.. doctest:: creatingModel
 
-   # Parameters are automatically bounded based on domain constraints
-   # For example, with domain axes:
-   # {"name": "sigma", "min": 0.1, "max": 3.0}
-   # The sigma parameter will be automatically constrained to [0.1, 3.0]
-
-   # Parameters not in parameter_points are discovered and use default bounds
-   minimal_workspace = {
-       "metadata": {"hs3_version": "0.2"},
-       "distributions": [
-           {
-               "name": "discovered_model",
-               "type": "gaussian_dist",
-               "x": "data",
-               "mean": "discovered_mu",
-               "sigma": "discovered_sigma",
-           }
-       ],
-       "domains": [
-           {
-               "name": "constraints",
-               "type": "product_domain",
-               "axes": [{"name": "discovered_sigma", "min": 0.5, "max": 2.0}],
-           }
-       ],
-       # Note: no parameter_points defined
-   }
-
-   ws_minimal = pyhs3.Workspace(**minimal_workspace)
-   model_minimal = ws_minimal.model()
-
-   print("Discovered parameters:")
-   for param_name in model_minimal.parameters:
-       print(f"  {param_name}")
+   >>> # Parameters are automatically bounded based on domain constraints
+   >>> # For example, with domain axes:
+   >>> # {"name": "sigma", "min": 0.1, "max": 3.0}
+   >>> # The sigma parameter will be automatically constrained to [0.1, 3.0]
+   >>> # Parameters not in parameter_points are discovered and use default bounds
+   >>> minimal_workspace = {
+   ...     "metadata": {"hs3_version": "0.2"},
+   ...     "distributions": [
+   ...         {
+   ...             "name": "discovered_model",
+   ...             "type": "gaussian_dist",
+   ...             "x": "data",
+   ...             "mean": "discovered_mu",
+   ...             "sigma": "discovered_sigma",
+   ...         }
+   ...     ],
+   ...     "domains": [
+   ...         {
+   ...             "name": "constraints",
+   ...             "type": "product_domain",
+   ...             "axes": [{"name": "discovered_sigma", "min": 0.5, "max": 2.0}],
+   ...         }
+   ...     ],
+   ...     # Note: no parameter_points defined
+   ... }
+   >>> ws_minimal = pyhs3.Workspace(**minimal_workspace)
+   >>> model_minimal = ws_minimal.model()
+   <BLANKLINE>
+   >>> print(f"Discovered parameters: {sorted(model_minimal.parameters)}")
+   Discovered parameters: ['data', 'discovered_mu', 'discovered_sigma']
 
 Evaluating Models
 ----------------
@@ -168,31 +167,30 @@ Type-Safe API (Recommended for Production)
 
 The :meth:`~pyhs3.Model.pdf` and :meth:`~pyhs3.Model.logpdf` methods require all parameter values to be numpy arrays. This ensures type safety and enables performance optimizations:
 
-.. code-block:: python
+.. doctest::
 
-   import numpy as np
-
-   # All parameters must be numpy arrays
-   pdf_value = model.pdf(
-       "gaussian_model", observable=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0)
-   )
-   print(f"PDF(0.0) = {pdf_value}")
-
-   # Evaluate at different points
-   pdf_at_1 = model.pdf(
-       "gaussian_model", observable=np.array(1.0), mu=np.array(0.0), sigma=np.array(1.0)
-   )
-   pdf_at_2 = model.pdf(
-       "gaussian_model", observable=np.array(2.0), mu=np.array(0.0), sigma=np.array(1.0)
-   )
-
-   print(f"PDF(1.0) = {pdf_at_1}")
-   print(f"PDF(2.0) = {pdf_at_2}")
-
-   # Log PDF evaluation
-   logpdf_value = model.logpdf(
-       "gaussian_model", observable=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0)
-   )
+   >>> import numpy as np
+   >>> # All parameters must be numpy arrays
+   >>> pdf_value = model.pdf(
+   ...     "gaussian_model", observable=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0)
+   ... )
+   >>> print(f"PDF(0.0) = {pdf_value}")  # doctest: +ELLIPSIS
+   PDF(0.0) = ...
+   >>> # Evaluate at different points
+   >>> pdf_at_1 = model.pdf(
+   ...     "gaussian_model", observable=np.array(1.0), mu=np.array(0.0), sigma=np.array(1.0)
+   ... )
+   >>> pdf_at_2 = model.pdf(
+   ...     "gaussian_model", observable=np.array(2.0), mu=np.array(0.0), sigma=np.array(1.0)
+   ... )
+   >>> print(f"PDF(1.0) = {pdf_at_1}")  # doctest: +ELLIPSIS
+   PDF(1.0) = ...
+   >>> print(f"PDF(2.0) = {pdf_at_2}")  # doctest: +ELLIPSIS
+   PDF(2.0) = ...
+   >>> # Log PDF evaluation
+   >>> logpdf_value = model.logpdf(
+   ...     "gaussian_model", observable=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0)
+   ... )
 
 Convenience API (For Testing and Interactive Use)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

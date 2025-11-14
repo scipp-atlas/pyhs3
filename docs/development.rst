@@ -158,16 +158,29 @@ Type Hints Requirements
 
 All code must include type hints:
 
-.. code-block:: python
+.. code-block:: pycon
 
-   from __future__ import annotations
-
-   from typing import Any
-
-
-   def process_data(data: dict[str, Any], normalize: bool = True) -> tuple[float, float]:
-       """Process input data and return mean and std."""
-       ...
+   >>> from __future__ import annotations
+   >>> from typing import Any
+   >>> def process_data(data: dict[str, Any], normalize: bool = True) -> tuple[float, float]:
+   ...     """Process input data and return mean and std."""
+   ...     values = list(data.values())
+   ...     if not values:
+   ...         return 0.0, 0.0
+   ...     mean = sum(values) / len(values) if isinstance(values[0], (int, float)) else 0.0
+   ...     variance = (
+   ...         sum((x - mean) ** 2 for x in values) / len(values)
+   ...         if isinstance(values[0], (int, float))
+   ...         else 0.0
+   ...     )
+   ...     std = variance**0.5
+   ...     return (mean, std) if normalize else (mean * 100, std * 100)
+   ...
+   >>> # Example usage
+   >>> process_data({"a": 1.0, "b": 2.0, "c": 3.0})
+   (2.0, 0.816496580927726)
+   >>> process_data({"a": 1.0, "b": 2.0, "c": 3.0}, normalize=False)
+   (200.0, 81.6496580927726)
 
 Using pylint
 ~~~~~~~~~~~~

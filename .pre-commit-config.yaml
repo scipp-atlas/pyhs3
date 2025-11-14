@@ -45,7 +45,7 @@ repos:
         args: [--prose-wrap=always]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: "v0.14.3"
+    rev: "v0.14.5"
     hooks:
       - id: ruff-check
         args: ["--fix", "--show-fixes"]
@@ -84,15 +84,13 @@ repos:
         entry: PyBind|Numpy|Cmake|CCache|Github|PyTest
         exclude: .pre-commit-config.yaml
 
-  - repo: https://github.com/abravalheri/validate-pyproject
-    rev: "v0.24.1"
+  - repo: https://github.com/henryiii/validate-pyproject-schema-store
+    rev: "2025.11.13"
     hooks:
       - id: validate-pyproject
-        additional_dependencies:
-          ["validate-pyproject-schema-store[all]>=2025.11.13"]
 
   - repo: https://github.com/python-jsonschema/check-jsonschema
-    rev: "0.34.1"
+    rev: "0.35.0"
     hooks:
       - id: check-dependabot
       - id: check-github-workflows

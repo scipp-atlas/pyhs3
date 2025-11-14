@@ -278,85 +278,91 @@ Data Flow Example
 
 Here's how data flows through a complete PyHS3 model:
 
-.. code-block:: python
+.. doctest::
 
-   # 1. JSON/Dict specification
-   model_spec = {
-       "metadata": {"hs3_version": "0.2"},
-       "distributions": [
-           {
-               "name": "signal",
-               "type": "gaussian_dist",
-               "x": "mass",
-               "mean": "higgs_mass",
-               "sigma": "resolution",
-           },
-           {
-               "name": "background",
-               "type": "generic_dist",
-               "x": "mass",
-               "expression": "exp(-mass/slope)",
-           },
-       ],
-       "functions": [
-           {
-               "name": "total_yield",
-               "type": "sum",
-               "summands": ["signal_yield", "background_yield"],
-           }
-       ],
-       "parameter_points": [
-           {
-               "name": "physics",
-               "parameters": [
-                   {"name": "higgs_mass", "value": 125.0},
-                   {"name": "resolution", "value": 2.5},
-                   {"name": "signal_yield", "value": 100.0},
-                   {"name": "background_yield", "value": 1000.0},
-                   {"name": "slope", "value": 50.0},
-               ],
-           }
-       ],
-       "domains": [
-           {
-               "name": "search_region",
-               "type": "product_domain",
-               "axes": [
-                   {"name": "mass", "min": 110.0, "max": 140.0},
-                   {"name": "higgs_mass", "min": 120.0, "max": 130.0},
-               ],
-           }
-       ],
-       "data": [{"name": "observed_mass_data", "bins": [...], "values": [...]}],
-       "likelihoods": [
-           {
-               "name": "higgs_likelihood",
-               "distributions": ["signal", "background"],
-               "data": ["observed_mass_data", "observed_mass_data"],
-           }
-       ],
-       "analyses": [
-           {
-               "name": "higgs_discovery",
-               "likelihood": "higgs_likelihood",
-               "domains": ["search_region"],
-               "parameters_of_interest": ["higgs_mass", "signal_yield"],
-           }
-       ],
-   }
-
-   # 2. Create Workspace (validates and organizes)
-   import pyhs3
-
-   ws = pyhs3.Workspace(**model_spec)
-
-   # 3. Create Model (builds computational graph)
-   model = ws.model(domain="search_region", parameter_set="physics")
-
-   # 4. Evaluate (compile and compute)
-   signal_pdf = model.pdf("signal", mass=125.0, higgs_mass=125.0, resolution=2.5)
-   background_pdf = model.pdf("background", mass=125.0, slope=50.0)
-   total_yield = model.pdf("total_yield", signal_yield=100.0, background_yield=1000.0)
+   >>> # 1. JSON/Dict specification
+   >>> model_spec = {
+   ...     "metadata": {"hs3_version": "0.2"},
+   ...     "distributions": [
+   ...         {
+   ...             "name": "signal",
+   ...             "type": "gaussian_dist",
+   ...             "x": "mass",
+   ...             "mean": "higgs_mass",
+   ...             "sigma": "resolution",
+   ...         },
+   ...         {
+   ...             "name": "background",
+   ...             "type": "generic_dist",
+   ...             "x": "mass",
+   ...             "expression": "exp(-mass/slope)",
+   ...         },
+   ...     ],
+   ...     "functions": [
+   ...         {
+   ...             "name": "total_yield",
+   ...             "type": "sum",
+   ...             "summands": ["signal_yield", "background_yield"],
+   ...         }
+   ...     ],
+   ...     "parameter_points": [
+   ...         {
+   ...             "name": "physics",
+   ...             "parameters": [
+   ...                 {"name": "higgs_mass", "value": 125.0},
+   ...                 {"name": "resolution", "value": 2.5},
+   ...                 {"name": "signal_yield", "value": 100.0},
+   ...                 {"name": "background_yield", "value": 1000.0},
+   ...                 {"name": "slope", "value": 50.0},
+   ...             ],
+   ...         }
+   ...     ],
+   ...     "domains": [
+   ...         {
+   ...             "name": "search_region",
+   ...             "type": "product_domain",
+   ...             "axes": [
+   ...                 {"name": "mass", "min": 110.0, "max": 140.0},
+   ...                 {"name": "higgs_mass", "min": 120.0, "max": 130.0},
+   ...             ],
+   ...         }
+   ...     ],
+   ...     "data": [
+   ...         {
+   ...             "name": "observed_mass_data",
+   ...             "type": "binned",
+   ...             "contents": [10, 20, 15],
+   ...             "axes": [{"name": "mass", "edges": [110.0, 120.0, 130.0, 140.0]}],
+   ...         }
+   ...     ],
+   ...     "likelihoods": [
+   ...         {
+   ...             "name": "higgs_likelihood",
+   ...             "distributions": ["signal", "background"],
+   ...             "data": ["observed_mass_data", "observed_mass_data"],
+   ...         }
+   ...     ],
+   ...     "analyses": [
+   ...         {
+   ...             "name": "higgs_discovery",
+   ...             "likelihood": "higgs_likelihood",
+   ...             "domains": ["search_region"],
+   ...             "parameters_of_interest": ["higgs_mass", "signal_yield"],
+   ...         }
+   ...     ],
+   ... }
+   >>> # 2. Create Workspace (validates and organizes)
+   >>> import pyhs3
+   >>> import numpy as np
+   >>> ws = pyhs3.Workspace(**model_spec)
+   >>> # 3. Create Model (builds computational graph)
+   >>> model = ws.model(domain="search_region", parameter_set="physics")
+   <BLANKLINE>
+   >>> # 4. Evaluate (compile and compute)
+   >>> signal_pdf = model.pdf(
+   ...     "signal", mass=np.array(125.0), higgs_mass=np.array(125.0), resolution=np.array(2.5)
+   ... )
+   >>> background_pdf = model.pdf("background", mass=np.array(125.0), slope=np.array(50.0))
 
 Common Patterns
 --------------

@@ -233,6 +233,8 @@ The typical flow through pyhs3:
 
    .. code-block:: python
 
+      import pyhs3
+
       # HS3 JSON → Pydantic models
       ws = pyhs3.Workspace(**json_data)
 
@@ -391,34 +393,29 @@ Adding New Distributions
 
 Example skeleton:
 
-.. code-block:: python
+.. doctest::
 
-   from __future__ import annotations
-
-   from typing import Literal, cast
-   import pytensor.tensor as pt
-
-   from pyhs3.distributions.core import Distribution
-   from pyhs3.context import Context
-   from pyhs3.typing.aliases import TensorVar
-
-
-   class MyDistribution(Distribution):
-       """My custom distribution."""
-
-       type: Literal["my_dist"] = "my_dist"
-       param1: str | float  # Parameter name or numeric value
-       param2: str | float  # Parameter name or numeric value
-
-       def likelihood(self, context: Context) -> TensorVar:
-           """Main probability model implementation."""
-           # Get processed parameters from context
-           p1 = context[self._parameters["param1"]]
-           p2 = context[self._parameters["param2"]]
-
-           # Implement your PDF/PMF here
-           # Example: return some_probability_expression
-           return cast(TensorVar, pt.constant(1.0))  # Replace with actual implementation
+   >>> from __future__ import annotations
+   >>> from typing import Literal, cast
+   >>> import pytensor.tensor as pt
+   >>> from pyhs3.distributions.core import Distribution
+   >>> from pyhs3.context import Context
+   >>> from pyhs3.typing.aliases import TensorVar
+   >>>
+   >>> class MyDistribution(Distribution):
+   ...     """My custom distribution."""
+   ...     type: Literal["my_dist"] = "my_dist"
+   ...     param1: str | float  # Parameter name or numeric value
+   ...     param2: str | float  # Parameter name or numeric value
+   ...     def likelihood(self, context: Context) -> TensorVar:
+   ...         """Main probability model implementation."""
+   ...         # Get processed parameters from context
+   ...         p1 = context[self._parameters["param1"]]
+   ...         p2 = context[self._parameters["param2"]]
+   ...         # Implement your PDF/PMF here
+   ...         # Example: return some_probability_expression
+   ...         return cast(TensorVar, pt.constant(1.0))  # Replace with actual implementation
+   ...
 
 Adding New Functions
 ~~~~~~~~~~~~~~~~~~~~

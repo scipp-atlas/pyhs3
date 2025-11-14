@@ -1,5 +1,9 @@
 .. _workspace_tutorial:
 
+.. testsetup:: *
+
+   import pyhs3
+
 Working with Workspaces
 =======================
 
@@ -24,49 +28,46 @@ Loading a Workspace
 
 You can create a workspace from a dictionary or load it from a JSON file. The following example shows a simple workspace with a :ref:`Gaussian distribution <hs3:hs3.gaussian-normal-distribution>`:
 
-.. code-block:: python
+.. doctest::
 
-   import pyhs3
-
-   # From a dictionary
-   workspace_data = {
-       "metadata": {"hs3_version": "0.2"},
-       "distributions": [
-           {
-               "name": "signal",
-               "type": "gaussian_dist",
-               "x": "obs",
-               "mean": "mu",
-               "sigma": "sigma",
-           }
-       ],
-       "parameter_points": [
-           {
-               "name": "nominal",
-               "parameters": [
-                   {"name": "obs", "value": 0.0},
-                   {"name": "mu", "value": 0.0},
-                   {"name": "sigma", "value": 1.0},
-               ],
-           }
-       ],
-       "domains": [
-           {
-               "name": "physics_region",
-               "type": "product_domain",
-               "axes": [
-                   {"name": "obs", "min": -5.0, "max": 5.0},
-                   {"name": "mu", "min": -2.0, "max": 2.0},
-                   {"name": "sigma", "min": 0.1, "max": 3.0},
-               ],
-           }
-       ],
-   }
-
-   ws = pyhs3.Workspace(**workspace_data)
-
-   # From a JSON file
-   # ws = pyhs3.Workspace.load("my_model.json")
+   >>> import pyhs3
+   >>> # From a dictionary
+   >>> workspace_data = {
+   ...     "metadata": {"hs3_version": "0.2"},
+   ...     "distributions": [
+   ...         {
+   ...             "name": "signal",
+   ...             "type": "gaussian_dist",
+   ...             "x": "obs",
+   ...             "mean": "mu",
+   ...             "sigma": "sigma",
+   ...         }
+   ...     ],
+   ...     "parameter_points": [
+   ...         {
+   ...             "name": "nominal",
+   ...             "parameters": [
+   ...                 {"name": "obs", "value": 0.0},
+   ...                 {"name": "mu", "value": 0.0},
+   ...                 {"name": "sigma", "value": 1.0},
+   ...             ],
+   ...         }
+   ...     ],
+   ...     "domains": [
+   ...         {
+   ...             "name": "physics_region",
+   ...             "type": "product_domain",
+   ...             "axes": [
+   ...                 {"name": "obs", "min": -5.0, "max": 5.0},
+   ...                 {"name": "mu", "min": -2.0, "max": 2.0},
+   ...                 {"name": "sigma", "min": 0.1, "max": 3.0},
+   ...             ],
+   ...         }
+   ...     ],
+   ... }
+   >>> ws = pyhs3.Workspace(**workspace_data)
+   >>> # From a JSON file
+   >>> # ws = pyhs3.Workspace.load("my_model.json")
 
 Exploring Workspace Contents
 ----------------------------
@@ -127,26 +128,43 @@ Once you have a workspace, you can explore its contents:
    - 0 likelihoods
    >>> print(f"- {len(ws.analyses)} analyses")
    - 0 analyses
-
-   # Access distributions
-   print("\\nDistributions:")
-   for dist in ws.distributions:
-       print(f"  {dist.name} ({dist.type})")
-       print(f"    Parameters: {list(dist.parameters.values())}")
-
-   # Access parameter sets
-   print("\\nParameter sets:")
-   for param_set in ws.parameter_points:
-       print(f"  {param_set.name}:")
-       for param in param_set.parameters:
-           print(f"    {param.name} = {param.value}")
-
-   # Access domains
-   print("\\nDomains:")
-   for domain in ws.domains:
-       print(f"  {domain.name}:")
-       for axis in domain.axes:
-           print(f"    {axis.name}: [{axis.min}, {axis.max}]")
+   >>> # Access distributions
+   >>> print("Distributions:")
+   Distributions:
+   >>> for dist in ws.distributions:
+   ...     print(f"  {dist.name} ({dist.type})")
+   ...     print(f"    Parameters: {sorted(dist.parameters)}")
+   ...
+     signal (gaussian_dist)
+       Parameters: ['mu', 'obs', 'sigma']
+   >>> # Access parameter sets
+   >>> print()
+   <BLANKLINE>
+   >>> print("Parameter sets:")
+   Parameter sets:
+   >>> for param_set in ws.parameter_points:
+   ...     print(f"  {param_set.name}:")
+   ...     for param in param_set.parameters:
+   ...         print(f"    {param.name} = {param.value}")
+   ...
+     nominal:
+       obs = 0.0
+       mu = 0.0
+       sigma = 1.0
+   >>> # Access domains
+   >>> print()
+   <BLANKLINE>
+   >>> print("Domains:")
+   Domains:
+   >>> for domain in ws.domains:
+   ...     print(f"  {domain.name}:")
+   ...     for axis in domain.axes:
+   ...         print(f"    {axis.name}: [{axis.min}, {axis.max}]")
+   ...
+     physics_region:
+       obs: [-5.0, 5.0]
+       mu: [-2.0, 2.0]
+       sigma: [0.1, 3.0]
 
 Understanding Workspace Structure
 --------------------------------
@@ -269,148 +287,164 @@ Creating Models from Workspaces
 
 The main purpose of a workspace is to create models that you can evaluate:
 
-.. code-block:: python
+.. code-block:: pycon
 
-   # Create a model using specific domain and parameter set
-   model = ws.model(domain="physics_region", parameter_set="nominal")
-
-   # Or use defaults (index 0)
-   model = ws.model()
-
-   # Evaluate the model
-   result = model.pdf("signal", obs=0.5, mu=0.0, sigma=1.0)
-   print(f"PDF value: {result}")
+   >>> # Create a model using specific domain and parameter set
+   >>> model = ws.model(domain="physics_region", parameter_set="nominal")
+   <BLANKLINE>
+   >>> # Or use defaults (index 0)
+   >>> model = ws.model()
+   <BLANKLINE>
+   >>> # Evaluate the model
+   >>> import numpy as np
+   >>> result = model.pdf("signal", obs=np.array(0.5), mu=np.array(0.0), sigma=np.array(1.0))
+   >>> print(f"PDF value: {result}")  # doctest: +ELLIPSIS
+   PDF value: ...
 
 Example: Complete Physics Model
 ------------------------------
 
 Here's a more realistic example of a workspace for a physics analysis using both :ref:`Gaussian distributions <hs3:hs3.gaussian-normal-distribution>` and :ref:`generic expressions <hs3:hs3.sec:generic_expression>` with a :ref:`sum function <hs3:hs3.sum>`:
 
-.. code-block:: python
+.. doctest::
 
-   physics_model = {
-       "metadata": {
-           "hs3_version": "0.2",
-           "authors": ["Physics Analysis Team"],
-           "description": "Signal + background model for Higgs search",
-       },
-       "distributions": [
-           {
-               "name": "signal",
-               "type": "gaussian_dist",
-               "x": "mass",
-               "mean": "higgs_mass",
-               "sigma": "resolution",
-           },
-           {
-               "name": "background",
-               "type": "generic_dist",
-               "x": "mass",
-               "expression": "exp(-mass/lifetime) / norm",
-           },
-       ],
-       "functions": [
-           {
-               "name": "total_events",
-               "type": "sum",
-               "summands": ["signal_yield", "background_yield"],
-           }
-       ],
-       "parameter_points": [
-           {
-               "name": "best_fit",
-               "parameters": [
-                   {"name": "higgs_mass", "value": 125.0},
-                   {"name": "resolution", "value": 2.5},
-                   {"name": "signal_yield", "value": 100.0},
-                   {"name": "background_yield", "value": 1000.0},
-                   {"name": "lifetime", "value": 50.0},
-                   {"name": "norm", "value": 1.0},
-               ],
-           }
-       ],
-       "domains": [
-           {
-               "name": "search_window",
-               "type": "product_domain",
-               "axes": [
-                   {"name": "mass", "min": 110.0, "max": 140.0},
-                   {"name": "higgs_mass", "min": 120.0, "max": 130.0},
-                   {"name": "resolution", "min": 1.0, "max": 5.0},
-                   {"name": "signal_yield", "min": 0.0, "max": 500.0},
-                   {"name": "background_yield", "min": 100.0, "max": 5000.0},
-               ],
-           }
-       ],
-       "data": [
-           {
-               "name": "observed_mass_spectrum",
-               "type": "binned",
-               "contents": [50, 75, 45],
-               "axes": [{"name": "mass", "edges": [110.0, 120.0, 125.0, 130.0, 140.0]}],
-               "uncertainty": {"type": "gaussian_uncertainty", "sigma": [7.1, 8.7, 6.7]},
-           }
-       ],
-       "likelihoods": [
-           {
-               "name": "higgs_likelihood",
-               "distributions": ["signal", "background"],
-               "data": ["observed_mass_spectrum", "observed_mass_spectrum"],
-           }
-       ],
-       "analyses": [
-           {
-               "name": "higgs_discovery",
-               "likelihood": "higgs_likelihood",
-               "domains": ["search_window"],
-               "parameters_of_interest": ["higgs_mass", "signal_yield"],
-               "init": "best_fit",
-           }
-       ],
-   }
-
-   physics_ws = pyhs3.Workspace(**physics_model)
-
-   # Explore the workspace
-   print(
-       f"Workspace contains {len(physics_ws.likelihoods)} likelihoods and {len(physics_ws.analyses)} analyses"
-   )
-   print(
-       f"Analysis '{physics_ws.analyses[0].name}' uses likelihood '{physics_ws.analyses[0].likelihood}'"
-   )
-
-   physics_model = physics_ws.model()
-
-   # Evaluate signal and background separately
-   signal_pdf = physics_model.pdf("signal", mass=125.0, higgs_mass=125.0, resolution=2.5)
-   background_pdf = physics_model.pdf("background", mass=125.0, lifetime=50.0, norm=1.0)
-
-   print(f"Signal PDF at 125 GeV: {signal_pdf}")
-   print(f"Background PDF at 125 GeV: {background_pdf}")
+   >>> import pyhs3
+   >>> physics_model = {
+   ...     "metadata": {
+   ...         "hs3_version": "0.2",
+   ...         "authors": ["Physics Analysis Team"],
+   ...         "description": "Signal + background model for Higgs search",
+   ...     },
+   ...     "distributions": [
+   ...         {
+   ...             "name": "signal",
+   ...             "type": "gaussian_dist",
+   ...             "x": "mass",
+   ...             "mean": "higgs_mass",
+   ...             "sigma": "resolution",
+   ...         },
+   ...         {
+   ...             "name": "background",
+   ...             "type": "generic_dist",
+   ...             "x": "mass",
+   ...             "expression": "exp(-mass/lifetime) / norm",
+   ...         },
+   ...     ],
+   ...     "functions": [
+   ...         {
+   ...             "name": "total_events",
+   ...             "type": "sum",
+   ...             "summands": ["signal_yield", "background_yield"],
+   ...         }
+   ...     ],
+   ...     "parameter_points": [
+   ...         {
+   ...             "name": "best_fit",
+   ...             "parameters": [
+   ...                 {"name": "higgs_mass", "value": 125.0},
+   ...                 {"name": "resolution", "value": 2.5},
+   ...                 {"name": "signal_yield", "value": 100.0},
+   ...                 {"name": "background_yield", "value": 1000.0},
+   ...                 {"name": "lifetime", "value": 50.0},
+   ...                 {"name": "norm", "value": 1.0},
+   ...             ],
+   ...         }
+   ...     ],
+   ...     "domains": [
+   ...         {
+   ...             "name": "search_window",
+   ...             "type": "product_domain",
+   ...             "axes": [
+   ...                 {"name": "mass", "min": 110.0, "max": 140.0},
+   ...                 {"name": "higgs_mass", "min": 120.0, "max": 130.0},
+   ...                 {"name": "resolution", "min": 1.0, "max": 5.0},
+   ...                 {"name": "signal_yield", "min": 0.0, "max": 500.0},
+   ...                 {"name": "background_yield", "min": 100.0, "max": 5000.0},
+   ...             ],
+   ...         }
+   ...     ],
+   ...     "data": [
+   ...         {
+   ...             "name": "observed_mass_spectrum",
+   ...             "type": "binned",
+   ...             "contents": [50, 75, 45, 55],
+   ...             "axes": [{"name": "mass", "edges": [110.0, 120.0, 125.0, 130.0, 140.0]}],
+   ...             "uncertainty": {
+   ...                 "type": "gaussian_uncertainty",
+   ...                 "sigma": [7.1, 8.7, 6.7, 7.8],
+   ...             },
+   ...         }
+   ...     ],
+   ...     "likelihoods": [
+   ...         {
+   ...             "name": "higgs_likelihood",
+   ...             "distributions": ["signal", "background"],
+   ...             "data": ["observed_mass_spectrum", "observed_mass_spectrum"],
+   ...         }
+   ...     ],
+   ...     "analyses": [
+   ...         {
+   ...             "name": "higgs_discovery",
+   ...             "likelihood": "higgs_likelihood",
+   ...             "domains": ["search_window"],
+   ...             "parameters_of_interest": ["higgs_mass", "signal_yield"],
+   ...             "init": "best_fit",
+   ...         }
+   ...     ],
+   ... }
+   >>> physics_ws = pyhs3.Workspace(**physics_model)
+   >>> # Explore the workspace
+   >>> print(
+   ...     f"Workspace contains {len(physics_ws.likelihoods)} likelihoods and {len(physics_ws.analyses)} analyses"
+   ... )
+   Workspace contains 1 likelihoods and 1 analyses
+   >>> print(
+   ...     f"Analysis '{physics_ws.analyses[0].name}' uses likelihood '{physics_ws.analyses[0].likelihood}'"
+   ... )
+   Analysis 'higgs_discovery' uses likelihood 'higgs_likelihood'
+   >>> physics_model = physics_ws.model()
+   <BLANKLINE>
+   >>> # Evaluate signal and background separately
+   >>> signal_pdf = physics_model.pdf(
+   ...     "signal", mass=np.array(125.0), higgs_mass=np.array(125.0), resolution=np.array(2.5)
+   ... )
+   >>> background_pdf = physics_model.pdf(
+   ...     "background", mass=np.array(125.0), lifetime=np.array(50.0), norm=np.array(1.0)
+   ... )
+   >>> print(f"Signal PDF at 125 GeV: {signal_pdf}")
+   Signal PDF at 125 GeV: ...
+   >>> print(f"Background PDF at 125 GeV: {background_pdf}")
+   Background PDF at 125 GeV: ...
 
 Working with Likelihoods and Analyses
 -------------------------------------
 
 Likelihoods and analyses are optional but important components for statistical inference:
 
-.. code-block:: python
+.. doctest::
 
-   # Access likelihood information
-   likelihood = physics_ws.likelihoods["higgs_likelihood"]
-   print(f"Likelihood '{likelihood.name}' connects:")
-   print(f"  - Distributions: {likelihood.distributions}")
-   print(f"  - To data: {likelihood.data}")
-
-   # Access analysis configuration
-   analysis = physics_ws.analyses["higgs_discovery"]
-   print(f"Analysis '{analysis.name}' configuration:")
-   print(f"  - Uses likelihood: {analysis.likelihood}")
-   print(f"  - Parameter domains: {analysis.domains}")
-   print(f"  - Parameters of interest: {analysis.parameters_of_interest}")
-   print(f"  - Initial values from: {analysis.init}")
-
-   # These components provide structured access to the complete statistical model
-   # for use with fitting and inference tools
+   >>> # Access likelihood information
+   >>> likelihood = physics_ws.likelihoods["higgs_likelihood"]
+   >>> print(f"Likelihood '{likelihood.name}' connects:")
+   Likelihood 'higgs_likelihood' connects:
+   >>> print(f"  - Distributions: {likelihood.distributions}")
+     - Distributions: ['signal', 'background']
+   >>> print(f"  - To data: {likelihood.data}")
+     - To data: ['observed_mass_spectrum', 'observed_mass_spectrum']
+   >>> # Access analysis configuration
+   >>> analysis = physics_ws.analyses["higgs_discovery"]
+   >>> print(f"Analysis '{analysis.name}' configuration:")
+   Analysis 'higgs_discovery' configuration:
+   >>> print(f"  - Uses likelihood: {analysis.likelihood}")
+     - Uses likelihood: higgs_likelihood
+   >>> print(f"  - Parameter domains: {analysis.domains}")
+     - Parameter domains: ['search_window']
+   >>> print(f"  - Parameters of interest: {analysis.parameters_of_interest}")
+     - Parameters of interest: ['higgs_mass', 'signal_yield']
+   >>> print(f"  - Initial values from: {analysis.init}")
+     - Initial values from: best_fit
+   >>> # These components provide structured access to the complete statistical model
+   >>> # for use with fitting and inference tools
 
 Working with Data Components
 ----------------------------

@@ -566,6 +566,75 @@ class TestBinnedDataHistConversion:
         assert np.array_equal(h.values(), expected_2d)
 
 
+class TestUnbinnedDataHistConversion:
+    """Tests for UnbinnedData.to_hist() method."""
+
+    def test_to_hist_1d_no_weights(self):
+        """Test UnbinnedData.to_hist() with 1D data without weights."""
+        # Create some unbinned data points
+        entries = [[0.5], [1.2], [1.8], [2.3], [0.9]]
+        axes = [Axis(name="x", min=0.0, max=3.0, nbins=3)]
+        data = UnbinnedData(
+            name="test_unbinned", type="unbinned", entries=entries, axes=axes
+        )
+
+        h = data.to_hist()
+
+        # Check that axis is configured correctly
+        assert len(h.axes) == 1
+        assert h.axes[0].name == "x"
+
+        # Check that entries were binned correctly
+        # Bin 0: [0, 1) -> 0.5, 0.9 = 2 entries
+        # Bin 1: [1, 2) -> 1.2, 1.8 = 2 entries
+        # Bin 2: [2, 3) -> 2.3 = 1 entry
+        expected_values = [2.0, 2.0, 1.0]
+        assert np.array_equal(h.values(), expected_values)
+
+    def test_to_hist_1d_with_weights(self):
+        """Test UnbinnedData.to_hist() with 1D data with weights."""
+        entries = [[0.5], [1.2], [1.8]]
+        weights = [2.0, 3.0, 1.5]
+        axes = [Axis(name="x", min=0.0, max=3.0, nbins=3)]
+        data = UnbinnedData(
+            name="test_weighted",
+            type="unbinned",
+            entries=entries,
+            axes=axes,
+            weights=weights,
+        )
+
+        h = data.to_hist()
+
+        # Check that weighted entries were binned correctly
+        # Bin 0: [0, 1) -> 0.5 with weight 2.0 = 2.0
+        # Bin 1: [1, 2) -> 1.2 (w=3.0) + 1.8 (w=1.5) = 4.5
+        # Bin 2: [2, 3) -> empty = 0.0
+        expected_values = [2.0, 4.5, 0.0]
+        assert np.allclose(h.values(), expected_values)
+
+    def test_to_hist_2d(self):
+        """Test UnbinnedData.to_hist() with 2D data."""
+        entries = [[0.5, 0.3], [1.2, 1.8], [0.8, 2.5]]
+        axes = [
+            Axis(name="x", min=0.0, max=2.0, nbins=2),
+            Axis(name="y", min=0.0, max=3.0, nbins=3),
+        ]
+        data = UnbinnedData(
+            name="test_2d_unbinned", type="unbinned", entries=entries, axes=axes
+        )
+
+        h = data.to_hist()
+
+        # Check dimensions
+        assert len(h.axes) == 2
+        assert h.axes[0].name == "x"
+        assert h.axes[1].name == "y"
+
+        # Verify that entries were binned (exact values depend on binning logic)
+        assert h.values().sum() == 3.0  # Total entries
+
+
 class TestData:
     """Tests for the Data collection class."""
 

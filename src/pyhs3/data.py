@@ -219,6 +219,90 @@ class UnbinnedData(Datum):
 
         return self
 
+    def to_hist(self) -> hist.Hist:
+        """
+        Convert to scikit-hep hist.Hist object by binning entries.
+
+        Creates a hist.Hist histogram by binning the unbinned entries according
+        to the axis specifications. The resulting histogram can be plotted using
+        matplotlib or other visualization tools.
+
+        Note:
+            Requires the hist package. Install with: python -m pip install 'pyhs3[visualization]'
+            or python -m pip install hist
+
+        Returns:
+            hist.Hist: Histogram representation with:
+                - Axes matching the data axes
+                - Values from binned entries
+                - Weights if provided
+
+        Raises:
+            ImportError: If hist package is not installed
+
+        Examples:
+            >>> entries = [[0.5], [1.2], [1.8]]
+            >>> axes = [Axis(name="x", min=0, max=3, nbins=3)]
+            >>> data = UnbinnedData(
+            ...     name="example",
+            ...     type="unbinned",
+            ...     entries=entries,
+            ...     axes=axes
+            ... )
+            >>> h = data.to_hist()
+            >>> h.plot()  # Plot with matplotlib
+        """
+        try:
+            import hist  # noqa: PLC0415
+        except ImportError as e:
+            msg = (
+                "Histogram visualization requires the 'hist' package. "
+                "Install with: python -m pip install 'pyhs3[visualization]' or python -m pip install hist"
+            )
+            raise ImportError(msg) from e
+
+        # Build the histogram incrementally
+        h_builder = hist.Hist.new
+
+        # Add axes
+        for axis in self.axes:
+            if axis.edges is not None:
+                # Irregular binning
+                h_builder = h_builder.Variable(axis.edges, name=axis.name)
+            elif all(x is not None for x in [axis.min, axis.max, axis.nbins]):
+                # Regular binning
+                # Type assertions needed since we checked above
+                assert axis.nbins is not None
+                assert axis.min is not None
+                assert axis.max is not None
+                h_builder = h_builder.Regular(
+                    axis.nbins, axis.min, axis.max, name=axis.name
+                )
+            else:
+                msg = f"Axis '{axis.name}' has insufficient binning information"
+                raise ValueError(msg)
+
+        # Select storage based on whether we have weights
+        h = (
+            h_builder.Weight()  # type: ignore[attr-defined]
+            if self.weights is not None
+            else h_builder.Double()  # type: ignore[attr-defined]
+        )
+
+        # Transpose entries from [[x1, y1], [x2, y2]] to [[x1, x2], [y1, y2]]
+        if len(self.entries) > 0:
+            entries_transposed = list(zip(*self.entries, strict=True))
+            # Convert to numpy arrays for filling
+            fill_args = [np.array(coord_list) for coord_list in entries_transposed]
+
+            # Fill the histogram
+            if self.weights is not None:
+                h.fill(*fill_args, weight=np.array(self.weights))
+            else:
+                h.fill(*fill_args)
+
+        return h  # type: ignore[no-any-return]
+
 
 class BinnedData(Datum):
     """

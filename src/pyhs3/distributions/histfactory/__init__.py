@@ -204,7 +204,7 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         Applies all modifiers to sample predictions to get final rates.
         """
         # Start with zeros for total prediction
-        total_rates = pt.zeros(total_bins)  # type: ignore[no-untyped-call]
+        total_rates = pt.zeros(total_bins)
 
         # Process each sample
         for sample in self.samples:

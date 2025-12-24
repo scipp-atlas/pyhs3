@@ -8,12 +8,15 @@ including point data, unbinned data, and binned data with uncertainties.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 from pyhs3.exceptions import custom_error_msg
+
+if TYPE_CHECKING:
+    import hist
 
 
 class Axis(BaseModel):
@@ -266,6 +269,83 @@ class BinnedData(Datum):
             raise ValueError(msg)
 
         return self
+
+    def to_hist(self) -> hist.Hist:
+        """
+        Convert to scikit-hep hist.Hist object for visualization.
+
+        Creates a hist.Hist histogram from this binned data. The resulting
+        histogram can be plotted using matplotlib or other visualization tools.
+
+        Note:
+            Requires the hist package. Install with: python -m pip install 'pyhs3[visualization]'
+            or python -m pip install hist
+
+        Note:
+            Correlation matrices in uncertainties are not preserved. Only the
+            sigma values (standard deviations) are included as histogram variances.
+
+        Returns:
+            hist.Hist: Histogram representation with:
+                - Axes matching the data axes
+                - Values from contents
+                - Variances from uncertainties if present
+
+        Raises:
+            ImportError: If hist package is not installed
+
+        Examples:
+            >>> data = BinnedData(
+            ...     name="example",
+            ...     type="binned",
+            ...     contents=[10, 20, 15],
+            ...     axes=[Axis(name="x", min=0, max=3, nbins=3)]
+            ... )
+            >>> h = data.to_hist()
+            >>> h.plot()  # Plot with matplotlib
+        """
+        try:
+            import hist  # noqa: PLC0415
+        except ImportError as e:
+            msg = (
+                "Histogram visualization requires the 'hist' package. "
+                "Install with: python -m pip install 'pyhs3[visualization]' or python -m pip install hist"
+            )
+            raise ImportError(msg) from e
+
+        # Build the histogram incrementally
+        h_builder = hist.Hist.new
+
+        # Add axes
+        for axis in self.axes:
+            if axis.edges is not None:
+                # Irregular binning
+                h_builder = h_builder.Variable(axis.edges, name=axis.name)
+            elif all(x is not None for x in [axis.min, axis.max, axis.nbins]):
+                # Regular binning
+                # Type assertions needed since we checked above
+                assert axis.nbins is not None
+                assert axis.min is not None
+                assert axis.max is not None
+                h_builder = h_builder.Regular(
+                    axis.nbins, axis.min, axis.max, name=axis.name
+                )
+            else:
+                msg = f"Axis '{axis.name}' has insufficient binning information"
+                raise ValueError(msg)
+
+        # Select storage based on whether we have uncertainties
+        if self.uncertainty is not None:
+            h = h_builder.Weight()  # type: ignore[attr-defined]
+            # Set values with variances
+            variances = np.square(self.uncertainty.sigma)
+            h[:] = [[c, v] for c, v in zip(self.contents, variances, strict=True)]
+        else:
+            h = h_builder.Double()  # type: ignore[attr-defined]
+            # Set values directly
+            h[:] = self.contents
+
+        return h  # type: ignore[no-any-return]
 
 
 # Type alias for all data types using discriminated union

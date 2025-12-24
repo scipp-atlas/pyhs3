@@ -7,6 +7,7 @@ Data collection class, and related components like Axis and GaussianUncertainty.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from pyhs3.data import (
@@ -17,6 +18,8 @@ from pyhs3.data import (
     PointData,
     UnbinnedData,
 )
+
+hist = pytest.importorskip("hist", reason="hist not installed")
 
 
 class TestAxis:
@@ -478,6 +481,27 @@ class TestBinnedData:
                 axes=axes,
                 uncertainty=uncertainty,
             )
+
+
+class TestBinnedDataHistConversion:
+    """Tests for BinnedData.to_hist() method."""
+
+    def test_to_hist_1d_regular_binning(self):
+        """Test BinnedData.to_hist() with 1D regular binning."""
+        contents = [10.0, 20.0, 15.0]
+        axes = [Axis(name="x", min=0.0, max=3.0, nbins=3)]
+        data = BinnedData(name="test", type="binned", contents=contents, axes=axes)
+
+        h = data.to_hist()
+
+        # Check that values match
+        assert np.array_equal(h.values(), contents)
+        # Check that axis is correctly configured
+        assert len(h.axes) == 1
+        assert h.axes[0].name == "x"
+        assert len(h.axes[0].edges) == 4  # 3 bins = 4 edges
+        assert h.axes[0].edges[0] == pytest.approx(0.0)
+        assert h.axes[0].edges[-1] == pytest.approx(3.0)
 
 
 class TestData:

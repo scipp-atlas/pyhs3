@@ -135,6 +135,7 @@ disallow_incomplete_defs = true
 module = [
   "pyhf.*",
   "sympy.*",  # https://github.com/sympy/sympy/pull/26158
+  "hist.*",
 ]
 ignore_missing_imports = true
 

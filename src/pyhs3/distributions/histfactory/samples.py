@@ -18,6 +18,7 @@ from pyhs3.distributions.histfactory.modifiers import Modifiers
 
 if TYPE_CHECKING:
     import hist
+
     from pyhs3.distributions.histfactory.axes import Axes
 
 

@@ -335,15 +335,36 @@ class BinnedData(Datum):
                 raise ValueError(msg)
 
         # Select storage based on whether we have uncertainties
+        h = (
+            h_builder.Weight()  # type: ignore[attr-defined]
+            if self.uncertainty is not None
+            else h_builder.Double()  # type: ignore[attr-defined]
+        )
+
+        # Calculate shape from axes
+        shape = tuple(
+            (
+                axis.nbins
+                if axis.nbins is not None
+                else len(axis.edges) - 1
+                if axis.edges is not None
+                else 0
+            )
+            for axis in self.axes
+        )
+
+        # Reshape contents for assignment
         if self.uncertainty is not None:
-            h = h_builder.Weight()  # type: ignore[attr-defined]
-            # Set values with variances
-            variances = np.square(self.uncertainty.sigma)
-            h[:] = [[c, v] for c, v in zip(self.contents, variances, strict=True)]
+            # Reshape both contents and variances
+            contents_nd = np.array(self.contents).reshape(shape)
+            variances_nd = np.square(self.uncertainty.sigma).reshape(shape)
+            # Set values with variances using view
+            h.view(flow=False)["value"] = contents_nd
+            h.view(flow=False)["variance"] = variances_nd
         else:
-            h = h_builder.Double()  # type: ignore[attr-defined]
-            # Set values directly
-            h[:] = self.contents
+            # Reshape and set contents using view
+            contents_nd = np.array(self.contents).reshape(shape)
+            h.view(flow=False)[...] = contents_nd
 
         return h  # type: ignore[no-any-return]
 

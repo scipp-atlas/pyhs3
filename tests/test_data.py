@@ -503,6 +503,68 @@ class TestBinnedDataHistConversion:
         assert h.axes[0].edges[0] == pytest.approx(0.0)
         assert h.axes[0].edges[-1] == pytest.approx(3.0)
 
+    def test_to_hist_1d_irregular_binning(self):
+        """Test BinnedData.to_hist() with 1D irregular binning."""
+        contents = [10.0, 25.0, 5.0]
+        edges = [0.0, 10.0, 50.0, 100.0]  # 3 bins with variable widths
+        axes = [Axis(name="pt", edges=edges)]
+        data = BinnedData(
+            name="test_irregular", type="binned", contents=contents, axes=axes
+        )
+
+        h = data.to_hist()
+
+        # Check that values match
+        assert np.array_equal(h.values(), contents)
+        # Check that axis is correctly configured with irregular binning
+        assert len(h.axes) == 1
+        assert h.axes[0].name == "pt"
+        assert len(h.axes[0].edges) == 4  # 3 bins = 4 edges
+        assert np.array_equal(h.axes[0].edges, edges)
+
+    def test_to_hist_1d_with_uncertainties(self):
+        """Test BinnedData.to_hist() with gaussian uncertainties."""
+        contents = [10.0, 20.0, 15.0]
+        sigma = [3.0, 4.0, 2.5]
+        axes = [Axis(name="x", min=0.0, max=3.0, nbins=3)]
+        uncertainty = GaussianUncertainty(type="gaussian_uncertainty", sigma=sigma)
+        data = BinnedData(
+            name="test_unc",
+            type="binned",
+            contents=contents,
+            axes=axes,
+            uncertainty=uncertainty,
+        )
+
+        h = data.to_hist()
+
+        # Check that values match
+        assert np.array_equal(h.values(), contents)
+        # Check that variances match (sigma^2)
+        expected_variances = np.square(sigma)
+        assert np.allclose(h.variances(), expected_variances)
+
+    def test_to_hist_2d_regular_binning(self):
+        """Test BinnedData.to_hist() with 2D regular binning."""
+        # 2x3 = 6 bins, flattened in C-order (row-major)
+        contents = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+        axes = [
+            Axis(name="x", min=0.0, max=2.0, nbins=2),
+            Axis(name="y", min=0.0, max=3.0, nbins=3),
+        ]
+        data = BinnedData(name="test_2d", type="binned", contents=contents, axes=axes)
+
+        h = data.to_hist()
+
+        # Check dimensions
+        assert len(h.axes) == 2
+        assert h.axes[0].name == "x"
+        assert h.axes[1].name == "y"
+
+        # Check values - hist should reshape to (2, 3) in C-order
+        expected_2d = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        assert np.array_equal(h.values(), expected_2d)
+
 
 class TestData:
     """Tests for the Data collection class."""

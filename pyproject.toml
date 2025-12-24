@@ -46,6 +46,10 @@ test = [
   "pydocstyle",
   "scikit-hep-testdata >= 0.5.7",
   "pydot",
+  "hist >= 2.7.0",
+]
+visualization = [
+  "hist >= 2.7.0",
 ]
 dev = [
   "pytest >=9",

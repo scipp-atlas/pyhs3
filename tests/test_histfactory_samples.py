@@ -10,10 +10,10 @@ import sys
 
 import numpy as np
 import pytest
-from pyhs3.lazy import get_hist
 
 from pyhs3.distributions.histfactory.axes import Axes
 from pyhs3.distributions.histfactory.samples import Sample, SampleData, Samples
+from pyhs3.lazy import get_hist
 
 hist = pytest.importorskip("hist", reason="hist not installed")
 

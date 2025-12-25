@@ -23,8 +23,6 @@ try:
 except ImportError:
     HAS_PYHF = False
 
-from pyhs3.lazy import get_hist
-
 import pyhs3
 from pyhs3.context import Context
 from pyhs3.distributions import HistFactoryDistChannel
@@ -34,6 +32,7 @@ from pyhs3.distributions.histfactory.modifiers import (
     ShapeFactorModifier,
     StatErrorModifier,
 )
+from pyhs3.lazy import get_hist
 
 
 class TestHistFactoryDist:

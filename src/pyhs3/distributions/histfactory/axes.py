@@ -16,6 +16,8 @@ from pydantic import Discriminator, Field, RootModel, Tag, model_validator
 
 from pyhs3.domains import Axis
 
+TYPE_CHECKING = False
+
 
 class BinnedAxisRange(Axis):
     """
@@ -49,8 +51,9 @@ class BinnedAxisRange(Axis):
         Returns:
             A hist.axis.Regular object for regular binning
         """
-        assert self.min is not None
-        assert self.max is not None
+        if TYPE_CHECKING:
+            assert self.min is not None
+            assert self.max is not None
         return hist.axis.Regular(self.nbins, self.min, self.max, name=self.name)
 
 

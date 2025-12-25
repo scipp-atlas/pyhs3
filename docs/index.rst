@@ -8,6 +8,7 @@
    broadcasting
    defining_components
    api
+   visualization
 
 .. toctree::
    :hidden:

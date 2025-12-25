@@ -27,6 +27,7 @@ extensions = [
     "sphinx_issues",
     "sphinxcontrib.mermaid",
     "sphinxcontrib.bibtex",
+    "matplotlib.sphinxext.plot_directive",
 ]
 
 # GitHub repo

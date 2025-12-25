@@ -287,13 +287,20 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
             ...     name="SR",
             ...     axes=[{"name": "mass", "min": 100, "max": 150, "nbins": 5}],
             ...     samples=[
-            ...         {"name": "signal", "data": {...}},
-            ...         {"name": "background", "data": {...}}
+            ...         {"name": "signal", "data": {"contents": [105, 106, 107, 108, 109], "errors": [0.5, 0.6, 0.7, 0.8, 0.9]}},
+            ...         {"name": "background", "data": {"contents": [110, 111, 112, 113, 114], "errors": [0.05, 0.06, 0.07, 0.08, 0.09]}}
             ...     ]
             ... )
             >>> h = channel.to_hist()
-            >>> h.axes[0]  # StrCategory(["signal", "background"], name="process")
+            >>> h
+            Hist(
+              StrCategory(['signal', 'background'], name='process'),
+              Regular(5, 100, 150, name='mass'),
+              storage=Weight()) # Sum: WeightedSum(value=1095, variance=2.5755)
+            >>> h.axes[0]
+            StrCategory(['signal', 'background'], name='process')
             >>> h["signal", :]  # Get all mass bins for signal sample
+            Hist(Regular(5, 100, 150, name='mass'), storage=Weight()) # Sum: WeightedSum(value=535, variance=2.55)
         """
         # First axis: categorical sample axis (use "process" since "sample" is a protected keyword in hist)
         sample_names = [sample.name for sample in self.samples]

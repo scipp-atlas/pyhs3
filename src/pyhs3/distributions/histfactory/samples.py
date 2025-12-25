@@ -66,8 +66,8 @@ class Sample(BaseModel):
             ...     data={"contents": [10, 20, 15], "errors": [3, 4, 2.5]}
             ... )
             >>> axes = Axes([{"name": "x", "min": 0, "max": 3, "nbins": 3}])
-            >>> h = sample.to_hist(axes)
-            >>> h.plot()  # Plot with matplotlib
+            >>> sample.to_hist(axes)
+            Hist(Regular(3, 0, 3, name='x'), storage=Weight()) # Sum: WeightedSum(value=45, variance=31.25)
         """
         # Convert axes to hist.axis objects
         # Access the root to get the actual axis (BinnedAxisRange or BinnedAxisEdges)

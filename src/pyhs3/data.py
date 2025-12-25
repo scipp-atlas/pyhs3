@@ -267,8 +267,8 @@ class UnbinnedData(Datum):
             ...     entries=entries,
             ...     axes=axes
             ... )
-            >>> h = data.to_hist()
-            >>> h.plot()  # Plot with matplotlib
+            >>> data.to_hist()
+            Hist(Regular(3, 0, 3, name='x'), storage=Double()) # Sum: 3.0
         """
         # Convert axes to hist.axis objects
         hist_axes = [axis.to_hist() for axis in self.axes]
@@ -368,8 +368,8 @@ class BinnedData(Datum):
             ...     contents=[10, 20, 15],
             ...     axes=[Axis(name="x", min=0, max=3, nbins=3)]
             ... )
-            >>> h = data.to_hist()
-            >>> h.plot()  # Plot with matplotlib
+            >>> data.to_hist()
+            Hist(Regular(3, 0, 3, name='x'), storage=Double()) # Sum: 45.0
         """
         # Convert axes to hist.axis objects
         hist_axes = [axis.to_hist() for axis in self.axes]

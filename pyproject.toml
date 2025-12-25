@@ -39,17 +39,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+visualization = [
+  "hist >= 2.7.0",
+]
 test = [
+  "pyhs3[visualization]",
   "pytest >=9",
   "pytest-cov >=3",
   "pyhf >= 0.7.6",
   "pydocstyle",
   "scikit-hep-testdata >= 0.5.7",
   "pydot",
-  "hist >= 2.7.0",
-]
-visualization = [
-  "hist >= 2.7.0",
 ]
 dev = [
   "pytest >=9",
@@ -68,6 +68,10 @@ docs = [
   "sphinx-issues",
   "sphinxcontrib-mermaid",
   "sphinxcontrib-bibtex",
+  "matplotlib",
+]
+develop = [
+  "pyhs3[test,docs,dev]",
 ]
 
 [project.urls]

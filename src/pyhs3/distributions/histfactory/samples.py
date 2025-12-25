@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, PrivateAttr, RootModel, model_validator
 
 # Import existing distributions for constraint terms
 from pyhs3.distributions.histfactory.modifiers import Modifiers
+from pyhs3.lazy import get_hist
 
 if TYPE_CHECKING:
     import hist
@@ -77,37 +78,14 @@ class Sample(BaseModel):
             >>> h = sample.to_hist(axes)
             >>> h.plot()  # Plot with matplotlib
         """
-        try:
-            import hist  # noqa: PLC0415
-        except ImportError as e:
-            msg = (
-                "Histogram visualization requires the 'hist' package. "
-                "Install with: python -m pip install 'pyhs3[visualization]' or python -m pip install hist"
-            )
-            raise ImportError(msg) from e
+        hist = get_hist()
 
-        # Build the histogram incrementally
-        h_builder = hist.Hist.new
+        # Convert axes to hist.axis objects
+        # Access the root to get the actual axis (BinnedAxisRange or BinnedAxisEdges)
+        hist_axes = [axis.root.to_hist() for axis in axes]
 
-        # Add axes
-        for axis in axes:
-            # Access the root to get the actual axis (BinnedAxisRange or BinnedAxisEdges)
-            ax = axis.root
-            if hasattr(ax, "edges"):
-                # Irregular binning (BinnedAxisEdges)
-                h_builder = h_builder.Variable(ax.edges, name=ax.name)
-            elif hasattr(ax, "nbins") and hasattr(ax, "min") and hasattr(ax, "max"):
-                # Regular binning (BinnedAxisRange)
-                # Type assertions needed for mypy
-                assert ax.min is not None
-                assert ax.max is not None
-                h_builder = h_builder.Regular(ax.nbins, ax.min, ax.max, name=ax.name)
-            else:
-                msg = f"Axis '{ax.name}' has insufficient binning information"
-                raise ValueError(msg)
-
-        # Use Weight storage since we always have errors
-        h = h_builder.Weight()  # type: ignore[attr-defined]
+        # Create histogram with Weight storage since we always have errors
+        h = hist.Hist(*hist_axes, storage=hist.storage.Weight())
 
         # Calculate shape from axes
         shape = tuple(axis.get_nbins() for axis in axes)

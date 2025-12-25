@@ -14,6 +14,7 @@ from typing import Annotated, Any
 from pydantic import Discriminator, Field, RootModel, Tag, model_validator
 
 from pyhs3.domains import Axis
+from pyhs3.lazy import get_hist
 
 
 class BinnedAxisRange(Axis):
@@ -40,6 +41,18 @@ class BinnedAxisRange(Axis):
     def get_nbins(self) -> int:
         """Get the number of bins."""
         return self.nbins
+
+    def to_hist(self) -> Any:
+        """
+        Convert this axis to a hist.axis.Regular object.
+
+        Returns:
+            A hist.axis.Regular object for regular binning
+        """
+        hist = get_hist()
+        assert self.min is not None
+        assert self.max is not None
+        return hist.axis.Regular(self.nbins, self.min, self.max, name=self.name)
 
 
 class BinnedAxisEdges(Axis):
@@ -68,6 +81,16 @@ class BinnedAxisEdges(Axis):
     def get_nbins(self) -> int:
         """Get the number of bins."""
         return len(self.edges) - 1
+
+    def to_hist(self) -> Any:
+        """
+        Convert this axis to a hist.axis.Variable object.
+
+        Returns:
+            A hist.axis.Variable object for irregular binning
+        """
+        hist = get_hist()
+        return hist.axis.Variable(self.edges, name=self.name)
 
 
 def get_binned_axis_discriminator(v: Any) -> str:

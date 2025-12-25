@@ -7,8 +7,8 @@
    model
    broadcasting
    defining_components
-   api
    visualization
+   api
 
 .. toctree::
    :hidden:

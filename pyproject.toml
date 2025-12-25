@@ -66,6 +66,7 @@ docs = [
   "sphinxcontrib-mermaid",
   "sphinxcontrib-bibtex",
   "matplotlib",
+  "hist[plot] > 2.7.0", # keep synced with dependencies
 ]
 develop = [
   "pyhs3[test,docs,dev]",

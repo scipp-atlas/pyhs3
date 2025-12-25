@@ -3,15 +3,6 @@ Histogram Visualization
 
 pyhs3 provides convenient methods to convert data objects into `hist.Hist <https://hist.readthedocs.io/>`_ histograms for visualization and analysis using the scikit-hep ecosystem.
 
-Installation
-------------
-
-The ``hist`` package is included as a dependency when you install pyhs3:
-
-.. code-block:: bash
-
-   python -m pip install pyhs3
-
 Converting Data to Histograms
 ------------------------------
 
@@ -29,7 +20,6 @@ BinnedData to hist
    :include-source:
 
    from pyhs3.data import BinnedData, Axis
-   import matplotlib.pyplot as plt
 
    # Create binned data with regular binning
    data = BinnedData(
@@ -54,7 +44,6 @@ BinnedData to hist
    :include-source:
 
    from pyhs3.data import BinnedData, Axis
-   import matplotlib.pyplot as plt
 
    # Create binned data with variable-width bins
    data = BinnedData(
@@ -79,7 +68,6 @@ Binned Data with Uncertainties
    :include-source:
 
    from pyhs3.data import BinnedData, Axis, GaussianUncertainty
-   import matplotlib.pyplot as plt
 
    # Create binned data with uncertainties
    contents = [12.5, 18.3, 15.7, 22.1, 19.4]
@@ -108,8 +96,6 @@ Binned Data with Uncertainties
    :include-source:
 
    from pyhs3.data import BinnedData, Axis
-   import matplotlib.pyplot as plt
-   import numpy as np
 
    # Create 2D binned data (3x4 = 12 bins)
    contents = [1.0, 2.0, 3.0, 4.0,
@@ -146,7 +132,6 @@ UnbinnedData to hist
    :include-source:
 
    from pyhs3.data import UnbinnedData, Axis
-   import matplotlib.pyplot as plt
 
    # Create unbinned data points
    entries = [[0.5], [1.2], [1.8], [2.3], [0.9], [1.5], [2.7], [1.1]]
@@ -173,7 +158,6 @@ Unbinned Data with Weights
    :include-source:
 
    from pyhs3.data import UnbinnedData, Axis
-   import matplotlib.pyplot as plt
 
    # Create weighted unbinned data
    entries = [[0.5], [1.2], [1.8], [2.3], [0.9]]
@@ -202,7 +186,6 @@ Unbinned Data with Weights
    :include-source:
 
    from pyhs3.data import UnbinnedData, Axis
-   import matplotlib.pyplot as plt
 
    # Create 2D unbinned data points
    entries = [
@@ -241,7 +224,6 @@ Basic Sample Conversion
 
    from pyhs3.distributions.histfactory.samples import Sample
    from pyhs3.distributions.histfactory.axes import Axes
-   import matplotlib.pyplot as plt
 
    # Create a HistFactory sample
    sample = Sample(
@@ -271,7 +253,6 @@ Comparing Multiple Samples
 
    from pyhs3.distributions.histfactory.samples import Sample
    from pyhs3.distributions.histfactory.axes import Axes
-   import matplotlib.pyplot as plt
 
    # Create multiple samples
    signal = Sample(
@@ -310,7 +291,6 @@ Basic Channel Conversion
    :include-source:
 
    from pyhs3.distributions import HistFactoryDistChannel
-   import matplotlib.pyplot as plt
 
    # Create a HistFactory channel with multiple samples
    channel = HistFactoryDistChannel(
@@ -348,7 +328,6 @@ Stacked Histogram from Channel
    :include-source:
 
    from pyhs3.distributions import HistFactoryDistChannel
-   import matplotlib.pyplot as plt
 
    # Create channel with multiple background processes
    channel = HistFactoryDistChannel(
@@ -402,7 +381,6 @@ The ``hist.Hist`` objects returned by ``to_hist()`` support the full matplotlib 
    :include-source:
 
    from pyhs3.data import BinnedData, Axis
-   import matplotlib.pyplot as plt
 
    data = BinnedData(
        name="custom",
@@ -415,7 +393,7 @@ The ``hist.Hist`` objects returned by ``to_hist()`` support the full matplotlib 
 
    # Customize the plot
    h.plot(
-       histtype="stepfilled",
+       histtype="fill",
        alpha=0.5,
        color="steelblue",
        edgecolor="darkblue",
@@ -428,6 +406,7 @@ The ``hist.Hist`` objects returned by ``to_hist()`` support the full matplotlib 
    plt.title("Customized Histogram", fontsize=16)
    plt.grid(True, alpha=0.3, linestyle="--")
    plt.legend(fontsize=12)
+   plt.show()
 
 Working with hist Objects
 --------------------------

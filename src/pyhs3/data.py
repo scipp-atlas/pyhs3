@@ -8,7 +8,7 @@ including point data, unbinned data, and binned data with uncertainties.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import Annotated, Any, Literal
 
 import hist
 import numpy as np
@@ -16,8 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 from pyhs3.exceptions import custom_error_msg
 
-if TYPE_CHECKING:
-    pass
+TYPE_CHECKING = False
 
 
 class Axis(BaseModel):
@@ -100,16 +99,13 @@ class Axis(BaseModel):
         if self.edges is not None:
             # Irregular binning
             return hist.axis.Variable(self.edges, name=self.name)
-        if all(x is not None for x in [self.min, self.max, self.nbins]):
-            # Regular binning
-            # Type assertions needed for mypy
-            assert self.nbins is not None
+
+        # Regular binning
+        if TYPE_CHECKING:
             assert self.min is not None
             assert self.max is not None
-            return hist.axis.Regular(self.nbins, self.min, self.max, name=self.name)
-
-        msg = f"Axis '{self.name}' has insufficient binning information"
-        raise ValueError(msg)
+            assert self.nbins is not None
+        return hist.axis.Regular(self.nbins, self.min, self.max, name=self.name)
 
 
 class GaussianUncertainty(BaseModel):

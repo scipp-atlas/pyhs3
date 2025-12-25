@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Annotated, Literal, cast
+from typing import Annotated, Literal, cast
 
 import pytensor.tensor as pt
 from pydantic import BaseModel, Field, RootModel, model_validator
@@ -12,14 +12,12 @@ from pyhs3.context import Context
 from pyhs3.distributions.basic import GaussianDist, LogNormalDist, PoissonDist
 from pyhs3.distributions.core import Distribution
 from pyhs3.distributions.histfactory import interpolations
+from pyhs3.distributions.histfactory.data import SampleData
 
 # Import existing distributions for constraint terms
 from pyhs3.exceptions import custom_error_msg
 from pyhs3.networks import HasDependencies
 from pyhs3.typing.aliases import TensorVar
-
-if TYPE_CHECKING:
-    from pyhs3.distributions.histfactory.samples import SampleData
 
 
 class ModifierData(BaseModel):

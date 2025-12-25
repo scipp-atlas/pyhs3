@@ -8,32 +8,17 @@ with samples and modifiers as defined in the HS3 specification.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import hist
 import numpy as np
-from pydantic import BaseModel, Field, PrivateAttr, RootModel, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, RootModel
+
+from pyhs3.distributions.histfactory.axes import Axes
 
 # Import existing distributions for constraint terms
+from pyhs3.distributions.histfactory.data import SampleData
 from pyhs3.distributions.histfactory.modifiers import Modifiers
-
-if TYPE_CHECKING:
-    from pyhs3.distributions.histfactory.axes import Axes
-
-
-class SampleData(BaseModel):
-    """Sample data containing bin contents and errors."""
-
-    contents: list[float]
-    errors: list[float]
-
-    @model_validator(mode="after")
-    def validate_lengths(self) -> SampleData:
-        """Ensure contents and errors have same length."""
-        if len(self.contents) != len(self.errors):
-            msg = f"Sample data contents ({len(self.contents)}) and errors ({len(self.errors)}) must have same length"
-            raise ValueError(msg)
-        return self
 
 
 class Sample(BaseModel):

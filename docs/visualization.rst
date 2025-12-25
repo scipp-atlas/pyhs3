@@ -304,6 +304,101 @@ Comparing Multiple Samples
    plt.legend()
    plt.title("Signal vs Background")
 
+HistFactory Channel to hist
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+HistFactory ``HistFactoryDistChannel`` objects represent complete channels with multiple samples. The ``to_hist()`` method creates a single histogram with a categorical "process" axis for distinguishing between samples, followed by the binning axes.
+
+Basic Channel Conversion
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. plot::
+   :include-source:
+
+   from pyhs3.distributions import HistFactoryDistChannel
+   import matplotlib.pyplot as plt
+
+   # Create a HistFactory channel with multiple samples
+   channel = HistFactoryDistChannel(
+       name="SR",
+       axes=[{"name": "mass", "min": 100.0, "max": 150.0, "nbins": 5}],
+       samples=[
+           {
+               "name": "signal",
+               "data": {"contents": [5.0, 8.0, 12.0, 7.0, 3.0], "errors": [2.0, 2.5, 3.0, 2.3, 1.5]},
+               "modifiers": []
+           },
+           {
+               "name": "background",
+               "data": {"contents": [15.0, 18.0, 14.0, 16.0, 12.0], "errors": [3.5, 4.0, 3.7, 3.9, 3.2]},
+               "modifiers": []
+           }
+       ]
+   )
+
+   # Convert to hist - creates histogram with categorical "process" axis
+   h = channel.to_hist()
+
+   # Plot both samples from the single histogram
+   h["signal", :].plot(histtype="step", linewidth=2, label="Signal")
+   h["background", :].plot(histtype="step", linewidth=2, label="Background")
+   plt.xlabel("mass [GeV]")
+   plt.ylabel("Events")
+   plt.legend()
+   plt.title("HistFactory Channel")
+
+Stacked Histogram from Channel
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. plot::
+   :include-source:
+
+   from pyhs3.distributions import HistFactoryDistChannel
+   import matplotlib.pyplot as plt
+
+   # Create channel with multiple background processes
+   channel = HistFactoryDistChannel(
+       name="channel",
+       axes=[{"name": "observable", "min": 0.0, "max": 4.0, "nbins": 4}],
+       samples=[
+           {
+               "name": "Signal",
+               "data": {"contents": [3.0, 5.0, 7.0, 4.0], "errors": [1.5, 2.0, 2.5, 1.8]},
+               "modifiers": []
+           },
+           {
+               "name": "QCD",
+               "data": {"contents": [20.0, 18.0, 15.0, 12.0], "errors": [4.0, 3.8, 3.5, 3.2]},
+               "modifiers": []
+           },
+           {
+               "name": "W+jets",
+               "data": {"contents": [15.0, 12.0, 10.0, 8.0], "errors": [3.5, 3.2, 3.0, 2.8]},
+               "modifiers": []
+           }
+       ]
+   )
+
+   h = channel.to_hist()
+
+   # Create stacked histogram
+   # Note: hist.stack() requires individual histograms, so we extract them
+   signal = h["Signal", :]
+   qcd = h["QCD", :]
+   wjets = h["W+jets", :]
+
+   # Plot stacked backgrounds
+   plt.stairs(wjets.values(), wjets.axes[0].edges, fill=True, label="W+jets", alpha=0.7)
+   plt.stairs(wjets.values() + qcd.values(), wjets.axes[0].edges, fill=True, label="QCD", alpha=0.7)
+
+   # Overlay signal
+   signal.plot(histtype="step", linewidth=2, color="red", label="Signal")
+
+   plt.xlabel("Observable")
+   plt.ylabel("Events")
+   plt.legend()
+   plt.title("Stacked HistFactory Channel")
+
 Customizing Plots
 ------------------
 

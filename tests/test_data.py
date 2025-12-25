@@ -7,6 +7,8 @@ Data collection class, and related components like Axis and GaussianUncertainty.
 
 from __future__ import annotations
 
+import sys
+
 import numpy as np
 import pytest
 
@@ -18,6 +20,7 @@ from pyhs3.data import (
     PointData,
     UnbinnedData,
 )
+from pyhs3.lazy import get_hist
 
 hist = pytest.importorskip("hist", reason="hist not installed")
 
@@ -803,3 +806,47 @@ class TestData:
 
         with pytest.raises(IndexError):
             _ = data[0]
+
+
+class TestImportErrorHandling:
+    """Tests for ImportError handling in to_hist() methods."""
+
+    def test_binned_data_to_hist_without_hist(self, isolate_modules):  # noqa: ARG002
+        """Test that BinnedData.to_hist() raises helpful error when hist is not installed."""
+        # Clear the cache and hide hist module
+        get_hist.cache_clear()
+        CACHE, sys.modules["hist"] = sys.modules["hist"], None
+
+        # Create data and try to convert - the import hist happens inside to_hist()
+        data = BinnedData(
+            name="test",
+            type="binned",
+            contents=[10.0, 20.0],
+            axes=[Axis(name="x", min=0, max=2, nbins=2)],
+        )
+
+        # Should raise ImportError with helpful message
+        with pytest.raises(ImportError, match=r"visualization.*pyhs3\[visualization\]"):
+            data.to_hist()
+
+        CACHE, sys.modules["hist"] = None, CACHE
+
+    def test_unbinned_data_to_hist_without_hist(self, isolate_modules):  # noqa: ARG002
+        """Test that UnbinnedData.to_hist() raises helpful error when hist is not installed."""
+        # Clear the cache and hide hist module
+        get_hist.cache_clear()
+        CACHE, sys.modules["hist"] = sys.modules["hist"], None
+
+        # Create data and try to convert - the import hist happens inside to_hist()
+        data = UnbinnedData(
+            name="test",
+            type="unbinned",
+            entries=[[0.5], [1.5]],
+            axes=[Axis(name="x", min=0, max=2, nbins=2)],
+        )
+
+        # Should raise ImportError with helpful message
+        with pytest.raises(ImportError, match=r"visualization.*pyhs3\[visualization\]"):
+            data.to_hist()
+
+        CACHE, sys.modules["hist"] = None, CACHE

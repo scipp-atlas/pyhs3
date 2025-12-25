@@ -266,3 +266,43 @@ class TestSampleHistConversion:
         # Check reshaped values
         expected_2d = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
         assert np.array_equal(h.values(), expected_2d)
+
+    def test_sample_to_hist_empty_contents(self):
+        """Test Sample.to_hist() with empty contents raises error."""
+        # This will fail validation at SampleData level
+        with pytest.raises(
+            ValueError, match=r"Sample data contents.*must have same length"
+        ):
+            Sample(
+                name="empty_sample",
+                data={"contents": [], "errors": [1.0]},
+            )
+
+    def test_sample_to_hist_3d(self):
+        """Test Sample.to_hist() with 3D histogram."""
+        # 2x2x3 = 12 bins
+        sample = Sample(
+            name="test_3d",
+            data={
+                "contents": [float(i) for i in range(1, 13)],
+                "errors": [0.1 * i for i in range(1, 13)],
+            },
+        )
+        axes = Axes(
+            [
+                {"name": "x", "min": 0.0, "max": 2.0, "nbins": 2},
+                {"name": "y", "min": 0.0, "max": 2.0, "nbins": 2},
+                {"name": "z", "min": 0.0, "max": 3.0, "nbins": 3},
+            ]
+        )
+
+        h = sample.to_hist(axes)
+
+        # Check dimensions
+        assert len(h.axes) == 3
+        assert h.axes[0].name == "x"
+        assert h.axes[1].name == "y"
+        assert h.axes[2].name == "z"
+
+        # Check that total is preserved
+        assert h.values().sum() == sum(range(1, 13))

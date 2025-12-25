@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import platform
-import sys
 import warnings
 
 import numpy as np
@@ -32,7 +31,6 @@ from pyhs3.distributions.histfactory.modifiers import (
     ShapeFactorModifier,
     StatErrorModifier,
 )
-from pyhs3.lazy import get_hist
 
 
 class TestHistFactoryDist:
@@ -1459,28 +1457,3 @@ class TestHistFactoryChannelHistConversion:
         # We should be able to recover the errors by taking sqrt of variances
         recovered_errors = np.sqrt(h["data", :].variances())
         assert np.allclose(recovered_errors, [10.0, 12.0, 11.0])
-
-    def test_to_hist_without_hist(self, isolate_modules):  # noqa: ARG002
-        """Test that HistFactoryDistChannel.to_hist() raises helpful error when hist is not installed."""
-        # Clear the cache and hide hist module
-        get_hist.cache_clear()
-        CACHE, sys.modules["hist"] = sys.modules["hist"], None
-
-        # Create channel - the import hist happens inside to_hist()
-        axes = [{"name": "x", "min": 0.0, "max": 2.0, "nbins": 2}]
-        samples = [
-            {
-                "name": "test",
-                "data": {"contents": [10.0, 20.0], "errors": [3.0, 4.0]},
-                "modifiers": [],
-            }
-        ]
-        channel = HistFactoryDistChannel(
-            name="test_channel", axes=axes, samples=samples
-        )
-
-        # Should raise ImportError with helpful message
-        with pytest.raises(ImportError, match=r"visualization.*pyhs3\[visualization\]"):
-            channel.to_hist()
-
-        CACHE, sys.modules["hist"] = None, CACHE

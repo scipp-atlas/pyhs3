@@ -6,17 +6,11 @@ pyhs3 provides convenient methods to convert data objects into `hist.Hist <https
 Installation
 ------------
 
-The visualization features require the optional ``hist`` dependency:
+The ``hist`` package is included as a dependency when you install pyhs3:
 
 .. code-block:: bash
 
-   python -m pip install 'pyhs3[visualization]'
-
-For developers who want the complete development environment including visualization:
-
-.. code-block:: bash
-
-   python -m pip install 'pyhs3[develop]'
+   python -m pip install pyhs3
 
 Converting Data to Histograms
 ------------------------------

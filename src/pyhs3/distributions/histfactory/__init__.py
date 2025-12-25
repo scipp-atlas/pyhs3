@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, cast
 
+import hist
 import numpy as np
 import pytensor.tensor as pt
 from pydantic import Field
@@ -20,7 +21,6 @@ from pyhs3.distributions.core import Distribution
 from pyhs3.distributions.histfactory.axes import Axes, BinnedAxis
 from pyhs3.distributions.histfactory.modifiers import HasConstraint, Modifier
 from pyhs3.distributions.histfactory.samples import Sample, Samples
-from pyhs3.lazy import get_hist
 from pyhs3.networks import HasDependencies, HasInternalNodes
 from pyhs3.typing.aliases import TensorVar
 
@@ -276,18 +276,11 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         The first axis is a categorical axis with sample names (labeled "process"),
         followed by the original binning axes.
 
-        Note:
-            Requires the hist package. Install with: python -m pip install 'pyhs3[visualization]'
-            or python -m pip install hist
-
         Returns:
             hist.Hist: Histogram with shape (n_samples, *binning_shape) where:
                 - Axis 0: Categorical axis "process" with sample names
                 - Remaining axes: Original binning axes from self.axes
                 - Values: Sample contents (with errors as variances)
-
-        Raises:
-            ImportError: If hist package is not installed
 
         Examples:
             >>> channel = HistFactoryDistChannel(
@@ -302,8 +295,6 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
             >>> h.axes[0]  # StrCategory(["signal", "background"], name="process")
             >>> h["signal", :]  # Get all mass bins for signal sample
         """
-        hist = get_hist()
-
         # First axis: categorical sample axis (use "process" since "sample" is a protected keyword in hist)
         sample_names = [sample.name for sample in self.samples]
         process_axis = hist.axis.StrCategory(sample_names, name="process")

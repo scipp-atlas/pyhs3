@@ -10,16 +10,14 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
+import hist
 import numpy as np
 from pydantic import BaseModel, Field, PrivateAttr, RootModel, model_validator
 
 # Import existing distributions for constraint terms
 from pyhs3.distributions.histfactory.modifiers import Modifiers
-from pyhs3.lazy import get_hist
 
 if TYPE_CHECKING:
-    import hist
-
     from pyhs3.distributions.histfactory.axes import Axes
 
 
@@ -52,10 +50,6 @@ class Sample(BaseModel):
         Creates a hist.Hist histogram from this sample's contents and errors.
         The axes must be provided since SampleData doesn't contain axis information.
 
-        Note:
-            Requires the hist package. Install with: python -m pip install 'pyhs3[visualization]'
-            or python -m pip install hist
-
         Args:
             axes: Axes specification defining the binning
 
@@ -64,9 +58,6 @@ class Sample(BaseModel):
                 - Axes matching the provided axes
                 - Values from sample contents
                 - Variances from sample errors (squared)
-
-        Raises:
-            ImportError: If hist package is not installed
 
         Examples:
             >>> from pyhs3.distributions.histfactory.axes import Axes
@@ -78,8 +69,6 @@ class Sample(BaseModel):
             >>> h = sample.to_hist(axes)
             >>> h.plot()  # Plot with matplotlib
         """
-        hist = get_hist()
-
         # Convert axes to hist.axis objects
         # Access the root to get the actual axis (BinnedAxisRange or BinnedAxisEdges)
         hist_axes = [axis.root.to_hist() for axis in axes]
@@ -98,7 +87,7 @@ class Sample(BaseModel):
         h.view(flow=False)["value"] = contents_nd
         h.view(flow=False)["variance"] = variances_nd
 
-        return h  # type: ignore[no-any-return]
+        return h
 
 
 class Samples(RootModel[list[Sample]]):

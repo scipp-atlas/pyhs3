@@ -6,14 +6,11 @@ Test SampleData validation and Samples collection functionality.
 
 from __future__ import annotations
 
-import sys
-
 import numpy as np
 import pytest
 
 from pyhs3.distributions.histfactory.axes import Axes
 from pyhs3.distributions.histfactory.samples import Sample, SampleData, Samples
-from pyhs3.lazy import get_hist
 
 hist = pytest.importorskip("hist", reason="hist not installed")
 
@@ -309,26 +306,3 @@ class TestSampleHistConversion:
 
         # Check that total is preserved
         assert h.values().sum() == sum(range(1, 13))
-
-
-class TestSampleImportErrorHandling:
-    """Tests for ImportError handling in Sample.to_hist() method."""
-
-    def test_sample_to_hist_without_hist(self, isolate_modules):  # noqa: ARG002
-        """Test that Sample.to_hist() raises helpful error when hist is not installed."""
-        # Clear the cache and hide hist module
-        get_hist.cache_clear()
-        CACHE, sys.modules["hist"] = sys.modules["hist"], None
-
-        # Create sample and axes - the import hist happens inside to_hist()
-        sample = Sample(
-            name="test_sample",
-            data={"contents": [10.0, 20.0], "errors": [3.0, 4.0]},
-        )
-        axes = Axes([{"name": "x", "min": 0.0, "max": 2.0, "nbins": 2}])
-
-        # Should raise ImportError with helpful message
-        with pytest.raises(ImportError, match=r"visualization.*pyhs3\[visualization\]"):
-            sample.to_hist(axes)
-
-        CACHE, sys.modules["hist"] = None, CACHE

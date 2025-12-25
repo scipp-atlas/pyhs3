@@ -36,14 +36,11 @@ dependencies = [
     'numpy',
     'sympy',
     'pydantic',
+    'hist >= 2.7.0',
 ]
 
 [project.optional-dependencies]
-visualization = [
-  "hist >= 2.7.0",
-]
 test = [
-  "pyhs3[visualization]",
   "pytest >=9",
   "pytest-cov >=3",
   "pyhf >= 0.7.6",
@@ -139,7 +136,6 @@ disallow_incomplete_defs = true
 module = [
   "pyhf.*",
   "sympy.*",  # https://github.com/sympy/sympy/pull/26158
-  "hist.*",
 ]
 ignore_missing_imports = true
 

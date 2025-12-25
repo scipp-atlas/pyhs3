@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pathlib
-import sys
 
 # shutil is nicer, but doesn't work: https://bugs.python.org/issue20849
 from functools import partial
@@ -60,18 +59,3 @@ def datadir(tmp_path, request):
         copytree(test_dir, str(tmp_path))
 
     return tmp_path
-
-
-@pytest.fixture
-def isolate_modules():
-    """
-    Isolate sys.modules to safely test ImportError paths.
-
-    This fixture saves sys.modules state and restores it after the test,
-    allowing tests to temporarily hide modules without affecting other tests.
-
-    Adapted from pyhf's test suite for testing import error handling.
-    """
-    CACHE_MODULES = sys.modules.copy()
-    yield
-    sys.modules.update(CACHE_MODULES)

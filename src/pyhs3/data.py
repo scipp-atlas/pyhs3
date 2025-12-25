@@ -10,14 +10,14 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
+import hist
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 from pyhs3.exceptions import custom_error_msg
-from pyhs3.lazy import get_hist
 
 if TYPE_CHECKING:
-    import hist
+    pass
 
 
 class Axis(BaseModel):
@@ -97,8 +97,6 @@ class Axis(BaseModel):
         Raises:
             ValueError: If axis has insufficient binning information
         """
-        hist = get_hist()
-
         if self.edges is not None:
             # Irregular binning
             return hist.axis.Variable(self.edges, name=self.name)
@@ -254,18 +252,11 @@ class UnbinnedData(Datum):
         to the axis specifications. The resulting histogram can be plotted using
         matplotlib or other visualization tools.
 
-        Note:
-            Requires the hist package. Install with: python -m pip install 'pyhs3[visualization]'
-            or python -m pip install hist
-
         Returns:
             hist.Hist: Histogram representation with:
                 - Axes matching the data axes
                 - Values from binned entries
                 - Weights if provided
-
-        Raises:
-            ImportError: If hist package is not installed
 
         Examples:
             >>> entries = [[0.5], [1.2], [1.8]]
@@ -279,8 +270,6 @@ class UnbinnedData(Datum):
             >>> h = data.to_hist()
             >>> h.plot()  # Plot with matplotlib
         """
-        hist = get_hist()
-
         # Convert axes to hist.axis objects
         hist_axes = [axis.to_hist() for axis in self.axes]
 
@@ -302,7 +291,7 @@ class UnbinnedData(Datum):
             else:
                 h.fill(*fill_args)
 
-        return h  # type: ignore[no-any-return]
+        return h
 
 
 class BinnedData(Datum):
@@ -363,10 +352,6 @@ class BinnedData(Datum):
         histogram can be plotted using matplotlib or other visualization tools.
 
         Note:
-            Requires the hist package. Install with: python -m pip install 'pyhs3[visualization]'
-            or python -m pip install hist
-
-        Note:
             Correlation matrices in uncertainties are not preserved. Only the
             sigma values (standard deviations) are included as histogram variances.
 
@@ -375,9 +360,6 @@ class BinnedData(Datum):
                 - Axes matching the data axes
                 - Values from contents
                 - Variances from uncertainties if present
-
-        Raises:
-            ImportError: If hist package is not installed
 
         Examples:
             >>> data = BinnedData(
@@ -389,8 +371,6 @@ class BinnedData(Datum):
             >>> h = data.to_hist()
             >>> h.plot()  # Plot with matplotlib
         """
-        hist = get_hist()
-
         # Convert axes to hist.axis objects
         hist_axes = [axis.to_hist() for axis in self.axes]
 
@@ -427,7 +407,7 @@ class BinnedData(Datum):
             contents_nd = np.array(self.contents).reshape(shape)
             h.view(flow=False)[...] = contents_nd
 
-        return h  # type: ignore[no-any-return]
+        return h
 
 
 # Type alias for all data types using discriminated union

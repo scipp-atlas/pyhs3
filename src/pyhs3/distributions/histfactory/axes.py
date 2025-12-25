@@ -11,10 +11,10 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Annotated, Any
 
+import hist
 from pydantic import Discriminator, Field, RootModel, Tag, model_validator
 
 from pyhs3.domains import Axis
-from pyhs3.lazy import get_hist
 
 
 class BinnedAxisRange(Axis):
@@ -49,7 +49,6 @@ class BinnedAxisRange(Axis):
         Returns:
             A hist.axis.Regular object for regular binning
         """
-        hist = get_hist()
         assert self.min is not None
         assert self.max is not None
         return hist.axis.Regular(self.nbins, self.min, self.max, name=self.name)
@@ -89,7 +88,6 @@ class BinnedAxisEdges(Axis):
         Returns:
             A hist.axis.Variable object for irregular binning
         """
-        hist = get_hist()
         return hist.axis.Variable(self.edges, name=self.name)
 
 

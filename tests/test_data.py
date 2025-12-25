@@ -11,6 +11,7 @@ import sys
 
 import numpy as np
 import pytest
+from pyhs3.lazy import get_hist
 
 from pyhs3.data import (
     Axis,
@@ -20,7 +21,6 @@ from pyhs3.data import (
     PointData,
     UnbinnedData,
 )
-from pyhs3.lazy import get_hist
 
 hist = pytest.importorskip("hist", reason="hist not installed")
 

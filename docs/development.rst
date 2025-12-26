@@ -21,14 +21,13 @@ Pre-commit Hooks
 Setting Up Pre-commit
 ~~~~~~~~~~~~~~~~~~~~~
 
-Install and configure pre-commit hooks:
+After running ``pixi install``, configure pre-commit hooks:
 
 .. code-block:: bash
 
-   pip install pre-commit
-   pre-commit install
+   pixi run pre-commit-install
 
-This installs git hooks that automatically run before each commit.
+This installs git hooks that automatically run before each commit. All tools (ruff, mypy, etc.) are managed by pixi, so you don't need to install them separately.
 
 Running Pre-commit
 ~~~~~~~~~~~~~~~~~~
@@ -37,13 +36,13 @@ Run hooks on changed files:
 
 .. code-block:: bash
 
-   pre-commit run
+   pixi run pre-commit
 
 Run hooks on all files:
 
 .. code-block:: bash
 
-   pre-commit run --all-files
+   pixi run pre-commit --all-files
 
 What Pre-commit Checks
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -96,22 +95,23 @@ Using ruff
 
 ruff is our primary linter and formatter. It's extremely fast and handles most code quality issues.
 
-Check code:
+The easiest way to run ruff is through pre-commit:
 
 .. code-block:: bash
 
+   pixi run pre-commit
+
+For manual use, ruff is available in the pixi environment. You can run it directly after ``pixi install``:
+
+.. code-block:: bash
+
+   # Check code
    ruff check src/pyhs3 tests
 
-Auto-fix issues:
-
-.. code-block:: bash
-
+   # Auto-fix issues
    ruff check --fix src/pyhs3 tests
 
-Format code:
-
-.. code-block:: bash
-
+   # Format code
    ruff format src/pyhs3 tests
 
 Configured Rules
@@ -136,7 +136,7 @@ Type Checking
 Using mypy
 ~~~~~~~~~~
 
-We enforce strict type checking with mypy:
+We enforce strict type checking with mypy. It runs automatically with pre-commit, or you can run it manually after ``pixi install``:
 
 .. code-block:: bash
 
@@ -241,7 +241,8 @@ View all available tasks:
 
 - ``docs-build``: Build documentation (static)
 - ``docs-linkcheck``: Check documentation for broken links
-- ``docs-serve``: Build and serve documentation with live reload
+- ``docs-serve``: Build and serve documentation
+- ``docs-watch``: Build and serve documentation with live reload (recommended for development)
 - ``docs-clean``: Clean documentation build artifacts
 - ``docs-api``: Regenerate API documentation
 
@@ -281,7 +282,7 @@ Run tasks using ``pixi run``:
    pixi run pylint
 
    # Documentation
-   pixi run docs-serve
+   pixi run docs-watch
    pixi run docs-build
 
    # Quick checks
@@ -354,7 +355,7 @@ Build and serve with live reload:
 
 .. code-block:: bash
 
-   pixi run docs-serve
+   pixi run docs-watch
 
 This will:
 
@@ -409,40 +410,54 @@ Testing Workflow
 Quick Testing
 ~~~~~~~~~~~~~
 
-During development, run tests frequently:
+During development, run tests frequently using pixi tasks:
+
+.. code-block:: bash
+
+   # Quick tests (skip slow and pydot)
+   pixi run test
+
+   # All tests with coverage
+   pixi run test-all
+
+   # Tests with coverage report
+   pixi run test-cov
+
+For specific tests, pass additional arguments after ``--``:
+
+.. code-block:: bash
+
+   # Run specific test file
+   pixi run test -- tests/test_distributions.py -v
+
+   # Run specific test
+   pixi run test -- tests/test_distributions.py::TestGaussianDistribution::test_pdf_evaluation
+
+Advanced: Direct pytest Usage
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+After ``pixi install``, pytest is available in the environment for direct use:
 
 .. code-block:: bash
 
    pytest -v
-
-Run specific test file:
-
-.. code-block:: bash
-
    pytest tests/test_distributions.py
-
-Run specific test:
-
-.. code-block:: bash
-
-   pytest tests/test_distributions.py::TestGaussianDistribution::test_pdf_evaluation
-
-Skip slow tests:
-
-.. code-block:: bash
-
    pytest -m "not slow"
 
 With Coverage
 ~~~~~~~~~~~~~
 
-Run tests with coverage:
+Use pixi tasks for coverage:
 
 .. code-block:: bash
 
-   pytest --cov=pyhs3
+   # Quick tests with coverage
+   pixi run test-cov
 
-Generate HTML coverage report:
+   # All tests with coverage
+   pixi run test-all
+
+Or run pytest directly with coverage options:
 
 .. code-block:: bash
 
@@ -594,17 +609,18 @@ Performance Tips
 Faster Testing
 ~~~~~~~~~~~~~~
 
-- Run specific tests instead of entire suite
-- Skip slow tests: ``pytest -m "not slow"``
+- Use ``pixi run test`` for quick tests (skips slow and pydot tests)
+- Run specific tests: ``pixi run test -- tests/test_specific.py``
+- After ``pixi install``, pytest is available for direct use when you need fine-grained control
 - Use pytest-xdist for parallel testing: ``pytest -n auto``
 - Use ``--lf`` to run last failed tests first: ``pytest --lf``
 
 Faster Linting
 ~~~~~~~~~~~~~~
 
-- Run ruff (very fast) instead of full pre-commit during iteration
-- Use ``ruff check --fix`` for quick auto-fixes
-- Run full ``pre-commit run --all-files`` before pushing
+- After ``pixi install``, ruff is available directly for very fast iteration
+- Use ``ruff check --fix`` for quick auto-fixes during development
+- Run full ``pixi run pre-commit`` before pushing to ensure all checks pass
 
 Editor Integration
 ------------------

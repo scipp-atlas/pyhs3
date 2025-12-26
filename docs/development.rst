@@ -289,12 +289,12 @@ Run tasks using ``pixi run``:
    pixi run check
    pixi run check-all
 
-Pass additional arguments after ``--``:
+Pass additional arguments directly:
 
 .. code-block:: bash
 
-   pixi run test -- tests/test_distributions.py -v
-   pixi run pylint -- --output-format=json
+   pixi run test tests/test_distributions.py -v
+   pixi run pylint --output-format=json
 
 Environments
 ~~~~~~~~~~~~
@@ -423,15 +423,15 @@ During development, run tests frequently using pixi tasks:
    # Tests with coverage report
    pixi run test-cov
 
-For specific tests, pass additional arguments after ``--``:
+For specific tests, pass additional arguments directly:
 
 .. code-block:: bash
 
    # Run specific test file
-   pixi run test -- tests/test_distributions.py -v
+   pixi run test tests/test_distributions.py -v
 
    # Run specific test
-   pixi run test -- tests/test_distributions.py::TestGaussianDistribution::test_pdf_evaluation
+   pixi run test tests/test_distributions.py::TestGaussianDistribution::test_pdf_evaluation
 
 Advanced: Direct pytest Usage
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -610,7 +610,7 @@ Faster Testing
 ~~~~~~~~~~~~~~
 
 - Use ``pixi run test`` for quick tests (skips slow and pydot tests)
-- Run specific tests: ``pixi run test -- tests/test_specific.py``
+- Run specific tests: ``pixi run test tests/test_specific.py``
 - After ``pixi install``, pytest is available for direct use when you need fine-grained control
 - Use pytest-xdist for parallel testing: ``pytest -n auto``
 - Use ``--lf`` to run last failed tests first: ``pytest --lf``

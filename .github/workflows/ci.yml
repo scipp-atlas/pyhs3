@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0
       - uses: prefix-dev/setup-pixi@v0.9.3
         with:
-          pixi-version: v0.49.0
+          pixi-version: v0.59.0
       - uses: pre-commit/action@v3.0.1
         with:
           extra_args: --hook-stage manual --all-files
@@ -57,7 +57,7 @@ jobs:
 
       - uses: prefix-dev/setup-pixi@v0.9.3
         with:
-          pixi-version: v0.49.0
+          pixi-version: v0.59.0
           cache: true
           environments: ${{ matrix.pixi-environment }}
 

@@ -63,16 +63,16 @@ jobs:
 
       - name: Test package
         run: >-
-          pixi run -e ${{ matrix.pixi-environment }} _test-all -- -ra
+          pixi run -e ${{ matrix.pixi-environment }} test-all -- -ra
           --cov-branch --cov-report=xml --cov-report=term --junitxml=junit.xml
           -o junit_family=legacy --durations=20
 
       - name: Test doctests in modules
-        run: pixi run -e ${{ matrix.pixi-environment }} _doctest
+        run: pixi run -e ${{ matrix.pixi-environment }} doctest
 
       - name: Test doctests in documentation
         if: matrix.python-version == '3.13'
-        run: pixi run -e ${{ matrix.pixi-environment }} _test -- README.rst docs
+        run: pixi run -e ${{ matrix.pixi-environment }} test -- README.rst docs
 
       - name: Upload coverage report
         uses: codecov/codecov-action@v5.5.2

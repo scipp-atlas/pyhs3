@@ -33,7 +33,7 @@ dynamic = ["version"]
 dependencies = [
     'rich',
     'rustworkx',
-    'pytensor >= 2.33.0',
+    'pytensor >= 2.20.0',
     'numpy',
     'sympy',
     'pydantic',

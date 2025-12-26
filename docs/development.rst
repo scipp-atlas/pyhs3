@@ -228,8 +228,8 @@ View all available tasks:
 
 **Testing tasks:**
 
-- ``test``: Run basic pytest tests
-- ``test-cov``: Run tests with coverage reporting
+- ``test``: Run quick tests (skip slow and pydot)
+- ``test-cov``: Run quick tests with coverage
 - ``test-slow``: Run tests including slow tests
 - ``test-pydot``: Run tests including pydot tests
 - ``test-all``: Run all tests with coverage (slow + pydot)
@@ -302,6 +302,38 @@ pixi manages three environments automatically:
 - ``dev``: Development environment (combines test + docs + dev tools)
 
 You don't need to manually activate or switch environments - tasks automatically use the correct environment.
+
+Testing with Specific Python Versions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To run tests with a specific Python version, use the environment name:
+
+.. code-block:: bash
+
+   # Python 3.10
+   pixi run -e py310 test
+
+   # Python 3.11
+   pixi run -e py311 test
+
+   # Python 3.12
+   pixi run -e py312 test
+
+   # Python 3.13
+   pixi run -e py313 test
+
+   # Python 3.14
+   pixi run -e py314 test
+
+The default ``test`` task runs quick tests (skips slow and pydot tests). For comprehensive testing:
+
+.. code-block:: bash
+
+   # Run all tests (including slow and pydot)
+   pixi run -e py311 test-all
+
+   # Run with coverage
+   pixi run -e py311 test-cov
 
 Building Documentation
 ----------------------

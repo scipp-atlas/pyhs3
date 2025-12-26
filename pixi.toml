@@ -4,7 +4,6 @@ channels = ["conda-forge"]
 platforms = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64", "win-64"]
 
 [dependencies]
-python = "*"
 pyhs3 = { path = "./" }
 
 [package]
@@ -13,6 +12,7 @@ version = "latest"
 
 [package.build]
 backend = { name = "pixi-build-python", version = "==0.4.0" }
+config = { noarch = true }
 
 [package.host-dependencies]
 hatchling = ">=1.25"
@@ -21,16 +21,10 @@ hatch-vcs = ">=0.4"
 [package.run-dependencies]
 rich = "*"
 rustworkx = "*"
-pytensor = ">=2.33.0"
+pytensor = ">=2.20"
 numpy = "*"
 sympy = "*"
 pydantic = "*"
-
-[feature.test]
-platforms = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64"]
-
-[feature.docs]
-platforms = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64"]
 
 [feature.py310.dependencies]
 python = "<3.11,>=3.10"
@@ -43,6 +37,9 @@ python = "<3.13,>=3.12"
 
 [feature.py313.dependencies]
 python = "<3.14,>=3.13"
+
+[feature.py314.dependencies]
+python = "<3.15,>=3.14"
 
 [feature.test.dependencies]
 pytest = ">=9"
@@ -59,19 +56,21 @@ root_base = ">=6.32.10,<7"
 [feature.test.target.linux-aarch64.dependencies]
 root_base = ">=6.32.10,<7"
 
-[feature.test.target.osx-64.dependencies]
-root_base = ">=6.32.10,<7"
-
-[feature.test.target.osx-arm64.dependencies]
-root_base = ">=6.32.10,<7"
+# root_base and pytensor do not resolve on py313
+# https://conda-forge.zulipchat.com/#narrow/channel/457337-general/topic/unable.20to.20resolve.20pytensor.20and.20root_base.20for.20py3.2E13/with/565448015
+#[feature.test.target.osx-64.dependencies]
+#root_base = ">=6.32.10,<7"
+#
+#[feature.test.target.osx-arm64.dependencies]
+#root_base = ">=6.32.10,<7"
 
 [feature.test.tasks]
-_test = "pytest"
-_test-cov = "pytest --cov=pyhs3 --cov-report=term --cov-report=html"
-_test-slow = "pytest --runslow"
-_test-pydot = "pytest --runpydot"
-_test-all = "pytest --runslow --runpydot --cov=pyhs3"
-_doctest = "pytest --doctest-modules src/pyhs3"
+test = { cmd = "pytest -m 'not slow and not pydot'", description = "Run quick tests (skip slow and pydot)" }
+test-cov = { cmd = "pytest -m 'not slow and not pydot' --cov=pyhs3 --cov-report=term --cov-report=html", description = "Run quick tests with coverage" }
+test-slow = { cmd = "pytest --runslow", description = "Run tests including slow tests" }
+test-pydot = { cmd = "pytest --runpydot", description = "Run tests including pydot tests" }
+test-all = { cmd = "pytest --runslow --runpydot --cov=pyhs3", description = "Run all tests with coverage (slow + pydot)" }
+doctest = { cmd = "pytest --doctest-modules src/pyhs3", description = "Run doctests in source modules" }
 
 [feature.docs.dependencies]
 sphinx = ">=7.0"
@@ -88,10 +87,11 @@ sphinxcontrib-bibtex = "*"
 sphinx-autobuild = "*"
 
 [feature.docs.tasks]
-_docs-build = "sphinx-build -n -T -b html docs docs/_build/html"
-_docs-serve = "sphinx-autobuild --open-browser -n -T -b html docs docs/_build/html"
-_docs-clean = "rm -rf docs/_build"
-_docs-api = "sphinx-apidoc -o docs/api/ --module-first --no-toc --force src/pyhs3"
+docs-build = { cmd = "sphinx-build -n -T -b html docs docs/_build/html", description = "Build documentation (static)", inputs = ["docs/"], outputs = ["docs/_build/html"] }
+docs-serve = { cmd = "python -m http.server -d docs/_build/html", depends-on = ["docs-build"], description = "Build and serve documentation" }
+docs-watch = { cmd = "sphinx-autobuild --open-browser -n -T -b html docs docs/_build/html", description = "Build and serve documentation with live reload", inputs = ["docs/"], outputs = ["docs/_build/html"] }
+docs-clean = { cmd = "rm -rf docs/_build", description = "Clean documentation build artifacts", inputs = ["docs/_build"] }
+docs-api = { cmd = "sphinx-apidoc -o docs/api/ --module-first --no-toc --force src/pyhs3", description = "Regenerate API documentation" }
 
 [feature.dev.dependencies]
 pre-commit = "*"
@@ -105,48 +105,24 @@ python-build = "*"
 pylint-pydantic = "*"
 
 [feature.dev.tasks]
-_pre-commit = "pre-commit run --all-files"
-_pylint = "pylint pyhs3"
-_pre-commit-install = "pre-commit install"
-_pre-commit-update = "pre-commit autoupdate"
-_build-clean = "rm -rf build dist"
-_build = { cmd = "python -m build", depends-on = ["_build-clean"] }
+pre-commit = { cmd = "pre-commit run --all-files", description = "Run pre-commit hooks on all files" }
+pylint = { cmd = "pylint pyhs3", description = "Run PyLint on pyhs3 package" }
+pre-commit-install = { cmd = "pre-commit install", description = "Install pre-commit git hooks" }
+pre-commit-update = { cmd = "pre-commit autoupdate", description = "Update pre-commit hook versions" }
+build-clean = { cmd = "rm -rf build dist", description = "Clean build artifacts" }
+build = { cmd = "python -m build", depends-on = ["build-clean"], description = "Build SDist and wheel distributions" }
 
 [environments]
-test = ["test"]
 docs = ["docs"]
-dev = ["test", "docs", "dev"]
+dev = ["dev"]
 py310 = ["test", "py310"]
 py311 = ["test", "py311"]
 py312 = ["test", "py312"]
 py313 = ["test", "py313"]
+py314 = ["test", "py314"]
 
 [tasks]
-# Testing tasks
-test = { depends-on = [{ task = "_test", environment = "test" }], description = "Run basic pytest tests" }
-test-cov = { depends-on = [{ task = "_test-cov", environment = "test" }], description = "Run tests with coverage reporting" }
-test-slow = { depends-on = [{ task = "_test-slow", environment = "test" }], description = "Run tests including slow tests" }
-test-pydot = { depends-on = [{ task = "_test-pydot", environment = "test" }], description = "Run tests including pydot tests" }
-test-all = { depends-on = [{ task = "_test-all", environment = "test" }], description = "Run all tests with coverage (slow + pydot)" }
-doctest = { depends-on = [{ task = "_doctest", environment = "test" }], description = "Run doctests in source modules" }
-
-# Documentation tasks
-docs-build = { depends-on = [{ task = "_docs-build", environment = "docs" }], description = "Build documentation (static)" }
-docs-serve = { depends-on = [{ task = "_docs-serve", environment = "docs" }], description = "Build and serve documentation with live reload" }
-docs-clean = { depends-on = [{ task = "_docs-clean", environment = "docs" }], description = "Clean documentation build artifacts" }
-docs-api = { depends-on = [{ task = "_docs-api", environment = "docs" }], description = "Regenerate API documentation" }
-
-# Linting and code quality tasks
-pre-commit = { depends-on = [{ task = "_pre-commit", environment = "dev" }], description = "Run pre-commit hooks on all files" }
-pylint = { depends-on = [{ task = "_pylint", environment = "dev" }], description = "Run PyLint on pyhs3 package" }
+# Composite tasks that span multiple features
 lint = { depends-on = ["pre-commit", "pylint"], description = "Run all linting (pre-commit + pylint)" }
-
-# Development utility tasks
-pre-commit-install = { depends-on = [{ task = "_pre-commit-install", environment = "dev" }], description = "Install pre-commit git hooks" }
-pre-commit-update = { depends-on = [{ task = "_pre-commit-update", environment = "dev" }], description = "Update pre-commit hook versions" }
-build-clean = { depends-on = [{ task = "_build-clean", environment = "dev" }], description = "Clean build artifacts" }
-build = { depends-on = [{ task = "_build", environment = "dev" }], description = "Build SDist and wheel distributions" }
-
-# Composite tasks for common workflows
 check = { depends-on = ["lint", "test"], description = "Quick check: lint + basic tests" }
 check-all = { depends-on = ["lint", "test-all"], description = "Comprehensive check: lint + all tests" }

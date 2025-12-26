@@ -21,10 +21,14 @@ hatch-vcs = ">=0.4"
 [package.run-dependencies]
 rich = "*"
 rustworkx = "*"
-pytensor = ">=2.20"
+pytensor = "*"
 numpy = "*"
 sympy = "*"
 pydantic = "*"
+
+# pytensor >=2.33 does not exist for win-64 for py310
+[feature.py310]
+platforms = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64"]
 
 [feature.py310.dependencies]
 python = "<3.11,>=3.10"

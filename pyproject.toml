@@ -33,7 +33,8 @@ dynamic = ["version"]
 dependencies = [
     'rich',
     'rustworkx',
-    'pytensor >= 2.20.0',
+    # https://github.com/pymc-devs/pytensor/commit/f1a2ac660efdbb3527e9a6b4d71a16e3d1c81b07
+    'pytensor >= 2.33.0', # pytensor.graph.traversal
     'numpy',
     'sympy',
     'pydantic',

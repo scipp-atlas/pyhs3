@@ -50,6 +50,9 @@ scikit-hep-testdata = ">=0.5.7"
 pydot = "*"
 graphviz = "*"
 
+[feature.test.activation]
+scripts = [".pixi/setup_graphviz.sh"]
+
 [feature.test.target.linux-64.dependencies]
 root_base = ">=6.32.10,<7"
 

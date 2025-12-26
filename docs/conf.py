@@ -27,6 +27,7 @@ extensions = [
     "sphinx_issues",
     "sphinxcontrib.mermaid",
     "sphinxcontrib.bibtex",
+    "matplotlib.sphinxext.plot_directive",
 ]
 
 # GitHub repo
@@ -78,6 +79,7 @@ myst_enable_extensions = [
 intersphinx_mapping = get_intersphinx_mapping(
     packages={
         "python",
+        "matplotlib",
     }
 )
 
@@ -86,6 +88,8 @@ intersphinx_mapping["hs3"] = (
     "https://hep-statistics-serialization-standard.github.io/",
     None,
 )
+
+intersphinx_mapping["hist"] = ("http://hist.readthedocs.io/en/latest/", None)
 
 nitpick_ignore = [
     ("py:class", "_io.StringIO"),

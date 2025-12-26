@@ -1193,3 +1193,267 @@ class TestModifierExpressions:
         result = f(0.95, 1.05)
         assert result[0] == pytest.approx(0.95)
         assert result[1] == pytest.approx(1.05)
+
+
+class TestHistFactoryChannelHistConversion:
+    """Tests for HistFactoryDistChannel.to_hist() method."""
+
+    def test_to_hist_single_sample_1d(self):
+        """Test HistFactoryDistChannel.to_hist() with single sample and 1D binning."""
+        axes = [{"name": "mass", "min": 100.0, "max": 150.0, "nbins": 5}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {
+                    "contents": [10.0, 20.0, 15.0, 25.0, 18.0],
+                    "errors": [3.0, 4.0, 3.5, 4.5, 4.0],
+                },
+                "modifiers": [],
+            }
+        ]
+
+        channel = HistFactoryDistChannel(name="SR", axes=axes, samples=samples)
+        h = channel.to_hist()
+
+        # Check that we have 2 axes: categorical sample + mass
+        assert len(h.axes) == 2
+
+        # Check first axis is categorical with sample names (labeled "process")
+        assert h.axes[0].name == "process"
+        assert list(h.axes[0]) == ["signal"]
+
+        # Check second axis is the mass axis
+        assert h.axes[1].name == "mass"
+        assert h.axes[1].size == 5
+
+        # Check values for the single sample
+        assert np.array_equal(h["signal", :].values(), [10.0, 20.0, 15.0, 25.0, 18.0])
+
+        # Check variances
+        expected_variances = np.square([3.0, 4.0, 3.5, 4.5, 4.0])
+        assert np.allclose(h["signal", :].variances(), expected_variances)
+
+    def test_to_hist_multiple_samples_1d(self):
+        """Test HistFactoryDistChannel.to_hist() with multiple samples and 1D binning."""
+        axes = [{"name": "observable", "min": 0.0, "max": 4.0, "nbins": 4}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {
+                    "contents": [5.0, 8.0, 12.0, 7.0],
+                    "errors": [2.0, 2.5, 3.0, 2.3],
+                },
+                "modifiers": [],
+            },
+            {
+                "name": "background",
+                "data": {
+                    "contents": [15.0, 18.0, 14.0, 16.0],
+                    "errors": [3.5, 4.0, 3.7, 3.9],
+                },
+                "modifiers": [],
+            },
+        ]
+
+        channel = HistFactoryDistChannel(name="channel1", axes=axes, samples=samples)
+        h = channel.to_hist()
+
+        # Check axes
+        assert len(h.axes) == 2
+        assert h.axes[0].name == "process"
+        assert list(h.axes[0]) == ["signal", "background"]
+        assert h.axes[1].name == "observable"
+
+        # Check values for both samples
+        assert np.array_equal(h["signal", :].values(), [5.0, 8.0, 12.0, 7.0])
+        assert np.array_equal(h["background", :].values(), [15.0, 18.0, 14.0, 16.0])
+
+        # Check variances for both samples
+        assert np.allclose(h["signal", :].variances(), np.square([2.0, 2.5, 3.0, 2.3]))
+        assert np.allclose(
+            h["background", :].variances(), np.square([3.5, 4.0, 3.7, 3.9])
+        )
+
+    def test_to_hist_multiple_samples_2d(self):
+        """Test HistFactoryDistChannel.to_hist() with multiple samples and 2D binning."""
+        # 2x3 = 6 bins
+        axes = [
+            {"name": "mass", "min": 100.0, "max": 150.0, "nbins": 2},
+            {"name": "pt", "min": 0.0, "max": 300.0, "nbins": 3},
+        ]
+        samples = [
+            {
+                "name": "signal",
+                "data": {
+                    "contents": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                    "errors": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+                },
+                "modifiers": [],
+            },
+            {
+                "name": "background",
+                "data": {
+                    "contents": [10.0, 11.0, 12.0, 13.0, 14.0, 15.0],
+                    "errors": [2.0, 2.1, 2.2, 2.3, 2.4, 2.5],
+                },
+                "modifiers": [],
+            },
+        ]
+
+        channel = HistFactoryDistChannel(name="SR_2D", axes=axes, samples=samples)
+        h = channel.to_hist()
+
+        # Check we have 3 axes: process + mass + pt
+        assert len(h.axes) == 3
+        assert h.axes[0].name == "process"
+        assert h.axes[1].name == "mass"
+        assert h.axes[2].name == "pt"
+
+        # Check shape: (2 samples, 2 mass bins, 3 pt bins)
+        assert h.values().shape == (2, 2, 3)
+
+        # Check signal sample values (reshape to 2x3)
+        expected_signal = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        assert np.array_equal(h["signal", :, :].values(), expected_signal)
+
+        # Check background sample values
+        expected_background = np.array([[10.0, 11.0, 12.0], [13.0, 14.0, 15.0]])
+        assert np.array_equal(h["background", :, :].values(), expected_background)
+
+    def test_to_hist_irregular_binning(self):
+        """Test HistFactoryDistChannel.to_hist() with irregular (variable-width) binning."""
+        axes = [{"name": "pt", "edges": [0.0, 10.0, 50.0, 100.0, 200.0]}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {
+                    "contents": [5.0, 15.0, 25.0, 10.0],
+                    "errors": [2.0, 3.0, 4.0, 2.5],
+                },
+                "modifiers": [],
+            },
+            {
+                "name": "background",
+                "data": {
+                    "contents": [50.0, 60.0, 40.0, 30.0],
+                    "errors": [7.0, 8.0, 6.0, 5.0],
+                },
+                "modifiers": [],
+            },
+        ]
+
+        channel = HistFactoryDistChannel(name="VarWidth", axes=axes, samples=samples)
+        h = channel.to_hist()
+
+        # Check axes
+        assert len(h.axes) == 2
+        assert h.axes[0].name == "process"
+        assert h.axes[1].name == "pt"
+
+        # Check that pt axis has the correct edges
+        expected_edges = [0.0, 10.0, 50.0, 100.0, 200.0]
+        assert np.array_equal(h.axes[1].edges, expected_edges)
+
+        # Check values
+        assert np.array_equal(h["signal", :].values(), [5.0, 15.0, 25.0, 10.0])
+        assert np.array_equal(h["background", :].values(), [50.0, 60.0, 40.0, 30.0])
+
+    def test_to_hist_sample_axis_is_first(self):
+        """Test that the process axis is the first axis (for intuitive slicing)."""
+        axes = [{"name": "x", "min": 0.0, "max": 5.0, "nbins": 5}]
+        samples = [
+            {
+                "name": "A",
+                "data": {
+                    "contents": [1.0, 2.0, 3.0, 4.0, 5.0],
+                    "errors": [0.5, 0.5, 0.5, 0.5, 0.5],
+                },
+                "modifiers": [],
+            },
+            {
+                "name": "B",
+                "data": {
+                    "contents": [10.0, 20.0, 30.0, 40.0, 50.0],
+                    "errors": [1.0, 1.0, 1.0, 1.0, 1.0],
+                },
+                "modifiers": [],
+            },
+        ]
+
+        channel = HistFactoryDistChannel(name="test", axes=axes, samples=samples)
+        h = channel.to_hist()
+
+        # Verify that axis 0 is the categorical process axis
+        assert h.axes[0].name == "process"
+
+        # Verify we can slice by sample name as first index
+        sample_a_hist = h["A", :]
+        assert np.array_equal(sample_a_hist.values(), [1.0, 2.0, 3.0, 4.0, 5.0])
+
+        sample_b_hist = h["B", :]
+        assert np.array_equal(sample_b_hist.values(), [10.0, 20.0, 30.0, 40.0, 50.0])
+
+    def test_to_hist_values_match_samples(self):
+        """Test that histogram values match individual Sample.to_hist() results."""
+        from pyhs3.distributions.histfactory.axes import Axes  # noqa: PLC0415
+
+        axes_def = [{"name": "mass", "min": 100.0, "max": 140.0, "nbins": 4}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {
+                    "contents": [10.0, 20.0, 15.0, 25.0],
+                    "errors": [3.0, 4.0, 3.5, 4.5],
+                },
+                "modifiers": [],
+            },
+            {
+                "name": "background",
+                "data": {
+                    "contents": [50.0, 60.0, 55.0, 65.0],
+                    "errors": [7.0, 8.0, 7.5, 8.5],
+                },
+                "modifiers": [],
+            },
+        ]
+
+        channel = HistFactoryDistChannel(name="channel", axes=axes_def, samples=samples)
+        h_channel = channel.to_hist()
+
+        # Create Axes object for individual sample conversion
+        axes_obj = Axes(axes_def)
+
+        # Convert each sample individually and compare
+        for sample in channel.samples:
+            h_sample = sample.to_hist(axes_obj)
+
+            # Check that channel histogram slice matches individual sample histogram
+            assert np.array_equal(h_channel[sample.name, :].values(), h_sample.values())
+            assert np.allclose(
+                h_channel[sample.name, :].variances(), h_sample.variances()
+            )
+
+    def test_to_hist_variances_preserved(self):
+        """Test that error uncertainties are properly preserved as variances."""
+        axes = [{"name": "x", "min": 0.0, "max": 3.0, "nbins": 3}]
+        samples = [
+            {
+                "name": "data",
+                "data": {
+                    "contents": [100.0, 150.0, 120.0],
+                    "errors": [10.0, 12.0, 11.0],
+                },
+                "modifiers": [],
+            }
+        ]
+
+        channel = HistFactoryDistChannel(name="channel", axes=axes, samples=samples)
+        h = channel.to_hist()
+
+        # Errors should be stored as variances (errors squared)
+        expected_variances = np.square([10.0, 12.0, 11.0])
+        assert np.allclose(h["data", :].variances(), expected_variances)
+
+        # We should be able to recover the errors by taking sqrt of variances
+        recovered_errors = np.sqrt(h["data", :].variances())
+        assert np.allclose(recovered_errors, [10.0, 12.0, 11.0])

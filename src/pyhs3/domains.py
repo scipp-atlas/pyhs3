@@ -50,6 +50,22 @@ class Axis(BaseModel):
             raise ValueError(msg)
         return self
 
+    def to_hist(self) -> Any:
+        """
+        Convert this axis to a hist.axis object.
+
+        This is a base implementation that should be overridden by subclasses
+        that have specific binning information (like BinnedAxisRange or BinnedAxisEdges).
+
+        Returns:
+            A hist.axis object
+
+        Raises:
+            ValueError: If axis has insufficient binning information
+        """
+        msg = f"Axis '{self.name}' does not have binning information for histogram conversion"
+        raise ValueError(msg)
+
 
 class Domain(BaseModel):
     """

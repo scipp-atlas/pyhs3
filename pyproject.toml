@@ -36,6 +36,7 @@ dependencies = [
     'numpy',
     'sympy',
     'pydantic',
+    'hist >= 2.7.0',
 ]
 
 [project.optional-dependencies]
@@ -64,6 +65,11 @@ docs = [
   "sphinx-issues",
   "sphinxcontrib-mermaid",
   "sphinxcontrib-bibtex",
+  "matplotlib",
+  "hist[plot] > 2.7.0", # keep synced with dependencies
+]
+develop = [
+  "pyhs3[test,docs,dev]",
 ]
 
 [project.urls]

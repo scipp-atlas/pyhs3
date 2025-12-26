@@ -52,7 +52,6 @@ jobs:
         exclude:
           - runs-on: windows-latest
             python-version: "3.10"
-            pixi-environment: py310
 
     steps:
       - uses: actions/checkout@v6

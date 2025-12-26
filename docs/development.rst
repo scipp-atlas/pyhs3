@@ -8,8 +8,7 @@ Development Tools
 
 We use several tools for development:
 
-- **hatch**: Project management and task running
-- **nox**: Automated testing across environments
+- **pixi**: Package management, environment management, and task running
 - **pre-commit**: Git hooks for code quality
 - **pytest**: Testing framework
 - **ruff**: Fast Python linter and formatter
@@ -197,97 +196,112 @@ Or using nox:
 
    nox -s pylint
 
-Working with hatch
-------------------
-
-hatch is our project management tool.
-
-Running Tests
-~~~~~~~~~~~~~
-
-Run tests:
-
-.. code-block:: bash
-
-   hatch run test
-
-Run doctests:
-
-.. code-block:: bash
-
-   hatch run doctest
-
-Run specific tests:
-
-.. code-block:: bash
-
-   hatch run test tests/test_distributions.py::TestGaussianDistribution
-
-Viewing Environments
-~~~~~~~~~~~~~~~~~~~~
-
-See configured environments:
-
-.. code-block:: bash
-
-   hatch env show
-
-Available Scripts
-~~~~~~~~~~~~~~~~~
-
-From ``pyproject.toml`` hatch configuration:
-
-- ``test``: Run pytest
-- ``doctest``: Run doctests on source code
-
-Working with nox
+Working with pixi
 ----------------
 
-nox provides reproducible testing across environments.
+pixi provides reproducible development environments and task automation. Tasks automatically use the correct environment, so you don't need to specify environments when running tasks.
 
-Available Sessions
-~~~~~~~~~~~~~~~~~~
+Installing pixi
+~~~~~~~~~~~~~~~
 
-View all available sessions:
+Follow installation instructions at https://pixi.sh/latest/
 
-.. code-block:: bash
+Quick Start
+~~~~~~~~~~~
 
-   nox --list
-
-Default sessions (run automatically with ``nox``):
-
-- ``lint``: Run pre-commit hooks
-- ``pylint``: Run pylint
-- ``tests``: Run pytest
-
-Optional sessions:
-
-- ``docs``: Build documentation
-- ``build``: Build package distributions
-
-Running Sessions
-~~~~~~~~~~~~~~~~
-
-Run all default sessions:
+After cloning the repository:
 
 .. code-block:: bash
 
-   nox
+   pixi install  # Install all dependencies and pyhs3 in editable mode
 
-Run specific session:
+This sets up all environments (test, docs, dev) and installs pyhs3 automatically.
 
-.. code-block:: bash
+Available Tasks
+~~~~~~~~~~~~~~~
 
-   nox -s lint
-   nox -s tests
-   nox -s pylint
-
-Run with arguments:
+View all available tasks:
 
 .. code-block:: bash
 
-   nox -s tests -- tests/test_distributions.py -v
-   nox -s docs -- --serve
+   pixi task list
+
+**Testing tasks:**
+
+- ``test``: Run basic pytest tests
+- ``test-cov``: Run tests with coverage reporting
+- ``test-slow``: Run tests including slow tests
+- ``test-pydot``: Run tests including pydot tests
+- ``test-all``: Run all tests with coverage (slow + pydot)
+- ``doctest``: Run doctests in source modules
+
+**Documentation tasks:**
+
+- ``docs-build``: Build documentation (static)
+- ``docs-serve``: Build and serve documentation with live reload
+- ``docs-clean``: Clean documentation build artifacts
+- ``docs-api``: Regenerate API documentation
+
+**Linting tasks:**
+
+- ``pre-commit``: Run pre-commit hooks on all files
+- ``pylint``: Run PyLint on pyhs3 package
+- ``lint``: Run all linting (pre-commit + pylint)
+
+**Development tasks:**
+
+- ``pre-commit-install``: Install pre-commit git hooks
+- ``pre-commit-update``: Update pre-commit hook versions
+- ``build-clean``: Clean build artifacts
+- ``build``: Build SDist and wheel distributions
+
+**Composite tasks:**
+
+- ``check``: Quick check (lint + basic tests)
+- ``check-all``: Comprehensive check (lint + all tests)
+
+Running Tasks
+~~~~~~~~~~~~~
+
+Run tasks using ``pixi run``:
+
+.. code-block:: bash
+
+   # Testing
+   pixi run test
+   pixi run test-cov
+   pixi run test-all
+
+   # Linting
+   pixi run lint
+   pixi run pre-commit
+   pixi run pylint
+
+   # Documentation
+   pixi run docs-serve
+   pixi run docs-build
+
+   # Quick checks
+   pixi run check
+   pixi run check-all
+
+Pass additional arguments after ``--``:
+
+.. code-block:: bash
+
+   pixi run test -- tests/test_distributions.py -v
+   pixi run pylint -- --output-format=json
+
+Environments
+~~~~~~~~~~~~
+
+pixi manages three environments automatically:
+
+- ``test``: Testing environment (includes ROOT, cms-combine, jax, pytest)
+- ``docs``: Documentation environment (includes Sphinx and extensions)
+- ``dev``: Development environment (combines test + docs + dev tools)
+
+You don't need to manually activate or switch environments - tasks automatically use the correct environment.
 
 Building Documentation
 ----------------------
@@ -299,13 +313,13 @@ Build documentation:
 
 .. code-block:: bash
 
-   nox -s docs
+   pixi run docs-build
 
 Build and serve with live reload:
 
 .. code-block:: bash
 
-   nox -s docs -- --serve
+   pixi run docs-serve
 
 This will:
 
@@ -314,27 +328,23 @@ This will:
 - Open your browser automatically
 - Reload when you make changes
 
-Manual Documentation Build
+Regenerate API Documentation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Regenerate API docs from source code:
+
+.. code-block:: bash
+
+   pixi run docs-api
+
+Clean Documentation Build
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Install documentation dependencies:
+Clean documentation build artifacts:
 
 .. code-block:: bash
 
-   pip install -e .[docs]
-
-Build with Sphinx:
-
-.. code-block:: bash
-
-   cd docs
-   sphinx-build -b html . _build/html
-
-View built documentation:
-
-.. code-block:: bash
-
-   open docs/_build/html/index.html
+   pixi run docs-clean
 
 Documentation Structure
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -417,7 +427,12 @@ Adding a New Distribution
 3. Write unit tests in ``tests/test_distributions.py``
 4. Add integration test if needed
 5. Update documentation if it's a public API
-6. Run tests and linting
+6. Run tests and linting:
+
+   .. code-block:: bash
+
+      pixi run check
+
 7. Commit with semantic message: ``feat: add XYZ distribution``
 
 Adding a New Function
@@ -444,7 +459,7 @@ Updating Documentation
 ~~~~~~~~~~~~~~~~~~~~~~
 
 1. Edit relevant ``.rst`` files in ``docs/``
-2. Build docs locally to preview: ``nox -s docs -- --serve``
+2. Build docs locally to preview: ``pixi run docs-serve``
 3. Check for broken links and formatting
 4. Commit: ``docs: update XYZ documentation``
 
@@ -497,9 +512,9 @@ If CI fails but tests pass locally:
 
 1. **Check the CI logs** on GitHub
 2. **Look for platform-specific issues** (Windows vs Linux vs macOS)
-3. **Verify all dependencies** are in ``pyproject.toml``
-4. **Run pre-commit**: ``pre-commit run --all-files``
-5. **Test with nox** to match CI environment: ``nox``
+3. **Verify all dependencies** are in ``pyproject.toml`` and ``pixi.toml``
+4. **Run pre-commit**: ``pixi run pre-commit``
+5. **Test with pixi** to match CI environment: ``pixi run check-all``
 
 Documentation Build Failures
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -508,7 +523,7 @@ If documentation fails to build:
 
 1. **Check Sphinx warnings** - treat warnings as errors
 2. **Verify reStructuredText syntax** - check for formatting errors
-3. **Test locally**: ``nox -s docs``
+3. **Test locally**: ``pixi run docs-build``
 4. **Check for broken links** in documentation
 5. **Validate cross-references** to ensure they resolve
 
@@ -517,21 +532,18 @@ Environment Issues
 
 If you have dependency or environment issues:
 
-1. **Create a fresh virtual environment**:
+1. **Reinstall with pixi**:
 
    .. code-block:: bash
 
-      rm -rf .venv
-      python -m venv .venv
-      source .venv/bin/activate
-      pip install -e .[dev,test,docs]
+      pixi clean
+      pixi install
 
-2. **Update dependencies**:
+2. **Update pixi**:
 
    .. code-block:: bash
 
-      pip install --upgrade pip
-      pip install -e .[dev,test,docs] --upgrade
+      pixi self-update
 
 3. **Clear caches**:
 
@@ -539,6 +551,7 @@ If you have dependency or environment issues:
 
       rm -rf .pytest_cache .mypy_cache .ruff_cache
       rm -rf docs/_build
+      pixi clean cache
 
 Performance Tips
 ----------------
@@ -603,9 +616,9 @@ Daily Workflow
 2. **Create/switch to feature branch**: ``git checkout -b feat/my-feature``
 3. **Make small, focused changes**
 4. **Write tests as you go**
-5. **Run tests frequently**: ``pytest``
+5. **Run tests frequently**: ``pixi run test``
 6. **Commit often** with semantic messages
-7. **Run pre-commit before pushing**: ``pre-commit run --all-files``
+7. **Run checks before pushing**: ``pixi run check``
 8. **Push and create PR** when ready
 
 Code Quality

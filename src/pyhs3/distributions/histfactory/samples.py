@@ -10,25 +10,15 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from pydantic import BaseModel, Field, PrivateAttr, RootModel, model_validator
+import hist
+import numpy as np
+from pydantic import BaseModel, Field, PrivateAttr, RootModel
+
+from pyhs3.distributions.histfactory.axes import Axes
 
 # Import existing distributions for constraint terms
+from pyhs3.distributions.histfactory.data import SampleData
 from pyhs3.distributions.histfactory.modifiers import Modifiers
-
-
-class SampleData(BaseModel):
-    """Sample data containing bin contents and errors."""
-
-    contents: list[float]
-    errors: list[float]
-
-    @model_validator(mode="after")
-    def validate_lengths(self) -> SampleData:
-        """Ensure contents and errors have same length."""
-        if len(self.contents) != len(self.errors):
-            msg = f"Sample data contents ({len(self.contents)}) and errors ({len(self.errors)}) must have same length"
-            raise ValueError(msg)
-        return self
 
 
 class Sample(BaseModel):
@@ -37,6 +27,52 @@ class Sample(BaseModel):
     name: str
     data: SampleData
     modifiers: Modifiers = Field(default_factory=Modifiers)
+
+    def to_hist(self, axes: Axes) -> hist.Hist:
+        """
+        Convert to scikit-hep hist.Hist object for visualization.
+
+        Creates a hist.Hist histogram from this sample's contents and errors.
+        The axes must be provided since SampleData doesn't contain axis information.
+
+        Args:
+            axes: Axes specification defining the binning
+
+        Returns:
+            hist.Hist: Histogram representation with:
+                - Axes matching the provided axes
+                - Values from sample contents
+                - Variances from sample errors (squared)
+
+        Examples:
+            >>> from pyhs3.distributions.histfactory.axes import Axes
+            >>> sample = Sample(
+            ...     name="signal",
+            ...     data={"contents": [10, 20, 15], "errors": [3, 4, 2.5]}
+            ... )
+            >>> axes = Axes([{"name": "x", "min": 0, "max": 3, "nbins": 3}])
+            >>> sample.to_hist(axes)
+            Hist(Regular(3, 0, 3, name='x'), storage=Weight()) # Sum: WeightedSum(value=45, variance=31.25)
+        """
+        # Convert axes to hist.axis objects
+        # Access the root to get the actual axis (BinnedAxisRange or BinnedAxisEdges)
+        hist_axes = [axis.root.to_hist() for axis in axes]
+
+        # Create histogram with Weight storage since we always have errors
+        h = hist.Hist(*hist_axes, storage=hist.storage.Weight())
+
+        # Calculate shape from axes
+        shape = tuple(axis.get_nbins() for axis in axes)
+
+        # Reshape contents and variances (errors squared)
+        contents_nd = np.array(self.data.contents).reshape(shape)
+        variances_nd = np.square(self.data.errors).reshape(shape)
+
+        # Set values with variances using view
+        h.view(flow=False)["value"] = contents_nd
+        h.view(flow=False)["variance"] = variances_nd
+
+        return h
 
 
 class Samples(RootModel[list[Sample]]):

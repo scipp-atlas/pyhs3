@@ -63,6 +63,15 @@ class TestAxis:
         assert axis.min == 5.0
         assert axis.max == 10.0
 
+    def test_axis_to_hist_raises_not_implemented(self):
+        """Test that base Axis.to_hist() raises ValueError."""
+        axis = Axis(name="test_param", min=0.0, max=10.0)
+        with pytest.raises(
+            ValueError,
+            match=r"Axis 'test_param' does not have binning information for histogram conversion",
+        ):
+            axis.to_hist()
+
     def test_axis_validation_negative_values(self):
         """Test Axis validation with negative values."""
         # Valid: both negative, max > min

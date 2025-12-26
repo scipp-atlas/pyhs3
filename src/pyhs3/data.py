@@ -8,12 +8,15 @@ including point data, unbinned data, and binned data with uncertainties.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
+import hist
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 from pyhs3.exceptions import custom_error_msg
+
+TYPE_CHECKING = False
 
 
 class Axis(BaseModel):
@@ -82,6 +85,27 @@ class Axis(BaseModel):
         if self.min is not None and self.max is not None and self.nbins is not None:
             return list(np.linspace(self.min, self.max, self.nbins + 1))
         return []
+
+    def to_hist(self) -> Any:
+        """
+        Convert this axis to a hist.axis object.
+
+        Returns:
+            A hist.axis object (Regular or Variable) depending on binning type
+
+        Raises:
+            ValueError: If axis has insufficient binning information
+        """
+        if self.edges is not None:
+            # Irregular binning
+            return hist.axis.Variable(self.edges, name=self.name)
+
+        # Regular binning
+        if TYPE_CHECKING:
+            assert self.min is not None
+            assert self.max is not None
+            assert self.nbins is not None
+        return hist.axis.Regular(self.nbins, self.min, self.max, name=self.name)
 
 
 class GaussianUncertainty(BaseModel):
@@ -216,6 +240,55 @@ class UnbinnedData(Datum):
 
         return self
 
+    def to_hist(self) -> hist.Hist:
+        """
+        Convert to scikit-hep hist.Hist object by binning entries.
+
+        Creates a hist.Hist histogram by binning the unbinned entries according
+        to the axis specifications. The resulting histogram can be plotted using
+        matplotlib or other visualization tools.
+
+        Returns:
+            hist.Hist: Histogram representation with:
+                - Axes matching the data axes
+                - Values from binned entries
+                - Weights if provided
+
+        Examples:
+            >>> entries = [[0.5], [1.2], [1.8]]
+            >>> axes = [Axis(name="x", min=0, max=3, nbins=3)]
+            >>> data = UnbinnedData(
+            ...     name="example",
+            ...     type="unbinned",
+            ...     entries=entries,
+            ...     axes=axes
+            ... )
+            >>> data.to_hist()
+            Hist(Regular(3, 0, 3, name='x'), storage=Double()) # Sum: 3.0
+        """
+        # Convert axes to hist.axis objects
+        hist_axes = [axis.to_hist() for axis in self.axes]
+
+        # Create histogram with appropriate storage
+        storage = (
+            hist.storage.Weight() if self.weights is not None else hist.storage.Double()
+        )
+        h = hist.Hist(*hist_axes, storage=storage)
+
+        # Transpose entries from [[x1, y1], [x2, y2]] to [[x1, x2], [y1, y2]]
+        if len(self.entries) > 0:
+            entries_transposed = list(zip(*self.entries, strict=True))
+            # Convert to numpy arrays for filling
+            fill_args = [np.array(coord_list) for coord_list in entries_transposed]
+
+            # Fill the histogram
+            if self.weights is not None:
+                h.fill(*fill_args, weight=np.array(self.weights))
+            else:
+                h.fill(*fill_args)
+
+        return h
+
 
 class BinnedData(Datum):
     """
@@ -266,6 +339,71 @@ class BinnedData(Datum):
             raise ValueError(msg)
 
         return self
+
+    def to_hist(self) -> hist.Hist:
+        """
+        Convert to scikit-hep hist.Hist object for visualization.
+
+        Creates a hist.Hist histogram from this binned data. The resulting
+        histogram can be plotted using matplotlib or other visualization tools.
+
+        Note:
+            Correlation matrices in uncertainties are not preserved. Only the
+            sigma values (standard deviations) are included as histogram variances.
+
+        Returns:
+            hist.Hist: Histogram representation with:
+                - Axes matching the data axes
+                - Values from contents
+                - Variances from uncertainties if present
+
+        Examples:
+            >>> data = BinnedData(
+            ...     name="example",
+            ...     type="binned",
+            ...     contents=[10, 20, 15],
+            ...     axes=[Axis(name="x", min=0, max=3, nbins=3)]
+            ... )
+            >>> data.to_hist()
+            Hist(Regular(3, 0, 3, name='x'), storage=Double()) # Sum: 45.0
+        """
+        # Convert axes to hist.axis objects
+        hist_axes = [axis.to_hist() for axis in self.axes]
+
+        # Create histogram with appropriate storage
+        storage = (
+            hist.storage.Weight()
+            if self.uncertainty is not None
+            else hist.storage.Double()
+        )
+        h = hist.Hist(*hist_axes, storage=storage)
+
+        # Calculate shape from axes
+        shape = tuple(
+            (
+                axis.nbins
+                if axis.nbins is not None
+                else len(axis.edges) - 1
+                if axis.edges is not None
+                else 0
+            )
+            for axis in self.axes
+        )
+
+        # Reshape contents for assignment
+        if self.uncertainty is not None:
+            # Reshape both contents and variances
+            contents_nd = np.array(self.contents).reshape(shape)
+            variances_nd = np.square(self.uncertainty.sigma).reshape(shape)
+            # Set values with variances using view
+            h.view(flow=False)["value"] = contents_nd
+            h.view(flow=False)["variance"] = variances_nd
+        else:
+            # Reshape and set contents using view
+            contents_nd = np.array(self.contents).reshape(shape)
+            h.view(flow=False)[...] = contents_nd
+
+        return h
 
 
 # Type alias for all data types using discriminated union

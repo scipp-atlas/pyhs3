@@ -6,9 +6,13 @@ Test SampleData validation and Samples collection functionality.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
+from pyhs3.distributions.histfactory.axes import Axes
 from pyhs3.distributions.histfactory.samples import Sample, SampleData, Samples
+
+hist = pytest.importorskip("hist", reason="hist not installed")
 
 
 class TestSampleData:
@@ -198,3 +202,107 @@ class TestSamples:
         samples = Samples(samples_data)
 
         assert len(samples) == 2
+
+
+class TestSampleHistConversion:
+    """Tests for Sample.to_hist() method."""
+
+    def test_sample_to_hist_1d_regular_binning(self):
+        """Test Sample.to_hist() with 1D regular binning."""
+        sample = Sample(
+            name="test_sample",
+            data={"contents": [10.0, 20.0, 15.0], "errors": [3.0, 4.0, 2.5]},
+        )
+        axes = Axes([{"name": "x", "min": 0.0, "max": 3.0, "nbins": 3}])
+
+        h = sample.to_hist(axes)
+
+        # Check values
+        assert np.array_equal(h.values(), [10.0, 20.0, 15.0])
+        # Check variances (errors squared)
+        expected_variances = np.square([3.0, 4.0, 2.5])
+        assert np.allclose(h.variances(), expected_variances)
+        # Check axis
+        assert h.axes[0].name == "x"
+
+    def test_sample_to_hist_1d_irregular_binning(self):
+        """Test Sample.to_hist() with 1D irregular binning."""
+        sample = Sample(
+            name="test_sample",
+            data={"contents": [10.0, 25.0, 5.0], "errors": [3.0, 5.0, 2.0]},
+        )
+        edges = [0.0, 10.0, 50.0, 100.0]
+        axes = Axes([{"name": "pt", "edges": edges}])
+
+        h = sample.to_hist(axes)
+
+        # Check values and variances
+        assert np.array_equal(h.values(), [10.0, 25.0, 5.0])
+        assert np.allclose(h.variances(), np.square([3.0, 5.0, 2.0]))
+        # Check edges
+        assert np.array_equal(h.axes[0].edges, edges)
+
+    def test_sample_to_hist_2d(self):
+        """Test Sample.to_hist() with 2D histogram."""
+        # 2x3 = 6 bins
+        sample = Sample(
+            name="test_2d",
+            data={
+                "contents": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                "errors": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+            },
+        )
+        axes = Axes(
+            [
+                {"name": "x", "min": 0.0, "max": 2.0, "nbins": 2},
+                {"name": "y", "min": 0.0, "max": 3.0, "nbins": 3},
+            ]
+        )
+
+        h = sample.to_hist(axes)
+
+        # Check dimensions
+        assert len(h.axes) == 2
+        # Check reshaped values
+        expected_2d = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        assert np.array_equal(h.values(), expected_2d)
+
+    def test_sample_to_hist_empty_contents(self):
+        """Test Sample.to_hist() with empty contents raises error."""
+        # This will fail validation at SampleData level
+        with pytest.raises(
+            ValueError, match=r"Sample data contents.*must have same length"
+        ):
+            Sample(
+                name="empty_sample",
+                data={"contents": [], "errors": [1.0]},
+            )
+
+    def test_sample_to_hist_3d(self):
+        """Test Sample.to_hist() with 3D histogram."""
+        # 2x2x3 = 12 bins
+        sample = Sample(
+            name="test_3d",
+            data={
+                "contents": [float(i) for i in range(1, 13)],
+                "errors": [0.1 * i for i in range(1, 13)],
+            },
+        )
+        axes = Axes(
+            [
+                {"name": "x", "min": 0.0, "max": 2.0, "nbins": 2},
+                {"name": "y", "min": 0.0, "max": 2.0, "nbins": 2},
+                {"name": "z", "min": 0.0, "max": 3.0, "nbins": 3},
+            ]
+        )
+
+        h = sample.to_hist(axes)
+
+        # Check dimensions
+        assert len(h.axes) == 3
+        assert h.axes[0].name == "x"
+        assert h.axes[1].name == "y"
+        assert h.axes[2].name == "z"
+
+        # Check that total is preserved
+        assert h.values().sum() == sum(range(1, 13))

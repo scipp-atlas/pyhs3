@@ -51,7 +51,6 @@ python = "<3.14,>=3.13"
 pytest = ">=9"
 pytest-cov = ">=3"
 pyhf = ">=0.7.6"
-pydocstyle = "*"
 scikit-hep-testdata = ">=0.5.7"
 pydot = "*"
 graphviz = "*"
@@ -76,10 +75,11 @@ root_base = ">=6.32.10,<7"
 [feature.test.tasks]
 test = { cmd = "pytest -m 'not slow and not pydot'", description = "Run quick tests (skip slow and pydot)" }
 test-cov = { cmd = "pytest -m 'not slow and not pydot' --cov=pyhs3 --cov-report=term --cov-report=html", description = "Run quick tests with coverage" }
+test-docstrings = { cmd = "pytest --doctest-modules src/pyhs3", description = "Run doctests in source modules" }
+test-docs = { cmd = "pytest README.rst docs", description = "Run doctests in docs and README.rst" }
 test-slow = { cmd = "pytest --runslow", description = "Run tests including slow tests" }
 test-pydot = { cmd = "pytest --runpydot", description = "Run tests including pydot tests" }
 test-all = { cmd = "pytest --runslow --runpydot --cov=pyhs3", description = "Run all tests with coverage (slow + pydot)" }
-doctest = { cmd = "pytest --doctest-modules src/pyhs3", description = "Run doctests in source modules" }
 
 [feature.docs.dependencies]
 sphinx = ">=7.0"
@@ -94,13 +94,16 @@ sphinx-issues = "*"
 sphinxcontrib-mermaid = "*"
 sphinxcontrib-bibtex = "*"
 sphinx-autobuild = "*"
+pydocstyle = "*"
 
 [feature.docs.tasks]
 docs-build = { cmd = "sphinx-build -n -T -b html docs docs/_build/html", description = "Build documentation (static)", inputs = ["docs/"], outputs = ["docs/_build/html"] }
+docs-linkcheck = { cmd = "sphinx-build -M linkcheck docs docs/_build", description = "Check documentation for broken links" }
 docs-serve = { cmd = "python -m http.server -d docs/_build/html", depends-on = ["docs-build"], description = "Build and serve documentation" }
 docs-watch = { cmd = "sphinx-autobuild --open-browser -n -T -b html docs docs/_build/html", description = "Build and serve documentation with live reload", inputs = ["docs/"], outputs = ["docs/_build/html"] }
 docs-clean = { cmd = "rm -rf docs/_build", description = "Clean documentation build artifacts", inputs = ["docs/_build"] }
 docs-api = { cmd = "sphinx-apidoc -o docs/api/ --module-first --no-toc --force src/pyhs3", description = "Regenerate API documentation" }
+check-docstrings = { cmd = "pydocstyle src/pyhs3/", description = "Check docstring style" }
 
 [feature.dev.dependencies]
 pre-commit = "*"

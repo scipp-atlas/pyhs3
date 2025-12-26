@@ -233,11 +233,14 @@ View all available tasks:
 - ``test-slow``: Run tests including slow tests
 - ``test-pydot``: Run tests including pydot tests
 - ``test-all``: Run all tests with coverage (slow + pydot)
-- ``doctest``: Run doctests in source modules
+- ``test-docstrings``: Run doctests in source modules
+- ``test-docs``: Run doctests in README and docs/
+- ``check-docstrings``: Check docstring style
 
 **Documentation tasks:**
 
 - ``docs-build``: Build documentation (static)
+- ``docs-linkcheck``: Check documentation for broken links
 - ``docs-serve``: Build and serve documentation with live reload
 - ``docs-clean``: Clean documentation build artifacts
 - ``docs-api``: Regenerate API documentation

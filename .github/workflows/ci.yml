@@ -28,6 +28,10 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.9.3
         with:
           pixi-version: v0.59.0
+          cache: true
+          cache_key: dev
+          cache-write:
+            ${{ github.event_name == 'push' && github.ref_name == 'main' }}
           environments: dev
 
       - name: Run pre-commit
@@ -47,6 +51,10 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.9.3
         with:
           pixi-version: v0.59.0
+          cache: true
+          cache_key: dev
+          cache-write:
+            ${{ github.event_name == 'push' && github.ref_name == 'main' }}
           environments: dev
 
       - name: Build and check package
@@ -81,6 +89,9 @@ jobs:
         with:
           pixi-version: v0.59.0
           cache: true
+          cache_key: ${{ matrix.pixi-environment }}
+          cache-write:
+            ${{ github.event_name == 'push' && github.ref_name == 'main' }}
           environments: ${{ matrix.pixi-environment }}
 
       - name: Test package

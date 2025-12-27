@@ -15,186 +15,6 @@ We use several tools for development:
 - **mypy**: Static type checking
 - **sphinx**: Documentation generation
 
-Pre-commit Hooks
-----------------
-
-Setting Up Pre-commit
-~~~~~~~~~~~~~~~~~~~~~
-
-After running ``pixi install``, configure pre-commit hooks:
-
-.. code-block:: bash
-
-   pixi run pre-commit-install
-
-This installs git hooks that automatically run before each commit. All tools (ruff, mypy, etc.) are managed by pixi, so you don't need to install them separately.
-
-Running Pre-commit
-~~~~~~~~~~~~~~~~~~
-
-Run hooks on changed files:
-
-.. code-block:: bash
-
-   pixi run pre-commit
-
-Run hooks on all files:
-
-.. code-block:: bash
-
-   pixi run pre-commit --all-files
-
-What Pre-commit Checks
-~~~~~~~~~~~~~~~~~~~~~~
-
-Our pre-commit configuration runs:
-
-- **blacken-docs**: Format code in documentation
-- **check-added-large-files**: Prevent large file commits
-- **check-case-conflict**: Detect case conflicts
-- **check-merge-conflict**: Detect merge conflict markers
-- **check-yaml**: Validate YAML files
-- **debug-statements**: Detect debug statements
-- **end-of-file-fixer**: Ensure files end with newline
-- **trailing-whitespace**: Remove trailing whitespace
-- **prettier**: Format YAML, Markdown, JSON, CSS
-- **ruff-check**: Lint Python code (with auto-fix)
-- **ruff-format**: Format Python code
-- **mypy**: Type check Python code
-- **codespell**: Check for common misspellings
-- **shellcheck**: Lint shell scripts
-- **validate-pyproject**: Validate pyproject.toml
-
-Pre-commit Workflow
-~~~~~~~~~~~~~~~~~~~
-
-**Let pre-commit handle imports and formatting automatically:**
-
-1. Make your code changes
-2. Add new imports if needed (don't remove unused imports manually)
-3. Commit your changes
-4. Pre-commit will automatically:
-   - Remove unused imports
-   - Sort imports
-   - Format code
-   - Fix other issues
-5. If pre-commit makes changes, re-add files and commit again
-
-If unstaged changes conflict with hook fixes:
-
-.. code-block:: bash
-
-   git add <modified-files>
-   git commit -m "your message"
-
-Code Linting
-------------
-
-Using ruff
-~~~~~~~~~~
-
-ruff is our primary linter and formatter. It's extremely fast and handles most code quality issues.
-
-The easiest way to run ruff is through pre-commit:
-
-.. code-block:: bash
-
-   pixi run pre-commit
-
-For manual use, ruff is available in the pixi environment. You can run it directly after ``pixi install``:
-
-.. code-block:: bash
-
-   # Check code
-   ruff check src/pyhs3 tests
-
-   # Auto-fix issues
-   ruff check --fix src/pyhs3 tests
-
-   # Format code
-   ruff format src/pyhs3 tests
-
-Configured Rules
-~~~~~~~~~~~~~~~~
-
-We enable many ruff rules (see ``pyproject.toml``):
-
-- **B**: flake8-bugbear (detect common bugs)
-- **I**: isort (import sorting)
-- **ARG**: flake8-unused-arguments
-- **C4**: flake8-comprehensions
-- **EM**: flake8-errmsg
-- **PL**: pylint rules
-- **PT**: flake8-pytest-style
-- **SIM**: flake8-simplify
-- **UP**: pyupgrade (modernize Python code)
-- And many more...
-
-Type Checking
--------------
-
-Using mypy
-~~~~~~~~~~
-
-We enforce strict type checking with mypy. It runs automatically with pre-commit, or you can run it manually after ``pixi install``:
-
-.. code-block:: bash
-
-   mypy src/pyhs3
-
-Configuration
-~~~~~~~~~~~~~
-
-Our mypy configuration (from ``pyproject.toml``):
-
-- **Python version**: 3.10+ (target version)
-- **Strict mode**: Enabled
-- **Paths**: ``src/`` and ``tests/``
-- **Package-specific**: Strict checking for ``pyhs3.*`` modules
-
-Type Hints Requirements
-~~~~~~~~~~~~~~~~~~~~~~~
-
-All code must include type hints:
-
-.. code-block:: pycon
-
-   >>> from __future__ import annotations
-   >>> from typing import Any
-   >>> def process_data(data: dict[str, Any], normalize: bool = True) -> tuple[float, float]:
-   ...     """Process input data and return mean and std."""
-   ...     values = list(data.values())
-   ...     if not values:
-   ...         return 0.0, 0.0
-   ...     mean = sum(values) / len(values) if isinstance(values[0], (int, float)) else 0.0
-   ...     variance = (
-   ...         sum((x - mean) ** 2 for x in values) / len(values)
-   ...         if isinstance(values[0], (int, float))
-   ...         else 0.0
-   ...     )
-   ...     std = variance**0.5
-   ...     return (mean, std) if normalize else (mean * 100, std * 100)
-   ...
-   >>> # Example usage
-   >>> process_data({"a": 1.0, "b": 2.0, "c": 3.0})
-   (2.0, 0.816496580927726)
-   >>> process_data({"a": 1.0, "b": 2.0, "c": 3.0}, normalize=False)
-   (200.0, 81.6496580927726)
-
-Using pylint
-~~~~~~~~~~~~
-
-For deeper static analysis, run pylint:
-
-.. code-block:: bash
-
-   pylint src/pyhs3
-
-Or using nox:
-
-.. code-block:: bash
-
-   nox -s pylint
 
 Working with pixi
 ----------------
@@ -308,6 +128,97 @@ pixi manages three environments automatically:
 
 You don't need to manually activate or switch environments - tasks automatically use the correct environment.
 
+Pre-commit Hooks
+----------------
+
+Setting Up Pre-commit
+~~~~~~~~~~~~~~~~~~~~~
+
+After running ``pixi install``, configure pre-commit hooks:
+
+.. code-block:: bash
+
+   pixi run pre-commit-install
+
+This installs git hooks that automatically run before each commit. All tools (ruff, mypy, etc.) are managed by pixi, so you don't need to install them separately.
+
+Running Pre-commit
+~~~~~~~~~~~~~~~~~~
+
+Run hooks on changed files:
+
+.. code-block:: bash
+
+   pixi run pre-commit
+
+Run hooks on all files:
+
+.. code-block:: bash
+
+   pixi run pre-commit --all-files
+
+Pre-commit Workflow
+~~~~~~~~~~~~~~~~~~~
+
+**Let pre-commit handle imports and formatting automatically:**
+
+1. Make your code changes
+2. Add new imports if needed (don't remove unused imports manually)
+3. Commit your changes
+4. Pre-commit will automatically:
+   - Remove unused imports
+   - Sort imports
+   - Format code
+   - Fix other issues
+5. If pre-commit makes changes, re-add files and commit again
+
+If unstaged changes conflict with hook fixes:
+
+.. code-block:: bash
+
+   git add <modified-files>
+   git commit -m "your message"
+
+Code Linting
+------------
+
+Using ruff
+~~~~~~~~~~
+
+ruff is our primary linter and formatter. It's extremely fast and handles most code quality issues. We enable many ruff rules (see ``pyproject.toml``).
+
+The easiest way to run ruff is through pre-commit:
+
+.. code-block:: bash
+
+   pixi run pre-commit
+
+For manual use, ruff is available in the pixi environment. You can run it directly after ``pixi install``:
+
+.. code-block:: bash
+
+   # Check code
+   ruff check src/pyhs3 tests
+
+   # Auto-fix issues
+   ruff check --fix src/pyhs3 tests
+
+   # Format code
+   ruff format src/pyhs3 tests
+
+Type Checking
+-------------
+
+Using mypy
+~~~~~~~~~~
+
+We enforce strict type checking with mypy. Our mypy configuration is in ``pyproject.toml``. It runs automatically with pre-commit, or you can run it manually after ``pixi install``:
+
+.. code-block:: bash
+
+   mypy src/pyhs3
+
+
 Testing with Specific Python Versions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -386,24 +297,7 @@ Clean documentation build artifacts:
 Documentation Structure
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Documentation sources are in ``docs/``:
-
-.. code-block:: text
-
-   docs/
-   ├── conf.py                    # Sphinx configuration
-   ├── index.rst                  # Main documentation page
-   ├── api.rst                    # API reference
-   ├── structure.rst              # HS3 structure guide
-   ├── workspace.rst              # Workspace documentation
-   ├── model.rst                  # Model documentation
-   ├── broadcasting.rst           # Broadcasting guide
-   ├── defining_components.rst    # Component definition guide
-   ├── contributing.rst           # This guide
-   ├── testing.rst                # Testing guide
-   ├── development.rst            # Development workflow
-   ├── architecture.rst           # Architecture overview
-   └── code_of_conduct.rst        # Code of conduct
+Documentation sources are in ``docs/``.
 
 Testing Workflow
 ----------------

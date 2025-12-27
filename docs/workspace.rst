@@ -1,5 +1,3 @@
-.. _workspace_tutorial:
-
 .. testsetup:: *
 
    import pyhs3
@@ -10,7 +8,7 @@ Working with Workspaces
 This tutorial covers how to work with PyHS3 workspaces - loading, exploring, and understanding their structure.
 
 What is a Workspace?
--------------------
+--------------------
 
 A **Workspace** is the main container in PyHS3 that holds all the components needed to define a statistical model:
 
@@ -167,7 +165,7 @@ Once you have a workspace, you can explore its contents:
        sigma: [0.1, 3.0]
 
 Understanding Workspace Structure
---------------------------------
+---------------------------------
 
 The workspace follows a hierarchical structure:
 
@@ -283,7 +281,7 @@ The workspace follows a hierarchical structure:
        Datum <|-- BinnedData : inherits
 
 Creating Models from Workspaces
-------------------------------
+-------------------------------
 
 The main purpose of a workspace is to create models that you can evaluate:
 
@@ -302,7 +300,7 @@ The main purpose of a workspace is to create models that you can evaluate:
    PDF value: ...
 
 Example: Complete Physics Model
-------------------------------
+-------------------------------
 
 Here's a more realistic example of a workspace for a physics analysis using both :ref:`Gaussian distributions <hs3:hs3.gaussian-normal-distribution>` and :ref:`generic expressions <hs3:hs3.sec:generic_expression>` with a :ref:`sum function <hs3:hs3.sum>`:
 

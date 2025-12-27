@@ -217,3 +217,18 @@ add_ignore = [
   "D100",
   "D105",
 ]
+
+[tool.rstcheck]
+ignore_directives = [
+    "autosummary",
+    "bibliography",
+    "doctest",
+    "mermaid",
+    "plot", # matplotlib
+    "testsetup"
+]
+ignore_roles = [
+    "cite:p",
+    "cite:ps",
+    "hs3:label"
+]

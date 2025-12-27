@@ -17,7 +17,7 @@ We use several tools for development:
 
 
 Working with pixi
-----------------
+-----------------
 
 pixi provides reproducible development environments and task automation. Tasks automatically use the correct environment, so you don't need to specify environments when running tasks.
 
@@ -176,7 +176,7 @@ If unstaged changes conflict with hook fixes:
 
 .. code-block:: bash
 
-   git add <modified-files>
+   git add file1 file2
    git commit -m "your message"
 
 Code Linting

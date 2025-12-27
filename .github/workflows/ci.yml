@@ -29,7 +29,7 @@ jobs:
         with:
           pixi-version: v0.59.0
           cache: true
-          cache_key: dev
+          cache-key: dev
           cache-write:
             ${{ github.event_name == 'push' && github.ref_name == 'main' }}
           environments: dev
@@ -52,7 +52,7 @@ jobs:
         with:
           pixi-version: v0.59.0
           cache: true
-          cache_key: dev
+          cache-key: dev
           cache-write:
             ${{ github.event_name == 'push' && github.ref_name == 'main' }}
           environments: dev
@@ -89,7 +89,7 @@ jobs:
         with:
           pixi-version: v0.59.0
           cache: true
-          cache_key: ${{ matrix.pixi-environment }}
+          cache-key: ${{ matrix.pixi-environment }}
           cache-write:
             ${{ github.event_name == 'push' && github.ref_name == 'main' }}
           environments: ${{ matrix.pixi-environment }}

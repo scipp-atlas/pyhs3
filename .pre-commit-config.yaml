@@ -4,7 +4,7 @@ ci:
   skip: [mypy]
   autoupdate_schedule: monthly
 
-exclude: ^.cruft.json|.copier-answers.yml|src/pyhs3/roadmap.py|example.py$
+exclude: ^.cruft.json|.copier-answers.yml|src/pyhs3/roadmap.py|example.py|pixi.lock$
 
 repos:
   - repo: https://github.com/adamchainz/blacken-docs

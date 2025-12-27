@@ -112,6 +112,7 @@ tbump = ">=6.7.0"
 mypy = "*"
 ruff = "*"
 python-build = "*"
+twine = "*"
 
 [feature.dev.pypi-dependencies]
 pylint-pydantic = "*"
@@ -122,7 +123,8 @@ pylint = { cmd = "pylint pyhs3", description = "Run PyLint on pyhs3 package" }
 pre-commit-install = { cmd = "pre-commit install", description = "Install pre-commit git hooks" }
 pre-commit-update = { cmd = "pre-commit autoupdate", description = "Update pre-commit hook versions" }
 build-clean = { cmd = "rm -rf build dist", description = "Clean build artifacts" }
-build = { cmd = "python -m build", depends-on = ["build-clean"], description = "Build SDist and wheel distributions" }
+build = { cmd = "python -m build", depends-on = ["build-clean"], description = "Build SDist and wheel distributions", outputs = ["dist"] }
+build-check = { cmd = "twine check --strict ./dist/*", depends-on = ["build"], description = "Run twine to check" }
 
 [environments]
 docs = ["docs"]

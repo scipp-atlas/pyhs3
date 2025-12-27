@@ -1,5 +1,3 @@
-.. _structure:
-
 PyHS3 Structure and Components
 ==============================
 
@@ -85,7 +83,7 @@ Domains serve multiple purposes:
 - Validate parameter values
 
 Parameter Points
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~
 
 **Parameter Points** define named sets of parameter values:
 
@@ -163,7 +161,7 @@ How Components Interact
 -----------------------
 
 Dependency Resolution
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 PyHS3 automatically builds a dependency graph to determine evaluation order:
 
@@ -221,7 +219,7 @@ For example:
    }
 
 Parameter Discovery
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 When parameters are not explicitly defined in ``parameter_points``, PyHS3 discovers them:
 
@@ -365,10 +363,10 @@ Here's how data flows through a complete PyHS3 model:
    >>> background_pdf = model.pdf("background", mass=np.array(125.0), slope=np.array(50.0))
 
 Common Patterns
---------------
+---------------
 
 Signal + Background Models
-~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -422,7 +420,7 @@ Systematic Uncertainties
    }
 
 Multi-channel Analysis
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 

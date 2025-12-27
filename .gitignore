@@ -157,3 +157,7 @@ Thumbs.db
 # Common editor files
 *~
 *.swp
+
+# pixi environments
+.pixi/*
+!.pixi/config.toml

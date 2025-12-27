@@ -1,5 +1,5 @@
 Defining Custom Functions and Distributions
-==========================================
+============================================
 
 This guide shows how to create custom Functions and Distributions for use with pyhs3. These custom components should follow the :hs3:label:`HS3 specification <hs3.sec:distributions>` for distributions and :hs3:label:`functions <hs3.sec:functions>`.
 Both Functions and Distributions inherit from the ``Evaluable`` base class, which provides

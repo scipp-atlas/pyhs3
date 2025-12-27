@@ -258,6 +258,7 @@ View all available tasks:
 - ``pre-commit-update``: Update pre-commit hook versions
 - ``build-clean``: Clean build artifacts
 - ``build``: Build SDist and wheel distributions
+- ``build-check``: Build and validate package with twine
 
 **Composite tasks:**
 

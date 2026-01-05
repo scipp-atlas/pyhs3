@@ -1,0 +1,144 @@
+[workspace]
+authors = ["Giordon Stark <kratsg@gmail.com>"]
+name = "pyhs3"
+channels = ["conda-forge"]
+platforms = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64", "win-64"]
+preview = ["pixi-build"]
+
+[dependencies]
+pyhs3 = { path = "./" }
+
+[package]
+name = "pyhs3"
+version = "latest"
+
+[package.build]
+backend = { name = "pixi-build-python", version = "*" }
+config = { noarch = true }
+
+[package.host-dependencies]
+hatchling = ">=1.25"
+hatch-vcs = ">=0.4"
+
+[package.run-dependencies]
+rich = "*"
+rustworkx = "*"
+pytensor = "*"
+numpy = "*"
+sympy = "*"
+pydantic = "*"
+hist = "*"
+
+# pytensor >=2.33 does not exist for win-64 for py310
+[feature.py310]
+platforms = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64"]
+
+[feature.py310.dependencies]
+python = "<3.11,>=3.10"
+
+[feature.py311.dependencies]
+python = "<3.12,>=3.11"
+
+[feature.py312.dependencies]
+python = "<3.13,>=3.12"
+
+[feature.py313.dependencies]
+python = "<3.14,>=3.13"
+
+# Need to wait for global pin to 3.14: https://github.com/conda-forge/python-feedstock/issues/794
+# [feature.py314.dependencies]
+# python = "<3.15,>=3.14"
+
+[feature.test.dependencies]
+pytest = ">=9"
+pytest-cov = ">=3"
+pyhf = ">=0.7.6"
+scikit-hep-testdata = ">=0.5.7"
+pydot = "*"
+graphviz = "*"
+
+[feature.test.activation]
+scripts = [".pixi/setup_graphviz.sh"]
+
+[feature.test.target.linux-64.dependencies]
+root_base = ">=6.32.10,<7"
+
+[feature.test.target.linux-aarch64.dependencies]
+root_base = ">=6.32.10,<7"
+
+# root_base and pytensor do not resolve on py313
+# https://conda-forge.zulipchat.com/#narrow/channel/457337-general/topic/unable.20to.20resolve.20pytensor.20and.20root_base.20for.20py3.2E13/with/565448015
+#[feature.test.target.osx-64.dependencies]
+#root_base = ">=6.32.10,<7"
+#
+#[feature.test.target.osx-arm64.dependencies]
+#root_base = ">=6.32.10,<7"
+
+[feature.test.tasks]
+test = { cmd = "pytest -m 'not slow and not pydot'", description = "Run quick tests (skip slow and pydot)" }
+test-cov = { cmd = "pytest -m 'not slow and not pydot' --cov=pyhs3 --cov-report=term --cov-report=html", description = "Run quick tests with coverage" }
+test-docstrings = { cmd = "pytest --doctest-modules src/pyhs3", description = "Run doctests in source modules" }
+test-docs = { cmd = "pytest README.rst docs", description = "Run doctests in docs and README.rst" }
+test-slow = { cmd = "pytest --runslow", description = "Run tests including slow tests" }
+test-pydot = { cmd = "pytest --runpydot", description = "Run tests including pydot tests" }
+test-all = { cmd = "pytest --runslow --runpydot --cov=pyhs3", description = "Run all tests with coverage (slow + pydot)" }
+
+[feature.docs.dependencies]
+sphinx = ">=7.0"
+myst-parser = ">=0.13"
+sphinx-copybutton = ">=0.3.2,!=0.5.1"
+sphinx-autodoc-typehints = "*"
+furo = ">=2023.08.17"
+sphinx-click = "*"
+ipywidgets = "*"
+intersphinx-registry = ">=0.2411.17"
+sphinx-issues = "*"
+sphinxcontrib-mermaid = "*"
+sphinxcontrib-bibtex = "*"
+sphinx-autobuild = "*"
+pydocstyle = "*"
+
+[feature.docs.tasks]
+docs-build = { cmd = "sphinx-build -n -T -b html docs docs/_build/html", description = "Build documentation (static)", inputs = ["docs/"], outputs = ["docs/_build/html"] }
+docs-linkcheck = { cmd = "sphinx-build -M linkcheck docs docs/_build", description = "Check documentation for broken links" }
+docs-serve = { cmd = "python -m http.server -d docs/_build/html", depends-on = ["docs-build"], description = "Build and serve documentation" }
+docs-watch = { cmd = "sphinx-autobuild --open-browser -n -T -b html docs docs/_build/html", description = "Build and serve documentation with live reload", inputs = ["docs/"], outputs = ["docs/_build/html"] }
+docs-clean = { cmd = "rm -rf docs/_build", description = "Clean documentation build artifacts", inputs = ["docs/_build"] }
+docs-api = { cmd = "sphinx-apidoc -o docs/api/ --module-first --no-toc --force src/pyhs3", description = "Regenerate API documentation" }
+check-docstrings = { cmd = "pydocstyle src/pyhs3/", description = "Check docstring style" }
+
+[feature.dev.dependencies]
+pre-commit = "*"
+pylint = ">=3.2"
+tbump = ">=6.7.0"
+mypy = "*"
+ruff = "*"
+python-build = "*"
+twine = "*"
+
+[feature.dev.pypi-dependencies]
+pylint-pydantic = "*"
+
+[feature.dev.tasks]
+pre-commit = { cmd = "pre-commit run --all-files", description = "Run pre-commit hooks on all files" }
+pylint = { cmd = "pylint pyhs3", description = "Run PyLint on pyhs3 package" }
+pre-commit-install = { cmd = "pre-commit install", description = "Install pre-commit git hooks" }
+pre-commit-update = { cmd = "pre-commit autoupdate", description = "Update pre-commit hook versions" }
+build-clean = { cmd = "rm -rf build dist", description = "Clean build artifacts" }
+build = { cmd = "python -m build", depends-on = ["build-clean"], description = "Build SDist and wheel distributions", outputs = ["dist"] }
+build-check = { cmd = "twine check --strict ./dist/*", depends-on = ["build"], description = "Run twine to check" }
+
+[environments]
+docs = ["docs"]
+dev = ["dev"]
+py310 = ["test", "py310"]
+py311 = ["test", "py311"]
+py312 = ["test", "py312"]
+py313 = ["test", "py313"]
+# py314 = ["test", "py314"]
+
+[tasks]
+# Composite tasks that span multiple features
+lint = { depends-on = ["pre-commit", "pylint"], description = "Run all linting (pre-commit + pylint)" }
+check = { depends-on = ["lint", "test"], description = "Quick check: lint + basic tests" }
+check-all = { depends-on = ["lint", "test-all"], description = "Comprehensive check: lint + all tests" }

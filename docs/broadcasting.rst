@@ -166,7 +166,7 @@ Here's a complete working example:
     Vector: [-2.91893853 -1.41893853 -0.91893853 -1.41893853 -2.91893853]
 
 Current Limitations
-------------------
+-------------------
 
 - Users must manually specify which parameters should be vectors
 - The ``kind`` must be set before creating the model

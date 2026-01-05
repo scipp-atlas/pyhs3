@@ -1,12 +1,10 @@
-.. _model_tutorial:
-
 Understanding and Exploring Models
 ==================================
 
 This tutorial covers how to work with PyHS3 models - understanding their structure, exploring their contents, and evaluating them.
 
 What is a Model?
----------------
+----------------
 
 A **Model** is the computational representation of your statistical model created from a workspace. It contains:
 
@@ -102,7 +100,7 @@ Once you have a model, you can explore its structure:
        Compiled: ...
 
 Understanding the Computational Graph
-------------------------------------
+-------------------------------------
 
 PyHS3 models are built as computational graphs where:
 
@@ -158,7 +156,7 @@ PyHS3 automatically discovers parameters from your distributions and functions. 
    Discovered parameters: ['data', 'discovered_mu', 'discovered_sigma']
 
 Evaluating Models
-----------------
+-----------------
 
 The primary use of models is to evaluate probability density functions. PyHS3 provides both type-safe and convenience methods for PDF evaluation:
 
@@ -232,7 +230,7 @@ For evaluating PDFs across multiple points, use numpy arrays:
    ]
 
 Model Compilation and Performance
---------------------------------
+----------------------------------
 
 Models use PyTensor for fast compilation and evaluation:
 
@@ -344,7 +342,7 @@ When working with models, you can debug issues using:
    print("Available functions:", list(model.functions.keys()))
 
 Advanced Topics
---------------
+---------------
 
 Tensor Types
 ~~~~~~~~~~~~
@@ -363,7 +361,7 @@ Parameters can have different tensor types based on their intended use:
    }
 
 Custom Functions
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~
 
 You can define custom mathematical expressions:
 
@@ -376,7 +374,7 @@ You can define custom mathematical expressions:
    }
 
 Performance Optimization
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 For better performance:
 

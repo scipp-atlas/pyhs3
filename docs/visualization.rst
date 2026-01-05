@@ -1,7 +1,7 @@
 Histogram Visualization
 =======================
 
-pyhs3 provides convenient methods to convert data objects into `hist.Hist <https://hist.readthedocs.io/>`_ histograms for visualization and analysis using the scikit-hep ecosystem.
+pyhs3 provides convenient methods to convert data objects into `hist.Hist <https://hist.readthedocs.io/en/latest/>`_ histograms for visualization and analysis using the scikit-hep ecosystem.
 
 Converting Data to Histograms
 ------------------------------

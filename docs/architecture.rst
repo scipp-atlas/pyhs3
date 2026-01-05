@@ -505,7 +505,7 @@ External Documentation
 
 - `HS3 Specification <https://hep-statistics-serialization-standard.github.io/>`_
 - `PyTensor Documentation <https://pytensor.readthedocs.io/>`_
-- `Pydantic Documentation <https://docs.pydantic.dev/>`_
+- `Pydantic Documentation <https://docs.pydantic.dev/latest/>`_
 - `Scientific Python Developer Guide <https://learn.scientific-python.org/development/>`_
 
 Internal Documentation

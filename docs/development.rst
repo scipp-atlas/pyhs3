@@ -8,13 +8,125 @@ Development Tools
 
 We use several tools for development:
 
-- **hatch**: Project management and task running
-- **nox**: Automated testing across environments
+- **pixi**: Package management, environment management, and task running
 - **pre-commit**: Git hooks for code quality
 - **pytest**: Testing framework
 - **ruff**: Fast Python linter and formatter
 - **mypy**: Static type checking
 - **sphinx**: Documentation generation
+
+
+Working with pixi
+-----------------
+
+pixi provides reproducible development environments and task automation. Tasks automatically use the correct environment, so you don't need to specify environments when running tasks.
+
+Installing pixi
+~~~~~~~~~~~~~~~
+
+Follow installation instructions at https://pixi.prefix.dev/latest/
+
+Quick Start
+~~~~~~~~~~~
+
+After cloning the repository:
+
+.. code-block:: bash
+
+   pixi install  # Install all dependencies and pyhs3 in editable mode
+
+This sets up all environments (test, docs, dev) and installs pyhs3 automatically.
+
+Available Tasks
+~~~~~~~~~~~~~~~
+
+View all available tasks:
+
+.. code-block:: bash
+
+   pixi task list
+
+**Testing tasks:**
+
+- ``test``: Run quick tests (skip slow and pydot)
+- ``test-cov``: Run quick tests with coverage
+- ``test-slow``: Run tests including slow tests
+- ``test-pydot``: Run tests including pydot tests
+- ``test-all``: Run all tests with coverage (slow + pydot)
+- ``test-docstrings``: Run doctests in source modules
+- ``test-docs``: Run doctests in README and docs/
+- ``check-docstrings``: Check docstring style
+
+**Documentation tasks:**
+
+- ``docs-build``: Build documentation (static)
+- ``docs-linkcheck``: Check documentation for broken links
+- ``docs-serve``: Build and serve documentation
+- ``docs-watch``: Build and serve documentation with live reload (recommended for development)
+- ``docs-clean``: Clean documentation build artifacts
+- ``docs-api``: Regenerate API documentation
+
+**Linting tasks:**
+
+- ``pre-commit``: Run pre-commit hooks on all files
+- ``pylint``: Run PyLint on pyhs3 package
+- ``lint``: Run all linting (pre-commit + pylint)
+
+**Development tasks:**
+
+- ``pre-commit-install``: Install pre-commit git hooks
+- ``pre-commit-update``: Update pre-commit hook versions
+- ``build-clean``: Clean build artifacts
+- ``build``: Build SDist and wheel distributions
+- ``build-check``: Build and validate package with twine
+
+**Composite tasks:**
+
+- ``check``: Quick check (lint + basic tests)
+- ``check-all``: Comprehensive check (lint + all tests)
+
+Running Tasks
+~~~~~~~~~~~~~
+
+Run tasks using ``pixi run``:
+
+.. code-block:: bash
+
+   # Testing
+   pixi run test
+   pixi run test-cov
+   pixi run test-all
+
+   # Linting
+   pixi run lint
+   pixi run pre-commit
+   pixi run pylint
+
+   # Documentation
+   pixi run docs-watch
+   pixi run docs-build
+
+   # Quick checks
+   pixi run check
+   pixi run check-all
+
+Pass additional arguments directly:
+
+.. code-block:: bash
+
+   pixi run test tests/test_distributions.py -v
+   pixi run pylint --output-format=json
+
+Environments
+~~~~~~~~~~~~
+
+pixi manages three environments automatically:
+
+- ``test``: Testing environment (includes ROOT, cms-combine, jax, pytest)
+- ``docs``: Documentation environment (includes Sphinx and extensions)
+- ``dev``: Development environment (combines test + docs + dev tools)
+
+You don't need to manually activate or switch environments - tasks automatically use the correct environment.
 
 Pre-commit Hooks
 ----------------
@@ -22,14 +134,13 @@ Pre-commit Hooks
 Setting Up Pre-commit
 ~~~~~~~~~~~~~~~~~~~~~
 
-Install and configure pre-commit hooks:
+After running ``pixi install``, configure pre-commit hooks:
 
 .. code-block:: bash
 
-   pip install pre-commit
-   pre-commit install
+   pixi run pre-commit-install
 
-This installs git hooks that automatically run before each commit.
+This installs git hooks that automatically run before each commit. All tools (ruff, mypy, etc.) are managed by pixi, so you don't need to install them separately.
 
 Running Pre-commit
 ~~~~~~~~~~~~~~~~~~
@@ -38,34 +149,13 @@ Run hooks on changed files:
 
 .. code-block:: bash
 
-   pre-commit run
+   pixi run pre-commit
 
 Run hooks on all files:
 
 .. code-block:: bash
 
-   pre-commit run --all-files
-
-What Pre-commit Checks
-~~~~~~~~~~~~~~~~~~~~~~
-
-Our pre-commit configuration runs:
-
-- **blacken-docs**: Format code in documentation
-- **check-added-large-files**: Prevent large file commits
-- **check-case-conflict**: Detect case conflicts
-- **check-merge-conflict**: Detect merge conflict markers
-- **check-yaml**: Validate YAML files
-- **debug-statements**: Detect debug statements
-- **end-of-file-fixer**: Ensure files end with newline
-- **trailing-whitespace**: Remove trailing whitespace
-- **prettier**: Format YAML, Markdown, JSON, CSS
-- **ruff-check**: Lint Python code (with auto-fix)
-- **ruff-format**: Format Python code
-- **mypy**: Type check Python code
-- **codespell**: Check for common misspellings
-- **shellcheck**: Lint shell scripts
-- **validate-pyproject**: Validate pyproject.toml
+   pixi run pre-commit --all-files
 
 Pre-commit Workflow
 ~~~~~~~~~~~~~~~~~~~
@@ -86,7 +176,7 @@ If unstaged changes conflict with hook fixes:
 
 .. code-block:: bash
 
-   git add <modified-files>
+   git add file1 file2
    git commit -m "your message"
 
 Code Linting
@@ -95,41 +185,26 @@ Code Linting
 Using ruff
 ~~~~~~~~~~
 
-ruff is our primary linter and formatter. It's extremely fast and handles most code quality issues.
+ruff is our primary linter and formatter. It's extremely fast and handles most code quality issues. We enable many ruff rules (see ``pyproject.toml``).
 
-Check code:
+The easiest way to run ruff is through pre-commit:
 
 .. code-block:: bash
 
+   pixi run pre-commit
+
+For manual use, ruff is available in the pixi environment. You can run it directly after ``pixi install``:
+
+.. code-block:: bash
+
+   # Check code
    ruff check src/pyhs3 tests
 
-Auto-fix issues:
-
-.. code-block:: bash
-
+   # Auto-fix issues
    ruff check --fix src/pyhs3 tests
 
-Format code:
-
-.. code-block:: bash
-
+   # Format code
    ruff format src/pyhs3 tests
-
-Configured Rules
-~~~~~~~~~~~~~~~~
-
-We enable many ruff rules (see ``pyproject.toml``):
-
-- **B**: flake8-bugbear (detect common bugs)
-- **I**: isort (import sorting)
-- **ARG**: flake8-unused-arguments
-- **C4**: flake8-comprehensions
-- **EM**: flake8-errmsg
-- **PL**: pylint rules
-- **PT**: flake8-pytest-style
-- **SIM**: flake8-simplify
-- **UP**: pyupgrade (modernize Python code)
-- And many more...
 
 Type Checking
 -------------
@@ -137,157 +212,44 @@ Type Checking
 Using mypy
 ~~~~~~~~~~
 
-We enforce strict type checking with mypy:
+We enforce strict type checking with mypy. Our mypy configuration is in ``pyproject.toml``. It runs automatically with pre-commit, or you can run it manually after ``pixi install``:
 
 .. code-block:: bash
 
    mypy src/pyhs3
 
-Configuration
-~~~~~~~~~~~~~
 
-Our mypy configuration (from ``pyproject.toml``):
+Testing with Specific Python Versions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-- **Python version**: 3.10+ (target version)
-- **Strict mode**: Enabled
-- **Paths**: ``src/`` and ``tests/``
-- **Package-specific**: Strict checking for ``pyhs3.*`` modules
-
-Type Hints Requirements
-~~~~~~~~~~~~~~~~~~~~~~~
-
-All code must include type hints:
-
-.. code-block:: pycon
-
-   >>> from __future__ import annotations
-   >>> from typing import Any
-   >>> def process_data(data: dict[str, Any], normalize: bool = True) -> tuple[float, float]:
-   ...     """Process input data and return mean and std."""
-   ...     values = list(data.values())
-   ...     if not values:
-   ...         return 0.0, 0.0
-   ...     mean = sum(values) / len(values) if isinstance(values[0], (int, float)) else 0.0
-   ...     variance = (
-   ...         sum((x - mean) ** 2 for x in values) / len(values)
-   ...         if isinstance(values[0], (int, float))
-   ...         else 0.0
-   ...     )
-   ...     std = variance**0.5
-   ...     return (mean, std) if normalize else (mean * 100, std * 100)
-   ...
-   >>> # Example usage
-   >>> process_data({"a": 1.0, "b": 2.0, "c": 3.0})
-   (2.0, 0.816496580927726)
-   >>> process_data({"a": 1.0, "b": 2.0, "c": 3.0}, normalize=False)
-   (200.0, 81.6496580927726)
-
-Using pylint
-~~~~~~~~~~~~
-
-For deeper static analysis, run pylint:
+To run tests with a specific Python version, use the environment name:
 
 .. code-block:: bash
 
-   pylint src/pyhs3
+   # Python 3.10
+   pixi run -e py310 test
 
-Or using nox:
+   # Python 3.11
+   pixi run -e py311 test
 
-.. code-block:: bash
+   # Python 3.12
+   pixi run -e py312 test
 
-   nox -s pylint
+   # Python 3.13
+   pixi run -e py313 test
 
-Working with hatch
-------------------
+   # Python 3.14
+   pixi run -e py314 test
 
-hatch is our project management tool.
-
-Running Tests
-~~~~~~~~~~~~~
-
-Run tests:
-
-.. code-block:: bash
-
-   hatch run test
-
-Run doctests:
+The default ``test`` task runs quick tests (skips slow and pydot tests). For comprehensive testing:
 
 .. code-block:: bash
 
-   hatch run doctest
+   # Run all tests (including slow and pydot)
+   pixi run -e py311 test-all
 
-Run specific tests:
-
-.. code-block:: bash
-
-   hatch run test tests/test_distributions.py::TestGaussianDistribution
-
-Viewing Environments
-~~~~~~~~~~~~~~~~~~~~
-
-See configured environments:
-
-.. code-block:: bash
-
-   hatch env show
-
-Available Scripts
-~~~~~~~~~~~~~~~~~
-
-From ``pyproject.toml`` hatch configuration:
-
-- ``test``: Run pytest
-- ``doctest``: Run doctests on source code
-
-Working with nox
-----------------
-
-nox provides reproducible testing across environments.
-
-Available Sessions
-~~~~~~~~~~~~~~~~~~
-
-View all available sessions:
-
-.. code-block:: bash
-
-   nox --list
-
-Default sessions (run automatically with ``nox``):
-
-- ``lint``: Run pre-commit hooks
-- ``pylint``: Run pylint
-- ``tests``: Run pytest
-
-Optional sessions:
-
-- ``docs``: Build documentation
-- ``build``: Build package distributions
-
-Running Sessions
-~~~~~~~~~~~~~~~~
-
-Run all default sessions:
-
-.. code-block:: bash
-
-   nox
-
-Run specific session:
-
-.. code-block:: bash
-
-   nox -s lint
-   nox -s tests
-   nox -s pylint
-
-Run with arguments:
-
-.. code-block:: bash
-
-   nox -s tests -- tests/test_distributions.py -v
-   nox -s docs -- --serve
+   # Run with coverage
+   pixi run -e py311 test-cov
 
 Building Documentation
 ----------------------
@@ -299,13 +261,13 @@ Build documentation:
 
 .. code-block:: bash
 
-   nox -s docs
+   pixi run docs-build
 
 Build and serve with live reload:
 
 .. code-block:: bash
 
-   nox -s docs -- --serve
+   pixi run docs-watch
 
 This will:
 
@@ -314,49 +276,28 @@ This will:
 - Open your browser automatically
 - Reload when you make changes
 
-Manual Documentation Build
+Regenerate API Documentation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Regenerate API docs from source code:
+
+.. code-block:: bash
+
+   pixi run docs-api
+
+Clean Documentation Build
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Install documentation dependencies:
+Clean documentation build artifacts:
 
 .. code-block:: bash
 
-   pip install -e .[docs]
-
-Build with Sphinx:
-
-.. code-block:: bash
-
-   cd docs
-   sphinx-build -b html . _build/html
-
-View built documentation:
-
-.. code-block:: bash
-
-   open docs/_build/html/index.html
+   pixi run docs-clean
 
 Documentation Structure
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Documentation sources are in ``docs/``:
-
-.. code-block:: text
-
-   docs/
-   ├── conf.py                    # Sphinx configuration
-   ├── index.rst                  # Main documentation page
-   ├── api.rst                    # API reference
-   ├── structure.rst              # HS3 structure guide
-   ├── workspace.rst              # Workspace documentation
-   ├── model.rst                  # Model documentation
-   ├── broadcasting.rst           # Broadcasting guide
-   ├── defining_components.rst    # Component definition guide
-   ├── contributing.rst           # This guide
-   ├── testing.rst                # Testing guide
-   ├── development.rst            # Development workflow
-   ├── architecture.rst           # Architecture overview
-   └── code_of_conduct.rst        # Code of conduct
+Documentation sources are in ``docs/``.
 
 Testing Workflow
 ----------------
@@ -364,40 +305,54 @@ Testing Workflow
 Quick Testing
 ~~~~~~~~~~~~~
 
-During development, run tests frequently:
+During development, run tests frequently using pixi tasks:
+
+.. code-block:: bash
+
+   # Quick tests (skip slow and pydot)
+   pixi run test
+
+   # All tests with coverage
+   pixi run test-all
+
+   # Tests with coverage report
+   pixi run test-cov
+
+For specific tests, pass additional arguments directly:
+
+.. code-block:: bash
+
+   # Run specific test file
+   pixi run test tests/test_distributions.py -v
+
+   # Run specific test
+   pixi run test tests/test_distributions.py::TestGaussianDistribution::test_pdf_evaluation
+
+Advanced: Direct pytest Usage
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+After ``pixi install``, pytest is available in the environment for direct use:
 
 .. code-block:: bash
 
    pytest -v
-
-Run specific test file:
-
-.. code-block:: bash
-
    pytest tests/test_distributions.py
-
-Run specific test:
-
-.. code-block:: bash
-
-   pytest tests/test_distributions.py::TestGaussianDistribution::test_pdf_evaluation
-
-Skip slow tests:
-
-.. code-block:: bash
-
    pytest -m "not slow"
 
 With Coverage
 ~~~~~~~~~~~~~
 
-Run tests with coverage:
+Use pixi tasks for coverage:
 
 .. code-block:: bash
 
-   pytest --cov=pyhs3
+   # Quick tests with coverage
+   pixi run test-cov
 
-Generate HTML coverage report:
+   # All tests with coverage
+   pixi run test-all
+
+Or run pytest directly with coverage options:
 
 .. code-block:: bash
 
@@ -417,7 +372,12 @@ Adding a New Distribution
 3. Write unit tests in ``tests/test_distributions.py``
 4. Add integration test if needed
 5. Update documentation if it's a public API
-6. Run tests and linting
+6. Run tests and linting:
+
+   .. code-block:: bash
+
+      pixi run check
+
 7. Commit with semantic message: ``feat: add XYZ distribution``
 
 Adding a New Function
@@ -444,7 +404,7 @@ Updating Documentation
 ~~~~~~~~~~~~~~~~~~~~~~
 
 1. Edit relevant ``.rst`` files in ``docs/``
-2. Build docs locally to preview: ``nox -s docs -- --serve``
+2. Build docs locally to preview: ``pixi run docs-serve``
 3. Check for broken links and formatting
 4. Commit: ``docs: update XYZ documentation``
 
@@ -497,9 +457,9 @@ If CI fails but tests pass locally:
 
 1. **Check the CI logs** on GitHub
 2. **Look for platform-specific issues** (Windows vs Linux vs macOS)
-3. **Verify all dependencies** are in ``pyproject.toml``
-4. **Run pre-commit**: ``pre-commit run --all-files``
-5. **Test with nox** to match CI environment: ``nox``
+3. **Verify all dependencies** are in ``pyproject.toml`` and ``pixi.toml``
+4. **Run pre-commit**: ``pixi run pre-commit``
+5. **Test with pixi** to match CI environment: ``pixi run check-all``
 
 Documentation Build Failures
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -508,7 +468,7 @@ If documentation fails to build:
 
 1. **Check Sphinx warnings** - treat warnings as errors
 2. **Verify reStructuredText syntax** - check for formatting errors
-3. **Test locally**: ``nox -s docs``
+3. **Test locally**: ``pixi run docs-build``
 4. **Check for broken links** in documentation
 5. **Validate cross-references** to ensure they resolve
 
@@ -517,21 +477,18 @@ Environment Issues
 
 If you have dependency or environment issues:
 
-1. **Create a fresh virtual environment**:
+1. **Reinstall with pixi**:
 
    .. code-block:: bash
 
-      rm -rf .venv
-      python -m venv .venv
-      source .venv/bin/activate
-      pip install -e .[dev,test,docs]
+      pixi clean
+      pixi install
 
-2. **Update dependencies**:
+2. **Update pixi**:
 
    .. code-block:: bash
 
-      pip install --upgrade pip
-      pip install -e .[dev,test,docs] --upgrade
+      pixi self-update
 
 3. **Clear caches**:
 
@@ -539,6 +496,7 @@ If you have dependency or environment issues:
 
       rm -rf .pytest_cache .mypy_cache .ruff_cache
       rm -rf docs/_build
+      pixi clean cache
 
 Performance Tips
 ----------------
@@ -546,17 +504,18 @@ Performance Tips
 Faster Testing
 ~~~~~~~~~~~~~~
 
-- Run specific tests instead of entire suite
-- Skip slow tests: ``pytest -m "not slow"``
+- Use ``pixi run test`` for quick tests (skips slow and pydot tests)
+- Run specific tests: ``pixi run test tests/test_specific.py``
+- After ``pixi install``, pytest is available for direct use when you need fine-grained control
 - Use pytest-xdist for parallel testing: ``pytest -n auto``
 - Use ``--lf`` to run last failed tests first: ``pytest --lf``
 
 Faster Linting
 ~~~~~~~~~~~~~~
 
-- Run ruff (very fast) instead of full pre-commit during iteration
-- Use ``ruff check --fix`` for quick auto-fixes
-- Run full ``pre-commit run --all-files`` before pushing
+- After ``pixi install``, ruff is available directly for very fast iteration
+- Use ``ruff check --fix`` for quick auto-fixes during development
+- Run full ``pixi run pre-commit`` before pushing to ensure all checks pass
 
 Editor Integration
 ------------------
@@ -603,9 +562,9 @@ Daily Workflow
 2. **Create/switch to feature branch**: ``git checkout -b feat/my-feature``
 3. **Make small, focused changes**
 4. **Write tests as you go**
-5. **Run tests frequently**: ``pytest``
+5. **Run tests frequently**: ``pixi run test``
 6. **Commit often** with semantic messages
-7. **Run pre-commit before pushing**: ``pre-commit run --all-files``
+7. **Run checks before pushing**: ``pixi run check``
 8. **Push and create PR** when ready
 
 Code Quality
@@ -637,7 +596,7 @@ If you're stuck:
 - Read :doc:`architecture` to understand the codebase
 - Open a discussion on GitHub
 - Check tool documentation:
-  - pytest: https://docs.pytest.org/
-  - mypy: https://mypy.readthedocs.io/
+  - pytest: https://docs.pytest.org/en/stable/
+  - mypy: https://mypy.readthedocs.io/en/stable/
   - ruff: https://docs.astral.sh/ruff/
   - sphinx: https://www.sphinx-doc.org/

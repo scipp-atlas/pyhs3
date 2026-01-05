@@ -19,7 +19,7 @@ pure-python implementation of HS3
 .. |GitHub Discussion| image:: https://img.shields.io/static/v1?label=Discussions&message=Ask&color=blue&logo=github
    :target: https://github.com/scipp-atlas/pyhs3/discussions
 .. |Docs from latest| image:: https://img.shields.io/badge/docs-v0.4.1-blue.svg
-   :target: https://pyhs3.readthedocs.io/
+   :target: https://pyhs3.readthedocs.io/en/v0.4.1/
 .. |Docs from main| image:: https://img.shields.io/badge/docs-main-blue.svg
    :target: https://scipp-atlas.github.io/pyhs3
 .. |PyPI version| image:: https://badge.fury.io/py/pyhs3.svg
@@ -32,7 +32,7 @@ pure-python implementation of HS3
    :target: https://pypi.org/project/pyhs3/
 
 .. |Code Coverage| image:: https://codecov.io/gh/scipp-atlas/pyhs3/graph/badge.svg?branch=main
-   :target: https://codecov.io/gh/scipp-atlas/pyhs3?branch=main
+   :target: https://app.codecov.io/gh/scipp-atlas/pyhs3?branch=main
 .. |CodeFactor| image:: https://www.codefactor.io/repository/github/scipp-atlas/pyhs3/badge
    :target: https://www.codefactor.io/repository/github/scipp-atlas/pyhs3
 .. |pre-commit.ci Status| image:: https://results.pre-commit.ci/badge/github/scipp-atlas/pyhs3/main.svg

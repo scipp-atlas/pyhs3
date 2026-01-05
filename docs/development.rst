@@ -24,7 +24,7 @@ pixi provides reproducible development environments and task automation. Tasks a
 Installing pixi
 ~~~~~~~~~~~~~~~
 
-Follow installation instructions at https://pixi.sh/latest/
+Follow installation instructions at https://pixi.prefix.dev/latest/
 
 Quick Start
 ~~~~~~~~~~~
@@ -596,7 +596,7 @@ If you're stuck:
 - Read :doc:`architecture` to understand the codebase
 - Open a discussion on GitHub
 - Check tool documentation:
-  - pytest: https://docs.pytest.org/
-  - mypy: https://mypy.readthedocs.io/
+  - pytest: https://docs.pytest.org/en/stable/
+  - mypy: https://mypy.readthedocs.io/en/stable/
   - ruff: https://docs.astral.sh/ruff/
   - sphinx: https://www.sphinx-doc.org/

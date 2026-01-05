@@ -11,7 +11,7 @@ name = "pyhs3"
 version = "latest"
 
 [package.build]
-backend = { name = "pixi-build-python", version = "==0.4.0" }
+backend = { name = "pixi-build-python", version = "*" }
 config = { noarch = true }
 
 [package.host-dependencies]

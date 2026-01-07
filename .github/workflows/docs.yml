@@ -38,9 +38,13 @@ jobs:
 
       - name: Check for broken links
         run: |
-          pixi run docs-linkcheck -q -W
+          pixi run docs-linkcheck -q -W --warning-file doc-warnings.txt
           # Don't ship the linkcheck
           rm -r docs/_build/linkcheck
+
+      - name: Print warnings from broken links
+        if: always()
+        run: cat doc-warnings.txt
 
       - name: Build docs
         run: pixi run docs-build -W

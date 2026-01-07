@@ -1801,6 +1801,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.3.1-hb9d3cd8_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/llvm-openmp-21.1.8-h4922eb0_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/logical-unification-0.4.7-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/lychee-0.22.0-he64ecbb_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/markdown-it-py-3.0.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/markupsafe-3.0.3-pyh7db6752_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/matplotlib-base-3.10.8-py313h683a580_0.conda
@@ -2009,6 +2010,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libxcb-1.17.0-h262b8f6_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libzlib-1.3.1-h86ecc28_2.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/logical-unification-0.4.7-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/lychee-0.22.0-hb434046_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/markdown-it-py-3.0.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/markupsafe-3.0.3-pyh7db6752_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/matplotlib-base-3.10.8-py313h5dbd8ee_0.conda
@@ -2218,6 +2220,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-64/llvm-tools-19-19.1.7-h879f4bc_2.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/llvm-tools-19.1.7-hb0207f0_2.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/logical-unification-0.4.7-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-64/lychee-0.22.0-hc2f27db_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/macosx_deployment_target_osx-64-10.13-hbc8f3bb_4.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/markdown-it-py-3.0.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/markupsafe-3.0.3-pyh7db6752_0.conda
@@ -2433,6 +2436,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/llvm-tools-19-19.1.7-h91fd4e7_2.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/llvm-tools-19.1.7-h855ad52_2.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/logical-unification-0.4.7-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/lychee-0.22.0-h9a5e2f5_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/macosx_deployment_target_osx-arm64-11.0-h6553868_4.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/markdown-it-py-3.0.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/markupsafe-3.0.3-pyh7db6752_0.conda
@@ -2635,6 +2639,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/win-64/libzlib-1.3.1-h2466b09_2.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/llvm-openmp-21.1.8-h4fa8253_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/logical-unification-0.4.7-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/win-64/lychee-0.22.0-h243827c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/m2-conda-epoch-20250515-0_x86_64.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/m2w64-sysroot_win-64-12.0.0.r4.gg4f2fc60ca-hd8ed1ab_10.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/markdown-it-py-3.0.0-pyhd8ed1ab_1.conda
@@ -17499,6 +17504,62 @@ packages:
   - pkg:pypi/logical-unification?source=hash-mapping
   size: 18830
   timestamp: 1761054211310
+- conda: https://conda.anaconda.org/conda-forge/linux-64/lychee-0.22.0-he64ecbb_1.conda
+  sha256: 115ece6cace4b607c5a670326140f5f3dbdcd737c38a001f1aaa6a3183b1d475
+  md5: 79e6a90a947014315502bfa04d0b5f8d
+  depends:
+  - __glibc >=2.17,<3.0.a0
+  - libgcc >=14
+  - openssl >=3.5.4,<4.0a0
+  constrains:
+  - __glibc >=2.17
+  license: Apache-2.0 OR MIT
+  size: 5907664
+  timestamp: 1765062488326
+- conda: https://conda.anaconda.org/conda-forge/linux-aarch64/lychee-0.22.0-hb434046_1.conda
+  sha256: fbf0d11a2f7d9a034adde3885e36eb3d7cb8d531d8fa2d15af7b595879a438cd
+  md5: b08c2e9d59be0cfb9d59fca404e2be19
+  depends:
+  - libgcc >=14
+  - openssl >=3.5.4,<4.0a0
+  constrains:
+  - __glibc >=2.17
+  license: Apache-2.0 OR MIT
+  size: 5929994
+  timestamp: 1765062503388
+- conda: https://conda.anaconda.org/conda-forge/osx-64/lychee-0.22.0-hc2f27db_1.conda
+  sha256: e0a08d320cc4108bee643cd6999f910186ecaa1c7b38af136df7b7f3f758bbcf
+  md5: 607aec2fa983a3ebda7079a43ef7b445
+  depends:
+  - __osx >=10.13
+  - openssl >=3.5.4,<4.0a0
+  constrains:
+  - __osx >=10.13
+  license: Apache-2.0 OR MIT
+  size: 5772624
+  timestamp: 1765062501576
+- conda: https://conda.anaconda.org/conda-forge/osx-arm64/lychee-0.22.0-h9a5e2f5_1.conda
+  sha256: 65b225c75e94f4d5912fda611a0078ff6c6ab671cf118ac3f0c80976d6848367
+  md5: cf4df431224f0969d3eac2cbabdfc085
+  depends:
+  - __osx >=11.0
+  - openssl >=3.5.4,<4.0a0
+  constrains:
+  - __osx >=11.0
+  license: Apache-2.0 OR MIT
+  size: 5449561
+  timestamp: 1765062508697
+- conda: https://conda.anaconda.org/conda-forge/win-64/lychee-0.22.0-h243827c_0.conda
+  sha256: 60d233e53603d5a9f174e8161605ec6e5027b3561640ba1d48c80991933f7737
+  md5: 18227a525152dc77ec3c230d03bc0d0d
+  depends:
+  - openssl >=3.5.4,<4.0a0
+  - ucrt >=10.0.20348.0
+  - vc >=14.3,<15
+  - vc14_runtime >=14.44.35208
+  license: Apache-2.0 OR MIT
+  size: 5438376
+  timestamp: 1764994121
 - conda: https://conda.anaconda.org/conda-forge/linux-64/lz4-c-1.10.0-h5888daf_1.conda
   sha256: 47326f811392a5fd3055f0f773036c392d26fdb32e4d8e7a8197eed951489346
   md5: 9de5350a85c4a20c685259b889aa6393

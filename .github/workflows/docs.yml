@@ -40,7 +40,7 @@ jobs:
         run: |
           pixi run docs-linkcheck -q -W --warning-file doc-warnings.txt
           # Don't ship the linkcheck
-          rm -r docs/_build/linkcheck
+          rm -r docs/_build/linkcheck ||:
 
       # https://github.com/sphinx-doc/sphinx/issues/8791#issuecomment-3712758665
       - name: Print warnings from broken links

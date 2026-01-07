@@ -38,19 +38,7 @@ jobs:
 
       - name: Check for broken links
         run: |
-          pixi shell -e docs
-          sphinx-build -M linkcheck docs docs/_build -q -W --warning-file doc-warnings.txt
-          # pixi run docs-linkcheck -q -W --warning-file doc-warnings.txt
-          # Don't ship the linkcheck
-          rm -r docs/_build/linkcheck ||:
-
-      # https://github.com/sphinx-doc/sphinx/issues/8791#issuecomment-3712758665
-      - name: Print warnings from broken links
-        if: always()
-        run: |
-          ls docs/
-          ls docs/_build
-          cat doc-warnings.txt
+          pixi run docs-linkcheck -v --no-progress --format detailed
 
       - name: Build docs
         run: pixi run docs-build -W

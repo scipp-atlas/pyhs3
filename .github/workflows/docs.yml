@@ -38,9 +38,7 @@ jobs:
 
       - name: Check for broken links
         run: |
-          pixi run docs-linkcheck -q -W
-          # Don't ship the linkcheck
-          rm -r docs/_build/linkcheck
+          pixi run docs-linkcheck -v --no-progress --format detailed
 
       - name: Build docs
         run: pixi run docs-build -W

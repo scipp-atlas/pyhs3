@@ -119,6 +119,7 @@ twine = "*"
 
 [feature.dev.pypi-dependencies]
 pylint-pydantic = "*"
+codeflash = "*"
 
 [feature.dev.tasks]
 pre-commit = { cmd = "pre-commit run --all-files", description = "Run pre-commit hooks on all files" }
@@ -128,6 +129,7 @@ pre-commit-update = { cmd = "pre-commit autoupdate", description = "Update pre-c
 build-clean = { cmd = "rm -rf build dist", description = "Clean build artifacts" }
 build = { cmd = "python -m build", depends-on = ["build-clean"], description = "Build SDist and wheel distributions", outputs = ["dist"] }
 build-check = { cmd = "twine check --strict ./dist/*", depends-on = ["build"], description = "Run twine to check" }
+codeflash = { cmd = "codeflash", description = "Run codeflash to identify optimizations" }
 
 [environments]
 docs = ["docs"]

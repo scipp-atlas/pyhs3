@@ -1,0 +1,38 @@
+name: Codeflash
+
+on:
+  pull_request:
+    paths:
+      - "**" # Modify this to the path of your project in a mono-repo. Codeflash will only run when code in this directory is modified.
+  workflow_dispatch:
+
+concurrency:
+  # Any new push to the PR will cancel the previous run, so that only the latest code is optimized
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  optimize:
+    name: Optimize new code in this PR
+    if: ${{ github.actor != 'codeflash-ai[bot]' }}
+    runs-on: ubuntu-latest
+    env:
+      CODEFLASH_API_KEY: ${{ secrets.CODEFLASH_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: prefix-dev/setup-pixi@v0.9.3
+        with:
+          pixi-version: v0.59.0
+          cache: true
+          cache-key: dev
+          cache-write:
+            ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+          environments: dev
+
+      - name: Run Codeflash to optimize code
+        id: optimize_code
+        run: pixi run codeflash

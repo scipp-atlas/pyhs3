@@ -82,7 +82,7 @@ class BinnedAxisEdges(Axis):
 
     def get_nbins(self) -> int:
         """Get the number of bins."""
-        return len(self.edges) - 1
+        return self._nbins
 
     def to_hist(self) -> Any:
         """
@@ -92,6 +92,10 @@ class BinnedAxisEdges(Axis):
             A hist.axis.Variable object for irregular binning
         """
         return hist.axis.Variable(self.edges, name=self.name)
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        self._nbins = len(self.edges) - 1
 
 
 def get_binned_axis_discriminator(v: Any) -> str:

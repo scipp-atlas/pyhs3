@@ -209,17 +209,12 @@ class NormSysModifier(HasConstraint, ParameterModifier):
         """Apply normsys modifier (systematic with hi/lo interpolation)."""
         alpha = context[self.parameter]
 
-        hi_factor = self.data.hi
-        lo_factor = self.data.lo
-
-        # Apply interpolation method
-        interpolation = self.data.interpolation
-        nominal_factor = pt.constant(1.0)
-        hi_factor_tensor = pt.constant(hi_factor)
-        lo_factor_tensor = pt.constant(lo_factor)
-
         factor = interpolations.apply_interpolation(
-            interpolation, alpha, nominal_factor, hi_factor_tensor, lo_factor_tensor
+            self.data.interpolation,
+            alpha,
+            self._nominal_factor,
+            self._hi_factor_tensor,
+            self._lo_factor_tensor,
         )
 
         return cast("TensorVar", rates * factor)
@@ -246,6 +241,13 @@ class NormSysModifier(HasConstraint, ParameterModifier):
         # Use the distribution's constants to augment the context
         augmented_context = {**context, **constraint_dist.constants}
         return constraint_dist.expression(Context(augmented_context))
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Cache constant tensors during initialization to avoid repeated creation
+        self._nominal_factor = pt.constant(1.0)
+        self._hi_factor_tensor = pt.constant(self.data.hi)
+        self._lo_factor_tensor = pt.constant(self.data.lo)
 
 
 class HistoSysModifier(HasConstraint, ParameterModifier):

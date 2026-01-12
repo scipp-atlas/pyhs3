@@ -22,9 +22,6 @@ from pyhs3.axes import Axis, BinnedAxis, UnbinnedAxis
 from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.exceptions import custom_error_msg
 
-TYPE_CHECKING = False
-
-
 class GaussianUncertainty(BaseModel):
     """
     Gaussian uncertainty specification for data.

@@ -101,10 +101,6 @@ class Axis(BaseModel):
             return hist.axis.Variable(self.edges, name=self.name)
 
         # Regular binning
-        if TYPE_CHECKING:
-            assert self.min is not None
-            assert self.max is not None
-            assert self.nbins is not None
         return hist.axis.Regular(self.nbins, self.min, self.max, name=self.name)
 
 

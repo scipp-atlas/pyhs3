@@ -9,6 +9,7 @@ discriminated unions.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from itertools import pairwise
 from typing import Annotated, Any
 
 import hist
@@ -74,8 +75,8 @@ class BinnedAxisEdges(Axis):
             msg = f"BinnedAxisEdges '{self.name}' must have at least 2 edges"
             raise ValueError(msg)
         # Check that edges are in ascending order
-        for i in range(1, len(self.edges)):
-            if self.edges[i] <= self.edges[i - 1]:
+        for a, b in pairwise(self.edges):
+            if b <= a:
                 msg = f"BinnedAxisEdges '{self.name}' edges must be in ascending order"
                 raise ValueError(msg)
         return self

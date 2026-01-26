@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 from typing import Any, cast
 
 import pytensor.tensor as pt
@@ -16,6 +17,14 @@ from sympy.parsing.sympy_parser import (
 )
 
 from pyhs3.exceptions import ExpressionEvaluationError, ExpressionParseError
+
+_transformations = (
+    auto_symbol,
+    lambda_notation,
+    repeated_decimals,
+    auto_number,
+    factorial_notation,
+)
 
 log = logging.getLogger(__name__)
 
@@ -67,16 +76,9 @@ def parse_expression(expr_str: str) -> sp.Expr:
     Raises:
         ExpressionParseError: If the expression cannot be parsed.
     """
-    transformations = (
-        auto_symbol,
-        lambda_notation,
-        repeated_decimals,
-        auto_number,
-        factorial_notation,
-    )
 
     try:
-        return sympy_parser.parse_expr(expr_str, transformations=transformations)
+        return _parse_expr_cached(expr_str)
     except Exception as exc:
         msg = f"Failed to parse expression '{expr_str}': {exc}"
         raise ExpressionParseError(msg) from exc
@@ -137,3 +139,9 @@ def sympy_to_pytensor(
     except Exception as exc:
         msg = f"Failed to convert expression to PyTensor: {sympy_expr}. {exc}"
         raise ExpressionEvaluationError(msg) from exc
+
+
+@lru_cache(maxsize=2048)
+def _parse_expr_cached(expr_str: str) -> sp.Expr:
+    # Delegate to SymPy's parser; results are cached to avoid repeated work
+    return sympy_parser.parse_expr(expr_str, transformations=_transformations)

@@ -27,8 +27,8 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.9.3
         with:
           pixi-version: v0.59.0
-          cache: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
-          cache-key: docs
+          cache: true
+          cache-key: docs-${{ github.ref_name }}
           cache-write:
             ${{ github.event_name == 'push' && github.ref_name == 'main' }}
           environments: docs

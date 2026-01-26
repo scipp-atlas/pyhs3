@@ -34,7 +34,7 @@ class TestAnalyzeSymPyExpr:
         """Test analysis of a simple polynomial expression."""
         expr = sp.parse_expr("x**2 + 2*x + 1")
 
-        with caplog.at_level(logging.DEBUG):
+        with caplog.at_level(logging.DEBUG, logger="pyhs3.generic_parse"):
             analyze_sympy_expr(expr)
 
     def test_multi_variable_expression(self):

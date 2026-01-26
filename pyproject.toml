@@ -232,3 +232,10 @@ ignore_roles = [
     "cite:ps",
     "hs3:label"
 ]
+
+[tool.codeflash]
+# All paths are relative to this pyproject.toml's directory.
+module-root = "src/pyhs3"
+tests-root = "tests"
+ignore-paths = []
+formatter-cmds = ["pixi run -e dev ruff check --exit-zero --fix $file", "pixi run -e dev ruff format $file"]

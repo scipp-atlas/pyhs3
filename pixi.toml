@@ -17,6 +17,7 @@ backend = { name = "pixi-build-python", version = "*" }
 config = { noarch = true }
 
 [package.host-dependencies]
+uv = "*"
 hatchling = ">=1.25"
 hatch-vcs = ">=0.4"
 

@@ -53,7 +53,8 @@ def analyze_sympy_expr(sympy_expr: sp.Expr) -> dict[str, Any]:
     log.debug("Expression: %s", sympy_expr)
     log.debug("Independent Variables: %s", independent_vars)
     log.debug("Dependent Variables: %s", dependent_vars)
-    log.debug("Expression Structure:\n%s", sp.pretty(sympy_expr))
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("Expression Structure:\n%s", sp.pretty(sympy_expr))
 
     return {
         "expression": sympy_expr,

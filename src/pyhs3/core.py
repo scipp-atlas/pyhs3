@@ -141,54 +141,53 @@ class Workspace(BaseModel):
         Returns:
             Formatted error message string
         """
-        error_count = len(validation_error.errors())
+        errors = validation_error.errors()
+        error_count = len(errors)
         error_types: Counter[str] = Counter()
         loc_errors: Counter[tuple[str, ...]] = Counter()
 
-        for error in validation_error.errors():
+        for error in errors:
             error_types[error["type"]] += 1
             loc_errors[
                 tuple("#" if isinstance(key, int) else key for key in error["loc"])
             ] += 1
 
-        # Create a concise error message
-        error_summary = (
-            f"Workspace validation failed with {error_count} errors from {path}\n"
-        )
-        error_summary += "\nError breakdown by type:\n"
-        for error_type, count in error_types.most_common():
-            error_summary += f"  {error_type}: {count}\n"
+        # Build error summary using list for efficient string concatenation
+        parts = [
+            f"Workspace validation failed with {error_count} errors from {path}\n",
+            "\nError breakdown by type:\n",
+        ]
 
-        error_summary += "\nError breakdown by component:\n"
+        for error_type, count in error_types.most_common():
+            parts.append(f"  {error_type}: {count}\n")
+
+        parts.append("\nError breakdown by component:\n")
         for loc, count in loc_errors.most_common():
             loc_str = ".".join(loc)
-            error_summary += f"  {loc_str}: {count}\n"
+            parts.append(f"  {loc_str}: {count}\n")
 
         # Show detailed errors with improved formatting
-        errors_to_show = (
-            validation_error.errors() if verbose else validation_error.errors()[:20]
-        )
-        error_summary += (
-            f"\nErrors for debugging ({'all' if verbose else 'first 20'}):\n"
-        )
+        errors_to_show = errors if verbose else errors[:20]
+        parts.append(f"\nErrors for debugging ({'all' if verbose else 'first 20'}):\n")
         for i, error in enumerate(errors_to_show):
-            # Format location more readably
-            loc_parts = []
-            for part in error.get("loc", []):
-                if isinstance(part, int):
-                    loc_parts.append(f"[{part}]")
-                else:
-                    loc_parts.append(str(part))
+            # Format location more readably using list comprehension
+            loc_parts = [
+                f"[{part}]" if isinstance(part, int) else str(part)
+                for part in error.get("loc", [])
+            ]
 
             # Build readable location string
-            readable_loc = ""
-            for j, part in enumerate(loc_parts):
-                if j == 0:
-                    readable_loc = part
-                elif part.startswith("["):
-                    readable_loc += part  # Index directly follows
-                else:
-                    readable_loc += f" -> {part}"
+            if not loc_parts:
+                readable_loc = ""
+            else:
+                readable_loc = loc_parts[0]
+                for part in loc_parts[1:]:
+                    if part.startswith("["):
+                        readable_loc += part  # Index directly follows
+                    else:
+                        readable_loc += f" -> {part}"
+
+            # Add name from input if available
 
             # Add name from input if available
             input_data: Any = error.get("input", {})
@@ -198,12 +197,14 @@ class Workspace(BaseModel):
                     readable_loc += f"('{name}')"
 
             msg = error.get("msg", "Unknown error")
-            error_summary += f"  {i + 1}. {readable_loc}: {msg}\n"
+            parts.append(f"  {i + 1}. {readable_loc}: {msg}\n")
 
         if not verbose and error_count > 20:
-            error_summary += f"  ... and {error_count - 20} more errors (use verbose=True to see all)\n"
+            parts.append(
+                f"  ... and {error_count - 20} more errors (use verbose=True to see all)\n"
+            )
 
-        return error_summary
+        return "".join(parts)
 
     def model(
         self,

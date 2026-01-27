@@ -28,7 +28,7 @@ jobs:
         with:
           pixi-version: v0.59.0
           cache: true
-          cache-key: docs
+          cache-key: docs-${{ github.ref_name }}
           cache-write:
             ${{ github.event_name == 'push' && github.ref_name == 'main' }}
           environments: docs

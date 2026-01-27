@@ -75,8 +75,8 @@ class BinnedAxisEdges(Axis):
             msg = f"BinnedAxisEdges '{self.name}' must have at least 2 edges"
             raise ValueError(msg)
         # Check that edges are in ascending order
-        for a, b in pairwise(self.edges):
-            if b <= a:
+        for prev, curr in pairwise(self.edges):
+            if curr <= prev:
                 msg = f"BinnedAxisEdges '{self.name}' edges must be in ascending order"
                 raise ValueError(msg)
         return self

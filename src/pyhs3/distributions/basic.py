@@ -177,7 +177,7 @@ class ExponentialDist(Distribution):
         :hs3:label:`exponential_dist <hs3.exponential-distribution>`
 
     ROOT Reference:
-        :rootref:`RooExponential <classRooExponential.html>`
+        :root:`RooExponential`
     """
 
     type: Literal["exponential_dist"] = "exponential_dist"
@@ -281,7 +281,7 @@ class LandauDist(Distribution):
         Note: Landau distribution is not explicitly defined in the current HS3 specification.
 
     ROOT Reference:
-        :rootref:`RooLandau <classRooLandau.html>`
+        :root:`RooLandau`
     """
 
     type: Literal["landau_dist"] = "landau_dist"

@@ -67,6 +67,7 @@ docs = [
   "sphinx-issues",
   "sphinxcontrib-mermaid",
   "sphinxcontrib-bibtex",
+  "sphinxcontrib-doxylink",
   "matplotlib",
   "hist[plot] > 2.7.0", # keep synced with dependencies
 ]
@@ -230,7 +231,8 @@ ignore_directives = [
 ignore_roles = [
     "cite:p",
     "cite:ps",
-    "hs3:label"
+    "hs3:label",
+    "root"
 ]
 
 [tool.codeflash]

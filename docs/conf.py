@@ -137,4 +137,34 @@ html_css_files = [
 ]
 
 # https://github.com/sphinx-contrib/doxylink/issues/72
-suppress_warnings = ["sphinxcontrib.doxylink"]
+doxylink_parse_error_ignore_regexes = [
+    "^Skipping define RLogger.hxx::",
+    "^Skipping function TClingCallFunc.cxx::",
+    "^Skipping function TDavixFile.cxx::",
+    "^Skipping function TProof.h::",
+    "^Skipping function TProofLite.h::",
+    "^Skipping function TStringLong.h::",
+    "^Skipping function civetweb.c::",
+    "^Skipping function entrylistblock_figure1.C::",
+    "^Skipping function legend1.C::",
+    "^Skipping function legend2.C::",
+    "^Skipping function legend3.C::",
+    "^Skipping function polyline.C::",
+    "^Skipping function rootcling_impl.cxx::",
+    "^Skipping function textalign.C::",
+    "^Skipping function textangle.C::",
+    "^Skipping function PassiveKeyGrab::",
+    "^Skipping function QuartzImage::",
+    "^Skipping function QuartzPixmap::",
+    "^Skipping function QuartzView::",
+    "^Skipping function QuartzWindow::",
+    "^Skipping function ROOT::",
+    "^Skipping function cout_redirect::",
+    "^Skipping function CPyCppyy::",
+    "^Skipping function ROOTOpenGLView::",
+    "^Skipping function RooStats::",
+    "^Skipping function THnBase::",
+    "^Skipping function THnSparse::",
+    "^Skipping function THnSparseT::",
+    "^Skipping function TThreadTimer::",
+]

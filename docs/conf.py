@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import pathlib
 from typing import Any
 
 from intersphinx_registry import get_intersphinx_mapping
@@ -27,6 +28,7 @@ extensions = [
     "sphinx_issues",
     "sphinxcontrib.mermaid",
     "sphinxcontrib.bibtex",
+    "sphinxcontrib.doxylink",
     "matplotlib.sphinxext.plot_directive",
 ]
 
@@ -101,7 +103,18 @@ always_document_param_types = True
 # Napoleon configuration for custom sections
 napoleon_custom_sections = [
     ("HS3 Reference", "references_style"),
+    ("ROOT Reference", "references_style"),
 ]
+
+# ROOT Doxygen cross-references
+_root_doxygen_version = "v636"
+
+doxylink = {
+    "root": (
+        str(pathlib.Path(__file__).parent / "ROOT.tag"),
+        f"https://root.cern/doc/{_root_doxygen_version}/",
+    ),
+}
 
 # sphinx-copybutton configuration
 copybutton_prompt_text = r">>> |\.\.\. |\$ "
@@ -122,3 +135,6 @@ html_static_path = ["_static"]
 html_css_files = [
     "css/custom.css",
 ]
+
+# https://github.com/sphinx-contrib/doxylink/issues/72
+suppress_warnings = ["sphinxcontrib.doxylink"]

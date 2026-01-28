@@ -61,7 +61,7 @@ class MixtureDist(Distribution):
             Only valid when using N coefficients (extended=True).
 
     ROOT Reference:
-        :rootref:`RooAddPdf <classRooAddPdf.html>`
+        :root:`RooAddPdf`
     """
 
     type: Literal["mixture_dist"] = "mixture_dist"

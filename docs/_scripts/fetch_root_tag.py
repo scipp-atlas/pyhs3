@@ -28,6 +28,11 @@ def main():
         print(f"✓ {TAG_FILE} already exists, skipping download")
         return 0
 
+    # Validate URL uses HTTPS for security
+    if not TAG_URL.startswith("https://"):
+        print(f"✗ URL must start with 'https://': {TAG_URL}", file=sys.stderr)
+        return 1
+
     print(f"Downloading {TAG_URL}...")
     try:
         with urlopen(TAG_URL) as response:

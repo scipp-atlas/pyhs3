@@ -344,11 +344,16 @@ class ShapeFactorModifier(ParametersModifier):
 
 
 class ShapeSysModifier(HasConstraint, ParametersModifier):
-    """Uncorrelated shape systematic with Poisson constraints."""
+    """Uncorrelated shape systematic with Poisson or Gaussian constraints.
+
+    The constraint type determines both the constraint term and the response function:
+    - Poisson: Direct multiplicative (gamma * nominal), Poisson constraint
+    - Gauss: Response function (nominal * (1 + gamma * sigma)), Gaussian(0, gamma, 1) constraint
+    """
 
     type: Literal["shapesys"] = "shapesys"
     application: Literal["multiplicative"] = Field("multiplicative", exclude=True)
-    constraint: Literal["Poisson"] = "Poisson"
+    constraint: Literal["Gauss", "Poisson"] = "Poisson"
     data: ShapeSysData
 
     @property
@@ -364,17 +369,59 @@ class ShapeSysModifier(HasConstraint, ParametersModifier):
         return cast("TensorVar", factors)
 
     def apply(self, context: Context, rates: TensorVar) -> TensorVar:
-        """Apply shapesys modifier (shape systematic with constraints)."""
-        # ShapeSys uses multiple parameters (one per bin)
+        """Apply shapesys modifier (shape systematic with constraints).
+
+        For Gaussian constraints, uses response function: nominal * (1 + gamma * sigma_rel)
+        which simplifies to: nominal + gamma * vals
+        For Poisson constraints, uses direct multiplication: nominal * gamma
+        """
         param_names = self.parameters
+
+        if self.constraint == "Gauss":
+            # Response function: nominal * (1 + gamma * vals/nominal) = nominal + gamma * vals
+            # This gives ±1 sigma = ±vals change when gamma = ±1
+            gammas = pt.stack([context[name] for name in param_names])
+            vals_tensor = pt.constant(self.data.vals)
+            return cast("TensorVar", rates + gammas * vals_tensor)
+        # Poisson: Direct multiplication (existing behavior)
         factors = pt.stack([context[name] for name in param_names])
         return cast("TensorVar", rates * factors)
 
     def make_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
-        """Create constraint term using PyTensor operations."""
+        """Create constraint term using PyTensor operations.
 
+        For Gaussian: Creates Gauss(x=0, mean=gamma, sigma=1) constraints
+        For Poisson: Creates Poisson(x=rate, mean=gamma*rate) constraints
+        """
         name = f"constraint_{self.name}"
 
+        if self.constraint == "Gauss":
+            # Gaussian constraints: Gauss(x=0, mean=gamma_i, sigma=1)
+            # This is the standard HistFactory convention
+            dists = []
+            for parameter in self.parameters:
+                dist = GaussianDist(
+                    name=f"{name}_{parameter}",
+                    x=0.0,
+                    mean=parameter,
+                    sigma=1.0,
+                )
+                dists.append(dist)
+
+            if not dists:
+                return pt.constant(1.0)
+
+            # Evaluate all distributions and multiply constraint terms
+            factors = []
+            for dist in dists:
+                # Use the distribution's constants to augment the context
+                dist_augmented_context = {**context, **dist.constants}
+                augmented_ctx = Context(dist_augmented_context)
+                factors.append(dist.expression(augmented_ctx))
+
+            return cast(TensorVar, pt.prod(pt.stack(factors), axis=0))  # type: ignore[no-untyped-call]
+
+        # Poisson constraints (existing implementation)
         nominal_yield = pt.vector("nominal_yield")
         uncertainty = pt.vector("uncertainty")
         # (sigma_b)^{-2} = (nominal / vals)^2
@@ -385,7 +432,7 @@ class ShapeSysModifier(HasConstraint, ParametersModifier):
 
         # Use augmented context pattern for parameter * rate scaling
         augmented_context = dict(context)
-        dists = []
+        poisson_dists = []
 
         for parameter, rate in zip(self.parameters, rates, strict=False):
             # Create scaled parameter in augmented context
@@ -393,18 +440,18 @@ class ShapeSysModifier(HasConstraint, ParametersModifier):
             augmented_context[scaled_param_name] = context[parameter] * rate
 
             # Create Poisson distribution with scaled parameter
-            dist = PoissonDist(
+            poisson_dist = PoissonDist(
                 name=f"{name}_{parameter}", x=rate, mean=scaled_param_name
             )
-            dists.append(dist)
+            poisson_dists.append(poisson_dist)
 
         # Evaluate all distributions with augmented context (including constants)
         factors = []
-        for dist in dists:
+        for poisson_dist in poisson_dists:
             # Use the distribution's constants to augment the context
-            dist_augmented_context = {**augmented_context, **dist.constants}
+            dist_augmented_context = {**augmented_context, **poisson_dist.constants}
             augmented_ctx = Context(dist_augmented_context)
-            factors.append(dist.expression(augmented_ctx))
+            factors.append(poisson_dist.expression(augmented_ctx))
 
         return cast(TensorVar, pt.prod(pt.stack(factors), axis=0))  # type: ignore[no-untyped-call]
 

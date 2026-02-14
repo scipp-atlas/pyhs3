@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from pyhs3 import Workspace
 from pyhs3.analyses import Analyses, Analysis
 
 
@@ -194,3 +195,73 @@ class TestAnalyses:
 
         with pytest.raises(IndexError):
             _ = analyses[0]
+
+
+class TestWorkspaceBackreferences:
+    """Tests for _workspace backreferences in Analysis and Analyses."""
+
+    def test_workspace_backreference_set_on_loading(self, datadir):
+        """Test that _workspace is set when loading a workspace with analyses."""
+        workspace_path = datadir / "simplemodel_uncorrelated-background_hs3.json"
+        workspace = Workspace.load(workspace_path)
+
+        # Verify analyses collection has workspace backreference
+        assert workspace.analyses is not None
+        assert workspace.analyses._workspace is workspace
+
+        # Verify individual analysis objects have workspace backreference
+        for analysis in workspace.analyses:
+            assert analysis._workspace is workspace
+
+    def test_workspace_backreference_none_standalone_analysis(self):
+        """Test that _workspace is None when creating standalone Analysis."""
+        analysis = Analysis(
+            name="test_analysis",
+            likelihood="test_likelihood",
+            domains=["test_domain"],
+        )
+        assert analysis._workspace is None
+
+    def test_workspace_backreference_none_standalone_analyses(self):
+        """Test that _workspace is None when creating standalone Analyses."""
+        analysis1 = Analysis(
+            name="analysis1", likelihood="likelihood1", domains=["domain1"]
+        )
+        analysis2 = Analysis(
+            name="analysis2", likelihood="likelihood2", domains=["domain2"]
+        )
+        analyses = Analyses([analysis1, analysis2])
+
+        assert analyses._workspace is None
+        for analysis in analyses:
+            assert analysis._workspace is None
+
+    def test_workspace_backreference_not_in_model_dump(self, datadir):
+        """Test that _workspace is not included in model_dump()."""
+        workspace_path = datadir / "simplemodel_uncorrelated-background_hs3.json"
+        workspace = Workspace.load(workspace_path)
+
+        # Verify workspace backreferences are set
+        assert workspace.analyses._workspace is workspace
+
+        # Verify _workspace not in model dump
+        workspace_dict = workspace.model_dump()
+        assert "_workspace" not in workspace_dict
+
+        # Verify analyses serialization doesn't include _workspace
+        analyses_dict = workspace.analyses.model_dump()
+        if isinstance(analyses_dict, list):
+            # RootModel serializes to list
+            for analysis_dict in analyses_dict:
+                assert "_workspace" not in analysis_dict
+        else:
+            assert "_workspace" not in analyses_dict
+
+    def test_workspace_backreference_not_in_json_schema(self):
+        """Test that _workspace is not included in JSON schema."""
+        analysis_schema = Analysis.model_json_schema()
+        assert "_workspace" not in analysis_schema.get("properties", {})
+
+        analyses_schema = Analyses.model_json_schema()
+        # For RootModel, check if _workspace is in the schema
+        assert "_workspace" not in str(analyses_schema)

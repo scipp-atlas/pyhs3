@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from pyhs3 import Workspace
 from pyhs3.likelihoods import Likelihood, Likelihoods
 
 
@@ -145,3 +146,73 @@ class TestLikelihoods:
 
         with pytest.raises(IndexError):
             _ = likelihoods[0]
+
+
+class TestWorkspaceBackreferences:
+    """Tests for _workspace backreferences in Likelihood and Likelihoods."""
+
+    def test_workspace_backreference_set_on_loading(self, datadir):
+        """Test that _workspace is set when loading a workspace with likelihoods."""
+        workspace_path = datadir / "simplemodel_uncorrelated-background_hs3.json"
+        workspace = Workspace.load(workspace_path)
+
+        # Verify likelihoods collection has workspace backreference
+        assert workspace.likelihoods is not None
+        assert workspace.likelihoods._workspace is workspace
+
+        # Verify individual likelihood objects have workspace backreference
+        for likelihood in workspace.likelihoods:
+            assert likelihood._workspace is workspace
+
+    def test_workspace_backreference_none_standalone_likelihood(self):
+        """Test that _workspace is None when creating standalone Likelihood."""
+        likelihood = Likelihood(
+            name="test_likelihood",
+            distributions=["dist1"],
+            data=["data1"],
+        )
+        assert likelihood._workspace is None
+
+    def test_workspace_backreference_none_standalone_likelihoods(self):
+        """Test that _workspace is None when creating standalone Likelihoods."""
+        likelihood1 = Likelihood(
+            name="likelihood1", distributions=["dist1"], data=["data1"]
+        )
+        likelihood2 = Likelihood(
+            name="likelihood2", distributions=["dist2"], data=["data2"]
+        )
+        likelihoods = Likelihoods([likelihood1, likelihood2])
+
+        assert likelihoods._workspace is None
+        for likelihood in likelihoods:
+            assert likelihood._workspace is None
+
+    def test_workspace_backreference_not_in_model_dump(self, datadir):
+        """Test that _workspace is not included in model_dump()."""
+        workspace_path = datadir / "simplemodel_uncorrelated-background_hs3.json"
+        workspace = Workspace.load(workspace_path)
+
+        # Verify workspace backreferences are set
+        assert workspace.likelihoods._workspace is workspace
+
+        # Verify _workspace not in model dump
+        workspace_dict = workspace.model_dump()
+        assert "_workspace" not in workspace_dict
+
+        # Verify likelihoods serialization doesn't include _workspace
+        likelihoods_dict = workspace.likelihoods.model_dump()
+        if isinstance(likelihoods_dict, list):
+            # RootModel serializes to list
+            for likelihood_dict in likelihoods_dict:
+                assert "_workspace" not in likelihood_dict
+        else:
+            assert "_workspace" not in likelihoods_dict
+
+    def test_workspace_backreference_not_in_json_schema(self):
+        """Test that _workspace is not included in JSON schema."""
+        likelihood_schema = Likelihood.model_json_schema()
+        assert "_workspace" not in likelihood_schema.get("properties", {})
+
+        likelihoods_schema = Likelihoods.model_json_schema()
+        # For RootModel, check if _workspace is in the schema
+        assert "_workspace" not in str(likelihoods_schema)

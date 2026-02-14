@@ -7,9 +7,14 @@ including analysis configurations with parameters of interest and domains.
 
 from __future__ import annotations
 
-from pydantic import ConfigDict, Field
+from typing import TYPE_CHECKING
+
+from pydantic import ConfigDict, Field, PrivateAttr
 
 from pyhs3.collections import NamedCollection, NamedModel
+
+if TYPE_CHECKING:
+    from pyhs3.core import Workspace
 
 
 class Analysis(NamedModel):
@@ -32,6 +37,7 @@ class Analysis(NamedModel):
 
     model_config = ConfigDict()
 
+    _workspace: Workspace | None = PrivateAttr(default=None)
     likelihood: str = Field(..., repr=False)
     parameters_of_interest: list[str] | None = Field(default=None, repr=False)
     domains: list[str] = Field(..., repr=False)
@@ -47,5 +53,7 @@ class Analyses(NamedCollection[Analysis]):
     configurations with likelihoods, parameters of interest, and domains.
     Provides dict-like access to analyses by name.
     """
+
+    _workspace: Workspace | None = PrivateAttr(default=None)
 
     root: list[Analysis] = Field(default_factory=list)

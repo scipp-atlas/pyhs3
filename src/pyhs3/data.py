@@ -240,7 +240,7 @@ class UnbinnedData(Datum):
 
         return self
 
-    def to_hist(self) -> hist.Hist:
+    def to_hist(self) -> hist.Hist[hist.storage.Weight | hist.storage.Double]:
         """
         Convert to scikit-hep hist.Hist object by binning entries.
 
@@ -340,7 +340,7 @@ class BinnedData(Datum):
 
         return self
 
-    def to_hist(self) -> hist.Hist:
+    def to_hist(self) -> hist.Hist[hist.storage.Weight | hist.storage.Double]:
         """
         Convert to scikit-hep hist.Hist object for visualization.
 
@@ -395,13 +395,13 @@ class BinnedData(Datum):
             # Reshape both contents and variances
             contents_nd = np.array(self.contents).reshape(shape)
             variances_nd = np.square(self.uncertainty.sigma).reshape(shape)
-            # Set values with variances using view
-            h.view(flow=False)["value"] = contents_nd
-            h.view(flow=False)["variance"] = variances_nd
+
+            stacked = np.stack([contents_nd, variances_nd], axis=-1)
+            h[...] = stacked
         else:
             # Reshape and set contents using view
             contents_nd = np.array(self.contents).reshape(shape)
-            h.view(flow=False)[...] = contents_nd
+            h[...] = contents_nd
 
         return h
 

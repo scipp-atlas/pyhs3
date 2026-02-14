@@ -28,7 +28,7 @@ class Sample(BaseModel):
     data: SampleData
     modifiers: Modifiers = Field(default_factory=Modifiers)
 
-    def to_hist(self, axes: Axes) -> hist.Hist:
+    def to_hist(self, axes: Axes) -> hist.Hist[hist.storage.Weight]:
         """
         Convert to scikit-hep hist.Hist object for visualization.
 
@@ -68,9 +68,8 @@ class Sample(BaseModel):
         contents_nd = np.array(self.data.contents).reshape(shape)
         variances_nd = np.square(self.data.errors).reshape(shape)
 
-        # Set values with variances using view
-        h.view(flow=False)["value"] = contents_nd
-        h.view(flow=False)["variance"] = variances_nd
+        stacked = np.stack([contents_nd, variances_nd], axis=-1)
+        h[...] = stacked
 
         return h
 

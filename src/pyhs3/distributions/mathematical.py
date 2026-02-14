@@ -23,12 +23,13 @@ from pydantic import (
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
 from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor
+from pyhs3.normalization import Normalizable
 from pyhs3.typing.aliases import TensorVar
 
 log = logging.getLogger(__name__)
 
 
-class GenericDist(Distribution):
+class GenericDist(Distribution, Normalizable):
     """
     Generic distribution implementation.
 

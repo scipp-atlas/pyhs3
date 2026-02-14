@@ -7,7 +7,7 @@ and lists of parameter names for accessing PyTensor variables.
 
 from __future__ import annotations
 
-from collections.abc import ItemsView, KeysView, ValuesView
+from collections.abc import ItemsView, KeysView, Mapping, ValuesView
 
 from pyhs3.typing.aliases import TensorVar
 
@@ -23,8 +23,9 @@ class Context:
 
     def __init__(
         self,
-        parameters: dict[str, TensorVar],
-        auxiliaries: dict[str, TensorVar] | None = None,
+        parameters: Mapping[str, TensorVar],
+        auxiliaries: Mapping[str, TensorVar] | None = None,
+        observables: Mapping[str, tuple[TensorVar, TensorVar]] | None = None,
     ) -> None:
         """
         Initialize context with parameter data.
@@ -32,12 +33,14 @@ class Context:
         Args:
             parameters: Dictionary of user-provided parameters
             auxiliaries: Dictionary of model-computed auxiliary values
+            observables: Dictionary mapping observable names to (lower, upper) bound tuples
 
         Raises:
             ValueError: If there's any overlap between parameter and auxiliary names
         """
-        self._parameters = parameters.copy()
-        self._auxiliaries = (auxiliaries or {}).copy()
+        self._parameters = dict(parameters)
+        self._auxiliaries = dict(auxiliaries) if auxiliaries else {}
+        self._observables = dict(observables) if observables else {}
 
         # Validate no key duplication between parameters and auxiliaries
         parameter_keys = set(self._parameters.keys())
@@ -84,6 +87,11 @@ class Context:
         """Get read-only view of auxiliaries."""
         return self._auxiliaries.copy()
 
+    @property
+    def observables(self) -> dict[str, tuple[TensorVar, TensorVar]]:
+        """Observable names mapped to (lower, upper) bound PyTensor expressions."""
+        return self._observables.copy()
+
     def keys(self) -> KeysView[str]:
         """Get all parameter names (both parameters and auxiliaries)."""
         # Create a view of combined keys
@@ -105,5 +113,7 @@ class Context:
     def copy(self) -> Context:
         """Create a copy of this context."""
         return Context(
-            parameters=self._parameters.copy(), auxiliaries=self._auxiliaries.copy()
+            parameters=self._parameters.copy(),
+            auxiliaries=self._auxiliaries.copy(),
+            observables=self._observables.copy(),
         )

@@ -317,6 +317,69 @@ class Workspace(BaseModel):
 
         return "".join(parts)
 
+    def _compute_observables(self, domain: Domain) -> dict[str, tuple[float, float]]:
+        """
+        Extract observable names and bounds from likelihoods + data + domain.
+
+        Walks likelihoods to find distribution-data pairings. For each dataset axis,
+        gets bounds from the data axis itself (axis.min/max). Propagates observable
+        info through composite distributions (MixtureDist, ProductDist).
+
+        Args:
+            domain: Domain constraints for parameters
+
+        Returns:
+            Dictionary mapping observable names to (min, max) tuples
+        """
+        observables: dict[str, tuple[float, float]] = {}
+
+        if not self.likelihoods or not self.data:
+            return observables
+
+        # For each likelihood, extract observable axes from paired data
+        for likelihood in self.likelihoods:
+            for data_name in likelihood.data:
+                # Skip non-string data (inline constraint values)
+                if not isinstance(data_name, str):
+                    continue
+
+                # Look up the data object
+                datum = self.data.get(data_name)
+                if datum is None:
+                    continue
+
+                # Extract axes if available
+                axes = getattr(datum, "axes", None)
+                if axes is None:
+                    continue
+
+                # For each axis, extract bounds
+                for axis in axes:
+                    obs_name = axis.name
+
+                    # Get bounds from axis (prefer axis min/max if available)
+                    if axis.min is not None and axis.max is not None:
+                        obs_min, obs_max = axis.min, axis.max
+                    else:
+                        # Fall back to domain bounds if axis doesn't specify
+                        log.warning(
+                            "Observable '%s' data does not have min/max (non-compliant with HS3 spec). "
+                            "Falling back to domain bounds.",
+                            obs_name,
+                        )
+                        domain_bounds = domain.get(obs_name, (None, None))
+                        if domain_bounds[0] is None or domain_bounds[1] is None:
+                            log.warning(
+                                "Observable '%s' has no bounds in data or domain. Skipping normalization.",
+                                obs_name,
+                            )
+                            continue
+                        obs_min, obs_max = domain_bounds
+
+                    observables[obs_name] = (obs_min, obs_max)
+
+        return observables
+
     def model(
         self,
         *,
@@ -358,6 +421,9 @@ class Workspace(BaseModel):
             else ParameterSet(name="default", parameters=[])
         )
 
+        # Compute observables from likelihoods + data + domain
+        observables = self._compute_observables(selected_domain)
+
         return Model(
             parameterset=parameterset or ParameterSet(name="default"),
             distributions=self.distributions or Distributions(),
@@ -365,6 +431,7 @@ class Workspace(BaseModel):
             functions=self.functions or Functions(),
             progress=progress,
             mode=mode,
+            observables=observables,
         )
 
 
@@ -394,6 +461,7 @@ class Model:
         functions: Functions,
         progress: bool = True,
         mode: str = "FAST_RUN",
+        observables: dict[str, tuple[float, float]] | None = None,
     ):
         """
         Represents a probabilistic model composed of parameters, domains, distributions, and functions.
@@ -410,6 +478,7 @@ class Model:
                        "NUMBA" (compile using Numba), "JAX" (compile using JAX),
                        "PYTORCH" (compile using PyTorch), "DebugMode" (debugging),
                        "NanGuardMode" (NaN detection).
+            observables (dict[str, tuple[float, float]] | None): Dictionary mapping observable names to (lower, upper) bounds.
 
         Attributes:
             domain (Domain): The original domain with constraints for parameters.
@@ -422,6 +491,10 @@ class Model:
         """
         self.parameterset = parameterset
         self.domain = domain
+        self._observables = {
+            name: (pt.constant(lower), pt.constant(upper))
+            for name, (lower, upper) in (observables or {}).items()
+        }
         self._distribution_objects = (
             distributions  # Store original distribution objects
         )
@@ -518,7 +591,10 @@ class Model:
                     **self.distributions,
                     **self.modifiers,
                 }
-                context = Context(parameters=context_data)
+                context = Context(
+                    parameters=context_data,
+                    observables=self._observables,
+                )
 
                 if node_type == "parameter":
                     # Create parameter tensor with domain bounds applied

@@ -8,8 +8,12 @@ including likelihood mappings between distributions and data.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, RootModel
+
+if TYPE_CHECKING:
+    from pyhs3.core import Workspace
 
 
 class Likelihood(BaseModel):
@@ -29,6 +33,8 @@ class Likelihood(BaseModel):
 
     model_config = ConfigDict()
 
+    _workspace: Workspace | None = PrivateAttr(default=None)
+
     name: str = Field(..., repr=True)
     distributions: list[str] = Field(..., repr=False)
     data: list[str] = Field(..., repr=False)
@@ -43,6 +49,8 @@ class Likelihoods(RootModel[list[Likelihood]]):
     distributions and observations for statistical inference.
     Provides dict-like access to likelihoods by name.
     """
+
+    _workspace: Workspace | None = PrivateAttr(default=None)
 
     root: list[Likelihood] = Field(default_factory=list)
 

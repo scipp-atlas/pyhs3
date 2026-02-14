@@ -91,6 +91,17 @@ class Workspace(BaseModel):
     analyses: Analyses | None = Field(default_factory=lambda: Analyses([]))
     misc: dict[str, Any] | None = Field(default_factory=dict)
 
+    def model_post_init(self, __context: Any, /) -> None:
+        """Inject _workspace backreference into child models that need it."""
+        if self.likelihoods is not None:
+            self.likelihoods._workspace = self
+            for likelihood in self.likelihoods:
+                likelihood._workspace = self
+        if self.analyses is not None:
+            self.analyses._workspace = self
+            for analysis in self.analyses:
+                analysis._workspace = self
+
     @classmethod
     def load(
         cls,

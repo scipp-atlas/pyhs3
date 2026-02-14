@@ -260,7 +260,7 @@ def base_name(name):
 
 def plot_dist(model, parameters, dist_name, data_set, plot_name=None):
     xs = [val[0] for val in data_set.entries]
-    ys = [model.logpdf_unsafe(dist_name, **{**parameters, data_set.axes[0].name : x}) for x in xs]
+    ys = [model.pdf_unsafe(dist_name, **{**parameters, data_set.axes[0].name : x}) for x in xs]
 
     plt.figure(plot_name)
     plt.title(plot_name)
@@ -270,6 +270,9 @@ def plot_dist(model, parameters, dist_name, data_set, plot_name=None):
 
 def main():
     ws = hs3.Workspace(**ws_json())
+
+    # test_mus = json.loads(test_data)["mu_HH"]
+    test_mus = np.linspace(-10,-5,20)
 
     cached_file = "ws.pkl"
 
@@ -320,53 +323,88 @@ def main():
     # _modelSB_Run2HM_3
     # dist type: "crystalball_doublesided_dist"
     # _modelSB_Run2HM_1
-# _modelSB_Run2HM_2
-# _modelSB_Run2HM_3
-# _modelSB_Run2LM_1
-# _modelSB_Run2LM_2
-# _modelSB_Run2LM_3
-# _modelSB_Run2LM_4
-# _modelSB_Run3HM_1
-# _modelSB_Run3HM_2
-# _modelSB_Run3HM_3
-# _modelSB_Run3LM_1
-# _modelSB_Run3LM_2
-# _modelSB_Run3LM_3
-# _modelSB_Run3LM_4
+    # _modelSB_Run2HM_2
+    # _modelSB_Run2HM_3
+    # _modelSB_Run2LM_1
+    # _modelSB_Run2LM_2
+    # _modelSB_Run2LM_3
+    # _modelSB_Run2LM_4
+    # _modelSB_Run3HM_1
+    # _modelSB_Run3HM_2
+    # _modelSB_Run3HM_3
+    # _modelSB_Run3LM_1
+    # _modelSB_Run3LM_2
+    # _modelSB_Run3LM_3
+    # _modelSB_Run3LM_4
 
     # for each plot plot pdfs and coefficients on same plot
 
-    with PdfPages("log_distribution_plots.pdf") as pdf:
-        for dist_name, data_set in zip(like.distributions, unbinned_filtered):
-            plot_dist(model, parameters, dist_name, data_set, plot_name=f"distribution: {dist_name}")
-            pdf.savefig()
-            plt.close()
+    # 1/9:
+    # investigate: yield__ggFH_mc20ade_Run2HM_1 and the pdf version which the yield is multiplied by
+    ggFH_dist = ws.distributions['_modelSB_Run2HM_1']
+    with PdfPages("ggFH_plot.pdf") as pdf:
+        plot_dist(model, parameters, ggFH_dist.name, unbinned_filtered[0])
+        pdf.savefig()
+        plt.close()
 
-    # for mu in mus:
-    #     parameters["mu_HH"] = mu
-    #     nlls = []
-    #     for i, (dist_name, data_set) in enumerate(zip(like.distributions, unbinned_filtered)):
-    #         print(f"building dist {dist_name} {i}/{len(like.distributions)}")
-    #         dist = ws.distributions[dist_name]
+    ggFH_yield = ws.functions['yield__VBFH_mc20ade_Run2HM_1']
+    # ggFH_yield = ws.functions['yield__background_Run2HM_1']
+    for factor in ggFH_yield.factors:
+        if factor in parameters:
+            print(f'factor: {factor}, value: {parameters[factor]}')
+        else:
+            print(f'function: {factor}, with factors:\n\t{ws.functions[factor].factors}')
 
-    #         nll = 0
-    #         templist= []
-    #         print(f"datset = {data_set.name}")
-    #         for val in nz_weighted_entries(data_set.entries, data_set.weights):
-    #             temp = {**parameters, data_set.axes[0].name: val}
-    #             contribution = -2 * model.logpdf_unsafe(dist.name, **temp) / len(nz_weighted_entries(data_set.entries, data_set.weights))
-    #             nll += contribution
-    #             # print(f"value {val} results in nll sum == {nll}, contribution == {contribution}, dataset = {data_set.name}, distname = {dist_name}")
-    #         templist.append(nll)
+    # 1/16:
+    # modelSB is a term within model, continue checking contraint terms within model to find why the overall normalization is so small
+    run2hm1 = ws.distributions['_model_Run2HM_1']
+    # for con in run2hm1.factors[1:]:
+    #     if con in ws.distributions:
+    #         con = ws.distributions[con]
+    #         if con.type == 'gaussian_dist':
+    #             parameters[con.mean] = 1.0
+    #             print(f'constraint = {con.name}, gauss mean = {parameters[con.mean]}')
 
-    #         # pdf__ggFHH_kl1p0_mc23a_Run3LM_4
+    # breakpoint()
+    
+
+    # with PdfPages("log_distribution_plots.pdf") as pdf:
+    #     for dist_name, data_set in zip(like.distributions, unbinned_filtered):
+    #         plot_dist(model, parameters, dist_name, data_set, plot_name=f"distribution: {dist_name}")
+    #         pdf.savefig()
+    #         plt.close()
+    i = 0
+    for mu in test_mus:
+        i += 1
+        s = f"({i}/{len(test_mus)})"
+        print(f"computing nll given mu = {mu}{s:>{20}}")
+        parameters["mu_HH"] = mu
+        nlls = []
+        for i, (dist_name, data_set) in enumerate(zip(like.distributions, unbinned_filtered)):
+            # print(f"building dist {dist_name} {i}/{len(like.distributions)}")
+            dist = ws.distributions[ws.distributions[dist_name].factors[0]]
+
+            nll = 0
+            print(f"datset = {data_set.name}")
+            for val in nz_weighted_entries(data_set.entries, data_set.weights):
+                temp = {**parameters, data_set.axes[0].name: val}
+                contribution = -2 * model.logpdf_unsafe(dist.name, **temp) / len(nz_weighted_entries(data_set.entries, data_set.weights))
+                nll += contribution
+                # print(f"value {val} results in nll sum == {nll}, contribution == {contribution}, dataset = {data_set.name}, distname = {dist_name}")
+
+            # pdf__ggFHH_kl1p0_mc23a_Run3LM_4
                         
 
-    #         # breakpoint()
-
-    #         nlls.append(nll)
+            nlls.append(nll)
         
-    #     nll_given_mu.append(np.sum(nlls))    # break
+        nll_given_mu.append(np.sum(nlls))
+
+    breakpoint()
+    plt.figure()
+    plt.plot(test_mus, nll_given_mu)
+    plt.xlabel("mu_HH")
+    plt.ylabel("nll")
+    plt.savefig("pure_negative_range.pdf")
     breakpoint()
 
     for b in binned:
@@ -411,6 +449,7 @@ def main():
         print(f"{b.name:<45} | {u}")
     
     out_pdf = "all_histograms.pdf"
+
 
 
 

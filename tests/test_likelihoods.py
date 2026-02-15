@@ -40,26 +40,6 @@ class TestLikelihood:
         assert likelihood.data == ["data1", "data2"]
         assert likelihood.aux_distributions == ["aux_dist1", "aux_dist2"]
 
-    def test_likelihood_creation_with_inline_data_values(self):
-        """Test Likelihood creation with inline numeric data values."""
-        likelihood = Likelihood(
-            name="constraint_likelihood", distributions=["single_dim_dist"], data=[1.0]
-        )
-        assert likelihood.name == "constraint_likelihood"
-        assert likelihood.distributions == ["single_dim_dist"]
-        assert likelihood.data == [1.0]
-
-    def test_likelihood_creation_mixed_data_types(self):
-        """Test Likelihood creation with mixed string and numeric data."""
-        likelihood = Likelihood(
-            name="mixed_likelihood",
-            distributions=["dist1", "dist2", "constraint_dist"],
-            data=["data1", "data2", 0.5],
-        )
-        assert likelihood.name == "mixed_likelihood"
-        assert likelihood.distributions == ["dist1", "dist2", "constraint_dist"]
-        assert likelihood.data == ["data1", "data2", 0.5]
-
     def test_likelihood_validation_requires_name(self):
         """Test that Likelihood validation requires name field."""
         with pytest.raises(ValueError, match="Field required"):

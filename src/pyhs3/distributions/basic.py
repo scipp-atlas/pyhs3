@@ -198,7 +198,7 @@ class ExponentialDist(Distribution):
         c = context[self._parameters["c"]]
 
         # Exponential PDF: exp(-c * x)
-        return cast(TensorVar, pt.exp(-c * x))
+        return cast(TensorVar, (c) * pt.exp(-c * x))
 
 
 class LogNormalDist(Distribution):
@@ -248,7 +248,7 @@ class LogNormalDist(Distribution):
         # Log-normal PDF: (1/x) * exp(-((ln(x) - mu)^2) / (2 * sigma^2))
         log_x = pt.log(x)
         normalized_log = (log_x - mu) / sigma
-        return cast(TensorVar, (1.0 / x) * pt.exp(-0.5 * normalized_log**2))
+        return cast(TensorVar, (1.0 / (x * sigma * pt.sqrt(2.0 * pt.pi))) * pt.exp(-0.5 * normalized_log**2))
 
 
 class LandauDist(Distribution):
@@ -314,8 +314,11 @@ class LandauDist(Distribution):
         # This is a simplified approximation - ROOT uses more sophisticated methods
         gaussian_core = pt.exp(-0.5 * z**2)
         asymmetric_factor = pt.exp(-0.1 * pt.maximum(0.0, z - 1) ** 2)
+        Z1 = pt.sqrt(pt.pi / 2) * (1 + pt.erf(1 / pt.sqrt(2.0)))
+        Z2 = pt.exp(-1/12) * (pt.sqrt(5 * pt.pi / 3) / 2) * pt.erfc((5/6) * pt.sqrt(3/5))
+        normalization = Z1 + Z2
 
-        return cast(TensorVar, (1.0 / sigma) * gaussian_core * asymmetric_factor)
+        return cast(TensorVar, (1.0 / normalization) * (1.0 / sigma) * gaussian_core * asymmetric_factor)
 
 
 # Registry of basic distributions

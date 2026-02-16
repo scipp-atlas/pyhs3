@@ -8,7 +8,7 @@ including likelihood mappings between distributions and data.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel
 
@@ -20,9 +20,6 @@ from pyhs3.typing.annotations import (
     FKListSerializer,
     make_fk_list_validator,
 )
-
-if TYPE_CHECKING:
-    pass
 
 
 class Likelihood(BaseModel):

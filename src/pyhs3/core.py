@@ -5,7 +5,7 @@ import logging
 import os
 import sys
 from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any, Literal, TypeAlias, TypeVar, cast
 
@@ -27,9 +27,8 @@ from rich.progress import (
 
 from pyhs3.analyses import Analyses, Analysis
 from pyhs3.context import Context
-from pyhs3.data import Data, DataType, Datum
+from pyhs3.data import Data, DataType
 from pyhs3.distributions import Distributions, DistributionType
-from pyhs3.distributions.core import Distribution
 from pyhs3.domains import Domain, Domains, DomainType, ProductDomain
 from pyhs3.exceptions import WorkspaceValidationError
 from pyhs3.functions import Functions
@@ -116,43 +115,56 @@ class Workspace(BaseModel):
             )
             raise ValueError(msg)
 
+    def _resolve_fk_list(
+        self,
+        refs: Iterable[Any],
+        collection: Distributions | Data | Domains,
+        parent_label: str,
+        entity_label: str,
+        errors: list[str],
+    ) -> list[Any]:
+        """Resolve string references in a list against a named collection."""
+        resolved: list[Any] = []
+        for ref in refs:
+            if isinstance(ref, str):
+                obj = collection.get(ref)
+                if obj is None:
+                    errors.append(
+                        f"{parent_label} references unknown {entity_label} '{ref}'"
+                    )
+                else:
+                    resolved.append(obj)
+            else:
+                resolved.append(ref)
+        return resolved
+
     def _resolve_likelihood_fields(
         self, likelihood: Likelihood, errors: list[str]
     ) -> None:
         """Resolve foreign key fields on a Likelihood."""
         # Resolve distributions
         if self.distributions is not None:
-            resolved_dists: list[Distribution] = []
-            for dist_ref in likelihood.distributions:
-                if isinstance(dist_ref, str):
-                    dist = self.distributions.get(dist_ref)
-                    if dist is None:
-                        errors.append(
-                            f"Likelihood '{likelihood.name}' references unknown distribution '{dist_ref}'"
-                        )
-                    else:
-                        resolved_dists.append(dist)
-                else:
-                    resolved_dists.append(dist_ref)  # already resolved
+            resolved = self._resolve_fk_list(
+                likelihood.distributions,
+                self.distributions,
+                f"Likelihood '{likelihood.name}'",
+                "distribution",
+                errors,
+            )
             likelihood.distributions = Distributions(
-                cast(list[DistributionType], resolved_dists)
+                cast(list[DistributionType], resolved)
             )
 
         # Resolve data
         if self.data is not None:
-            resolved_data: list[Datum] = []
-            for data_ref in likelihood.data:
-                if isinstance(data_ref, str):
-                    datum = self.data.get(data_ref)
-                    if datum is None:
-                        errors.append(
-                            f"Likelihood '{likelihood.name}' references unknown data '{data_ref}'"
-                        )
-                    else:
-                        resolved_data.append(datum)
-                else:
-                    resolved_data.append(data_ref)  # already resolved
-            likelihood.data = Data(cast(list[DataType], resolved_data))
+            resolved = self._resolve_fk_list(
+                likelihood.data,
+                self.data,
+                f"Likelihood '{likelihood.name}'",
+                "data",
+                errors,
+            )
+            likelihood.data = Data(cast(list[DataType], resolved))
 
     def _resolve_analysis_fields(self, analysis: Analysis, errors: list[str]) -> None:
         """Resolve foreign key fields on an Analysis."""
@@ -168,19 +180,14 @@ class Workspace(BaseModel):
 
         # Resolve domains
         if self.domains is not None:
-            resolved_domains: list[Domain] = []
-            for domain_ref in analysis.domains:
-                if isinstance(domain_ref, str):
-                    dom = self.domains.get(domain_ref)
-                    if dom is None:
-                        errors.append(
-                            f"Analysis '{analysis.name}' references unknown domain '{domain_ref}'"
-                        )
-                    else:
-                        resolved_domains.append(dom)
-                else:
-                    resolved_domains.append(domain_ref)
-            analysis.domains = Domains(cast(list[DomainType], resolved_domains))
+            resolved = self._resolve_fk_list(
+                analysis.domains,
+                self.domains,
+                f"Analysis '{analysis.name}'",
+                "domain",
+                errors,
+            )
+            analysis.domains = Domains(cast(list[DomainType], resolved))
 
     @classmethod
     def load(

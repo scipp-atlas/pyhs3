@@ -8,7 +8,7 @@ including analysis configurations with parameters of interest and domains.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel
 
@@ -22,9 +22,6 @@ from pyhs3.typing.annotations import (
     FKValidator,
     make_fk_list_validator,
 )
-
-if TYPE_CHECKING:
-    pass
 
 
 class Analysis(BaseModel):

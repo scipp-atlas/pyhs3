@@ -466,3 +466,6 @@ class Data(
     def __iter__(self) -> Iterator[Datum]:  # type: ignore[override]
         """Iterate over the data sets."""
         return iter(self.root)
+
+    def __repr__(self) -> str:
+        return f"""Data({[datum.name for datum in self]})"""

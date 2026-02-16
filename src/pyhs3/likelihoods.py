@@ -8,8 +8,18 @@ including likelihood mappings between distributions and data.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel
+
+from pyhs3.data import Data, Datum
+from pyhs3.distributions import Distributions
+from pyhs3.distributions.core import Distribution
+from pyhs3.typing.annotations import (
+    FKListSchema,
+    FKListSerializer,
+    make_fk_list_validator,
+)
 
 
 class Likelihood(BaseModel):
@@ -30,8 +40,18 @@ class Likelihood(BaseModel):
     model_config = ConfigDict()
 
     name: str = Field(..., repr=True)
-    distributions: list[str] = Field(..., repr=False)
-    data: list[str] = Field(..., repr=False)
+    distributions: Annotated[
+        list[str] | Distributions,
+        make_fk_list_validator(Distribution),
+        FKListSerializer,
+        FKListSchema,
+    ] = Field(..., repr=False)
+    data: Annotated[
+        list[str] | Data,
+        make_fk_list_validator(Datum),
+        FKListSerializer,
+        FKListSchema,
+    ] = Field(..., repr=False)
     aux_distributions: list[str] | None = Field(default=None, repr=False)
 
 

@@ -252,3 +252,6 @@ class Domains(RootModel[list[DomainType]]):
 
     def __len__(self) -> int:
         return len(self.root)
+
+    def __repr__(self) -> str:
+        return f"""Domains({[domain.name for domain in self]})"""

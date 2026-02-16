@@ -397,7 +397,7 @@ Here's a more realistic example of a workspace for a physics analysis using both
    ... )
    Workspace contains 1 likelihoods and 1 analyses
    >>> print(
-   ...     f"Analysis '{physics_ws.analyses[0].name}' uses likelihood '{physics_ws.analyses[0].likelihood}'"
+   ...     f"Analysis '{physics_ws.analyses[0].name}' uses likelihood '{physics_ws.analyses[0].likelihood.name}'"
    ... )
    Analysis 'higgs_discovery' uses likelihood 'higgs_likelihood'
    >>> physics_model = physics_ws.model()
@@ -425,18 +425,18 @@ Likelihoods and analyses are optional but important components for statistical i
    >>> likelihood = physics_ws.likelihoods["higgs_likelihood"]
    >>> print(f"Likelihood '{likelihood.name}' connects:")
    Likelihood 'higgs_likelihood' connects:
-   >>> print(f"  - Distributions: {likelihood.distributions}")
-     - Distributions: ['signal', 'background']
-   >>> print(f"  - To data: {likelihood.data}")
-     - To data: ['observed_mass_spectrum', 'observed_mass_spectrum']
+   >>> print(f"  - Distributions: {likelihood.distributions!r}")
+     - Distributions: Distributions(['signal', 'background'])
+   >>> print(f"  - To data: {likelihood.data!r}")
+     - To data: Data(['observed_mass_spectrum', 'observed_mass_spectrum'])
    >>> # Access analysis configuration
    >>> analysis = physics_ws.analyses["higgs_discovery"]
    >>> print(f"Analysis '{analysis.name}' configuration:")
    Analysis 'higgs_discovery' configuration:
-   >>> print(f"  - Uses likelihood: {analysis.likelihood}")
-     - Uses likelihood: higgs_likelihood
-   >>> print(f"  - Parameter domains: {analysis.domains}")
-     - Parameter domains: ['search_window']
+   >>> print(f"  - Uses likelihood: {analysis.likelihood!r}")
+     - Uses likelihood: Likelihood(name='higgs_likelihood')
+   >>> print(f"  - Parameter domains: {analysis.domains!r}")
+     - Parameter domains: Domains(['search_window'])
    >>> print(f"  - Parameters of interest: {analysis.parameters_of_interest}")
      - Parameters of interest: ['higgs_mass', 'signal_yield']
    >>> print(f"  - Initial values from: {analysis.init}")

@@ -11,6 +11,8 @@ import pytest
 
 from pyhs3 import Workspace
 from pyhs3.analyses import Analyses, Analysis
+from pyhs3.domains import Domain
+from pyhs3.likelihoods import Likelihood
 
 
 class TestAnalysis:
@@ -197,71 +199,137 @@ class TestAnalyses:
             _ = analyses[0]
 
 
-class TestWorkspaceBackreferences:
-    """Tests for _workspace backreferences in Analysis and Analyses."""
+class TestForeignKeyResolution:
+    """Tests for FK validation and serialization in Analysis."""
 
-    def test_workspace_backreference_set_on_loading(self, datadir):
-        """Test that _workspace is set when loading a workspace with analyses."""
-        workspace_path = datadir / "simplemodel_uncorrelated-background_hs3.json"
-        workspace = Workspace.load(workspace_path)
+    def test_analysis_accepts_string_from_json(self):
+        """Test Analysis accepts string references from JSON."""
+        analysis = Analysis.model_validate(
+            {
+                "name": "test_analysis",
+                "likelihood": "test_likelihood",
+                "domains": ["domain1", "domain2"],
+            }
+        )
+        assert analysis.name == "test_analysis"
+        assert analysis.likelihood == "test_likelihood"
+        assert analysis.domains == ["domain1", "domain2"]
 
-        # Verify analyses collection has workspace backreference
-        assert workspace.analyses is not None
-        assert workspace.analyses._workspace is workspace
+    def test_analysis_accepts_object_from_python(self):
+        """Test Analysis accepts model instances from Python."""
+        likelihood = Likelihood(
+            name="test_likelihood", distributions=["dist1"], data=["data1"]
+        )
+        domain1 = Domain(name="domain1", type="constant", value="value1")
+        domain2 = Domain(name="domain2", type="constant", value="value2")
 
-        # Verify individual analysis objects have workspace backreference
-        for analysis in workspace.analyses:
-            assert analysis._workspace is workspace
+        analysis = Analysis(
+            name="test_analysis", likelihood=likelihood, domains=[domain1, domain2]
+        )
+        assert analysis.name == "test_analysis"
+        assert analysis.likelihood is likelihood
+        assert analysis.domains == [domain1, domain2]
 
-    def test_workspace_backreference_none_standalone_analysis(self):
-        """Test that _workspace is None when creating standalone Analysis."""
+    def test_analysis_rejects_dict_for_likelihood(self):
+        """Test Analysis rejects dict for likelihood field."""
+        with pytest.raises(TypeError, match="Embedded objects not allowed"):
+            Analysis(
+                name="test_analysis",
+                likelihood={"name": "bad"},
+                domains=["domain1"],
+            )
+
+    def test_analysis_rejects_dict_in_domains(self):
+        """Test Analysis rejects dict in domains list."""
+        with pytest.raises(TypeError, match="Embedded objects not allowed"):
+            Analysis(
+                name="test_analysis",
+                likelihood="test_likelihood",
+                domains=[{"name": "bad"}],
+            )
+
+    def test_analysis_serialization_to_strings(self):
+        """Test Analysis serialization converts FK fields to strings."""
+        likelihood = Likelihood(
+            name="test_likelihood", distributions=["dist1"], data=["data1"]
+        )
+        domain1 = Domain(name="domain1", type="constant", value="value1")
+        domain2 = Domain(name="domain2", type="constant", value="value2")
+
+        analysis = Analysis(
+            name="test_analysis", likelihood=likelihood, domains=[domain1, domain2]
+        )
+
+        dumped = analysis.model_dump()
+        assert dumped["likelihood"] == "test_likelihood"
+        assert dumped["domains"] == ["domain1", "domain2"]
+
+    def test_analysis_json_schema_shows_strings(self):
+        """Test Analysis JSON schema shows FK fields as strings."""
+        schema = Analysis.model_json_schema()
+        properties = schema["properties"]
+
+        # likelihood should be type string
+        assert properties["likelihood"]["type"] == "string"
+
+        # domains should be array of strings
+        assert properties["domains"]["type"] == "array"
+        assert properties["domains"]["items"]["type"] == "string"
+
+    def test_analysis_standalone_keeps_strings(self):
+        """Test standalone Analysis keeps string references without workspace."""
         analysis = Analysis(
             name="test_analysis",
             likelihood="test_likelihood",
-            domains=["test_domain"],
+            domains=["domain1"],
         )
-        assert analysis._workspace is None
+        # Strings stay as strings without workspace resolution
+        assert analysis.likelihood == "test_likelihood"
+        assert analysis.domains == ["domain1"]
 
-    def test_workspace_backreference_none_standalone_analyses(self):
-        """Test that _workspace is None when creating standalone Analyses."""
-        analysis1 = Analysis(
-            name="analysis1", likelihood="likelihood1", domains=["domain1"]
-        )
-        analysis2 = Analysis(
-            name="analysis2", likelihood="likelihood2", domains=["domain2"]
-        )
-        analyses = Analyses([analysis1, analysis2])
 
-        assert analyses._workspace is None
-        for analysis in analyses:
-            assert analysis._workspace is None
+class TestWorkspaceFKResolution:
+    """Integration tests for FK resolution in Workspace context."""
 
-    def test_workspace_backreference_not_in_model_dump(self, datadir):
-        """Test that _workspace is not included in model_dump()."""
+    def test_analysis_likelihood_resolved_to_object(self, datadir):
+        """Test analysis likelihood is resolved to Likelihood object."""
         workspace_path = datadir / "simplemodel_uncorrelated-background_hs3.json"
         workspace = Workspace.load(workspace_path)
 
-        # Verify workspace backreferences are set
-        assert workspace.analyses._workspace is workspace
+        assert workspace.analyses is not None
+        for analysis in workspace.analyses:
+            assert isinstance(analysis.likelihood, Likelihood)
+            # Verify it's the actual likelihood from workspace
+            assert (
+                analysis.likelihood is workspace.likelihoods[analysis.likelihood.name]
+            )
 
-        # Verify _workspace not in model dump
-        workspace_dict = workspace.model_dump()
-        assert "_workspace" not in workspace_dict
+    def test_analysis_domains_resolved_to_objects(self, datadir):
+        """Test analysis domains are resolved to Domain objects."""
+        workspace_path = datadir / "simplemodel_uncorrelated-background_hs3.json"
+        workspace = Workspace.load(workspace_path)
 
-        # Verify analyses serialization doesn't include _workspace
-        analyses_dict = workspace.analyses.model_dump()
-        if isinstance(analyses_dict, list):
-            # RootModel serializes to list
-            for analysis_dict in analyses_dict:
-                assert "_workspace" not in analysis_dict
-        else:
-            assert "_workspace" not in analyses_dict
+        assert workspace.analyses is not None
+        for analysis in workspace.analyses:
+            for domain in analysis.domains:
+                assert isinstance(domain, Domain)
+                # Verify it's the actual domain from workspace
+                assert domain is workspace.domains[domain.name]
 
-    def test_workspace_backreference_not_in_json_schema(self):
-        """Test that _workspace is not included in JSON schema."""
-        analysis_schema = Analysis.model_json_schema()
-        assert "_workspace" not in analysis_schema.get("properties", {})
+    def test_workspace_roundtrip_preserves_strings(self, datadir):
+        """Test workspace roundtrip preserves string references in JSON."""
+        workspace_path = datadir / "simplemodel_uncorrelated-background_hs3.json"
+        workspace = Workspace.load(workspace_path)
 
-        analyses_schema = Analyses.model_json_schema()
-        # For RootModel, check if _workspace is in the schema
-        assert "_workspace" not in str(analyses_schema)
+        # Dump back to dict
+        dumped = workspace.model_dump()
+
+        # Reload from dict
+        workspace2 = Workspace.model_validate(dumped)
+
+        # Verify analyses are resolved again
+        assert workspace2.analyses is not None
+        for analysis in workspace2.analyses:
+            assert isinstance(analysis.likelihood, Likelihood)
+            for domain in analysis.domains:
+                assert isinstance(domain, Domain)

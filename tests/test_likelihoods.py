@@ -10,6 +10,9 @@ from __future__ import annotations
 import pytest
 
 from pyhs3 import Workspace
+from pyhs3.data import Datum, PointData
+from pyhs3.distributions import GaussianDist
+from pyhs3.distributions.core import Distribution
 from pyhs3.likelihoods import Likelihood, Likelihoods
 
 
@@ -148,71 +151,243 @@ class TestLikelihoods:
             _ = likelihoods[0]
 
 
-class TestWorkspaceBackreferences:
-    """Tests for _workspace backreferences in Likelihood and Likelihoods."""
+class TestForeignKeyResolution:
+    """Tests for FK validation and serialization in Likelihood."""
 
-    def test_workspace_backreference_set_on_loading(self, datadir):
-        """Test that _workspace is set when loading a workspace with likelihoods."""
-        workspace_path = datadir / "simplemodel_uncorrelated-background_hs3.json"
-        workspace = Workspace.load(workspace_path)
+    def test_likelihood_accepts_strings_from_json(self):
+        """Test Likelihood accepts string references from JSON."""
+        likelihood = Likelihood.model_validate(
+            {
+                "name": "test_likelihood",
+                "distributions": ["dist1", "dist2"],
+                "data": ["obs1", "obs2"],
+            }
+        )
+        assert likelihood.name == "test_likelihood"
+        assert likelihood.distributions == ["dist1", "dist2"]
+        assert likelihood.data == ["obs1", "obs2"]
 
-        # Verify likelihoods collection has workspace backreference
-        assert workspace.likelihoods is not None
-        assert workspace.likelihoods._workspace is workspace
+    def test_likelihood_accepts_objects_from_python(self):
+        """Test Likelihood accepts model instances from Python."""
+        dist1 = GaussianDist(name="dist1", x="x", mean=0.0, sigma=1.0)
+        datum1 = PointData(name="obs1", value=1.5)
 
-        # Verify individual likelihood objects have workspace backreference
-        for likelihood in workspace.likelihoods:
-            assert likelihood._workspace is workspace
-
-    def test_workspace_backreference_none_standalone_likelihood(self):
-        """Test that _workspace is None when creating standalone Likelihood."""
         likelihood = Likelihood(
-            name="test_likelihood",
-            distributions=["dist1"],
-            data=["data1"],
+            name="test_likelihood", distributions=[dist1], data=[datum1]
         )
-        assert likelihood._workspace is None
+        assert likelihood.name == "test_likelihood"
+        assert likelihood.distributions == [dist1]
+        assert likelihood.data == [datum1]
 
-    def test_workspace_backreference_none_standalone_likelihoods(self):
-        """Test that _workspace is None when creating standalone Likelihoods."""
-        likelihood1 = Likelihood(
-            name="likelihood1", distributions=["dist1"], data=["data1"]
+    def test_likelihood_rejects_dict_in_distributions(self):
+        """Test Likelihood rejects dict in distributions list."""
+        with pytest.raises(TypeError, match="Embedded objects not allowed"):
+            Likelihood(
+                name="test_likelihood",
+                distributions=[{"name": "bad"}],
+                data=["obs1"],
+            )
+
+    def test_likelihood_rejects_dict_in_data(self):
+        """Test Likelihood rejects dict in data list."""
+        with pytest.raises(TypeError, match="Embedded objects not allowed"):
+            Likelihood(
+                name="test_likelihood",
+                distributions=["dist1"],
+                data=[{"name": "bad"}],
+            )
+
+    def test_likelihood_serialization_to_strings(self):
+        """Test Likelihood serialization converts FK fields to strings."""
+        dist1 = GaussianDist(name="dist1", x="x", mean=0.0, sigma=1.0)
+        datum1 = PointData(name="obs1", value=1.5)
+
+        likelihood = Likelihood(
+            name="test_likelihood", distributions=[dist1], data=[datum1]
         )
-        likelihood2 = Likelihood(
-            name="likelihood2", distributions=["dist2"], data=["data2"]
-        )
-        likelihoods = Likelihoods([likelihood1, likelihood2])
 
-        assert likelihoods._workspace is None
-        for likelihood in likelihoods:
-            assert likelihood._workspace is None
+        dumped = likelihood.model_dump()
+        assert dumped["distributions"] == ["dist1"]
+        assert dumped["data"] == ["obs1"]
 
-    def test_workspace_backreference_not_in_model_dump(self, datadir):
-        """Test that _workspace is not included in model_dump()."""
+    def test_likelihood_json_schema_correct(self):
+        """Test Likelihood JSON schema shows FK fields as array of strings."""
+        schema = Likelihood.model_json_schema()
+        properties = schema["properties"]
+
+        # distributions should be array of strings
+        assert properties["distributions"]["type"] == "array"
+        assert properties["distributions"]["items"]["type"] == "string"
+
+        # data should be array of strings
+        assert properties["data"]["type"] == "array"
+        assert properties["data"]["items"]["type"] == "string"
+
+
+class TestWorkspaceFKResolution:
+    """Integration tests for FK resolution in Workspace context."""
+
+    def test_likelihood_distributions_resolved(self, datadir):
+        """Test likelihood distributions are resolved to Distribution objects."""
         workspace_path = datadir / "simplemodel_uncorrelated-background_hs3.json"
         workspace = Workspace.load(workspace_path)
 
-        # Verify workspace backreferences are set
-        assert workspace.likelihoods._workspace is workspace
+        assert workspace.likelihoods is not None
+        for likelihood in workspace.likelihoods:
+            for dist in likelihood.distributions:
+                assert isinstance(dist, Distribution)
+                # Verify it's the actual distribution from workspace
+                assert dist is workspace.distributions[dist.name]
 
-        # Verify _workspace not in model dump
-        workspace_dict = workspace.model_dump()
-        assert "_workspace" not in workspace_dict
+    def test_likelihood_data_resolved(self, datadir):
+        """Test likelihood data are resolved to Datum objects."""
+        workspace_path = datadir / "simplemodel_uncorrelated-background_hs3.json"
+        workspace = Workspace.load(workspace_path)
 
-        # Verify likelihoods serialization doesn't include _workspace
-        likelihoods_dict = workspace.likelihoods.model_dump()
-        if isinstance(likelihoods_dict, list):
-            # RootModel serializes to list
-            for likelihood_dict in likelihoods_dict:
-                assert "_workspace" not in likelihood_dict
-        else:
-            assert "_workspace" not in likelihoods_dict
+        assert workspace.likelihoods is not None
+        for likelihood in workspace.likelihoods:
+            for datum in likelihood.data:
+                assert isinstance(datum, Datum)
+                # Verify it's the actual datum from workspace
+                assert datum is workspace.data[datum.name]
 
-    def test_workspace_backreference_not_in_json_schema(self):
-        """Test that _workspace is not included in JSON schema."""
-        likelihood_schema = Likelihood.model_json_schema()
-        assert "_workspace" not in likelihood_schema.get("properties", {})
+    def test_workspace_roundtrip_preserves_strings(self, datadir):
+        """Test workspace roundtrip preserves string references in JSON."""
+        workspace_path = datadir / "simplemodel_uncorrelated-background_hs3.json"
+        workspace = Workspace.load(workspace_path)
 
-        likelihoods_schema = Likelihoods.model_json_schema()
-        # For RootModel, check if _workspace is in the schema
-        assert "_workspace" not in str(likelihoods_schema)
+        # Dump back to dict
+        dumped = workspace.model_dump()
+
+        # Reload from dict
+        workspace2 = Workspace.model_validate(dumped)
+
+        # Verify likelihoods are resolved again
+        assert workspace2.likelihoods is not None
+        for likelihood in workspace2.likelihoods:
+            for dist in likelihood.distributions:
+                assert isinstance(dist, Distribution)
+            for datum in likelihood.data:
+                assert isinstance(datum, Datum)
+
+
+class TestWorkspaceReferentialIntegrity:
+    """Tests for workspace referential integrity validation."""
+
+    def test_workspace_unknown_distribution_raises(self):
+        """Test workspace raises error for unknown distribution reference."""
+        with pytest.raises(ValueError, match="unknown distribution"):
+            Workspace.model_validate(
+                {
+                    "metadata": {"hs3_version": "0.1.0"},
+                    "likelihoods": [
+                        {
+                            "name": "likelihood1",
+                            "distributions": ["unknown_dist"],
+                            "data": [],
+                        }
+                    ],
+                    "distributions": [],
+                    "data": [],
+                }
+            )
+
+    def test_workspace_unknown_data_raises(self):
+        """Test workspace raises error for unknown data reference."""
+        with pytest.raises(ValueError, match="unknown data"):
+            Workspace.model_validate(
+                {
+                    "metadata": {"hs3_version": "0.1.0"},
+                    "likelihoods": [
+                        {
+                            "name": "likelihood1",
+                            "distributions": [],
+                            "data": ["unknown_data"],
+                        }
+                    ],
+                    "distributions": [],
+                    "data": [],
+                }
+            )
+
+    def test_workspace_unknown_likelihood_raises(self):
+        """Test workspace raises error for unknown likelihood reference."""
+        with pytest.raises(ValueError, match="unknown likelihood"):
+            Workspace.model_validate(
+                {
+                    "metadata": {"hs3_version": "0.1.0"},
+                    "analyses": [
+                        {
+                            "name": "analysis1",
+                            "likelihood": "unknown_likelihood",
+                            "domains": [],
+                        }
+                    ],
+                    "likelihoods": [],
+                }
+            )
+
+    def test_workspace_unknown_domain_raises(self):
+        """Test workspace raises error for unknown domain reference."""
+        with pytest.raises(ValueError, match="unknown domain"):
+            Workspace.model_validate(
+                {
+                    "metadata": {"hs3_version": "0.1.0"},
+                    "analyses": [
+                        {
+                            "name": "analysis1",
+                            "likelihood": "likelihood1",
+                            "domains": ["unknown_domain"],
+                        }
+                    ],
+                    "likelihoods": [
+                        {
+                            "name": "likelihood1",
+                            "distributions": ["dist1"],
+                            "data": ["obs1"],
+                        }
+                    ],
+                    "distributions": [
+                        {
+                            "name": "dist1",
+                            "type": "gaussian_dist",
+                            "x": "x",
+                            "mean": 0.0,
+                            "sigma": 1.0,
+                        }
+                    ],
+                    "data": [{"name": "obs1", "type": "point", "value": 1.0}],
+                    "domains": [],
+                }
+            )
+
+    def test_workspace_collects_all_errors(self):
+        """Test workspace collects multiple FK resolution errors."""
+        with pytest.raises(ValueError, match="unresolved references") as exc_info:
+            Workspace.model_validate(
+                {
+                    "metadata": {"hs3_version": "0.1.0"},
+                    "analyses": [
+                        {
+                            "name": "analysis1",
+                            "likelihood": "unknown_likelihood",
+                            "domains": ["unknown_domain"],
+                        }
+                    ],
+                    "likelihoods": [
+                        {
+                            "name": "likelihood1",
+                            "distributions": ["unknown_dist"],
+                            "data": ["unknown_data"],
+                        }
+                    ],
+                    "distributions": [],
+                    "data": [],
+                    "domains": [],
+                }
+            )
+
+        # Verify multiple errors are reported
+        error_msg = str(exc_info.value)
+        assert "unknown_likelihood" in error_msg or "unknown_domain" in error_msg
+        assert "unknown_dist" in error_msg or "unknown_data" in error_msg

@@ -7,11 +7,21 @@ including analysis configurations with parameters of interest and domains.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 from pydantic import ConfigDict, Field, PrivateAttr
 
 from pyhs3.collections import NamedCollection, NamedModel
+from pyhs3.domains import Domain, Domains
+from pyhs3.likelihoods import Likelihood
+from pyhs3.typing.annotations import (
+    FKListSchema,
+    FKListSerializer,
+    FKSchema,
+    FKSerializer,
+    FKValidator,
+    make_fk_list_validator,
+)
 
 if TYPE_CHECKING:
     from pyhs3.core import Workspace
@@ -38,9 +48,16 @@ class Analysis(NamedModel):
     model_config = ConfigDict()
 
     _workspace: Workspace | None = PrivateAttr(default=None)
-    likelihood: str = Field(..., repr=False)
+    likelihood: Annotated[str | Likelihood, FKValidator, FKSerializer, FKSchema] = (
+        Field(..., repr=False)
+    )
     parameters_of_interest: list[str] | None = Field(default=None, repr=False)
-    domains: list[str] = Field(..., repr=False)
+    domains: Annotated[
+        list[str] | Domains,
+        make_fk_list_validator(Domain),
+        FKListSerializer,
+        FKListSchema,
+    ] = Field(..., repr=False)
     init: str | None = Field(default=None, repr=False)
     prior: str | None = Field(default=None, repr=False)
 
@@ -53,7 +70,5 @@ class Analyses(NamedCollection[Analysis]):
     configurations with likelihoods, parameters of interest, and domains.
     Provides dict-like access to analyses by name.
     """
-
-    _workspace: Workspace | None = PrivateAttr(default=None)
 
     root: list[Analysis] = Field(default_factory=list)

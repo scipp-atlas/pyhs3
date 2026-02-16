@@ -182,3 +182,6 @@ class Distributions(RootModel[list[DistributionType]]):
 
     def __len__(self) -> int:
         return len(self.root)
+
+    def __repr__(self) -> str:
+        return f"""Distributions({[distribution.name for distribution in self]})"""

@@ -8,12 +8,23 @@ including analysis configurations with parameters of interest and domains.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel
+
+from pyhs3.domains import Domain, Domains
+from pyhs3.likelihoods import Likelihood
+from pyhs3.typing.annotations import (
+    FKListSchema,
+    FKListSerializer,
+    FKSchema,
+    FKSerializer,
+    FKValidator,
+    make_fk_list_validator,
+)
 
 if TYPE_CHECKING:
-    from pyhs3.core import Workspace
+    pass
 
 
 class Analysis(BaseModel):
@@ -36,12 +47,17 @@ class Analysis(BaseModel):
 
     model_config = ConfigDict()
 
-    _workspace: Workspace | None = PrivateAttr(default=None)
-
     name: str = Field(..., repr=True)
-    likelihood: str = Field(..., repr=False)
+    likelihood: Annotated[str | Likelihood, FKValidator, FKSerializer, FKSchema] = (
+        Field(..., repr=False)
+    )
     parameters_of_interest: list[str] | None = Field(default=None, repr=False)
-    domains: list[str] = Field(..., repr=False)
+    domains: Annotated[
+        list[str] | Domains,
+        make_fk_list_validator(Domain),
+        FKListSerializer,
+        FKListSchema,
+    ] = Field(..., repr=False)
     init: str | None = Field(default=None, repr=False)
     prior: str | None = Field(default=None, repr=False)
 
@@ -54,8 +70,6 @@ class Analyses(RootModel[list[Analysis]]):
     configurations with likelihoods, parameters of interest, and domains.
     Provides dict-like access to analyses by name.
     """
-
-    _workspace: Workspace | None = PrivateAttr(default=None)
 
     root: list[Analysis] = Field(default_factory=list)
 

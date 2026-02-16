@@ -10,10 +10,11 @@ from __future__ import annotations
 import pytest
 
 from pyhs3 import Workspace
-from pyhs3.data import Datum, PointData
-from pyhs3.distributions import GaussianDist
+from pyhs3.data import Data, Datum, PointData
+from pyhs3.distributions import Distributions, GaussianDist
 from pyhs3.distributions.core import Distribution
 from pyhs3.likelihoods import Likelihood, Likelihoods
+from pyhs3.metadata import Metadata
 
 
 class TestLikelihood:
@@ -210,6 +211,18 @@ class TestForeignKeyResolution:
         assert dumped["distributions"] == ["dist1"]
         assert dumped["data"] == ["obs1"]
 
+    def test_likelihood_serialization_with_string_references(self):
+        """Test Likelihood serialization with string refs (branch #4)."""
+        likelihood = Likelihood(
+            name="test_likelihood",
+            distributions=["dist1", "dist2"],
+            data=["obs1"],
+        )
+
+        dumped = likelihood.model_dump()
+        assert dumped["distributions"] == ["dist1", "dist2"]
+        assert dumped["data"] == ["obs1"]
+
     def test_likelihood_json_schema_correct(self):
         """Test Likelihood JSON schema shows FK fields as array of strings."""
         schema = Likelihood.model_json_schema()
@@ -269,6 +282,36 @@ class TestWorkspaceFKResolution:
                 assert isinstance(dist, Distribution)
             for datum in likelihood.data:
                 assert isinstance(datum, Datum)
+
+    def test_likelihood_with_preresolved_objects(self):
+        """Test Likelihood with preresolved Distribution and Datum instances (branch #1)."""
+        # Create Distribution and Datum instances
+        dist1 = GaussianDist(name="dist1", x="x", mean=0.0, sigma=1.0)
+        datum1 = PointData(name="obs1", value=1.5)
+
+        # Build workspace programmatically with preresolved objects
+        workspace = Workspace(
+            metadata=Metadata(hs3_version="0.1.0"),
+            distributions=Distributions([dist1]),
+            data=Data([datum1]),
+            likelihoods=Likelihoods(
+                [
+                    Likelihood(
+                        name="test_likelihood",
+                        distributions=[dist1],  # Already-resolved ref
+                        data=[datum1],  # Already-resolved ref
+                    )
+                ]
+            ),
+        )
+
+        # Verify references remain resolved
+        assert workspace.likelihoods is not None
+        likelihood = workspace.likelihoods[0]
+        assert isinstance(likelihood.distributions[0], Distribution)
+        assert isinstance(likelihood.data[0], Datum)
+        assert likelihood.distributions[0] is dist1
+        assert likelihood.data[0] is datum1
 
 
 class TestWorkspaceReferentialIntegrity:

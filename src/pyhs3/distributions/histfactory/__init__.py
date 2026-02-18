@@ -323,11 +323,9 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
             variances_nd = np.square(sample.data.errors).reshape(binning_shape)
 
             # Set values for this sample using integer indexing
-            # Note: We use integer index i here because h.view() returns a numpy array
-            # that doesn't support string indexing. The sample order matches the
-            # categorical axis order, so h.view()[i, ...] corresponds to sample.name
-            h.view(flow=False)[i, ...]["value"] = contents_nd
-            h.view(flow=False)[i, ...]["variance"] = variances_nd
+            # The sample order matches the categorical axis order, so h[i, ...] corresponds to sample.name
+            stacked = np.stack([contents_nd, variances_nd], axis=-1)
+            h[i, ...] = stacked
 
         return h
 

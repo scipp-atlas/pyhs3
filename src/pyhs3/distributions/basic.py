@@ -319,7 +319,11 @@ class LandauDist(Distribution):
         gaussian_core = pt.exp(-0.5 * z**2)
         asymmetric_factor = pt.exp(-0.1 * pt.maximum(0.0, z - 1) ** 2)
         gaussian_term_integral = pt.sqrt(pt.pi / 2) * (1 + pt.erf(1 / pt.sqrt(2.0)))
-        asymmetric_factor_integral = pt.exp(-1/12) * (pt.sqrt(5 * pt.pi / 3) / 2) * pt.erfc((5/6) * pt.sqrt(3/5))
+        asymmetric_factor_integral = (
+            pt.exp(-1 / 12)
+            * (pt.sqrt(5 * pt.pi / 3) / 2)
+            * pt.erfc((5 / 6) * pt.sqrt(3 / 5))
+        )
         normalization = gaussian_term_integral + asymmetric_factor_integral
 
         return cast(

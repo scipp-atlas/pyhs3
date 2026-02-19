@@ -14,6 +14,7 @@ import pytensor.tensor as pt
 
 from pyhs3.base import Evaluable
 from pyhs3.context import Context
+from pyhs3.normalization import Normalizable, gauss_legendre_integral
 from pyhs3.typing.aliases import TensorVar
 
 
@@ -52,12 +53,41 @@ class Distribution(Evaluable, ABC):
             TypeError: Must be implemented by subclasses
         """
 
+    def normalization_integral(
+        self,
+        context: Context,  # noqa: ARG002
+        observable_name: str,  # noqa: ARG002
+        lower: TensorVar,  # noqa: ARG002
+        upper: TensorVar,  # noqa: ARG002
+    ) -> TensorVar | None:
+        """
+        Analytical normalization integral over the observable domain.
+
+        Override in subclasses to provide known analytical integrals.
+        Return None (default) to use Gauss-Legendre quadrature fallback.
+
+        This method is only called when the distribution inherits from Normalizable.
+
+        Args:
+            context: Mapping of names to pytensor variables
+            observable_name: Name of the observable to integrate over
+            lower: Lower integration bound
+            upper: Upper integration bound
+
+        Returns:
+            Symbolic integral expression, or None for numerical fallback.
+        """
+        return None
+
     def _expression(self, context: Context) -> TensorVar:
         """
         Complete probability combining main likelihood with extended terms.
 
         Returns the product of likelihood() and extended_likelihood().
         This provides the complete probability for the distribution.
+
+        For distributions inheriting from Normalizable, applies normalization
+        over observables present in the context.
 
         Subclasses typically do not need to override this method - just
         implement likelihood() and optionally extended_likelihood().
@@ -68,9 +98,22 @@ class Distribution(Evaluable, ABC):
         Returns:
             TensorVar: Complete probability density
         """
-        return cast(
-            TensorVar, self.likelihood(context) * self.extended_likelihood(context)
-        )
+        raw = self.likelihood(context)
+
+        # Apply normalization if this distribution is Normalizable
+        if isinstance(self, Normalizable):
+            for obs_name, (lower, upper) in context.observables.items():
+                if obs_name not in self.parameters:
+                    continue
+                # Try analytical integral from normalization_integral()
+                integral = self.normalization_integral(context, obs_name, lower, upper)
+                if integral is None:
+                    # Fall back to numerical quadrature
+                    obs_var = context[obs_name]
+                    integral = gauss_legendre_integral(raw, obs_var, lower, upper)
+                raw = raw / integral
+
+        return cast(TensorVar, raw * self.extended_likelihood(context))
 
     def log_expression(self, context: Context) -> TensorVar:
         """
@@ -80,6 +123,9 @@ class Distribution(Evaluable, ABC):
         This is mathematically equivalent to log(likelihood * extended_likelihood)
         but can be more numerically stable.
 
+        For distributions inheriting from Normalizable, applies normalization
+        over observables present in the context.
+
         PyTensor handles optimization and simplification automatically.
 
         Args:
@@ -88,10 +134,26 @@ class Distribution(Evaluable, ABC):
         Returns:
             TensorVar: Log-probability density
         """
+        log_raw = pt.log(self.likelihood(context))
+
+        # Apply normalization if this distribution is Normalizable
+        if isinstance(self, Normalizable):
+            for obs_name, (lower, upper) in context.observables.items():
+                if obs_name not in self.parameters:
+                    continue
+                # Try analytical integral from normalization_integral()
+                integral = self.normalization_integral(context, obs_name, lower, upper)
+                if integral is None:
+                    # Fall back to numerical quadrature
+                    obs_var = context[obs_name]
+                    integral = gauss_legendre_integral(
+                        self.likelihood(context), obs_var, lower, upper
+                    )
+                log_raw = log_raw - pt.log(integral)
+
         return cast(
             TensorVar,
-            pt.log(self.likelihood(context))
-            + pt.log(self.extended_likelihood(context)),
+            log_raw + pt.log(self.extended_likelihood(context)),
         )
 
     def extended_likelihood(

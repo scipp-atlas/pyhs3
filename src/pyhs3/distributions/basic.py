@@ -250,7 +250,7 @@ class LogNormalDist(Distribution):
         normalized_log = (log_x - mu) / sigma
         return cast(
             TensorVar,
-            (1.0 / (x * sigma * pt.sqrt(2.0 * pt.pi)))
+            (1.0 / (x * sigma * pt.sqrt(2.0 * math.pi)))
             * pt.exp(-0.5 * normalized_log**2),
         )
 
@@ -318,10 +318,10 @@ class LandauDist(Distribution):
         # This is a simplified approximation - ROOT uses more sophisticated methods
         gaussian_core = pt.exp(-0.5 * z**2)
         asymmetric_factor = pt.exp(-0.1 * pt.maximum(0.0, z - 1) ** 2)
-        gaussian_term_integral = pt.sqrt(pt.pi / 2) * (1 + pt.erf(1 / pt.sqrt(2.0)))
+        gaussian_term_integral = pt.sqrt(math.pi / 2) * (1 + pt.erf(1 / pt.sqrt(2.0)))
         asymmetric_factor_integral = (
             pt.exp(-1 / 12)
-            * (pt.sqrt(5 * pt.pi / 3) / 2)
+            * (pt.sqrt(5 * math.pi / 3) / 2)
             * pt.erfc((5 / 6) * pt.sqrt(3 / 5))
         )
         normalization = gaussian_term_integral + asymmetric_factor_integral

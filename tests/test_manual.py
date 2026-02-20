@@ -271,8 +271,8 @@ def plot_dist(model, parameters, dist_name, data_set, plot_name=None):
 def main():
     ws = hs3.Workspace(**ws_json())
 
-    # test_mus = json.loads(test_data)["mu_HH"]
-    test_mus = np.linspace(-10,-5,20)
+    test_mus = json.loads(test_data)["mu_HH"]
+    # test_mus = np.linspace(-10,-5,20)
 
     cached_file = "ws.pkl"
 
@@ -404,7 +404,7 @@ def main():
     plt.plot(test_mus, nll_given_mu)
     plt.xlabel("mu_HH")
     plt.ylabel("nll")
-    plt.savefig("pure_negative_range.pdf")
+    plt.savefig("nll_values_with_some_normalized_functions.pdf")
     breakpoint()
 
     for b in binned:

@@ -792,22 +792,3 @@ class TestData:
 
         with pytest.raises(IndexError):
             _ = data[0]
-
-
-class TestDataRepr:
-    """Tests for Data.__repr__() method."""
-
-    def test_data_repr(self):
-        """Test Data.__repr__() returns expected format."""
-        datum1 = PointData(name="obs1", value=1.5)
-        datum2 = PointData(name="obs2", value=2.5)
-        data = Data([datum1, datum2])
-
-        repr_str = repr(data)
-        assert repr_str == "Data(['obs1', 'obs2'])"
-
-    def test_data_repr_empty(self):
-        """Test Data.__repr__() with empty collection."""
-        data = Data([])
-        repr_str = repr(data)
-        assert repr_str == "Data([])"

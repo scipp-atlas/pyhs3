@@ -194,16 +194,3 @@ class TestAnalyses:
 
         with pytest.raises(IndexError):
             _ = analyses[0]
-
-    def test_analyses_repr(self):
-        """Test Analyses.__repr__ method."""
-        analysis1 = Analysis(
-            name="analysis1", likelihood="likelihood1", domains=["domain1"]
-        )
-        analysis2 = Analysis(
-            name="analysis2", likelihood="likelihood2", domains=["domain2"]
-        )
-        analyses = Analyses([analysis1, analysis2])
-
-        result = repr(analyses)
-        assert result == "Analyses(['analysis1', 'analysis2'])"

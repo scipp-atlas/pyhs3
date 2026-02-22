@@ -58,9 +58,6 @@ class Functions(NamedCollection[FunctionType]):
 
     Provides dict-like access to functions by name and handles
     function creation from configuration dictionaries.
-
-    Attributes:
-        funcs: Mapping from function names to Function instances.
     """
 
     root: Annotated[

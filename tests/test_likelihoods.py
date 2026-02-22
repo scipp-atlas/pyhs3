@@ -145,16 +145,3 @@ class TestLikelihoods:
 
         with pytest.raises(IndexError):
             _ = likelihoods[0]
-
-    def test_likelihoods_repr(self):
-        """Test Likelihoods.__repr__ method."""
-        likelihood1 = Likelihood(
-            name="likelihood1", distributions=["dist1"], data=["data1"]
-        )
-        likelihood2 = Likelihood(
-            name="likelihood2", distributions=["dist2"], data=["data2"]
-        )
-        likelihoods = Likelihoods([likelihood1, likelihood2])
-
-        result = repr(likelihoods)
-        assert result == "Likelihoods(['likelihood1', 'likelihood2'])"

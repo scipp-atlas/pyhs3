@@ -7,13 +7,11 @@ with samples and modifiers as defined in the HS3 specification.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import Any
-
 import hist
 import numpy as np
-from pydantic import BaseModel, Field, PrivateAttr, RootModel
+from pydantic import Field
 
+from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.distributions.histfactory.axes import Axes
 
 # Import existing distributions for constraint terms
@@ -21,10 +19,9 @@ from pyhs3.distributions.histfactory.data import SampleData
 from pyhs3.distributions.histfactory.modifiers import Modifiers
 
 
-class Sample(BaseModel):
+class Sample(NamedModel):
     """HistFactory sample specification."""
 
-    name: str
     data: SampleData
     modifiers: Modifiers = Field(default_factory=Modifiers)
 
@@ -74,7 +71,7 @@ class Sample(BaseModel):
         return h
 
 
-class Samples(RootModel[list[Sample]]):
+class Samples(NamedCollection[Sample]):
     """
     Collection of samples for a HistFactory distribution.
 
@@ -83,25 +80,6 @@ class Samples(RootModel[list[Sample]]):
     """
 
     root: list[Sample] = Field(default_factory=list)
-    _map: dict[str, Sample] = PrivateAttr(default_factory=dict)
-
-    def model_post_init(self, __context: Any, /) -> None:
-        """Initialize computed collections after Pydantic validation."""
-        self._map = {sample.name: sample for sample in self.root}
-
-    def __getitem__(self, item: str | int) -> Sample:
-        if isinstance(item, int):
-            return self.root[item]
-        return self._map[item]
-
-    def __contains__(self, item: str) -> bool:
-        return item in self._map
-
-    def __iter__(self) -> Iterator[Sample]:  # type: ignore[override]
-        return iter(self.root)
-
-    def __len__(self) -> int:
-        return len(self.root)
 
 
 __all__ = ("Sample", "Samples")

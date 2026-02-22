@@ -7,22 +7,15 @@ axes and product domains for defining parameter spaces and integration regions.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from typing import Annotated, Any, Literal
 
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    PrivateAttr,
-    RootModel,
-    model_validator,
-)
+from pydantic import ConfigDict, Field, PrivateAttr, model_validator
 
+from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.exceptions import custom_error_msg
 
 
-class Axis(BaseModel):
+class Axis(NamedModel):
     """
     Axis specification for parameter domains.
 
@@ -38,7 +31,6 @@ class Axis(BaseModel):
 
     model_config = ConfigDict()
 
-    name: str = Field(repr=True)
     min: float | None = Field(default=None, repr=False)
     max: float | None = Field(default=None, repr=False)
 
@@ -67,7 +59,7 @@ class Axis(BaseModel):
         raise ValueError(msg)
 
 
-class Domain(BaseModel):
+class Domain(NamedModel):
     """
     Base class for HS3 domain specifications.
 
@@ -83,7 +75,6 @@ class Domain(BaseModel):
 
     model_config = ConfigDict()
 
-    name: str = Field(..., repr=True)
     type: str = Field(..., repr=False)
 
     @property
@@ -208,7 +199,7 @@ registered_domains: dict[str, type[Domain]] = {
 DomainType = Annotated[ProductDomain, Field(discriminator="type")]
 
 
-class Domains(RootModel[list[DomainType]]):
+class Domains(NamedCollection[DomainType]):
     """
     Collection of HS3 domains for parameter space definitions.
 
@@ -229,26 +220,3 @@ class Domains(RootModel[list[DomainType]]):
             }
         ),
     ]
-    _map: dict[str, Domain] = PrivateAttr(default_factory=dict)
-
-    def model_post_init(self, __context: Any, /) -> None:
-        """Initialize computed collections after Pydantic validation."""
-        self._map = {domain.name: domain for domain in self.root}
-
-    def __getitem__(self, item: str | int) -> Domain:
-        if isinstance(item, int):
-            return self.root[item]
-        return self._map[item]
-
-    def get(self, item: str, default: Domain | None = None) -> Domain | None:
-        """Get a domain by name, returning default if not found."""
-        return self._map.get(item, default)
-
-    def __contains__(self, item: str) -> bool:
-        return item in self._map
-
-    def __iter__(self) -> Iterator[Domain]:  # type: ignore[override]  # https://github.com/pydantic/pydantic/issues/8872
-        return iter(self.root)
-
-    def __len__(self) -> int:
-        return len(self.root)

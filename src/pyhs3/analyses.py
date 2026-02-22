@@ -7,12 +7,12 @@ including analysis configurations with parameters of interest and domains.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from pydantic import ConfigDict, Field
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from pyhs3.collections import NamedCollection, NamedModel
 
 
-class Analysis(BaseModel):
+class Analysis(NamedModel):
     """
     Analysis specification defining automated analysis parameters.
 
@@ -32,7 +32,6 @@ class Analysis(BaseModel):
 
     model_config = ConfigDict()
 
-    name: str = Field(..., repr=True)
     likelihood: str = Field(..., repr=False)
     parameters_of_interest: list[str] | None = Field(default=None, repr=False)
     domains: list[str] = Field(..., repr=False)
@@ -40,7 +39,7 @@ class Analysis(BaseModel):
     prior: str | None = Field(default=None, repr=False)
 
 
-class Analyses(RootModel[list[Analysis]]):
+class Analyses(NamedCollection[Analysis]):
     """
     Collection of HS3 analysis specifications.
 
@@ -50,32 +49,3 @@ class Analyses(RootModel[list[Analysis]]):
     """
 
     root: list[Analysis] = Field(default_factory=list)
-
-    @property
-    def analysis_map(self) -> dict[str, Analysis]:
-        """Mapping from analysis names to Analysis instances."""
-        return {analysis.name: analysis for analysis in self.root}
-
-    def __len__(self) -> int:
-        """Number of analyses in this collection."""
-        return len(self.root)
-
-    def __contains__(self, analysis_name: str) -> bool:
-        """Check if an analysis with the given name exists."""
-        return analysis_name in self.analysis_map
-
-    def __getitem__(self, item: str | int) -> Analysis:
-        """Get an analysis by name or index."""
-        if isinstance(item, int):
-            return self.root[item]
-        return self.analysis_map[item]
-
-    def get(
-        self, analysis_name: str, default: Analysis | None = None
-    ) -> Analysis | None:
-        """Get an analysis by name, returning default if not found."""
-        return self.analysis_map.get(analysis_name, default)
-
-    def __iter__(self) -> Iterator[Analysis]:  # type: ignore[override]
-        """Iterate over the analyses."""
-        return iter(self.root)

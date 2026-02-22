@@ -171,21 +171,6 @@ class TestAnalyses:
         result = list(analyses)
         assert result == [analysis1, analysis2]
 
-    def test_analyses_analysis_map_property(self):
-        """Test analysis_map property."""
-        analysis1 = Analysis(
-            name="analysis1", likelihood="likelihood1", domains=["domain1"]
-        )
-        analysis2 = Analysis(
-            name="analysis2", likelihood="likelihood2", domains=["domain2"]
-        )
-        analyses = Analyses([analysis1, analysis2])
-
-        analysis_map = analyses.analysis_map
-        assert analysis_map["analysis1"] == analysis1
-        assert analysis_map["analysis2"] == analysis2
-        assert len(analysis_map) == 2
-
     def test_analyses_contains_operator(self):
         """Test 'in' operator for analyses."""
         analysis = Analysis(

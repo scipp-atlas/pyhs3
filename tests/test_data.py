@@ -771,17 +771,6 @@ class TestData:
         result = list(data)
         assert result == [datum1, datum2]
 
-    def test_data_data_map_property(self):
-        """Test data_map property."""
-        datum1 = PointData(name="point1", type="point", value=1.0)
-        datum2 = PointData(name="point2", type="point", value=2.0)
-        data = Data([datum1, datum2])
-
-        data_map = data.data_map
-        assert data_map["point1"] == datum1
-        assert data_map["point2"] == datum2
-        assert len(data_map) == 2
-
     def test_data_contains_operator(self):
         """Test 'in' operator for data."""
         datum = PointData(name="test_point", type="point", value=1.0)

@@ -7,9 +7,9 @@ including likelihood mappings between distributions and data.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
-from pydantic import ConfigDict, Field, PrivateAttr
+from pydantic import ConfigDict, Field
 
 from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.data import Data, Datum
@@ -20,9 +20,6 @@ from pyhs3.typing.annotations import (
     FKListSerializer,
     make_fk_list_validator,
 )
-
-if TYPE_CHECKING:
-    from pyhs3.core import Workspace
 
 
 class Likelihood(NamedModel):
@@ -42,7 +39,6 @@ class Likelihood(NamedModel):
 
     model_config = ConfigDict()
 
-    _workspace: Workspace | None = PrivateAttr(default=None)
     distributions: Annotated[
         list[str] | Distributions,
         make_fk_list_validator(Distribution),

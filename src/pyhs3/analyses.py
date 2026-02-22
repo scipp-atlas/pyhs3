@@ -7,9 +7,9 @@ including analysis configurations with parameters of interest and domains.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
-from pydantic import ConfigDict, Field, PrivateAttr
+from pydantic import ConfigDict, Field
 
 from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.domains import Domain, Domains
@@ -22,9 +22,6 @@ from pyhs3.typing.annotations import (
     FKValidator,
     make_fk_list_validator,
 )
-
-if TYPE_CHECKING:
-    from pyhs3.core import Workspace
 
 
 class Analysis(NamedModel):
@@ -47,7 +44,6 @@ class Analysis(NamedModel):
 
     model_config = ConfigDict()
 
-    _workspace: Workspace | None = PrivateAttr(default=None)
     likelihood: Annotated[str | Likelihood, FKValidator, FKSerializer, FKSchema] = (
         Field(..., repr=False)
     )

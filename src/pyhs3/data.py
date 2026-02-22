@@ -7,13 +7,13 @@ including point data, unbinned data, and binned data with uncertainties.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from typing import Annotated, Any, Literal
 
 import hist
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.exceptions import custom_error_msg
 
 TYPE_CHECKING = False
@@ -141,7 +141,7 @@ class GaussianUncertainty(BaseModel):
         return self
 
 
-class Datum(BaseModel):
+class Datum(NamedModel):
     """
     Base class for HS3 data specifications.
 
@@ -410,19 +410,7 @@ class BinnedData(Datum):
 DataType = Annotated[PointData | UnbinnedData | BinnedData, Field(discriminator="type")]
 
 
-class Data(
-    RootModel[
-        Annotated[
-            list[DataType],
-            custom_error_msg(
-                {
-                    "union_tag_not_found": "Data entry missing required 'type' field. Expected one of: 'point', 'unbinned', 'binned'",
-                    "union_tag_invalid": "Unknown data type '{tag}' does not match any of the expected types: {expected_tags}",
-                }
-            ),
-        ]
-    ]
-):
+class Data(NamedCollection[DataType]):
     """
     Collection of HS3 data specifications.
 
@@ -439,33 +427,3 @@ class Data(
             }
         ),
     ] = Field(default_factory=list)
-
-    @property
-    def data_map(self) -> dict[str, Datum]:
-        """Mapping from data names to Datum instances."""
-        return {data.name: data for data in self.root}
-
-    def __len__(self) -> int:
-        """Number of data sets in this collection."""
-        return len(self.root)
-
-    def __contains__(self, data_name: str) -> bool:
-        """Check if a data set with the given name exists."""
-        return data_name in self.data_map
-
-    def __getitem__(self, item: str | int) -> Datum:
-        """Get a data set by name or index."""
-        if isinstance(item, int):
-            return self.root[item]
-        return self.data_map[item]
-
-    def get(self, data_name: str, default: Datum | None = None) -> Datum | None:
-        """Get a data set by name, returning default if not found."""
-        return self.data_map.get(data_name, default)
-
-    def __iter__(self) -> Iterator[Datum]:  # type: ignore[override]
-        """Iterate over the data sets."""
-        return iter(self.root)
-
-    def __repr__(self) -> str:
-        return f"""Data({[datum.name for datum in self]})"""

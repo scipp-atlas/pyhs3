@@ -211,3 +211,16 @@ class TestParameterPoints:
 
         set_names = [param_set.name for param_set in param_points]
         assert set_names == ["set1", "set2"]
+
+    def test_parameter_points_repr(self):
+        """Test ParameterPoints.__repr__ method."""
+        param_set1 = ParameterSet(
+            name="set1", parameters=[ParameterPoint(name="mu", value=0.0)]
+        )
+        param_set2 = ParameterSet(
+            name="set2", parameters=[ParameterPoint(name="sigma", value=1.0)]
+        )
+        param_points = ParameterPoints([param_set1, param_set2])
+
+        result = repr(param_points)
+        assert result == "ParameterPoints(['set1', 'set2'])"

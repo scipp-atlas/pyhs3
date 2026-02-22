@@ -1193,6 +1193,48 @@ class TestFunctions:
         assert "test_func" in function_set
         assert "nonexistent" not in function_set
 
+    def test_function_set_get(self):
+        """Test Functions.get() method."""
+        functions_config = [
+            {"name": "test_func", "type": "product", "factors": ["a"]},
+        ]
+        function_set = Functions(functions_config)
+
+        # Test getting existing function
+        func = function_set.get("test_func")
+        assert func is not None
+        assert func.name == "test_func"
+
+        # Test getting non-existent function returns None
+        assert function_set.get("nonexistent") is None
+
+        # Test getting non-existent function with default
+        default_func = ProductFunction(name="default", factors=["x"])
+        result = function_set.get("nonexistent", default_func)
+        assert result is default_func
+
+    def test_function_set_getitem_int(self):
+        """Test Functions integer indexing."""
+        func1 = ProductFunction(name="func1", factors=["a"])
+        func2 = SumFunction(name="func2", summands=["b"])
+        function_set = Functions([func1, func2])
+
+        assert function_set[0] == func1
+        assert function_set[1] == func2
+        assert function_set[-1] == func2
+
+        with pytest.raises(IndexError):
+            _ = function_set[10]
+
+    def test_function_set_repr(self):
+        """Test Functions.__repr__ method."""
+        func1 = ProductFunction(name="prod_func", factors=["a"])
+        func2 = SumFunction(name="sum_func", summands=["b"])
+        function_set = Functions([func1, func2])
+
+        result = repr(function_set)
+        assert result == "Functions(['prod_func', 'sum_func'])"
+
 
 class TestFunctionIntegration:
     """Test integration between different function types."""

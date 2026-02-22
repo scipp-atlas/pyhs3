@@ -7,12 +7,12 @@ including likelihood mappings between distributions and data.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from pydantic import ConfigDict, Field
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from pyhs3.collections import NamedCollection, NamedModel
 
 
-class Likelihood(BaseModel):
+class Likelihood(NamedModel):
     """
     Likelihood specification mapping distributions to observations.
 
@@ -35,7 +35,7 @@ class Likelihood(BaseModel):
     aux_distributions: list[str] | None = Field(default=None, repr=False)
 
 
-class Likelihoods(RootModel[list[Likelihood]]):
+class Likelihoods(NamedCollection[Likelihood]):
     """
     Collection of HS3 likelihood specifications.
 
@@ -45,32 +45,3 @@ class Likelihoods(RootModel[list[Likelihood]]):
     """
 
     root: list[Likelihood] = Field(default_factory=list)
-
-    @property
-    def likelihood_map(self) -> dict[str, Likelihood]:
-        """Mapping from likelihood names to Likelihood instances."""
-        return {likelihood.name: likelihood for likelihood in self.root}
-
-    def __len__(self) -> int | float:
-        """Number of likelihoods in this collection."""
-        return len(self.root)
-
-    def __contains__(self, likelihood_name: str) -> bool:
-        """Check if a likelihood with the given name exists."""
-        return likelihood_name in self.likelihood_map
-
-    def __getitem__(self, item: str | int) -> Likelihood:
-        """Get a likelihood by name or index."""
-        if isinstance(item, int):
-            return self.root[item]
-        return self.likelihood_map[item]
-
-    def get(
-        self, likelihood_name: str, default: Likelihood | None = None
-    ) -> Likelihood | None:
-        """Get a likelihood by name, returning default if not found."""
-        return self.likelihood_map.get(likelihood_name, default)
-
-    def __iter__(self) -> Iterator[Likelihood]:  # type: ignore[override]
-        """Iterate over the likelihoods."""
-        return iter(self.root)

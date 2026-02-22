@@ -122,21 +122,6 @@ class TestLikelihoods:
         result = list(likelihoods)
         assert result == [likelihood1, likelihood2]
 
-    def test_likelihoods_likelihood_map_property(self):
-        """Test likelihood_map property."""
-        likelihood1 = Likelihood(
-            name="likelihood1", distributions=["dist1"], data=["data1"]
-        )
-        likelihood2 = Likelihood(
-            name="likelihood2", distributions=["dist2"], data=["data2"]
-        )
-        likelihoods = Likelihoods([likelihood1, likelihood2])
-
-        likelihood_map = likelihoods.likelihood_map
-        assert likelihood_map["likelihood1"] == likelihood1
-        assert likelihood_map["likelihood2"] == likelihood2
-        assert len(likelihood_map) == 2
-
     def test_likelihoods_contains_operator(self):
         """Test 'in' operator for likelihoods."""
         likelihood = Likelihood(
@@ -160,3 +145,16 @@ class TestLikelihoods:
 
         with pytest.raises(IndexError):
             _ = likelihoods[0]
+
+    def test_likelihoods_repr(self):
+        """Test Likelihoods.__repr__ method."""
+        likelihood1 = Likelihood(
+            name="likelihood1", distributions=["dist1"], data=["data1"]
+        )
+        likelihood2 = Likelihood(
+            name="likelihood2", distributions=["dist2"], data=["data2"]
+        )
+        likelihoods = Likelihoods([likelihood1, likelihood2])
+
+        result = repr(likelihoods)
+        assert result == "Likelihoods(['likelihood1', 'likelihood2'])"

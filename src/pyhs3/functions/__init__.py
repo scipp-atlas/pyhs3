@@ -8,15 +8,11 @@ generic functions with mathematical expressions, and interpolation functions.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
-from typing import Annotated, Any
+from typing import Annotated
 
-from pydantic import (
-    Field,
-    PrivateAttr,
-    RootModel,
-)
+from pydantic import Field
 
+from pyhs3.collections import NamedCollection
 from pyhs3.exceptions import custom_error_msg
 from pyhs3.functions import standard
 from pyhs3.functions.core import Function
@@ -52,7 +48,7 @@ FunctionType = Annotated[
 ]
 
 
-class Functions(RootModel[list[FunctionType]]):
+class Functions(NamedCollection[FunctionType]):
     """
     Collection of HS3 functions for parameter computation.
 
@@ -75,20 +71,3 @@ class Functions(RootModel[list[FunctionType]]):
             }
         ),
     ] = Field(default_factory=list)
-    _map: dict[str, Function] = PrivateAttr(default_factory=dict)
-
-    def model_post_init(self, __context: Any, /) -> None:
-        """Initialize computed collections after Pydantic validation."""
-        self._map = {func.name: func for func in self.root}
-
-    def __getitem__(self, item: str) -> Function:
-        return self._map[item]
-
-    def __contains__(self, item: str) -> bool:
-        return item in self._map
-
-    def __iter__(self) -> Iterator[Function]:  # type: ignore[override]  # https://github.com/pydantic/pydantic/issues/8872
-        return iter(self.root)
-
-    def __len__(self) -> int:
-        return len(self.root)

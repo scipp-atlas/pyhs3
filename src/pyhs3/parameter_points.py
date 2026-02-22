@@ -8,11 +8,11 @@ individual parameters and parameter sets for defining model parameter values.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from typing import Any
 
 import pytensor.tensor as pt
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, RootModel
+from pydantic import BaseModel, ConfigDict, Field
 
+from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.typing.aliases import TensorVar
 
 
@@ -41,7 +41,7 @@ class ParameterPoint(BaseModel):
     kind: Callable[..., TensorVar] = Field(default=pt.scalar, exclude=True, repr=False)
 
 
-class ParameterSet(BaseModel):
+class ParameterSet(NamedModel):
     """
     Named collection of parameter specifications (matches HS3Spec structure).
 
@@ -89,7 +89,7 @@ class ParameterSet(BaseModel):
         return iter(self.parameters)
 
 
-class ParameterPoints(RootModel[list[ParameterSet]]):
+class ParameterPoints(NamedCollection[ParameterSet]):
     """
     Collection of HS3 parameter sets for model configuration.
 
@@ -102,28 +102,3 @@ class ParameterPoints(RootModel[list[ParameterSet]]):
     """
 
     root: list[ParameterSet] = Field(default_factory=list)
-    _map: dict[str, ParameterSet] = PrivateAttr(default_factory=dict)
-
-    def model_post_init(self, __context: Any, /) -> None:
-        """Initialize computed collections after Pydantic validation."""
-        self._map = {param_set.name: param_set for param_set in self.root}
-
-    def __getitem__(self, item: str | int) -> ParameterSet:
-        if isinstance(item, int):
-            return self.root[item]
-        return self._map[item]
-
-    def get(
-        self, item: str, default: ParameterSet | None = None
-    ) -> ParameterSet | None:
-        """Get a parameter set by name, returning default if not found."""
-        return self._map.get(item, default)
-
-    def __contains__(self, item: str) -> bool:
-        return item in self._map
-
-    def __iter__(self) -> Iterator[ParameterSet]:  # type: ignore[override]  # https://github.com/pydantic/pydantic/issues/8872
-        return iter(self.root)
-
-    def __len__(self) -> int:
-        return len(self.root)

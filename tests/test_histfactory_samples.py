@@ -203,6 +203,51 @@ class TestSamples:
 
         assert len(samples) == 2
 
+    def test_samples_get(self):
+        """Test Samples.get() functionality."""
+        samples_data = [
+            {
+                "name": "signal",
+                "data": {"contents": [5.0, 3.0], "errors": [1.0, 1.0]},
+                "modifiers": [],
+            },
+        ]
+        samples = Samples(samples_data)
+
+        # Test getting existing sample
+        sample = samples.get("signal")
+        assert sample is not None
+        assert sample.name == "signal"
+
+        # Test getting non-existent sample returns None
+        assert samples.get("nonexistent") is None
+
+        # Test getting non-existent sample with default
+        default_sample = Sample(
+            name="default", data={"contents": [1.0], "errors": [0.1]}
+        )
+        result = samples.get("nonexistent", default_sample)
+        assert result is default_sample
+
+    def test_samples_repr(self):
+        """Test Samples.__repr__ functionality."""
+        samples_data = [
+            {
+                "name": "signal",
+                "data": {"contents": [5.0, 3.0], "errors": [1.0, 1.0]},
+                "modifiers": [],
+            },
+            {
+                "name": "background",
+                "data": {"contents": [10.0, 8.0], "errors": [2.0, 2.0]},
+                "modifiers": [],
+            },
+        ]
+        samples = Samples(samples_data)
+
+        result = repr(samples)
+        assert result == "Samples(['signal', 'background'])"
+
 
 class TestSampleHistConversion:
     """Tests for Sample.to_hist() method."""

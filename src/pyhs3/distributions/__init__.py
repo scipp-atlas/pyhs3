@@ -8,12 +8,12 @@ Includes both standard HS3 distributions and CMS-specific extensions.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import Annotated, Any, TypeVar
+from typing import Annotated, TypeVar
 
-from pydantic import Field, PrivateAttr, RootModel
+from pydantic import Field
 
 # Import modules instead of individual classes
+from pyhs3.collections import NamedCollection
 from pyhs3.distributions import (
     basic,
     cms,
@@ -134,7 +134,7 @@ DistributionType = Annotated[
 ]
 
 
-class Distributions(RootModel[list[DistributionType]]):
+class Distributions(NamedCollection[DistributionType]):
     """
     Collection of distributions for a probabilistic model.
 
@@ -157,31 +157,3 @@ class Distributions(RootModel[list[DistributionType]]):
             }
         ),
     ] = Field(default_factory=list)
-    _map: dict[str, Distribution] = PrivateAttr(default_factory=dict)
-
-    def model_post_init(self, __context: Any, /) -> None:
-        """Initialize computed collections after Pydantic validation."""
-        self._map = {dist.name: dist for dist in self.root}
-
-    def __getitem__(self, item: str | int) -> Distribution:
-        if isinstance(item, int):
-            return self.root[item]
-        return self._map[item]
-
-    def __contains__(self, item: str) -> bool:
-        return item in self._map
-
-    def get(
-        self, name: str, default: Distribution | None = None
-    ) -> Distribution | None:
-        """Get a distribution by name, returning default if not found."""
-        return self._map.get(name, default)
-
-    def __iter__(self) -> Iterator[Distribution]:  # type: ignore[override]  # https://github.com/pydantic/pydantic/issues/8872
-        return iter(self.root)
-
-    def __len__(self) -> int:
-        return len(self.root)
-
-    def __repr__(self) -> str:
-        return f"""Distributions({[distribution.name for distribution in self]})"""

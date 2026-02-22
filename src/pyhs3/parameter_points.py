@@ -10,13 +10,13 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 
 import pytensor.tensor as pt
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.typing.aliases import TensorVar
 
 
-class ParameterPoint(BaseModel):
+class ParameterPoint(NamedModel):
     """
     Individual parameter specification with name and value.
 
@@ -34,7 +34,6 @@ class ParameterPoint(BaseModel):
 
     model_config = ConfigDict()
 
-    name: str = Field(..., repr=True)
     value: float = Field(..., repr=False)
     const: bool = Field(default=False, repr=False)
     nbins: int | None = Field(default=None, repr=False)
@@ -56,7 +55,6 @@ class ParameterSet(NamedModel):
 
     model_config = ConfigDict()
 
-    name: str = Field(..., repr=True)
     parameters: list[ParameterPoint] = Field(default_factory=list, repr=False)
 
     @property

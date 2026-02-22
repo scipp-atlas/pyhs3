@@ -29,7 +29,6 @@ class Likelihood(NamedModel):
 
     model_config = ConfigDict()
 
-    name: str = Field(..., repr=True)
     distributions: list[str] = Field(..., repr=False)
     data: list[str] = Field(..., repr=False)
     aux_distributions: list[str] | None = Field(default=None, repr=False)

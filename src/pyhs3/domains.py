@@ -9,13 +9,13 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import ConfigDict, Field, PrivateAttr, model_validator
 
 from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.exceptions import custom_error_msg
 
 
-class Axis(BaseModel):
+class Axis(NamedModel):
     """
     Axis specification for parameter domains.
 
@@ -31,7 +31,6 @@ class Axis(BaseModel):
 
     model_config = ConfigDict()
 
-    name: str = Field(repr=True)
     min: float | None = Field(default=None, repr=False)
     max: float | None = Field(default=None, repr=False)
 
@@ -76,7 +75,6 @@ class Domain(NamedModel):
 
     model_config = ConfigDict()
 
-    name: str = Field(..., repr=True)
     type: str = Field(..., repr=False)
 
     @property

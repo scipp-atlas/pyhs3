@@ -142,9 +142,6 @@ class Distributions(NamedCollection[DistributionType]):
     by distribution name. Handles distribution creation from configuration
     dictionaries and maintains a registry of available distribution types.
 
-    Attributes:
-        dists: Mapping from distribution names to Distribution instances.
-
     HS3 Reference:
         :hs3:label:`distributions <hs3.sec:distributions>`
     """

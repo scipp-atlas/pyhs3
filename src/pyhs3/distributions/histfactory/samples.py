@@ -22,7 +22,6 @@ from pyhs3.distributions.histfactory.modifiers import Modifiers
 class Sample(NamedModel):
     """HistFactory sample specification."""
 
-    name: str
     data: SampleData
     modifiers: Modifiers = Field(default_factory=Modifiers)
 

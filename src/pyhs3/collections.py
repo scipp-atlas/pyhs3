@@ -6,13 +6,13 @@ from abc import ABC
 from collections.abc import Iterator
 from typing import Any, TypeVar
 
-from pydantic import BaseModel, PrivateAttr, RootModel
+from pydantic import BaseModel, Field, PrivateAttr, RootModel
 
 
 class NamedModel(BaseModel, ABC):
     """ABC for objects that have a name attribute."""
 
-    name: str
+    name: str = Field(..., repr=True)
 
 
 T = TypeVar("T", bound=NamedModel)

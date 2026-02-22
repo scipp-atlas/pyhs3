@@ -19,7 +19,7 @@ from pyhs3.exceptions import custom_error_msg
 TYPE_CHECKING = False
 
 
-class Axis(BaseModel):
+class Axis(NamedModel):
     """
     Axis specification for data coordinates.
 
@@ -37,7 +37,6 @@ class Axis(BaseModel):
 
     model_config = ConfigDict()
 
-    name: str = Field(..., repr=True)
     min: float | None = Field(default=None, repr=False)
     max: float | None = Field(default=None, repr=False)
     nbins: int | None = Field(default=None, repr=False)
@@ -155,7 +154,6 @@ class Datum(NamedModel):
 
     model_config = ConfigDict()
 
-    name: str = Field(..., repr=True)
     type: str = Field(..., repr=False)
 
 

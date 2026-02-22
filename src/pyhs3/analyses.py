@@ -32,7 +32,6 @@ class Analysis(NamedModel):
 
     model_config = ConfigDict()
 
-    name: str = Field(..., repr=True)
     likelihood: str = Field(..., repr=False)
     parameters_of_interest: list[str] | None = Field(default=None, repr=False)
     domains: list[str] = Field(..., repr=False)

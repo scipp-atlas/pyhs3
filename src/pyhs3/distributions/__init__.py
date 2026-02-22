@@ -163,14 +163,25 @@ class Distributions(RootModel[list[DistributionType]]):
         """Initialize computed collections after Pydantic validation."""
         self._map = {dist.name: dist for dist in self.root}
 
-    def __getitem__(self, item: str) -> Distribution:
+    def __getitem__(self, item: str | int) -> Distribution:
+        if isinstance(item, int):
+            return self.root[item]
         return self._map[item]
 
     def __contains__(self, item: str) -> bool:
         return item in self._map
+
+    def get(
+        self, name: str, default: Distribution | None = None
+    ) -> Distribution | None:
+        """Get a distribution by name, returning default if not found."""
+        return self._map.get(name, default)
 
     def __iter__(self) -> Iterator[Distribution]:  # type: ignore[override]  # https://github.com/pydantic/pydantic/issues/8872
         return iter(self.root)
 
     def __len__(self) -> int:
         return len(self.root)
+
+    def __repr__(self) -> str:
+        return f"""Distributions({[distribution.name for distribution in self]})"""

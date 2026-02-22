@@ -403,3 +403,22 @@ class TestDomains:
             ProductDomain(
                 name="invalid_domain", axes=[Axis(name="param1", min=10.0, max=5.0)]
             )
+
+
+class TestDomainsRepr:
+    """Tests for Domains.__repr__() method."""
+
+    def test_domains_repr(self):
+        """Test Domains.__repr__() returns expected format."""
+        domain1 = ProductDomain(name="domain1", axes=[])
+        domain2 = ProductDomain(name="domain2", axes=[])
+        domains = Domains([domain1, domain2])
+
+        repr_str = repr(domains)
+        assert repr_str == "Domains(['domain1', 'domain2'])"
+
+    def test_domains_repr_empty(self):
+        """Test Domains.__repr__() with empty collection."""
+        domains = Domains([])
+        repr_str = repr(domains)
+        assert repr_str == "Domains([])"

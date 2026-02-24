@@ -19,14 +19,14 @@ BinnedData to hist
 .. plot::
    :include-source:
 
-   from pyhs3.data import BinnedData, Axis
+   from pyhs3.data import BinnedData, BinnedAxis
 
    # Create binned data with regular binning
    data = BinnedData(
        name="example",
        type="binned",
        contents=[10.0, 20.0, 15.0, 25.0, 18.0],
-       axes=[Axis(name="x", min=0.0, max=5.0, nbins=5)]
+       axes=[BinnedAxis(name="x", min=0.0, max=5.0, nbins=5)]
    )
 
    # Convert to hist and plot
@@ -43,14 +43,14 @@ BinnedData to hist
 .. plot::
    :include-source:
 
-   from pyhs3.data import BinnedData, Axis
+   from pyhs3.data import BinnedData, BinnedAxis
 
    # Create binned data with variable-width bins
    data = BinnedData(
        name="variable_bins",
        type="binned",
        contents=[5.0, 15.0, 8.0],
-       axes=[Axis(name="pt", edges=[0.0, 10.0, 50.0, 100.0])]
+       axes=[BinnedAxis(name="pt", edges=[0.0, 10.0, 50.0, 100.0])]
    )
 
    # Convert to hist and plot
@@ -67,7 +67,7 @@ Binned Data with Uncertainties
 .. plot::
    :include-source:
 
-   from pyhs3.data import BinnedData, Axis, GaussianUncertainty
+   from pyhs3.data import BinnedData, BinnedAxis, GaussianUncertainty
 
    # Create binned data with uncertainties
    contents = [12.5, 18.3, 15.7, 22.1, 19.4]
@@ -77,7 +77,7 @@ Binned Data with Uncertainties
        name="with_errors",
        type="binned",
        contents=contents,
-       axes=[Axis(name="mass", min=100.0, max=150.0, nbins=5)],
+       axes=[BinnedAxis(name="mass", min=100.0, max=150.0, nbins=5)],
        uncertainty=GaussianUncertainty(type="gaussian_uncertainty", sigma=sigma)
    )
 
@@ -95,7 +95,7 @@ Binned Data with Uncertainties
 .. plot::
    :include-source:
 
-   from pyhs3.data import BinnedData, Axis
+   from pyhs3.data import BinnedData, BinnedAxis
 
    # Create 2D binned data (3x4 = 12 bins)
    contents = [1.0, 2.0, 3.0, 4.0,
@@ -107,8 +107,8 @@ Binned Data with Uncertainties
        type="binned",
        contents=contents,
        axes=[
-           Axis(name="x", min=0.0, max=3.0, nbins=3),
-           Axis(name="y", min=0.0, max=4.0, nbins=4),
+           BinnedAxis(name="x", min=0.0, max=3.0, nbins=3),
+           BinnedAxis(name="y", min=0.0, max=4.0, nbins=4),
        ]
    )
 
@@ -131,7 +131,7 @@ UnbinnedData to hist
 .. plot::
    :include-source:
 
-   from pyhs3.data import UnbinnedData, Axis
+   from pyhs3.data import UnbinnedData, UnbinnedAxis
 
    # Create unbinned data points
    entries = [[0.5], [1.2], [1.8], [2.3], [0.9], [1.5], [2.7], [1.1]]
@@ -140,11 +140,11 @@ UnbinnedData to hist
        name="events",
        type="unbinned",
        entries=entries,
-       axes=[Axis(name="x", min=0.0, max=3.0, nbins=6)]
+       axes=[UnbinnedAxis(name="x", min=0.0, max=3.0)]
    )
 
    # Convert to hist by binning the entries
-   h = data.to_hist()
+   h = data.to_hist(nbins=6)
    h.plot(histtype="fill", alpha=0.6, label="Unbinned → Binned")
    plt.xlabel("x")
    plt.ylabel("Entries")
@@ -157,7 +157,7 @@ Unbinned Data with Weights
 .. plot::
    :include-source:
 
-   from pyhs3.data import UnbinnedData, Axis
+   from pyhs3.data import UnbinnedData, UnbinnedAxis
 
    # Create weighted unbinned data
    entries = [[0.5], [1.2], [1.8], [2.3], [0.9]]
@@ -167,12 +167,12 @@ Unbinned Data with Weights
        name="weighted_events",
        type="unbinned",
        entries=entries,
-       axes=[Axis(name="x", min=0.0, max=3.0, nbins=6)],
+       axes=[UnbinnedAxis(name="x", min=0.0, max=3.0)],
        weights=weights
    )
 
    # Convert to hist (weights are applied)
-   h = data.to_hist()
+   h = data.to_hist(nbins=6)
    h.plot(histtype="step", linewidth=2, label="Weighted Events")
    plt.xlabel("x")
    plt.ylabel("Weighted Events")
@@ -185,7 +185,7 @@ Unbinned Data with Weights
 .. plot::
    :include-source:
 
-   from pyhs3.data import UnbinnedData, Axis
+   from pyhs3.data import UnbinnedData, UnbinnedAxis
 
    # Create 2D unbinned data points
    entries = [
@@ -198,13 +198,13 @@ Unbinned Data with Weights
        type="unbinned",
        entries=entries,
        axes=[
-           Axis(name="x", min=0.0, max=3.0, nbins=6),
-           Axis(name="y", min=0.0, max=3.0, nbins=6),
+           UnbinnedAxis(name="x", min=0.0, max=3.0),
+           UnbinnedAxis(name="y", min=0.0, max=3.0),
        ]
    )
 
    # Convert to 2D histogram
-   h = data.to_hist()
+   h = data.to_hist(nbins=6)
    plt.pcolormesh(*h.axes.edges.T, h.values().T, cmap="plasma")
    plt.colorbar(label="Events")
    plt.xlabel("x")
@@ -380,13 +380,13 @@ The ``hist.Hist`` objects returned by ``to_hist()`` support the full matplotlib 
 .. plot::
    :include-source:
 
-   from pyhs3.data import BinnedData, Axis
+   from pyhs3.data import BinnedData, BinnedAxis
 
    data = BinnedData(
        name="custom",
        type="binned",
        contents=[12.0, 18.0, 15.0, 22.0, 19.0, 14.0],
-       axes=[Axis(name="x", min=0.0, max=6.0, nbins=6)]
+       axes=[BinnedAxis(name="x", min=0.0, max=6.0, nbins=6)]
    )
 
    h = data.to_hist()
@@ -415,13 +415,13 @@ Once you have a ``hist.Hist`` object, you can use all the features of the hist l
 
 .. code-block:: python
 
-   from pyhs3.data import BinnedData, Axis
+   from pyhs3.data import BinnedData, BinnedAxis
 
    data = BinnedData(
        name="analysis",
        type="binned",
        contents=[10.0, 20.0, 15.0],
-       axes=[Axis(name="x", min=0.0, max=3.0, nbins=3)],
+       axes=[BinnedAxis(name="x", min=0.0, max=3.0, nbins=3)],
    )
 
    h = data.to_hist()

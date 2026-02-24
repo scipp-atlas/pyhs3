@@ -21,29 +21,62 @@ TYPE_CHECKING = False
 
 class Axis(NamedModel):
     """
-    Axis specification for data coordinates.
+    Base axis specification for data coordinates.
 
-    Defines coordinate system for unbinned or binned data.
-    For binned data, can use either regular binning (min/max/nbins)
-    or irregular binning (edges).
+    Per HS3 spec: "Each struct must have the components name as well as max and min."
+    Used for point data and unbinned data to define observable bounds.
 
     Attributes:
         name: Name of the axis/variable
-        min: Minimum value (for regular binning or unbinned data bounds)
-        max: Maximum value (for regular binning or unbinned data bounds)
-        nbins: Number of bins (for regular binning)
-        edges: Bin edges array (for irregular binning, length n+1)
+        min: Minimum value (required)
+        max: Maximum value (required)
     """
 
     model_config = ConfigDict()
 
-    min: float | None = Field(default=None, repr=False)
-    max: float | None = Field(default=None, repr=False)
+    min: float = Field(..., repr=False)
+    max: float = Field(..., repr=False)
+
+
+class UnbinnedAxis(Axis):
+    """
+    Axis for unbinned data.
+
+    Alias for Axis with required min/max bounds. Provided for backward
+    compatibility and semantic clarity.
+
+    Attributes:
+        name: Name of the axis/variable
+        min: Minimum value (required)
+        max: Maximum value (required)
+    """
+
+
+class BinnedAxis(Axis):
+    """
+    Axis for binned data.
+
+    Per HS3 spec: Must specify binning through either:
+    - Regular binning: min, max, nbins
+    - Irregular binning: edges
+
+    Attributes:
+        name: Name of the axis/variable
+        min: Minimum value (for regular binning, optional for irregular)
+        max: Maximum value (for regular binning, optional for irregular)
+        nbins: Number of bins (for regular binning)
+        edges: Bin edges array (for irregular binning, length n+1)
+    """
+
+    # Override to make min/max optional for irregular binning
+    min: float | None = Field(default=None, repr=False)  # type: ignore[assignment]
+    max: float | None = Field(default=None, repr=False)  # type: ignore[assignment]
+
     nbins: int | None = Field(default=None, repr=False)
     edges: list[float] | None = Field(default=None, repr=False)
 
     @model_validator(mode="after")
-    def validate_binning(self) -> Axis:
+    def validate_binning(self) -> BinnedAxis:
         """Ensure proper binning specification for binned data."""
         # For regular binning, need min, max, and nbins
         has_regular = all(x is not None for x in [self.min, self.max, self.nbins])
@@ -53,6 +86,11 @@ class Axis(NamedModel):
         # Either both regular binning or irregular binning, but not mixed
         if has_regular and has_irregular:
             msg = "Cannot specify both regular binning (min/max/nbins) and irregular binning (edges)"
+            raise ValueError(msg)
+
+        # Must have one or the other
+        if not has_regular and not has_irregular:
+            msg = f"Axis '{self.name}' must specify either regular binning (nbins/min/max) or irregular binning (edges)"
             raise ValueError(msg)
 
         # For irregular binning, validate edges
@@ -70,20 +108,22 @@ class Axis(NamedModel):
         return self
 
     @property
-    def bin_edges(self) -> list[float] | None:
+    def bin_edges(self) -> list[float]:
         """Get the bin edges for this axis.
 
         Returns:
             List of bin edges. For regular binning, generates edges using linspace.
-            For irregular binning, returns the provided edges. Empty list if
-            insufficient information is provided.
+            For irregular binning, returns the provided edges.
         """
         if self.edges is not None:
             return self.edges
 
         if self.min is not None and self.max is not None and self.nbins is not None:
             return list(np.linspace(self.min, self.max, self.nbins + 1))
-        return []
+
+        # This should never happen due to validate_binning
+        msg = f"Axis '{self.name}' has no binning information"
+        raise ValueError(msg)
 
     def to_hist(self) -> Any:
         """
@@ -168,11 +208,13 @@ class PointData(Datum):
         type: Must be "point"
         value: Measured value
         uncertainty: Optional uncertainty/error
+        axes: Optional axes for observable bounds (for normalization)
     """
 
     type: Literal["point"] = Field(default="point", repr=False)
     value: float = Field(..., repr=False)
     uncertainty: float | None = Field(default=None, repr=False)
+    axes: list[Axis] | None = Field(default=None, repr=False)
 
 
 class UnbinnedData(Datum):
@@ -186,14 +228,14 @@ class UnbinnedData(Datum):
         name: Custom string identifier
         type: Must be "unbinned"
         entries: Array of coordinate arrays for each data point
-        axes: Axis specifications defining coordinate system
+        axes: Axis specifications defining coordinate system (UnbinnedAxis with required min/max)
         weights: Optional weights for each entry
         entries_uncertainties: Optional uncertainties for each coordinate
     """
 
     type: Literal["unbinned"] = Field(default="unbinned", repr=False)
     entries: list[list[float]] = Field(..., repr=False)
-    axes: list[Axis] = Field(..., repr=False)
+    axes: list[UnbinnedAxis] = Field(..., repr=False)
     weights: list[float] | None = Field(default=None, repr=False)
     entries_uncertainties: list[list[float]] | None = Field(default=None, repr=False)
 
@@ -238,13 +280,18 @@ class UnbinnedData(Datum):
 
         return self
 
-    def to_hist(self) -> hist.Hist[hist.storage.Weight | hist.storage.Double]:
+    def to_hist(
+        self, nbins: int = 50
+    ) -> hist.Hist[hist.storage.Weight | hist.storage.Double]:
         """
         Convert to scikit-hep hist.Hist object by binning entries.
 
         Creates a hist.Hist histogram by binning the unbinned entries according
         to the axis specifications. The resulting histogram can be plotted using
         matplotlib or other visualization tools.
+
+        Args:
+            nbins: Number of bins to use for each axis (default: 50)
 
         Returns:
             hist.Hist: Histogram representation with:
@@ -254,18 +301,22 @@ class UnbinnedData(Datum):
 
         Examples:
             >>> entries = [[0.5], [1.2], [1.8]]
-            >>> axes = [Axis(name="x", min=0, max=3, nbins=3)]
+            >>> axes = [UnbinnedAxis(name="x", min=0, max=3)]
             >>> data = UnbinnedData(
             ...     name="example",
             ...     type="unbinned",
             ...     entries=entries,
             ...     axes=axes
             ... )
-            >>> data.to_hist()
+            >>> data.to_hist(nbins=3)
             Hist(Regular(3, 0, 3, name='x'), storage=Double()) # Sum: 3.0
         """
         # Convert axes to hist.axis objects
-        hist_axes = [axis.to_hist() for axis in self.axes]
+        # UnbinnedAxis doesn't have to_hist(), so create Regular axes manually
+        hist_axes = [
+            hist.axis.Regular(nbins, axis.min, axis.max, name=axis.name)
+            for axis in self.axes
+        ]
 
         # Create histogram with appropriate storage
         storage = (
@@ -299,19 +350,20 @@ class BinnedData(Datum):
         name: Custom string identifier
         type: Must be "binned"
         contents: Bin contents array
-        axes: Axis specifications defining binning
+        axes: Axis specifications defining binning (BinnedAxis with binning info)
         uncertainty: Optional uncertainty specification
     """
 
     type: Literal["binned"] = Field(default="binned", repr=False)
     contents: list[float] = Field(..., repr=False)
-    axes: list[Axis] = Field(..., repr=False)
+    axes: list[BinnedAxis] = Field(..., repr=False)
     uncertainty: GaussianUncertainty | None = Field(default=None, repr=False)
 
     @model_validator(mode="after")
     def validate_binned_data(self) -> BinnedData:
         """Validate binned data consistency."""
         # Calculate expected number of bins
+        # BinnedAxis.validate_binning already ensures each axis has valid binning
         expected_bins = 1
         for axis in self.axes:
             if axis.nbins is not None:
@@ -320,9 +372,6 @@ class BinnedData(Datum):
             elif axis.edges is not None:
                 # Irregular binning
                 expected_bins *= len(axis.edges) - 1
-            else:
-                msg = f"Axis '{axis.name}' must specify either regular binning (nbins/min/max) or irregular binning (edges)"
-                raise ValueError(msg)
 
         # Check contents length
         if len(self.contents) != expected_bins:

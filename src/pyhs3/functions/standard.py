@@ -22,7 +22,7 @@ from pydantic import (
 )
 
 from pyhs3.context import Context
-from pyhs3.data import Axis
+from pyhs3.data import BinnedAxis
 from pyhs3.exceptions import custom_error_msg
 from pyhs3.functions.core import Function
 from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor
@@ -683,13 +683,13 @@ class HistogramData(BaseModel):
     Histogram data implementation for the HistogramFunction.
 
     Parameters:
-        axes: list of Axis used to describe the binning
+        axes: list of BinnedAxis used to describe the binning
         contents: list of bin content parameter values
     """
 
     model_config = ConfigDict()
 
-    axes: list[Axis] = Field(..., repr=False)
+    axes: list[BinnedAxis] = Field(..., repr=False)
     contents: list[float] = Field(..., repr=False)
 
 

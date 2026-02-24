@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 
 from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.domains import Domain, Domains
@@ -56,6 +56,14 @@ class Analysis(NamedModel):
     ] = Field(..., repr=False)
     init: str | None = Field(default=None, repr=False)
     prior: str | None = Field(default=None, repr=False)
+
+    @model_validator(mode="after")
+    def validate_non_empty_domains(self) -> Analysis:
+        """Validate that domains is non-empty."""
+        if len(self.domains) == 0:
+            msg = f"Analysis '{self.name}': must have at least one domain"
+            raise ValueError(msg)
+        return self
 
 
 class Analyses(NamedCollection[Analysis]):

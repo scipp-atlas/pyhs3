@@ -113,7 +113,7 @@ class Workspace(BaseModel):
             msg = "Workspace has unresolved references:\n" + "\n".join(
                 f"  - {e}" for e in errors
             )
-            raise ValueError(msg)
+            raise WorkspaceValidationError(msg)
 
     def _resolve_fk_list(
         self,

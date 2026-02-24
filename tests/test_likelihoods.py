@@ -13,6 +13,7 @@ from pyhs3 import Workspace
 from pyhs3.data import Data, Datum, PointData
 from pyhs3.distributions import Distributions, GaussianDist
 from pyhs3.distributions.core import Distribution
+from pyhs3.exceptions import WorkspaceValidationError
 from pyhs3.likelihoods import Likelihood, Likelihoods
 from pyhs3.metadata import Metadata
 
@@ -59,6 +60,37 @@ class TestLikelihood:
         """Test that Likelihood validation requires data field."""
         with pytest.raises(ValueError, match="Field required"):
             Likelihood(name="test_likelihood", distributions=["dist1"])
+
+    def test_likelihood_requires_matching_lengths(self):
+        """Test that Likelihood validation requires matching distributions/data lengths."""
+        with pytest.raises(ValueError, match="must have the same length"):
+            Likelihood(
+                name="test_likelihood",
+                distributions=["dist1", "dist2"],
+                data=["data1"],
+            )
+
+    def test_likelihood_requires_nonempty_distributions_data(self):
+        """Test that Likelihood validation requires non-empty distributions/data."""
+        with pytest.raises(ValueError, match="must have at least one"):
+            Likelihood(
+                name="test_likelihood",
+                distributions=[],
+                data=[],
+            )
+
+    def test_likelihood_allows_empty_with_aux_distributions(self):
+        """Test that Likelihood allows empty distributions/data when aux_distributions is provided."""
+        likelihood = Likelihood(
+            name="test_likelihood",
+            distributions=[],
+            data=[],
+            aux_distributions=["aux1"],
+        )
+        assert likelihood.name == "test_likelihood"
+        assert likelihood.distributions == []
+        assert likelihood.data == []
+        assert likelihood.aux_distributions == ["aux1"]
 
 
 class TestLikelihoods:
@@ -216,12 +248,12 @@ class TestForeignKeyResolution:
         likelihood = Likelihood(
             name="test_likelihood",
             distributions=["dist1", "dist2"],
-            data=["obs1"],
+            data=["obs1", "obs2"],
         )
 
         dumped = likelihood.model_dump()
         assert dumped["distributions"] == ["dist1", "dist2"]
-        assert dumped["data"] == ["obs1"]
+        assert dumped["data"] == ["obs1", "obs2"]
 
     def test_likelihood_json_schema_correct(self):
         """Test Likelihood JSON schema shows FK fields as array of strings."""
@@ -319,7 +351,7 @@ class TestWorkspaceReferentialIntegrity:
 
     def test_workspace_unknown_distribution_raises(self):
         """Test workspace raises error for unknown distribution reference."""
-        with pytest.raises(ValueError, match="unknown distribution"):
+        with pytest.raises(WorkspaceValidationError, match="unknown distribution"):
             Workspace.model_validate(
                 {
                     "metadata": {"hs3_version": "0.1.0"},
@@ -327,7 +359,7 @@ class TestWorkspaceReferentialIntegrity:
                         {
                             "name": "likelihood1",
                             "distributions": ["unknown_dist"],
-                            "data": [],
+                            "data": ["obs1"],
                         }
                     ],
                     "distributions": [],
@@ -337,14 +369,14 @@ class TestWorkspaceReferentialIntegrity:
 
     def test_workspace_unknown_data_raises(self):
         """Test workspace raises error for unknown data reference."""
-        with pytest.raises(ValueError, match="unknown data"):
+        with pytest.raises(WorkspaceValidationError, match="unknown data"):
             Workspace.model_validate(
                 {
                     "metadata": {"hs3_version": "0.1.0"},
                     "likelihoods": [
                         {
                             "name": "likelihood1",
-                            "distributions": [],
+                            "distributions": ["dist1"],
                             "data": ["unknown_data"],
                         }
                     ],
@@ -355,7 +387,7 @@ class TestWorkspaceReferentialIntegrity:
 
     def test_workspace_unknown_likelihood_raises(self):
         """Test workspace raises error for unknown likelihood reference."""
-        with pytest.raises(ValueError, match="unknown likelihood"):
+        with pytest.raises(WorkspaceValidationError, match="unknown likelihood"):
             Workspace.model_validate(
                 {
                     "metadata": {"hs3_version": "0.1.0"},
@@ -363,7 +395,7 @@ class TestWorkspaceReferentialIntegrity:
                         {
                             "name": "analysis1",
                             "likelihood": "unknown_likelihood",
-                            "domains": [],
+                            "domains": ["domain1"],
                         }
                     ],
                     "likelihoods": [],
@@ -372,7 +404,7 @@ class TestWorkspaceReferentialIntegrity:
 
     def test_workspace_unknown_domain_raises(self):
         """Test workspace raises error for unknown domain reference."""
-        with pytest.raises(ValueError, match="unknown domain"):
+        with pytest.raises(WorkspaceValidationError, match="unknown domain"):
             Workspace.model_validate(
                 {
                     "metadata": {"hs3_version": "0.1.0"},
@@ -406,7 +438,9 @@ class TestWorkspaceReferentialIntegrity:
 
     def test_workspace_collects_all_errors(self):
         """Test workspace collects multiple FK resolution errors."""
-        with pytest.raises(ValueError, match="unresolved references") as exc_info:
+        with pytest.raises(
+            WorkspaceValidationError, match="unresolved references"
+        ) as exc_info:
             Workspace.model_validate(
                 {
                     "metadata": {"hs3_version": "0.1.0"},
@@ -426,7 +460,13 @@ class TestWorkspaceReferentialIntegrity:
                     ],
                     "distributions": [],
                     "data": [],
-                    "domains": [],
+                    "domains": [
+                        {
+                            "name": "domain1",
+                            "type": "product_domain",
+                            "axes": [],
+                        }
+                    ],
                 }
             )
 

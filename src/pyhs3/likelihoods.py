@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 
 from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.data import Data, Datum
@@ -52,6 +52,23 @@ class Likelihood(NamedModel):
         FKListSchema,
     ] = Field(..., repr=False)
     aux_distributions: list[str] | None = Field(default=None, repr=False)
+
+    @model_validator(mode="after")
+    def validate_distributions_data_pairing(self) -> Likelihood:
+        """Validate that distributions and data are properly paired."""
+        if len(self.distributions) != len(self.data):
+            msg = (
+                f"Likelihood '{self.name}': distributions and data must have the same length, "
+                f"got {len(self.distributions)} distributions and {len(self.data)} data entries"
+            )
+            raise ValueError(msg)
+        if len(self.distributions) == 0 and not self.aux_distributions:
+            msg = (
+                f"Likelihood '{self.name}': must have at least one distribution/data pair "
+                f"or provide aux_distributions"
+            )
+            raise ValueError(msg)
+        return self
 
 
 class Likelihoods(NamedCollection[Likelihood]):

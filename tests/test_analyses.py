@@ -110,6 +110,15 @@ class TestAnalysis:
         with pytest.raises(ValueError, match="Field required"):
             Analysis(name="test_analysis", likelihood="test_likelihood")
 
+    def test_analysis_requires_nonempty_domains(self):
+        """Test that Analysis validation requires non-empty domains."""
+        with pytest.raises(ValueError, match="must have at least one domain"):
+            Analysis(
+                name="test_analysis",
+                likelihood="test_likelihood",
+                domains=[],
+            )
+
 
 class TestAnalyses:
     """Tests for the Analyses collection class."""

@@ -11,6 +11,7 @@ import pytest
 
 from pyhs3 import Workspace
 from pyhs3.analyses import Analyses, Analysis
+from pyhs3.exceptions import WorkspaceValidationError
 from pyhs3.likelihoods import Likelihood, Likelihoods
 from pyhs3.metadata import Metadata
 
@@ -64,7 +65,9 @@ class TestWorkspaceFKResolutionWithNoneCollections:
 
     def test_likelihood_references_distributions_when_none(self):
         """Test error when likelihood references distributions but distributions=None."""
-        with pytest.raises(ValueError, match="references unknown distributions"):
+        with pytest.raises(
+            WorkspaceValidationError, match="references unknown distributions"
+        ):
             Workspace(
                 metadata=Metadata(hs3_version="0.1.0"),
                 likelihoods=Likelihoods(
@@ -82,7 +85,7 @@ class TestWorkspaceFKResolutionWithNoneCollections:
 
     def test_likelihood_references_data_when_none(self):
         """Test error when likelihood references data but data=None."""
-        with pytest.raises(ValueError, match="references unknown data"):
+        with pytest.raises(WorkspaceValidationError, match="references unknown data"):
             Workspace(
                 metadata=Metadata(hs3_version="0.1.0"),
                 likelihoods=Likelihoods(
@@ -100,7 +103,9 @@ class TestWorkspaceFKResolutionWithNoneCollections:
 
     def test_analysis_references_likelihood_when_none(self):
         """Test error when analysis references likelihood but likelihoods=None."""
-        with pytest.raises(ValueError, match="references unknown likelihood"):
+        with pytest.raises(
+            WorkspaceValidationError, match="references unknown likelihood"
+        ):
             Workspace(
                 metadata=Metadata(hs3_version="0.1.0"),
                 analyses=Analyses(
@@ -117,7 +122,7 @@ class TestWorkspaceFKResolutionWithNoneCollections:
 
     def test_analysis_references_domains_when_none(self):
         """Test error when analysis references domains but domains=None."""
-        with pytest.raises(ValueError, match="references unknown domain"):
+        with pytest.raises(WorkspaceValidationError, match="references unknown domain"):
             Workspace(
                 metadata=Metadata(hs3_version="0.1.0"),
                 likelihoods=Likelihoods(
@@ -126,6 +131,7 @@ class TestWorkspaceFKResolutionWithNoneCollections:
                             name="lk1",
                             distributions=[],
                             data=[],
+                            aux_distributions=["aux"],
                         )
                     ]
                 ),

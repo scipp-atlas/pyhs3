@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from pytensor import function
 
 from pyhs3 import Workspace
+from pyhs3.context import Context
 from pyhs3.core import create_bounded_tensor
 from pyhs3.distributions import (
     ArgusDist,
@@ -107,7 +108,7 @@ class TestProductDist:
             "f2": pt.constant([2.0, 3.0, 4.0]),
         }
 
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         expected = pt.constant([2.0, 6.0, 12.0])  # elementwise product
 
         # Compile and evaluate
@@ -123,7 +124,7 @@ class TestProductDist:
         # Empty context since no factors to provide
         params = {}
 
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         expected = pt.constant(1.0)
 
         # Compile and evaluate
@@ -187,7 +188,7 @@ class TestCrystalBallDist:
             "sigma": pt.constant(1.0),
         }
 
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         expected = pt.exp(-0.5 * 0.0**2)  # Gaussian at peak
 
         f = function([], [result, expected])
@@ -215,7 +216,7 @@ class TestCrystalBallDist:
             "sigma": pt.constant(1.0),
         }
 
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
 
         # Should be in left tail region since t = -3.0 < -1.0
         f = function([], result)
@@ -291,7 +292,7 @@ class TestAsymmetricCrystalBallDist:
             "sigma_R": pt.constant(1.0),
         }
 
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         expected = pt.exp(-0.5 * 0.0**2)  # Gaussian at peak
 
         f = function([], [result, expected])
@@ -325,7 +326,7 @@ class TestAsymmetricCrystalBallDist:
             "sigma_R": pt.constant(1.0),
         }
 
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
 
         # Should be in left tail region since t_L = -3.0 < -1.0
         f = function([], result)
@@ -361,7 +362,7 @@ class TestGenericDist:
         params = {"x": x}
 
         # Get the expression result from the distribution
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
 
         # Compile and test the function
         f = function([x], result)
@@ -435,7 +436,7 @@ class TestPoissonDist:
             "k": pt.constant(3.0),
         }
 
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([], result)
         result_val = f()
 
@@ -453,7 +454,7 @@ class TestPoissonDist:
             "k": pt.constant(0.0),
         }
 
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([], result)
         result_val = f()
 
@@ -479,7 +480,7 @@ class TestPoissonDist:
             "k": pt.constant(k_val),
         }
 
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([], result)
         result_val = f()
 
@@ -494,7 +495,7 @@ class TestPoissonDist:
         k_var = pt.scalar("k")
         params = {"lambda_param": lambda_var, "k": k_var}
 
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([lambda_var, k_var], result)
 
         # Test several points
@@ -515,7 +516,7 @@ class TestPoissonDist:
         for k_val in [0, 1, 2, 5, 10]:
             test_params = dict(params)
             test_params["k"] = pt.constant(float(k_val))
-            result = dist.expression(test_params)
+            result = dist.expression(Context(test_params))
             f = function([], result)
             pmf_val = f()
             assert pmf_val >= 0.0, (
@@ -1143,7 +1144,7 @@ class TestUniformDist:
         # Parameters - the x value doesn't matter for uniform distribution
         params = {"x": pt.constant(0.5)}
 
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([], result)
         result_val = f()
 
@@ -1159,7 +1160,7 @@ class TestUniformDist:
 
         for x_val in x_values:
             params = {"x": pt.constant(x_val)}
-            result = dist.expression(params)
+            result = dist.expression(Context(params))
             f = function([], result)
             result_val = f()
             assert result_val == 1.0, f"Failed for x={x_val}"
@@ -1253,7 +1254,7 @@ class TestExponentialDist:
 
         # Test exp(-1 * 1) = exp(-1) ≈ 0.3679
         params = {"x": pt.constant(1.0), "c": pt.constant(1.0)}
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([], result)
         result_val = f()
         expected = np.exp(-1.0)
@@ -1261,7 +1262,7 @@ class TestExponentialDist:
 
         # Test exp(-0.5 * 2) = exp(-1) ≈ 0.3679
         params = {"x": pt.constant(2.0), "c": pt.constant(0.5)}
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([], result)
         result_val = f()
         expected = 0.5 * np.exp(-1.0)
@@ -1269,7 +1270,7 @@ class TestExponentialDist:
 
         # Test exp(-2 * 0) = exp(0) = 1
         params = {"x": pt.constant(0.0), "c": pt.constant(2.0)}
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([], result)
         result_val = f()
         expected = 2.0
@@ -1290,7 +1291,7 @@ class TestExponentialDist:
         dist = ExponentialDist(name="test_exp", x="x", c="c")
 
         params = {"x": pt.constant(x_val), "c": pt.constant(c_val)}
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([], result)
         result_val = f()
 
@@ -1305,7 +1306,7 @@ class TestExponentialDist:
         c_var = pt.scalar("c")
         params = {"x": x_var, "c": c_var}
 
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([x_var, c_var], result)
 
         # Test several points
@@ -1330,7 +1331,7 @@ class TestExponentialDist:
         for x_val in x_values:
             test_params = dict(params)
             test_params["x"] = pt.constant(x_val)
-            result = dist.expression(test_params)
+            result = dist.expression(Context(test_params))
             f = function([], result)
             pdf_val = f()
             assert pdf_val > 0.0, f"PDF should be positive, got {pdf_val} for x={x_val}"
@@ -1450,7 +1451,7 @@ class TestLogNormalDist:
             "mu": pt.constant(0.0),
             "sigma": pt.constant(1.0),
         }
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([], result)
         result_val = f()
         expected = 1.0 / math.sqrt(2.0 * math.pi)
@@ -1463,7 +1464,7 @@ class TestLogNormalDist:
             "mu": pt.constant(1.0),
             "sigma": pt.constant(1.0),
         }
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([], result)
         result_val = f()
         expected = 1.0 / (e_val * math.sqrt(2.0 * math.pi))
@@ -1490,7 +1491,7 @@ class TestLogNormalDist:
             "mu": pt.constant(mu_val),
             "sigma": pt.constant(sigma_val),
         }
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([], result)
         result_val = f()
 
@@ -1513,7 +1514,7 @@ class TestLogNormalDist:
         sigma_var = pt.scalar("sigma")
         params = {"x": x_var, "mu": mu_var, "sigma": sigma_var}
 
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([x_var, mu_var, sigma_var], result)
 
         # Test at x=1, mu=0, sigma=1: should give 1.0
@@ -1537,7 +1538,7 @@ class TestLogNormalDist:
         for x_val in x_values:
             test_params = dict(params)
             test_params["x"] = pt.constant(x_val)
-            result = dist.expression(test_params)
+            result = dist.expression(Context(test_params))
             f = function([], result)
             pdf_val = f()
             assert pdf_val > 0.0, f"PDF should be positive, got {pdf_val} for x={x_val}"
@@ -1547,7 +1548,7 @@ class TestLogNormalDist:
         mode_x = np.exp(mu_val - sigma_val**2)
         test_params = dict(params)
         test_params["x"] = pt.constant(mode_x)
-        result = dist.expression(test_params)
+        result = dist.expression(Context(test_params))
         f_mode = function([], result)
         mode_val = f_mode()
 
@@ -1557,7 +1558,7 @@ class TestLogNormalDist:
             if test_x > 0:  # Only test positive values
                 test_params = dict(params)
                 test_params["x"] = pt.constant(test_x)
-                result = dist.expression(test_params)
+                result = dist.expression(Context(test_params))
                 f_test = function([], result)
                 test_val = f_test()
                 assert test_val <= mode_val, (
@@ -1653,7 +1654,7 @@ class TestPolynomialDist:
             "a1": pt.constant(2.0),
             "a2": pt.constant(3.0),
         }
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([], result)
         result_val = f()
         expected = 1.0
@@ -1666,7 +1667,7 @@ class TestPolynomialDist:
             "a1": pt.constant(2.0),
             "a2": pt.constant(3.0),
         }
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([], result)
         result_val = f()
         expected = 6.0
@@ -1679,7 +1680,7 @@ class TestPolynomialDist:
             "a1": pt.constant(2.0),
             "a2": pt.constant(3.0),
         }
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([], result)
         result_val = f()
         expected = 17.0
@@ -1692,13 +1693,13 @@ class TestPolynomialDist:
 
         # At x=0: 5 + 3*0 = 5
         params = {"x": pt.constant(0.0), "c0": pt.constant(5.0), "c1": pt.constant(3.0)}
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([], result)
         assert np.isclose(f(), 5.0)
 
         # At x=2: 5 + 3*2 = 11
         params = {"x": pt.constant(2.0), "c0": pt.constant(5.0), "c1": pt.constant(3.0)}
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([], result)
         assert np.isclose(f(), 11.0)
 
@@ -1710,7 +1711,7 @@ class TestPolynomialDist:
         # Should always return 42 regardless of x value
         for x_val in [0.0, 1.0, -1.0, 10.0]:
             params = {"x": pt.constant(x_val), "c0": pt.constant(42.0)}
-            result = dist.expression(params)
+            result = dist.expression(Context(params))
             f = function([], result)
             assert np.isclose(f(), 42.0), f"Failed for x={x_val}"
 
@@ -1804,7 +1805,7 @@ class TestArgusDist:
             "c": pt.constant(-1.0),
             "p": pt.constant(0.5),
         }
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([], result)
         result_val = f()
         expected = 0.0
@@ -1822,7 +1823,7 @@ class TestArgusDist:
             "c": pt.constant(c_val),
             "p": pt.constant(p_val),
         }
-        result = dist.expression(params)
+        result = dist.expression(Context(params))
         f = function([], result)
         result_val = f()
 
@@ -1854,7 +1855,7 @@ class TestArgusDist:
         # Test that PDF is zero at endpoint m = m0
         test_params = dict(params)
         test_params["m"] = pt.constant(m0_val)
-        result = dist.expression(test_params)
+        result = dist.expression(Context(test_params))
         f = function([], result)
         pdf_val = f()
         assert np.isclose(pdf_val, 0.0, atol=1e-10), (
@@ -1867,7 +1868,7 @@ class TestArgusDist:
         for m_val in m_values:
             test_params = dict(params)
             test_params["m"] = pt.constant(m_val)
-            result = dist.expression(test_params)
+            result = dist.expression(Context(test_params))
             f = function([], result)
             pdf_val = f()
             assert pdf_val >= 0.0, (
@@ -1950,7 +1951,7 @@ class TestBernsteinPolyDist:
 
         # For degree 0: B_0,0(x) = 1, so result is just c0
         context = {"x": pt.constant(0.5), "c0": pt.constant(2.0)}
-        result = dist.expression(context)
+        result = dist.expression(Context(context))
         f = function([], result)
         result_val = f()
 
@@ -1973,7 +1974,7 @@ class TestBernsteinPolyDist:
             "c0": pt.constant(1.0),
             "c1": pt.constant(3.0),
         }
-        result = dist.expression(context)
+        result = dist.expression(Context(context))
         f = function([], result)
         result_val = f()
 
@@ -1997,7 +1998,7 @@ class TestBernsteinPolyDist:
             "c1": pt.constant(2.0),
             "c2": pt.constant(1.5),
         }
-        result = dist.expression(context)
+        result = dist.expression(Context(context))
         f = function([], result)
         result_val = f()
 
@@ -2026,7 +2027,7 @@ class TestBernsteinPolyDist:
             "c1": pt.constant(2.0),
             "c2": pt.constant(1.0),
         }
-        result = dist.expression(context)
+        result = dist.expression(Context(context))
         f = function([], result)
         result_val = f()
 
@@ -2036,7 +2037,7 @@ class TestBernsteinPolyDist:
 
         # At x=1: only B_n,n(1) = 1, all others are 0
         context["x"] = pt.constant(1.0)
-        result = dist.expression(context)
+        result = dist.expression(Context(context))
         f = function([], result)
         result_val = f()
 
@@ -2062,7 +2063,7 @@ class TestBernsteinPolyDist:
                 "constant_bernstein_unity_coefficients[2]": pt.constant(1.0),
                 "constant_bernstein_unity_coefficients[3]": pt.constant(1.0),
             }
-            result = dist.expression(context)
+            result = dist.expression(Context(context))
             f = function([], result)
             result_val = f()
 
@@ -2088,7 +2089,7 @@ class TestBernsteinPolyDist:
             if param != "x_var":
                 context[param] = pt.constant(1.0)  # Will use actual coefficient values
 
-        result = dist.expression(context)
+        result = dist.expression(Context(context))
         f = function([], result)
         result_val = f()
 
@@ -2128,7 +2129,7 @@ class TestLandauDist:
             "mean_param": pt.constant(3.0),
             "sigma_param": pt.constant(1.0),
         }
-        result = dist.expression(context)
+        result = dist.expression(Context(context))
         f = function([], result)
         result_val = f()
 
@@ -2155,7 +2156,7 @@ class TestLandauDist:
             "constant_landau_asym_sigma": pt.constant(1.0),
             "x": pt.constant(-1.0),  # Below mean
         }
-        result_below = dist.expression(context_below)
+        result_below = dist.expression(Context(context_below))
         f_below = function([], result_below)
         val_below = f_below()
 
@@ -2164,7 +2165,7 @@ class TestLandauDist:
             "constant_landau_asym_sigma": pt.constant(1.0),
             "x": pt.constant(1.0),  # Above mean
         }
-        result_above = dist.expression(context_above)
+        result_above = dist.expression(Context(context_above))
         f_above = function([], result_above)
         val_above = f_above()
 
@@ -2196,7 +2197,7 @@ class TestLandauDist:
                 "sigma_param": pt.constant(sigma_val),
                 "x": pt.constant(x_val),
             }
-            result = dist.expression(context)
+            result = dist.expression(Context(context))
             f = function([], result)
             result_val = f()
 
@@ -2274,7 +2275,7 @@ class TestCMSDistributions:
             "alpha": pt.constant(0.1),
             "beta": pt.constant(-0.2),
         }
-        result = dist.expression(context)
+        result = dist.expression(Context(context))
         f = function([], result)
         result_val = f()
 
@@ -2294,7 +2295,7 @@ class TestCMSDistributions:
         )
 
         context = {"mass": pt.constant(100.0)}
-        result = dist.expression(context)
+        result = dist.expression(Context(context))
         f = function([], result)
         result_val = f()
 
@@ -2334,7 +2335,7 @@ class TestCMSDistributions:
             "a2_param": pt.constant(-2.0),
             "a3_param": pt.constant(0.01),
         }
-        result = dist.expression(context)
+        result = dist.expression(Context(context))
         f = function([], result)
         result_val = f()
 
@@ -2366,7 +2367,7 @@ class TestCMSDistributions:
                 "constant_ggzz_math_a2": pt.constant(-1.0),
                 "constant_ggzz_math_a3": pt.constant(0.1),
             }
-            result = dist.expression(context)
+            result = dist.expression(Context(context))
             f = function([], result)
             result_val = f()
 
@@ -2409,7 +2410,7 @@ class TestCMSDistributions:
             "a3_param": pt.constant(-1.5),
             "a4_param": pt.constant(0.005),
         }
-        result = dist.expression(context)
+        result = dist.expression(Context(context))
         f = function([], result)
         result_val = f()
 
@@ -2443,7 +2444,7 @@ class TestCMSDistributions:
                 "constant_qqzz_shift_a3": pt.constant(1.0),
                 "constant_qqzz_shift_a4": pt.constant(0.0),
             }
-            result = dist.expression(context)
+            result = dist.expression(Context(context))
             f = function([], result)
             result_val = f()
 
@@ -2482,7 +2483,7 @@ class TestCMSDistributions:
             "beta": pt.constant(-0.1),
             "gamma": pt.constant(0.05),
         }
-        result = dist.expression(context)
+        result = dist.expression(Context(context))
         f = function([], result)
         result_val = f()
 
@@ -2509,7 +2510,7 @@ class TestCMSDistributions:
             "coef1": pt.constant(0.1),
             "coef2": pt.constant(-0.05),
         }
-        result = dist.expression(context)
+        result = dist.expression(Context(context))
         f = function([], result)
         result_val = f()
 
@@ -2568,7 +2569,7 @@ class TestMixtureDist:
             "coeff2": pt.constant(0.4),
         }
 
-        result = dist.expression(context)
+        result = dist.expression(Context(context))
         f = function([], result)
         result_val = f()
 
@@ -2595,7 +2596,7 @@ class TestMixtureDist:
             "coeff3": pt.constant(0.5),
         }
 
-        result = dist.expression(context)
+        result = dist.expression(Context(context))
         f = function([], result)
         result_val = f()
 
@@ -2629,7 +2630,7 @@ class TestMixtureDist:
             "coeff3": pt.constant(0.5),
         }
 
-        result = dist.expression(context)
+        result = dist.expression(Context(context))
         f = function([], result)
         result_val = f()
 
@@ -2888,8 +2889,8 @@ class TestMixtureDist:
         }
 
         # Get both log_expression and expression results
-        log_result = dist.log_expression(context)
-        expr_result = dist.expression(context)
+        log_result = dist.log_expression(Context(context))
+        expr_result = dist.expression(Context(context))
 
         f_log = function([], log_result)
         f_expr = function([], expr_result)

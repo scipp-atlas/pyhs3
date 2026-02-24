@@ -374,7 +374,7 @@ Custom exceptions in ``src/pyhs3/exceptions.py``:
 - ``HS3Exception``: Base exception
 - ``ExpressionParseError``: Expression parsing failures
 - ``ExpressionEvaluationError``: Runtime evaluation errors
-- ``UnknownInterpolationCodeError``: Invalid interpolation codes
+- ``WorkspaceValidationError``: Workspace validation failures (e.g. unresolved references)
 
 Extension Points
 ----------------

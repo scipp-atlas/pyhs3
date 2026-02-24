@@ -27,7 +27,7 @@ from rich.progress import (
 
 from pyhs3.analyses import Analyses, Analysis
 from pyhs3.context import Context
-from pyhs3.data import Data, DataType
+from pyhs3.data import BinnedData, Data, DataType, UnbinnedData
 from pyhs3.distributions import Distributions, DistributionType
 from pyhs3.domains import Domain, Domains, DomainType, ProductDomain
 from pyhs3.exceptions import WorkspaceValidationError
@@ -317,7 +317,7 @@ class Workspace(BaseModel):
 
         return "".join(parts)
 
-    def _compute_observables(self, domain: Domain) -> dict[str, tuple[float, float]]:
+    def _compute_observables(self) -> dict[str, tuple[float, float]]:
         """
         Extract observable names and bounds from likelihoods + data + domain.
 
@@ -338,41 +338,23 @@ class Workspace(BaseModel):
 
         # For each likelihood, extract observable axes from paired data
         for likelihood in self.likelihoods:
-            for data_name in likelihood.data:
-                # Look up the data object
-                datum = self.data.get(data_name)
-                if datum is None:
-                    continue
+            for data_item in likelihood.data:
+                if isinstance(data_item, str):
+                    datum = self.data[data_item]
+                else:
+                    datum = data_item
 
-                # Extract axes if available
-                axes = getattr(datum, "axes", None)
-                if axes is None:
+                if not isinstance(datum, (UnbinnedData, BinnedData)):
+                    log.warning(
+                        "The likelihood '%s' references a dataset '%s' without axes. This cannot be used to normalize any distribution.",
+                        likelihood.name,
+                        datum.name,
+                    )
                     continue
 
                 # For each axis, extract bounds
-                for axis in axes:
-                    obs_name = axis.name
-
-                    # Get bounds from axis (prefer axis min/max if available)
-                    if axis.min is not None and axis.max is not None:
-                        obs_min, obs_max = axis.min, axis.max
-                    else:
-                        # Fall back to domain bounds if axis doesn't specify
-                        log.warning(
-                            "Observable '%s' data does not have min/max (non-compliant with HS3 spec). "
-                            "Falling back to domain bounds.",
-                            obs_name,
-                        )
-                        domain_bounds = domain.get(obs_name, (None, None))
-                        if domain_bounds[0] is None or domain_bounds[1] is None:
-                            log.warning(
-                                "Observable '%s' has no bounds in data or domain. Skipping normalization.",
-                                obs_name,
-                            )
-                            continue
-                        obs_min, obs_max = domain_bounds
-
-                    observables[obs_name] = (obs_min, obs_max)
+                for axis in datum.axes:
+                    observables[axis.name] = (axis.min or -np.inf, axis.max or np.inf)
 
         return observables
 
@@ -418,7 +400,7 @@ class Workspace(BaseModel):
         )
 
         # Compute observables from likelihoods + data + domain
-        observables = self._compute_observables(selected_domain)
+        observables = self._compute_observables()
 
         return Model(
             parameterset=parameterset or ParameterSet(name="default"),

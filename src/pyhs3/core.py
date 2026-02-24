@@ -339,10 +339,6 @@ class Workspace(BaseModel):
         # For each likelihood, extract observable axes from paired data
         for likelihood in self.likelihoods:
             for data_name in likelihood.data:
-                # Skip non-string data (inline constraint values)
-                if not isinstance(data_name, str):
-                    continue
-
                 # Look up the data object
                 datum = self.data.get(data_name)
                 if datum is None:

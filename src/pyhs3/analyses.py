@@ -7,9 +7,21 @@ including analysis configurations with parameters of interest and domains.
 
 from __future__ import annotations
 
-from pydantic import ConfigDict, Field
+from typing import Annotated
+
+from pydantic import ConfigDict, Field, model_validator
 
 from pyhs3.collections import NamedCollection, NamedModel
+from pyhs3.domains import Domain, Domains
+from pyhs3.likelihoods import Likelihood
+from pyhs3.typing.annotations import (
+    FKListSchema,
+    FKListSerializer,
+    FKSchema,
+    FKSerializer,
+    FKValidator,
+    make_fk_list_validator,
+)
 
 
 class Analysis(NamedModel):
@@ -32,11 +44,26 @@ class Analysis(NamedModel):
 
     model_config = ConfigDict()
 
-    likelihood: str = Field(..., repr=False)
+    likelihood: Annotated[str | Likelihood, FKValidator, FKSerializer, FKSchema] = (
+        Field(..., repr=False)
+    )
     parameters_of_interest: list[str] | None = Field(default=None, repr=False)
-    domains: list[str] = Field(..., repr=False)
+    domains: Annotated[
+        list[str] | Domains,
+        make_fk_list_validator(Domain),
+        FKListSerializer,
+        FKListSchema,
+    ] = Field(..., repr=False)
     init: str | None = Field(default=None, repr=False)
     prior: str | None = Field(default=None, repr=False)
+
+    @model_validator(mode="after")
+    def validate_non_empty_domains(self) -> Analysis:
+        """Validate that domains is non-empty."""
+        if len(self.domains) == 0:
+            msg = f"Analysis '{self.name}': must have at least one domain"
+            raise ValueError(msg)
+        return self
 
 
 class Analyses(NamedCollection[Analysis]):

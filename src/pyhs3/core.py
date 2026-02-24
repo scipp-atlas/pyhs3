@@ -5,7 +5,7 @@ import logging
 import os
 import sys
 from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any, Literal, TypeAlias, TypeVar, cast
 
@@ -25,14 +25,14 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from pyhs3.analyses import Analyses
+from pyhs3.analyses import Analyses, Analysis
 from pyhs3.context import Context
-from pyhs3.data import Data
-from pyhs3.distributions import Distributions
-from pyhs3.domains import Domain, Domains, ProductDomain
+from pyhs3.data import Data, DataType
+from pyhs3.distributions import Distributions, DistributionType
+from pyhs3.domains import Domain, Domains, DomainType, ProductDomain
 from pyhs3.exceptions import WorkspaceValidationError
 from pyhs3.functions import Functions
-from pyhs3.likelihoods import Likelihoods
+from pyhs3.likelihoods import Likelihood, Likelihoods
 from pyhs3.metadata import Metadata
 from pyhs3.networks import build_dependency_graph
 from pyhs3.parameter_points import ParameterPoints, ParameterSet
@@ -90,6 +90,117 @@ class Workspace(BaseModel):
     likelihoods: Likelihoods | None = Field(default_factory=lambda: Likelihoods([]))
     analyses: Analyses | None = Field(default_factory=lambda: Analyses([]))
     misc: dict[str, Any] | None = Field(default_factory=dict)
+
+    def model_post_init(self, __context: Any, /) -> None:
+        """Resolve foreign key references after workspace construction."""
+        self._resolve_foreign_keys()
+
+    def _resolve_foreign_keys(self) -> None:
+        """Resolve string references to actual objects with referential integrity checking."""
+        errors: list[str] = []
+
+        # Resolve Likelihood fields first (analyses reference likelihoods)
+        if self.likelihoods is not None:
+            for likelihood in self.likelihoods:
+                self._resolve_likelihood_fields(likelihood, errors)
+
+        # Resolve Analysis fields
+        if self.analyses is not None:
+            for analysis in self.analyses:
+                self._resolve_analysis_fields(analysis, errors)
+
+        if errors:
+            msg = "Workspace has unresolved references:\n" + "\n".join(
+                f"  - {e}" for e in errors
+            )
+            raise WorkspaceValidationError(msg)
+
+    def _resolve_fk_list(
+        self,
+        refs: Iterable[Any],
+        collection: Distributions | Data | Domains,
+        parent_label: str,
+        entity_label: str,
+        errors: list[str],
+    ) -> list[Any]:
+        """Resolve string references in a list against a named collection."""
+        resolved: list[Any] = []
+        for ref in refs:
+            if isinstance(ref, str):
+                obj = collection.get(ref)
+                if obj is None:
+                    errors.append(
+                        f"{parent_label} references unknown {entity_label} '{ref}'"
+                    )
+                else:
+                    resolved.append(obj)
+            else:
+                resolved.append(ref)
+        return resolved
+
+    def _resolve_likelihood_fields(
+        self, likelihood: Likelihood, errors: list[str]
+    ) -> None:
+        """Resolve foreign key fields on a Likelihood."""
+        # Resolve distributions
+        if self.distributions is not None:
+            resolved = self._resolve_fk_list(
+                likelihood.distributions,
+                self.distributions,
+                f"Likelihood '{likelihood.name}'",
+                "distribution",
+                errors,
+            )
+            likelihood.distributions = Distributions(
+                cast(list[DistributionType], resolved)
+            )
+        else:
+            errors.append(
+                f"Likelihood '{likelihood.name}' references unknown distributions"
+            )
+
+        # Resolve data
+        if self.data is not None:
+            resolved = self._resolve_fk_list(
+                likelihood.data,
+                self.data,
+                f"Likelihood '{likelihood.name}'",
+                "data",
+                errors,
+            )
+            likelihood.data = Data(cast(list[DataType], resolved))
+        else:
+            errors.append(f"Likelihood '{likelihood.name}' references unknown data")
+
+    def _resolve_analysis_fields(self, analysis: Analysis, errors: list[str]) -> None:
+        """Resolve foreign key fields on an Analysis."""
+        # Resolve likelihood
+        if self.likelihoods is not None:
+            if isinstance(analysis.likelihood, str):
+                lk = self.likelihoods.get(analysis.likelihood)
+                if lk is None:
+                    errors.append(
+                        f"Analysis '{analysis.name}' references unknown likelihood '{analysis.likelihood}'"
+                    )
+                else:
+                    analysis.likelihood = lk
+        else:
+            errors.append(
+                f"Analysis '{analysis.name}' references unknown likelihood '{analysis.likelihood}'"
+            )
+
+        # Resolve domains
+        if self.domains is not None:
+            resolved = self._resolve_fk_list(
+                analysis.domains,
+                self.domains,
+                f"Analysis '{analysis.name}'",
+                "domain",
+                errors,
+            )
+            analysis.domains = Domains(cast(list[DomainType], resolved))
+        else:
+            errors.append(f"Analysis '{analysis.name}' references unknown domains")
 
     @classmethod
     def load(

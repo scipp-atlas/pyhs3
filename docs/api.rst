@@ -183,4 +183,4 @@ Exceptions
    HS3Exception
    ExpressionParseError
    ExpressionEvaluationError
-   UnknownInterpolationCodeError
+   WorkspaceValidationError

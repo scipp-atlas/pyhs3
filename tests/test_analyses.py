@@ -9,7 +9,13 @@ from __future__ import annotations
 
 import pytest
 
+from pyhs3 import Workspace
 from pyhs3.analyses import Analyses, Analysis
+from pyhs3.data import Data, PointData
+from pyhs3.distributions import Distributions, GaussianDist
+from pyhs3.domains import Axis, Domain, Domains, ProductDomain
+from pyhs3.likelihoods import Likelihood, Likelihoods
+from pyhs3.metadata import Metadata
 
 
 class TestAnalysis:
@@ -104,6 +110,15 @@ class TestAnalysis:
         with pytest.raises(ValueError, match="Field required"):
             Analysis(name="test_analysis", likelihood="test_likelihood")
 
+    def test_analysis_requires_nonempty_domains(self):
+        """Test that Analysis validation requires non-empty domains."""
+        with pytest.raises(ValueError, match="must have at least one domain"):
+            Analysis(
+                name="test_analysis",
+                likelihood="test_likelihood",
+                domains=[],
+            )
+
 
 class TestAnalyses:
     """Tests for the Analyses collection class."""
@@ -194,3 +209,188 @@ class TestAnalyses:
 
         with pytest.raises(IndexError):
             _ = analyses[0]
+
+
+class TestForeignKeyResolution:
+    """Tests for FK validation and serialization in Analysis."""
+
+    def test_analysis_accepts_string_from_json(self):
+        """Test Analysis accepts string references from JSON."""
+        analysis = Analysis.model_validate(
+            {
+                "name": "test_analysis",
+                "likelihood": "test_likelihood",
+                "domains": ["domain1", "domain2"],
+            }
+        )
+        assert analysis.name == "test_analysis"
+        assert analysis.likelihood == "test_likelihood"
+        assert analysis.domains == ["domain1", "domain2"]
+
+    def test_analysis_accepts_object_from_python(self):
+        """Test Analysis accepts model instances from Python."""
+        likelihood = Likelihood(
+            name="test_likelihood", distributions=["dist1"], data=["data1"]
+        )
+        domain1 = Domain(name="domain1", type="constant", value="value1")
+        domain2 = Domain(name="domain2", type="constant", value="value2")
+
+        analysis = Analysis(
+            name="test_analysis", likelihood=likelihood, domains=[domain1, domain2]
+        )
+        assert analysis.name == "test_analysis"
+        assert analysis.likelihood is likelihood
+        assert analysis.domains == [domain1, domain2]
+
+    def test_analysis_rejects_dict_for_likelihood(self):
+        """Test Analysis rejects dict for likelihood field."""
+        with pytest.raises(TypeError, match="Embedded objects not allowed"):
+            Analysis(
+                name="test_analysis",
+                likelihood={"name": "bad"},
+                domains=["domain1"],
+            )
+
+    def test_analysis_rejects_dict_in_domains(self):
+        """Test Analysis rejects dict in domains list."""
+        with pytest.raises(TypeError, match="Embedded objects not allowed"):
+            Analysis(
+                name="test_analysis",
+                likelihood="test_likelihood",
+                domains=[{"name": "bad"}],
+            )
+
+    def test_analysis_serialization_to_strings(self):
+        """Test Analysis serialization converts FK fields to strings."""
+        likelihood = Likelihood(
+            name="test_likelihood", distributions=["dist1"], data=["data1"]
+        )
+        domain1 = Domain(name="domain1", type="constant", value="value1")
+        domain2 = Domain(name="domain2", type="constant", value="value2")
+
+        analysis = Analysis(
+            name="test_analysis", likelihood=likelihood, domains=[domain1, domain2]
+        )
+
+        dumped = analysis.model_dump()
+        assert dumped["likelihood"] == "test_likelihood"
+        assert dumped["domains"] == ["domain1", "domain2"]
+
+    def test_analysis_json_schema_shows_strings(self):
+        """Test Analysis JSON schema shows FK fields as strings."""
+        schema = Analysis.model_json_schema()
+        properties = schema["properties"]
+
+        # likelihood should be type string
+        assert properties["likelihood"]["type"] == "string"
+
+        # domains should be array of strings
+        assert properties["domains"]["type"] == "array"
+        assert properties["domains"]["items"]["type"] == "string"
+
+    def test_analysis_standalone_keeps_strings(self):
+        """Test standalone Analysis keeps string references without workspace."""
+        analysis = Analysis(
+            name="test_analysis",
+            likelihood="test_likelihood",
+            domains=["domain1"],
+        )
+        # Strings stay as strings without workspace resolution
+        assert analysis.likelihood == "test_likelihood"
+        assert analysis.domains == ["domain1"]
+
+    def test_analysis_serialization_with_string_likelihood(self):
+        """Test Analysis serialization with string likelihood (branch #3)."""
+        analysis = Analysis(
+            name="test_analysis",
+            likelihood="test_likelihood",
+            domains=["domain1"],
+        )
+
+        dumped = analysis.model_dump()
+        assert dumped["likelihood"] == "test_likelihood"
+
+
+class TestWorkspaceFKResolution:
+    """Integration tests for FK resolution in Workspace context."""
+
+    def test_analysis_likelihood_resolved_to_object(self, datadir):
+        """Test analysis likelihood is resolved to Likelihood object."""
+        workspace_path = datadir / "simplemodel_uncorrelated-background_hs3.json"
+        workspace = Workspace.load(workspace_path)
+
+        assert workspace.analyses is not None
+        for analysis in workspace.analyses:
+            assert isinstance(analysis.likelihood, Likelihood)
+            # Verify it's the actual likelihood from workspace
+            assert (
+                analysis.likelihood is workspace.likelihoods[analysis.likelihood.name]
+            )
+
+    def test_analysis_domains_resolved_to_objects(self, datadir):
+        """Test analysis domains are resolved to Domain objects."""
+        workspace_path = datadir / "simplemodel_uncorrelated-background_hs3.json"
+        workspace = Workspace.load(workspace_path)
+
+        assert workspace.analyses is not None
+        for analysis in workspace.analyses:
+            for domain in analysis.domains:
+                assert isinstance(domain, Domain)
+                # Verify it's the actual domain from workspace
+                assert domain is workspace.domains[domain.name]
+
+    def test_workspace_roundtrip_preserves_strings(self, datadir):
+        """Test workspace roundtrip preserves string references in JSON."""
+        workspace_path = datadir / "simplemodel_uncorrelated-background_hs3.json"
+        workspace = Workspace.load(workspace_path)
+
+        # Dump back to dict
+        dumped = workspace.model_dump()
+
+        # Reload from dict
+        workspace2 = Workspace.model_validate(dumped)
+
+        # Verify analyses are resolved again
+        assert workspace2.analyses is not None
+        for analysis in workspace2.analyses:
+            assert isinstance(analysis.likelihood, Likelihood)
+            for domain in analysis.domains:
+                assert isinstance(domain, Domain)
+
+    def test_analysis_with_preresolved_domains(self):
+        """Test Analysis with preresolved Domain and Likelihood instances (branch #1)."""
+        # Create Domain and Likelihood instances
+        domain1 = ProductDomain(
+            name="domain1", axes=[Axis(name="x", min=0.0, max=10.0)]
+        )
+        dist1 = GaussianDist(name="dist1", x="x", mean=0.0, sigma=1.0)
+        datum1 = PointData(name="obs1", value=1.5)
+        likelihood1 = Likelihood(
+            name="test_likelihood", distributions=[dist1], data=[datum1]
+        )
+
+        # Build workspace programmatically with preresolved objects
+        workspace = Workspace(
+            metadata=Metadata(hs3_version="0.1.0"),
+            distributions=Distributions([dist1]),
+            data=Data([datum1]),
+            likelihoods=Likelihoods([likelihood1]),
+            domains=Domains([domain1]),
+            analyses=Analyses(
+                [
+                    Analysis(
+                        name="test_analysis",
+                        likelihood=likelihood1,  # Already-resolved ref
+                        domains=[domain1],  # Already-resolved ref
+                    )
+                ]
+            ),
+        )
+
+        # Verify references remain resolved
+        assert workspace.analyses is not None
+        analysis = workspace.analyses[0]
+        assert isinstance(analysis.likelihood, Likelihood)
+        assert isinstance(analysis.domains[0], Domain)
+        assert analysis.likelihood is likelihood1
+        assert analysis.domains[0] is domain1

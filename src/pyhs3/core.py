@@ -27,7 +27,7 @@ from rich.progress import (
 
 from pyhs3.analyses import Analyses, Analysis
 from pyhs3.context import Context
-from pyhs3.data import BinnedData, Data, DataType, UnbinnedData
+from pyhs3.data import Data, DataType, PointData
 from pyhs3.distributions import Distributions, DistributionType
 from pyhs3.domains import Domain, Domains, DomainType, ProductDomain
 from pyhs3.exceptions import WorkspaceValidationError
@@ -339,22 +339,29 @@ class Workspace(BaseModel):
         # For each likelihood, extract observable axes from paired data
         for likelihood in self.likelihoods:
             for data_item in likelihood.data:
-                if isinstance(data_item, str):
-                    datum = self.data[data_item]
-                else:
-                    datum = data_item
+                # FK resolution guarantees data items are resolved objects
+                datum = (
+                    data_item
+                    if not isinstance(data_item, str)
+                    else self.data[data_item]
+                )
 
-                if not isinstance(datum, (UnbinnedData, BinnedData)):
+                # PointData axes are optional; UnbinnedData/BinnedData always have them
+                if isinstance(datum, PointData) and datum.axes is None:
                     log.warning(
-                        "The likelihood '%s' references a dataset '%s' without axes. This cannot be used to normalize any distribution.",
+                        "The likelihood '%s' references a PointData '%s' without axes. This cannot be used to normalize any distribution.",
                         likelihood.name,
                         datum.name,
                     )
                     continue
 
                 # For each axis, extract bounds
+                # At this point: PointData with axes, UnbinnedData, or BinnedData (all have axes)
+                if not hasattr(datum, "axes") or datum.axes is None:
+                    continue
+
                 for axis in datum.axes:
-                    observables[axis.name] = (axis.min or -np.inf, axis.max or np.inf)
+                    observables[axis.name] = (axis.min, axis.max)
 
         return observables
 

@@ -7,7 +7,7 @@ from pytensor.compile.function import function
 from scipy.integrate import quad
 
 from pyhs3.core import Model, Workspace
-from pyhs3.data import Axis, BinnedData, Data
+from pyhs3.data import BinnedData, Data
 from pyhs3.distributions import Distributions
 from pyhs3.distributions.mathematical import GenericDist
 from pyhs3.domains import Domains, ProductDomain
@@ -116,7 +116,7 @@ class TestWorkspaceNormalization:
                 [
                     BinnedData(
                         name="test_data",
-                        axes=[Axis(name="x", min=0.0, max=10.0, nbins=10)],
+                        axes=[{"name": "x", "min": 0.0, "max": 10.0, "nbins": 10}],
                         contents=[1.0] * 10,
                     )
                 ]
@@ -142,7 +142,7 @@ class TestWorkspaceNormalization:
         )
 
         # Compute observables
-        observables = workspace._compute_observables(workspace.domains[0])
+        observables = workspace._compute_observables()
 
         # Should find x as an observable with bounds [0, 10]
         assert "x" in observables
@@ -160,7 +160,7 @@ class TestWorkspaceNormalization:
                 [
                     BinnedData(
                         name="test_data",
-                        axes=[Axis(name="x", min=0.0, max=10.0, nbins=10)],
+                        axes=[{"name": "x", "min": 0.0, "max": 10.0, "nbins": 10}],
                         contents=[1.0] * 10,
                     )
                 ]
@@ -222,7 +222,7 @@ class TestWorkspaceNormalization:
         )
 
         # Compute observables
-        observables = workspace._compute_observables(workspace.domains[0])
+        observables = workspace._compute_observables()
 
         # Should be empty
         assert len(observables) == 0

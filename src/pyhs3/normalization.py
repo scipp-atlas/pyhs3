@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pytensor.tensor as pt
-from pytensor.graph.basic import clone_replace
+from pytensor.graph import clone_replace  # type: ignore[attr-defined]
 
 if TYPE_CHECKING:
     from pyhs3.context import Context
@@ -86,7 +86,7 @@ def gauss_legendre_integral(
     integral = pt.constant(0.0)
     for node, weight in zip(_GL_NODES, _GL_WEIGHTS, strict=False):
         x_i = half_width * pt.constant(float(node)) + midpoint
-        f_i = clone_replace(expression, replace={variable: x_i})
+        f_i = clone_replace(expression, replace={variable: x_i})  # type: ignore[arg-type]
         integral = integral + pt.constant(float(weight)) * f_i
 
     return cast("TensorVar", half_width * integral)

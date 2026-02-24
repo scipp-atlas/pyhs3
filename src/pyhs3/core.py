@@ -154,6 +154,10 @@ class Workspace(BaseModel):
             likelihood.distributions = Distributions(
                 cast(list[DistributionType], resolved)
             )
+        else:
+            errors.append(
+                f"Likelihood '{likelihood.name}' references unknown distributions"
+            )
 
         # Resolve data
         if self.data is not None:
@@ -165,18 +169,25 @@ class Workspace(BaseModel):
                 errors,
             )
             likelihood.data = Data(cast(list[DataType], resolved))
+        else:
+            errors.append(f"Likelihood '{likelihood.name}' references unknown data")
 
     def _resolve_analysis_fields(self, analysis: Analysis, errors: list[str]) -> None:
         """Resolve foreign key fields on an Analysis."""
         # Resolve likelihood
-        if isinstance(analysis.likelihood, str) and self.likelihoods is not None:
-            lk = self.likelihoods.get(analysis.likelihood)
-            if lk is None:
-                errors.append(
-                    f"Analysis '{analysis.name}' references unknown likelihood '{analysis.likelihood}'"
-                )
-            else:
-                analysis.likelihood = lk
+        if self.likelihoods is not None:
+            if isinstance(analysis.likelihood, str):
+                lk = self.likelihoods.get(analysis.likelihood)
+                if lk is None:
+                    errors.append(
+                        f"Analysis '{analysis.name}' references unknown likelihood '{analysis.likelihood}'"
+                    )
+                else:
+                    analysis.likelihood = lk
+        else:
+            errors.append(
+                f"Analysis '{analysis.name}' references unknown likelihood '{analysis.likelihood}'"
+            )
 
         # Resolve domains
         if self.domains is not None:
@@ -188,6 +199,8 @@ class Workspace(BaseModel):
                 errors,
             )
             analysis.domains = Domains(cast(list[DomainType], resolved))
+        else:
+            errors.append(f"Analysis '{analysis.name}' references unknown domains")
 
     @classmethod
     def load(

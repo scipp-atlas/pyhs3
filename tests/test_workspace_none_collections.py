@@ -7,7 +7,11 @@ covering branches in core.py model_post_init.
 
 from __future__ import annotations
 
+import pytest
+
 from pyhs3 import Workspace
+from pyhs3.analyses import Analyses, Analysis
+from pyhs3.likelihoods import Likelihood, Likelihoods
 from pyhs3.metadata import Metadata
 
 
@@ -53,6 +57,91 @@ class TestWorkspaceNoneCollections:
             domains=None,
         )
         assert workspace.domains is None
+
+
+class TestWorkspaceFKResolutionWithNoneCollections:
+    """Tests for FK resolution error branches when collections are None."""
+
+    def test_likelihood_references_distributions_when_none(self):
+        """Test error when likelihood references distributions but distributions=None."""
+        with pytest.raises(ValueError, match="references unknown distributions"):
+            Workspace(
+                metadata=Metadata(hs3_version="0.1.0"),
+                likelihoods=Likelihoods(
+                    [
+                        Likelihood(
+                            name="lk1",
+                            distributions=["dist1"],
+                            data=["obs1"],
+                        )
+                    ]
+                ),
+                distributions=None,  # Missing distributions collection
+                data=None,
+            )
+
+    def test_likelihood_references_data_when_none(self):
+        """Test error when likelihood references data but data=None."""
+        with pytest.raises(ValueError, match="references unknown data"):
+            Workspace(
+                metadata=Metadata(hs3_version="0.1.0"),
+                likelihoods=Likelihoods(
+                    [
+                        Likelihood(
+                            name="lk1",
+                            distributions=["dist1"],
+                            data=["obs1"],
+                        )
+                    ]
+                ),
+                distributions=None,
+                data=None,  # Missing data collection
+            )
+
+    def test_analysis_references_likelihood_when_none(self):
+        """Test error when analysis references likelihood but likelihoods=None."""
+        with pytest.raises(ValueError, match="references unknown likelihood"):
+            Workspace(
+                metadata=Metadata(hs3_version="0.1.0"),
+                analyses=Analyses(
+                    [
+                        Analysis(
+                            name="ana1",
+                            likelihood="lk1",
+                            domains=["domain1"],
+                        )
+                    ]
+                ),
+                likelihoods=None,  # Missing likelihoods collection
+            )
+
+    def test_analysis_references_domains_when_none(self):
+        """Test error when analysis references domains but domains=None."""
+        with pytest.raises(ValueError, match="references unknown domain"):
+            Workspace(
+                metadata=Metadata(hs3_version="0.1.0"),
+                likelihoods=Likelihoods(
+                    [
+                        Likelihood(
+                            name="lk1",
+                            distributions=[],
+                            data=[],
+                        )
+                    ]
+                ),
+                analyses=Analyses(
+                    [
+                        Analysis(
+                            name="ana1",
+                            likelihood="lk1",
+                            domains=["domain1"],
+                        )
+                    ]
+                ),
+                domains=None,  # Missing domains collection
+                distributions=None,
+                data=None,
+            )
 
 
 class TestWorkspaceRepr:

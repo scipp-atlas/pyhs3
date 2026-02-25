@@ -14,8 +14,8 @@ import numpy as np
 import pytensor.tensor as pt
 from pydantic import Field
 
+from pyhs3.axes import BinnedAxes
 from pyhs3.context import Context
-from pyhs3.data import BinnedAxes
 
 # Import existing distributions for constraint terms
 from pyhs3.distributions.core import Distribution

@@ -11,8 +11,8 @@ import hist
 import numpy as np
 from pydantic import Field
 
+from pyhs3.axes import BinnedAxes
 from pyhs3.collections import NamedCollection, NamedModel
-from pyhs3.data import BinnedAxes
 
 # Import existing distributions for constraint terms
 from pyhs3.distributions.histfactory.data import SampleData
@@ -42,7 +42,7 @@ class Sample(NamedModel):
                 - Variances from sample errors (squared)
 
         Examples:
-            >>> from pyhs3.distributions.histfactory.axes import BinnedAxes
+            >>> from pyhs3.axes import BinnedAxes
             >>> sample = Sample(
             ...     name="signal",
             ...     data={"contents": [10, 20, 15], "errors": [3, 4, 2.5]}
@@ -52,7 +52,7 @@ class Sample(NamedModel):
             Hist(Regular(3, 0, 3, name='x'), storage=Weight()) # Sum: WeightedSum(value=45, variance=31.25)
         """
         # Convert axes to hist.axis objects
-        # Access the root to get the actual axis (BinnedAxisRange or BinnedAxisEdges)
+        # Access the root to get the actual axis (RegularAxis or IrregularAxis)
         hist_axes = [axis.root.to_hist() for axis in axes]
 
         # Create histogram with Weight storage since we always have errors

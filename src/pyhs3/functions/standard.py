@@ -21,8 +21,8 @@ from pydantic import (
     model_validator,
 )
 
+from pyhs3.axes import BinnedAxis
 from pyhs3.context import Context
-from pyhs3.data import BinnedAxis
 from pyhs3.exceptions import custom_error_msg
 from pyhs3.functions.core import Function
 from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor

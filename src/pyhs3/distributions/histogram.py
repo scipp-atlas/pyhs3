@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from pyhs3.data import BinnedAxis
+from pyhs3.axes import BinnedAxis
 from pyhs3.distributions.core import Distribution
 
 

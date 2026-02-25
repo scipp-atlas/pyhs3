@@ -15,10 +15,10 @@ import pytensor.tensor as pt
 from pydantic import Field
 
 from pyhs3.context import Context
+from pyhs3.data import BinnedAxes
 
 # Import existing distributions for constraint terms
 from pyhs3.distributions.core import Distribution
-from pyhs3.distributions.histfactory.axes import Axes, BinnedAxis
 from pyhs3.distributions.histfactory.modifiers import HasConstraint, Modifier
 from pyhs3.distributions.histfactory.samples import Sample, Samples
 from pyhs3.networks import HasDependencies, HasInternalNodes
@@ -91,7 +91,7 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     """
 
     type: Literal["histfactory_dist"] = "histfactory_dist"
-    axes: Axes = Field(..., json_schema_extra={"preprocess": False})
+    axes: BinnedAxes = Field(..., json_schema_extra={"preprocess": False})
     samples: Samples = Field(..., json_schema_extra={"preprocess": False})
 
     def get_internal_nodes(self) -> list[Any]:
@@ -307,14 +307,13 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         process_axis = hist.axis.StrCategory(sample_names, name="process")
 
         # Convert remaining axes to hist.axis objects
-        # Access the root to get the actual axis (BinnedAxisRange or BinnedAxisEdges)
-        binning_axes = [axis.root.to_hist() for axis in self.axes]
+        binning_axes = [axis.to_hist() for axis in self.axes]
 
         # Create histogram with all axes (categorical first, then binning axes)
         h = hist.Hist(process_axis, *binning_axes, storage=hist.storage.Weight())
 
         # Calculate shape from axes (excluding the sample axis)
-        binning_shape = tuple(axis.get_nbins() for axis in self.axes)
+        binning_shape = tuple(axis.nbins for axis in self.axes)
 
         # Fill histogram by iterating over samples
         for i, sample in enumerate(self.samples):
@@ -337,8 +336,6 @@ distributions: dict[str, type[Distribution]] = {
 
 # Define what should be exported from this module
 __all__ = [
-    "Axes",
-    "BinnedAxis",
     "HistFactoryDistChannel",
     "distributions",
 ]

@@ -24,6 +24,7 @@ except ImportError:
 
 import pyhs3
 from pyhs3.context import Context
+from pyhs3.data import BinnedAxes
 from pyhs3.distributions import HistFactoryDistChannel
 from pyhs3.distributions.histfactory.modifiers import (
     HistoSysModifier,
@@ -1395,8 +1396,6 @@ class TestHistFactoryChannelHistConversion:
 
     def test_to_hist_values_match_samples(self):
         """Test that histogram values match individual Sample.to_hist() results."""
-        from pyhs3.distributions.histfactory.axes import Axes  # noqa: PLC0415
-
         axes_def = [{"name": "mass", "min": 100.0, "max": 140.0, "nbins": 4}]
         samples = [
             {
@@ -1420,8 +1419,7 @@ class TestHistFactoryChannelHistConversion:
         channel = HistFactoryDistChannel(name="channel", axes=axes_def, samples=samples)
         h_channel = channel.to_hist()
 
-        # Create Axes object for individual sample conversion
-        axes_obj = Axes(axes_def)
+        axes_obj = BinnedAxes(axes_def)
 
         # Convert each sample individually and compare
         for sample in channel.samples:

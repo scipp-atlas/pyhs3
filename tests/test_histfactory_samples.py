@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from pyhs3.distributions.histfactory.axes import Axes
+from pyhs3.data import Axes
 from pyhs3.distributions.histfactory.samples import Sample, SampleData, Samples
 
 hist = pytest.importorskip("hist", reason="hist not installed")

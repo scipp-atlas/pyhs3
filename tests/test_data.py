@@ -32,18 +32,8 @@ class TestAxis:
         """Test Axis creation with required min/max bounds."""
         axis = Axis(name="test_var", min=0.0, max=10.0)
         assert axis.name == "test_var"
-        assert axis.min == 0.0
-        assert axis.max == 10.0
-
-    def test_axis_min_required(self):
-        """Test that Axis requires min."""
-        with pytest.raises(ValidationError, match="Field required"):
-            Axis(name="x", max=10.0)
-
-    def test_axis_max_required(self):
-        """Test that Axis requires max."""
-        with pytest.raises(ValidationError, match="Field required"):
-            Axis(name="x", min=0.0)
+        assert not hasattr(axis, "min")
+        assert not hasattr(axis, "max")
 
 
 class TestUnbinnedAxis:
@@ -82,107 +72,105 @@ class TestBinnedAxis:
         assert axis.min == 100.0
         assert axis.max == 200.0
         assert axis.nbins == 50
-        assert axis.edges is None
+        assert axis.edges is not None
 
     def test_binned_axis_creation_irregular_binning(self):
         """Test BinnedAxis creation with irregular binning."""
         edges = [0.0, 1.0, 3.0, 10.0, 100.0]
         axis = BinnedAxis(name="pt", edges=edges)
         assert axis.name == "pt"
-        assert axis.min is None
-        assert axis.max is None
-        assert axis.nbins is None
+        assert axis.min == 0.0
+        assert axis.max == 100.0
+        assert axis.nbins == 4
         assert axis.edges == edges
 
     def test_binned_axis_validation_mixed_binning_fails(self):
         """Test that specifying both regular and irregular binning fails."""
-        with pytest.raises(ValueError, match="Cannot specify both regular binning"):
+        with pytest.raises(
+            ValidationError, match="must specify either regular binning"
+        ):
             BinnedAxis(name="test", min=0.0, max=10.0, nbins=5, edges=[0, 5, 10])
 
     def test_binned_axis_validation_no_binning_fails(self):
         """Test that BinnedAxis requires binning information."""
-        with pytest.raises(ValueError, match="must specify either regular binning"):
+        with pytest.raises(
+            ValidationError, match="must specify either regular binning"
+        ):
             BinnedAxis(name="test")
 
     def test_binned_axis_validation_no_binning_with_bounds_fails(self):
         """Test that BinnedAxis requires binning, not just bounds."""
-        with pytest.raises(ValueError, match="must specify either regular binning"):
+        with pytest.raises(
+            ValidationError, match="must specify either regular binning"
+        ):
             BinnedAxis(name="test", min=0.0, max=10.0)
 
     def test_binned_axis_validation_edges_too_short(self):
         """Test that edges array must have at least 2 elements."""
-        with pytest.raises(
-            ValueError, match="Edges array must have at least 2 elements"
-        ):
+        with pytest.raises(ValueError, match="must have at least 2 edges"):
             BinnedAxis(name="test", edges=[1.0])
 
     def test_binned_axis_validation_edges_not_ordered(self):
         """Test that edges must be in non-decreasing order."""
-        with pytest.raises(ValueError, match="Edges must be in non-decreasing order"):
+        with pytest.raises(ValueError, match="edges must be in ascending order"):
             BinnedAxis(name="test", edges=[1.0, 3.0, 2.0, 4.0])
 
-    def test_binned_axis_validation_edges_equal_allowed(self):
+    def test_binned_axis_validation_edges_equal_disallowed(self):
         """Test that equal adjacent edges are allowed."""
-        axis = BinnedAxis(name="test", edges=[1.0, 2.0, 2.0, 3.0])
-        assert axis.edges == [1.0, 2.0, 2.0, 3.0]
+        with pytest.raises(ValueError, match="edges must be in ascending order"):
+            BinnedAxis(name="test", edges=[1.0, 2.0, 2.0, 3.0])
 
-    def test_binned_axis_bin_edges_regular_binning(self):
-        """Test bin_edges property with regular binning."""
+    def test_binned_axis_edges_regular_binning(self):
+        """Test edges property with regular binning."""
         axis = BinnedAxis(name="mass", min=0.0, max=10.0, nbins=5)
-        edges = axis.bin_edges
 
         # Should return 6 edges for 5 bins: [0, 2, 4, 6, 8, 10]
         expected_edges = [0.0, 2.0, 4.0, 6.0, 8.0, 10.0]
-        assert len(edges) == 6
-        assert edges == pytest.approx(expected_edges)
+        assert len(axis.edges) == 6
+        assert axis.edges == pytest.approx(expected_edges)
 
-    def test_binned_axis_bin_edges_irregular_binning(self):
-        """Test bin_edges property with irregular binning."""
+    def test_binned_axis_edges_irregular_binning(self):
+        """Test edges property with irregular binning."""
         custom_edges = [0.0, 1.0, 5.0, 12.0, 25.0]
         axis = BinnedAxis(name="pt", edges=custom_edges)
-        edges = axis.bin_edges
 
         # Should return the provided edges exactly
-        assert edges == custom_edges
+        assert axis.edges == custom_edges
 
-    def test_binned_axis_bin_edges_single_bin(self):
-        """Test bin_edges property with single bin."""
+    def test_binned_axis_edges_single_bin(self):
+        """Test edges property with single bin."""
         axis = BinnedAxis(name="single", min=1.0, max=2.0, nbins=1)
-        edges = axis.bin_edges
 
         # Should return 2 edges for 1 bin: [1.0, 2.0]
-        assert len(edges) == 2
-        assert edges == pytest.approx([1.0, 2.0])
+        assert len(axis.edges) == 2
+        assert axis.edges == pytest.approx([1.0, 2.0])
 
-    def test_binned_axis_bin_edges_zero_range(self):
-        """Test bin_edges property with zero range (min=max)."""
+    def test_binned_axis_edges_zero_range(self):
+        """Test edges property with zero range (min=max)."""
         axis = BinnedAxis(name="zero_range", min=5.0, max=5.0, nbins=1)
-        edges = axis.bin_edges
 
         # Should return [5.0, 5.0] for zero range
-        assert len(edges) == 2
-        assert edges == pytest.approx([5.0, 5.0])
+        assert len(axis.edges) == 2
+        assert axis.edges == pytest.approx([5.0, 5.0])
 
-    def test_binned_axis_bin_edges_negative_range(self):
-        """Test bin_edges property with negative values."""
+    def test_binned_axis_edges_negative_range(self):
+        """Test edges property with negative values."""
         axis = BinnedAxis(name="negative", min=-10.0, max=-2.0, nbins=4)
-        edges = axis.bin_edges
 
         # Should handle negative values correctly: [-10, -8, -6, -4, -2]
         expected_edges = [-10.0, -8.0, -6.0, -4.0, -2.0]
-        assert len(edges) == 5
-        assert edges == pytest.approx(expected_edges)
+        assert len(axis.edges) == 5
+        assert axis.edges == pytest.approx(expected_edges)
 
-    def test_binned_axis_bin_edges_large_number_of_bins(self):
-        """Test bin_edges property with large number of bins."""
+    def test_binned_axis_edges_large_number_of_bins(self):
+        """Test edges property with large number of bins."""
         axis = BinnedAxis(name="many_bins", min=0.0, max=100.0, nbins=1000)
-        edges = axis.bin_edges
 
         # Should return 1001 edges for 1000 bins
-        assert len(edges) == 1001
-        assert edges[0] == pytest.approx(0.0)
-        assert edges[-1] == pytest.approx(100.0)
-        assert edges[500] == pytest.approx(50.0)  # Middle should be 50.0
+        assert len(axis.edges) == 1001
+        assert axis.edges[0] == pytest.approx(0.0)
+        assert axis.edges[-1] == pytest.approx(100.0)
+        assert axis.edges[500] == pytest.approx(50.0)  # Middle should be 50.0
 
     def test_binned_axis_to_hist_regular(self):
         """Test to_hist() method with regular binning."""
@@ -281,8 +269,8 @@ class TestPointData:
         assert data.axes is not None
         assert len(data.axes) == 1
         assert data.axes[0].name == "x"
-        assert data.axes[0].min == 0.0
-        assert data.axes[0].max == 10.0
+        assert not hasattr(data.axes[0], "min")
+        assert not hasattr(data.axes[0], "max")
 
     def test_point_data_with_multiple_axes(self):
         """Test PointData with multiple axes."""

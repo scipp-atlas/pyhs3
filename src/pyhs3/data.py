@@ -7,11 +7,21 @@ including point data, unbinned data, and binned data with uncertainties.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from itertools import pairwise
 from typing import Annotated, Any, Literal
 
 import hist
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    RootModel,
+    Tag,
+    model_validator,
+)
 
 from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.exceptions import custom_error_msg
@@ -23,19 +33,11 @@ class Axis(NamedModel):
     """
     Base axis specification for data coordinates.
 
-    Per HS3 spec: "Each struct must have the components name as well as max and min."
-    Used for point data and unbinned data to define observable bounds.
-
     Attributes:
         name: Name of the axis/variable
-        min: Minimum value (required)
-        max: Maximum value (required)
     """
 
     model_config = ConfigDict()
-
-    min: float = Field(..., repr=False)
-    max: float = Field(..., repr=False)
 
 
 class UnbinnedAxis(Axis):
@@ -51,100 +53,261 @@ class UnbinnedAxis(Axis):
         max: Maximum value (required)
     """
 
+    min: float = Field(..., repr=False)
+    max: float = Field(..., repr=False)
 
-class BinnedAxis(Axis):
+
+class RegularAxis(Axis):
     """
-    Axis for binned data.
-
-    Per HS3 spec: Must specify binning through either:
-    - Regular binning: min, max, nbins
-    - Irregular binning: edges
-
     Attributes:
         name: Name of the axis/variable
-        min: Minimum value (for regular binning, optional for irregular)
-        max: Maximum value (for regular binning, optional for irregular)
+        min: Minimum value
+        max: Maximum value
         nbins: Number of bins (for regular binning)
-        edges: Bin edges array (for irregular binning, length n+1)
     """
 
-    # Override to make min/max optional for irregular binning
-    min: float | None = Field(default=None, repr=False)  # type: ignore[assignment]
-    max: float | None = Field(default=None, repr=False)  # type: ignore[assignment]
-
-    nbins: int | None = Field(default=None, repr=False)
-    edges: list[float] | None = Field(default=None, repr=False)
+    min: float = Field(..., repr=False)
+    max: float = Field(..., repr=False)
+    nbins: int = Field(repr=False)
 
     @model_validator(mode="after")
-    def validate_binning(self) -> BinnedAxis:
-        """Ensure proper binning specification for binned data."""
-        # For regular binning, need min, max, and nbins
-        has_regular = all(x is not None for x in [self.min, self.max, self.nbins])
-        # For irregular binning, need edges
-        has_irregular = self.edges is not None
-
-        # Either both regular binning or irregular binning, but not mixed
-        if has_regular and has_irregular:
-            msg = "Cannot specify both regular binning (min/max/nbins) and irregular binning (edges)"
+    def check_min_le_max(self) -> RegularAxis:
+        """Validate that max >= min."""
+        if self.max < self.min:
+            msg = f"Axis '{self.name}': max ({self.max}) must be >= min ({self.min})"
             raise ValueError(msg)
+        return self
 
-        # Must have one or the other
-        if not has_regular and not has_irregular:
-            msg = f"Axis '{self.name}' must specify either regular binning (nbins/min/max) or irregular binning (edges)"
+    @model_validator(mode="after")
+    def check_binning(self) -> RegularAxis:
+        """Validate that max >= min."""
+        if self.nbins <= 0:
+            msg = f"RegularAxis '{self.name}' must have positive number of bins, got {self.nbins}"
             raise ValueError(msg)
-
-        # For irregular binning, validate edges
-        if has_irregular and self.edges is not None:
-            if len(self.edges) < 2:
-                msg = "Edges array must have at least 2 elements"
-                raise ValueError(msg)
-            if not all(
-                self.edges[i] <= self.edges[i + 1]  # pylint: disable=unsubscriptable-object
-                for i in range(len(self.edges) - 1)
-            ):
-                msg = "Edges must be in non-decreasing order"
-                raise ValueError(msg)
-
         return self
 
     @property
-    def bin_edges(self) -> list[float]:
+    def edges(self) -> list[float]:
         """Get the bin edges for this axis.
 
         Returns:
-            List of bin edges. For regular binning, generates edges using linspace.
-            For irregular binning, returns the provided edges.
+            List of bin edges. Generates edges using linspace.
         """
-        if self.edges is not None:
-            return self.edges
+        return list(np.linspace(self.min, self.max, self.nbins + 1))
 
-        if self.min is not None and self.max is not None and self.nbins is not None:
-            return list(np.linspace(self.min, self.max, self.nbins + 1))
-
-        # This should never happen due to validate_binning
-        msg = f"Axis '{self.name}' has no binning information"
-        raise ValueError(msg)
-
-    def to_hist(self) -> Any:
+    def to_hist(self) -> hist.axis.Regular:
         """
         Convert this axis to a hist.axis object.
 
         Returns:
-            A hist.axis object (Regular or Variable) depending on binning type
-
-        Raises:
-            ValueError: If axis has insufficient binning information
+            A hist.axis.Regular object
         """
-        if self.edges is not None:
-            # Irregular binning
-            return hist.axis.Variable(self.edges, name=self.name)
-
-        # Regular binning
-        if TYPE_CHECKING:
-            assert self.min is not None
-            assert self.max is not None
-            assert self.nbins is not None
         return hist.axis.Regular(self.nbins, self.min, self.max, name=self.name)
+
+
+class IrregularAxis(Axis):
+    """
+    Attributes:
+        name: Name of the axis/variable
+        edges: Bin edges array (length n+1)
+    """
+
+    edges: list[float] = Field(repr=False)
+
+    @model_validator(mode="after")
+    def validate_binning(self) -> IrregularAxis:
+        """Ensure proper binning specification for binned data."""
+        if len(self.edges) < 2:
+            msg = f"IrregularAxis '{self.name}' must have at least 2 edges"
+            raise ValueError(msg)
+        # Check that edges are in ascending order
+        for prev, curr in pairwise(self.edges):
+            if curr <= prev:
+                msg = f"IrregularAxis '{self.name}' edges must be in ascending order"
+                raise ValueError(msg)
+        return self
+
+    @property
+    def min(self) -> float:
+        """Return lower edge."""
+        return self.edges[0]
+
+    @property
+    def max(self) -> float:
+        """Return upper edge."""
+        return self.edges[-1]
+
+    @property
+    def nbins(self) -> int:
+        """Get the nbins for this axis.
+
+        Returns:
+            Number of bins.
+        """
+        return len(self.edges) - 1
+
+    def to_hist(self) -> hist.axis.Variable:
+        """
+        Convert this axis to a hist.axis object.
+
+        Returns:
+            A hist.axis.Variable object
+        """
+        return hist.axis.Variable(self.edges, name=self.name)
+
+
+def binned_axis_discriminator(v: Any) -> str | None:
+    if isinstance(v, dict):
+        if "edges" in v and "nbins" not in v:
+            return "irregular"
+        if "nbins" in v and "edges" not in v:
+            return "regular"
+        return None
+
+    # Already-constructed model case
+    if isinstance(v, IrregularAxis):
+        return "irregular"
+    if isinstance(v, RegularAxis):
+        return "regular"
+
+    return None
+
+
+BinnedAxisUnion = Annotated[
+    (
+        Annotated[RegularAxis, Tag("regular")]
+        | Annotated[IrregularAxis, Tag("irregular")]
+    ),
+    Discriminator(binned_axis_discriminator),
+    custom_error_msg(
+        {
+            "union_tag_not_found": "Unknown axis {input}'. You must specify either regular binning (nbins/min/max) or irregular binning (edges).",
+            "missing": "{input_value['name']} is missing {loc}",
+        }
+    ),
+]
+
+
+class BinnedAxis(RootModel[BinnedAxisUnion]):
+    """
+    Binned axis specification.
+
+    Supports both regular binning (min/max/nbins) and irregular binning (edges)
+    through a discriminated union. The discriminator automatically selects the
+    correct type based on the presence of 'nbins' or 'edges' fields.
+    """
+
+    root: BinnedAxisUnion
+
+    @property
+    def name(self) -> str:
+        """Get the axis name."""
+        return self.root.name
+
+    @property
+    def nbins(self) -> int:
+        """Get the number of bins."""
+        return self.root.nbins
+
+    @property
+    def min(self) -> float:
+        """Get the min."""
+        return self.root.min
+
+    @property
+    def max(self) -> float:
+        """Get the max."""
+        return self.root.max
+
+    @property
+    def edges(self) -> list[float]:
+        """Get the edges."""
+        return self.root.edges
+
+    def to_hist(self) -> hist.axis.Variable | hist.axis.Regular:
+        """
+        Convert this axis to a hist.axis object.
+
+        Returns:
+            A hist.axis.Variable object
+        """
+        return self.root.to_hist()
+
+
+class BinnedAxes(RootModel[list[BinnedAxis]]):
+    """
+    Collection of binned axes.
+
+    Manages a list of BinnedAxis instances, providing list-like access and
+    validation. Each axis can use either regular or irregular binning.
+    """
+
+    root: list[BinnedAxis] = Field(default_factory=list)
+
+    def __getitem__(self, index: int) -> BinnedAxis:
+        """Get axis by index."""
+        return self.root[index]
+
+    def __len__(self) -> int:
+        """Get number of axes."""
+        return len(self.root)
+
+    def __iter__(self) -> Iterator[BinnedAxis]:  # type: ignore[override]  # https://github.com/pydantic/pydantic/issues/8872
+        """Iterate over axes."""
+        return iter(self.root)
+
+    def get_total_bins(self) -> int:
+        """Calculate total number of bins across all axes."""
+        total_bins = 1
+        for axis in self.root:
+            total_bins *= axis.nbins
+        return total_bins
+
+
+class UnbinnedAxes(RootModel[list[UnbinnedAxis]]):
+    """
+    Collection of unbinned axes.
+
+    Manages a list of UnbinnedAxis instances, providing list-like access and
+    validation. Each axis can use either regular or irregular binning.
+    """
+
+    root: list[UnbinnedAxis] = Field(default_factory=list)
+
+    def __getitem__(self, index: int) -> UnbinnedAxis:
+        """Get axis by index."""
+        return self.root[index]
+
+    def __len__(self) -> int:
+        """Get number of axes."""
+        return len(self.root)
+
+    def __iter__(self) -> Iterator[UnbinnedAxis]:  # type: ignore[override]  # https://github.com/pydantic/pydantic/issues/8872
+        """Iterate over axes."""
+        return iter(self.root)
+
+
+class Axes(RootModel[list[BinnedAxis | UnbinnedAxis]]):
+    """
+    Collection of axes.
+
+    Manages a list of BinnedAxis instances, providing list-like access and
+    validation. Each axis can use either regular or irregular binning.
+    """
+
+    root: list[BinnedAxis | UnbinnedAxis] = Field(default_factory=list)
+
+    def __getitem__(self, index: int) -> BinnedAxis | UnbinnedAxis:
+        """Get axis by index."""
+        return self.root[index]
+
+    def __len__(self) -> int:
+        """Get number of axes."""
+        return len(self.root)
+
+    def __iter__(self) -> Iterator[BinnedAxis | UnbinnedAxis]:  # type: ignore[override]  # https://github.com/pydantic/pydantic/issues/8872
+        """Iterate over axes."""
+        return iter(self.root)
 
 
 class GaussianUncertainty(BaseModel):
@@ -366,12 +529,7 @@ class BinnedData(Datum):
         # BinnedAxis.validate_binning already ensures each axis has valid binning
         expected_bins = 1
         for axis in self.axes:
-            if axis.nbins is not None:
-                # Regular binning
-                expected_bins *= axis.nbins
-            elif axis.edges is not None:
-                # Irregular binning
-                expected_bins *= len(axis.edges) - 1
+            expected_bins *= axis.nbins
 
         # Check contents length
         if len(self.contents) != expected_bins:
@@ -426,16 +584,7 @@ class BinnedData(Datum):
         h = hist.Hist(*hist_axes, storage=storage)
 
         # Calculate shape from axes
-        shape = tuple(
-            (
-                axis.nbins
-                if axis.nbins is not None
-                else len(axis.edges) - 1
-                if axis.edges is not None
-                else 0
-            )
-            for axis in self.axes
-        )
+        shape = tuple(axis.nbins for axis in self.axes)
 
         # Reshape contents for assignment
         if self.uncertainty is not None:

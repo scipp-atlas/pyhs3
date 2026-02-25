@@ -8,9 +8,8 @@ including unbinned axes (with min/max bounds) and binned axes
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from itertools import pairwise
-from typing import Annotated, Any, Generic, TypeVar
+from typing import Annotated, Any, Literal, TypeAlias, TypeVar
 
 import hist
 import numpy as np
@@ -18,12 +17,11 @@ from pydantic import (
     ConfigDict,
     Discriminator,
     Field,
-    RootModel,
     Tag,
     model_validator,
 )
 
-from pyhs3.collections import NamedModel
+from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.exceptions import custom_error_msg
 
 
@@ -42,8 +40,7 @@ class UnbinnedAxis(Axis):
     """
     Axis for unbinned data.
 
-    Alias for Axis with required min/max bounds. Provided for backward
-    compatibility and semantic clarity.
+    Alias for Axis with required min/max bounds.
 
     Attributes:
         name: Name of the axis/variable
@@ -53,6 +50,46 @@ class UnbinnedAxis(Axis):
 
     min: float = Field(..., repr=False)
     max: float = Field(..., repr=False)
+
+    @model_validator(mode="after")
+    def check_min_le_max(self) -> UnbinnedAxis:
+        """Validate that max >= min when both are provided."""
+        if self.max < self.min:
+            msg = f"UnbinnedAxis '{self.name}': max ({self.max}) must be >= min ({self.min})"
+            raise ValueError(msg)
+        return self
+
+    def to_hist(self) -> Any:
+        """
+        Convert this axis to a hist.axis object.
+
+        This is a base implementation that should be overridden by subclasses
+        that have specific binning information (like BinnedAxis).
+
+        Returns:
+            A hist.axis object
+
+        Raises:
+            ValueError: If axis has insufficient binning information
+        """
+        msg = f"UnbinnedAxis '{self.name}' does not have binning information for histogram conversion"
+        raise ValueError(msg)
+
+
+class ConstantAxis(Axis):
+    """
+    Axis for constant data.
+
+    Alias for Axis with required const field.
+
+    Attributes:
+        name: Name of the axis/variable
+        const: true (required)
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    const: Literal[True] = Field(True, repr=False, init=False)
 
 
 class RegularAxis(Axis):
@@ -188,32 +225,9 @@ BinnedAxis = Annotated[
 TAxis = TypeVar("TAxis", bound=Axis)
 
 
-class AxesCollection(RootModel[list[TAxis]], Generic[TAxis]):
+class BinnedAxes(NamedCollection[BinnedAxis]):
     """
-    Collection of axes.
-
-    Manages a list of TAxis instances, providing list-like access and
-    validation. Each axis can use either regular or irregular binning.
-    """
-
-    root: list[TAxis] = Field(default_factory=list)
-
-    def __getitem__(self, index: int) -> TAxis:
-        """Get axis by index."""
-        return self.root[index]
-
-    def __len__(self) -> int:
-        """Get number of axes."""
-        return len(self.root)
-
-    def __iter__(self) -> Iterator[TAxis]:  # type: ignore[override]  # https://github.com/pydantic/pydantic/issues/887
-        """Iterate over axes."""
-        return iter(self.root)
-
-
-class BinnedAxes(AxesCollection[BinnedAxis]):
-    """
-    Collection of binned axes.
+    Collection of binned axis.
     """
 
     def get_total_bins(self) -> int:
@@ -224,5 +238,28 @@ class BinnedAxes(AxesCollection[BinnedAxis]):
         return total
 
 
-UnbinnedAxes = AxesCollection[UnbinnedAxis]
-Axes = AxesCollection[BinnedAxis | UnbinnedAxis]
+DomainAxis: TypeAlias = UnbinnedAxis | ConstantAxis
+
+
+class UnbinnedAxes(NamedCollection[UnbinnedAxis]):
+    """
+    Collection of UnbinnedAxis.
+    """
+
+    root: list[UnbinnedAxis] = Field(default_factory=list)
+
+
+class Axes(NamedCollection[BinnedAxis | UnbinnedAxis]):
+    """
+    Collection of BinnedAxis | UnbinnedAxis.
+    """
+
+    root: list[BinnedAxis | UnbinnedAxis] = Field(default_factory=list)
+
+
+class DomainAxes(NamedCollection[DomainAxis]):
+    """
+    Collection of BinnedAxis | UnbinnedAxis.
+    """
+
+    root: list[DomainAxis] = Field(default_factory=list)

@@ -15,6 +15,7 @@ from pyhs3.axes import (
     Axis,
     BinnedAxes,
     BinnedAxis,
+    ConstantAxis,
     IrregularAxis,
     RegularAxis,
     UnbinnedAxis,
@@ -51,6 +52,11 @@ class TestUnbinnedAxis:
         assert axis.min == 0.0
         assert axis.max == 5.0
 
+    def test_unbinned_axis_creation_name_only(self):
+        """Test basic Axis creation with name only."""
+        with pytest.raises(ValidationError, match="Field required"):
+            UnbinnedAxis(name="test_param")
+
     def test_unbinned_axis_min_required(self):
         """Test that UnbinnedAxis requires min."""
         with pytest.raises(ValidationError, match="Field required"):
@@ -65,6 +71,114 @@ class TestUnbinnedAxis:
         """Test that UnbinnedAxis requires both min and max."""
         with pytest.raises(ValidationError):
             UnbinnedAxis(name="x")
+
+    def test_unbinned_axis_creation_with_range(self):
+        """Test Axis creation with min and max values."""
+        axis = UnbinnedAxis(name="test_param", min=0.0, max=10.0)
+        assert axis.name == "test_param"
+        assert axis.min == 0.0
+        assert axis.max == 10.0
+
+    def test_unbinned_axis_creation_min_only(self):
+        """Test Axis creation with only min value."""
+        with pytest.raises(ValidationError, match="Field required"):
+            UnbinnedAxis(name="test_param", min=0.0)
+
+    def test_unbinned_axis_creation_max_only(self):
+        """Test Axis creation with only max value."""
+        with pytest.raises(ValidationError, match="Field required"):
+            UnbinnedAxis(name="test_param", max=10.0)
+
+    def test_unbinned_axis_validation_max_less_than_min_raises_error(self):
+        """Test that Axis validation raises ValueError when max < min."""
+        with pytest.raises(
+            ValueError,
+            match=r"UnbinnedAxis 'test_param': max \(5\.0\) must be >= min \(10\.0\)",
+        ):
+            UnbinnedAxis(name="test_param", min=10.0, max=5.0)
+
+    def test_unbinned_axis_validation_max_equal_min_allowed(self):
+        """Test that Axis allows max == min."""
+        axis = UnbinnedAxis(name="test_param", min=5.0, max=5.0)
+        assert axis.min == 5.0
+        assert axis.max == 5.0
+
+    def test_unbinned_axis_validation_max_greater_than_min_allowed(self):
+        """Test that Axis allows max > min."""
+        axis = UnbinnedAxis(name="test_param", min=5.0, max=10.0)
+        assert axis.min == 5.0
+        assert axis.max == 10.0
+
+    def test_unbinned_axis_to_hist_raises_not_implemented(self):
+        """Test that base Axis.to_hist() raises ValueError."""
+        axis = UnbinnedAxis(name="test_param", min=0.0, max=10.0)
+        with pytest.raises(
+            ValueError,
+            match=r"UnbinnedAxis 'test_param' does not have binning information for histogram conversion",
+        ):
+            axis.to_hist()
+
+    def test_unbinned_axis_validation_negative_values(self):
+        """Test Axis validation with negative values."""
+        # Valid: both negative, max > min
+        axis1 = UnbinnedAxis(name="param1", min=-10.0, max=-5.0)
+        assert axis1.min == -10.0
+        assert axis1.max == -5.0
+
+        # Valid: min negative, max positive
+        axis2 = UnbinnedAxis(name="param2", min=-5.0, max=5.0)
+        assert axis2.min == -5.0
+        assert axis2.max == 5.0
+
+        # Invalid: max < min with negative values
+        with pytest.raises(
+            ValueError, match=r"Axis 'param3': max \(-10\.0\) must be >= min \(-5\.0\)"
+        ):
+            UnbinnedAxis(name="param3", min=-5.0, max=-10.0)
+
+    def test_unbinned_axis_from_dict(self):
+        """Test Axis creation from dictionary."""
+        config = {"name": "test_param", "min": 0.0, "max": 10.0}
+        axis = UnbinnedAxis(**config)
+        assert axis.name == "test_param"
+        assert axis.min == 0.0
+        assert axis.max == 10.0
+
+    def test_unbinned_axis_from_dict_validation_error(self):
+        """Test that Axis.from_dict also validates range constraints."""
+        config = {"name": "test_param", "min": 10.0, "max": 5.0}
+        with pytest.raises(
+            ValueError,
+            match=r"Axis 'test_param': max \(5\.0\) must be >= min \(10\.0\)",
+        ):
+            UnbinnedAxis(**config)
+
+
+class TestConstantAxis:
+    """Tests for the ConstantAxis class."""
+
+    def test_constant_axis_creation(self):
+        """Test ConstantAxis creation with const=True."""
+        axis = ConstantAxis(name="x", const=True)
+        assert axis.name == "x"
+        assert axis.const is True
+
+    def test_constant_axis_const_not_required(self):
+        """Test that ConstantAxis does not require const"""
+        axis = ConstantAxis(name="x")
+        assert axis.name == "x"
+        assert axis.const is True
+
+    def test_constant_axis_const_required(self):
+        """Test that ConstantAxis const=False."""
+        with pytest.raises(ValidationError, match="Input should be True"):
+            ConstantAxis(name="x", const=False)
+
+    def test_constant_axis_not_mutable(self):
+        """Test that ConstantAxis is frozen."""
+        axis = ConstantAxis(name="x")
+        with pytest.raises(ValidationError):
+            axis.const = False
 
 
 class TestRegularAxis:
@@ -361,7 +475,7 @@ class TestAxes:
 
     def test_axes_creation_empty(self):
         """Test empty Axes creation."""
-        axes = BinnedAxes()
+        axes = BinnedAxes([])
         assert len(axes) == 0
         assert axes.get_total_bins() == 1  # No axes means 1 bin total
 

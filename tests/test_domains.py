@@ -9,103 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from pyhs3.domains import Axis, Domain, Domains, ProductDomain
-
-
-class TestAxis:
-    """Tests for the Axis class."""
-
-    def test_axis_creation_basic(self):
-        """Test basic Axis creation with name only."""
-        axis = Axis(name="test_param")
-        assert axis.name == "test_param"
-        assert axis.min is None
-        assert axis.max is None
-
-    def test_axis_creation_with_range(self):
-        """Test Axis creation with min and max values."""
-        axis = Axis(name="test_param", min=0.0, max=10.0)
-        assert axis.name == "test_param"
-        assert axis.min == 0.0
-        assert axis.max == 10.0
-
-    def test_axis_creation_min_only(self):
-        """Test Axis creation with only min value."""
-        axis = Axis(name="test_param", min=0.0)
-        assert axis.name == "test_param"
-        assert axis.min == 0.0
-        assert axis.max is None
-
-    def test_axis_creation_max_only(self):
-        """Test Axis creation with only max value."""
-        axis = Axis(name="test_param", max=10.0)
-        assert axis.name == "test_param"
-        assert axis.min is None
-        assert axis.max == 10.0
-
-    def test_axis_validation_max_less_than_min_raises_error(self):
-        """Test that Axis validation raises ValueError when max < min."""
-        with pytest.raises(
-            ValueError,
-            match=r"Axis 'test_param': max \(5\.0\) must be >= min \(10\.0\)",
-        ):
-            Axis(name="test_param", min=10.0, max=5.0)
-
-    def test_axis_validation_max_equal_min_allowed(self):
-        """Test that Axis allows max == min."""
-        axis = Axis(name="test_param", min=5.0, max=5.0)
-        assert axis.min == 5.0
-        assert axis.max == 5.0
-
-    def test_axis_validation_max_greater_than_min_allowed(self):
-        """Test that Axis allows max > min."""
-        axis = Axis(name="test_param", min=5.0, max=10.0)
-        assert axis.min == 5.0
-        assert axis.max == 10.0
-
-    def test_axis_to_hist_raises_not_implemented(self):
-        """Test that base Axis.to_hist() raises ValueError."""
-        axis = Axis(name="test_param", min=0.0, max=10.0)
-        with pytest.raises(
-            ValueError,
-            match=r"Axis 'test_param' does not have binning information for histogram conversion",
-        ):
-            axis.to_hist()
-
-    def test_axis_validation_negative_values(self):
-        """Test Axis validation with negative values."""
-        # Valid: both negative, max > min
-        axis1 = Axis(name="param1", min=-10.0, max=-5.0)
-        assert axis1.min == -10.0
-        assert axis1.max == -5.0
-
-        # Valid: min negative, max positive
-        axis2 = Axis(name="param2", min=-5.0, max=5.0)
-        assert axis2.min == -5.0
-        assert axis2.max == 5.0
-
-        # Invalid: max < min with negative values
-        with pytest.raises(
-            ValueError, match=r"Axis 'param3': max \(-10\.0\) must be >= min \(-5\.0\)"
-        ):
-            Axis(name="param3", min=-5.0, max=-10.0)
-
-    def test_axis_from_dict(self):
-        """Test Axis creation from dictionary."""
-        config = {"name": "test_param", "min": 0.0, "max": 10.0}
-        axis = Axis(**config)
-        assert axis.name == "test_param"
-        assert axis.min == 0.0
-        assert axis.max == 10.0
-
-    def test_axis_from_dict_validation_error(self):
-        """Test that Axis.from_dict also validates range constraints."""
-        config = {"name": "test_param", "min": 10.0, "max": 5.0}
-        with pytest.raises(
-            ValueError,
-            match=r"Axis 'test_param': max \(5\.0\) must be >= min \(10\.0\)",
-        ):
-            Axis(**config)
+from pyhs3.axes import UnbinnedAxis
+from pyhs3.domains import Domain, Domains, ProductDomain
 
 
 class TestDomain:
@@ -156,8 +61,8 @@ class TestProductDomain:
     def test_product_domain_creation(self):
         """Test basic ProductDomain creation."""
         axes = [
-            Axis(name="param1", min=0.0, max=1.0),
-            Axis(name="param2", min=-5.0, max=5.0),
+            UnbinnedAxis(name="param1", min=0.0, max=1.0),
+            UnbinnedAxis(name="param2", min=-5.0, max=5.0),
         ]
         domain = ProductDomain(name="test_domain", axes=axes)
         assert domain.name == "test_domain"
@@ -205,9 +110,9 @@ class TestProductDomain:
     def test_product_domain_duplicate_axis_names_raises_error(self):
         """Test that ProductDomain raises ValueError for duplicate axis names."""
         axes = [
-            Axis(name="param1", min=0.0, max=1.0),
-            Axis(name="param2", min=-5.0, max=5.0),
-            Axis(name="param1", min=2.0, max=3.0),  # Duplicate name
+            UnbinnedAxis(name="param1", min=0.0, max=1.0),
+            UnbinnedAxis(name="param2", min=-5.0, max=5.0),
+            UnbinnedAxis(name="param1", min=2.0, max=3.0),  # Duplicate name
         ]
         with pytest.raises(
             ValueError,
@@ -218,11 +123,11 @@ class TestProductDomain:
     def test_product_domain_multiple_duplicate_axis_names_raises_error(self):
         """Test that ProductDomain raises ValueError for multiple duplicate axis names."""
         axes = [
-            Axis(name="param1", min=0.0, max=1.0),
-            Axis(name="param2", min=-5.0, max=5.0),
-            Axis(name="param1", min=2.0, max=3.0),  # Duplicate param1
-            Axis(name="param3", min=0.0, max=10.0),
-            Axis(name="param2", min=0.0, max=1.0),  # Duplicate param2
+            UnbinnedAxis(name="param1", min=0.0, max=1.0),
+            UnbinnedAxis(name="param2", min=-5.0, max=5.0),
+            UnbinnedAxis(name="param1", min=2.0, max=3.0),  # Duplicate param1
+            UnbinnedAxis(name="param3", min=0.0, max=10.0),
+            UnbinnedAxis(name="param2", min=0.0, max=1.0),  # Duplicate param2
         ]
         with pytest.raises(
             ValueError,
@@ -238,7 +143,7 @@ class TestProductDomain:
 
         # Single axis domain
         single_axis_domain = ProductDomain(
-            name="single", axes=[Axis(name="param1", min=0.0, max=1.0)]
+            name="single", axes=[UnbinnedAxis(name="param1", min=0.0, max=1.0)]
         )
         assert single_axis_domain.dimension == 1
 
@@ -246,9 +151,9 @@ class TestProductDomain:
         multi_axis_domain = ProductDomain(
             name="multi",
             axes=[
-                Axis(name="param1", min=0.0, max=1.0),
-                Axis(name="param2", min=-5.0, max=5.0),
-                Axis(name="param3", min=0.0, max=10.0),
+                UnbinnedAxis(name="param1", min=0.0, max=1.0),
+                UnbinnedAxis(name="param2", min=-5.0, max=5.0),
+                UnbinnedAxis(name="param3", min=0.0, max=10.0),
             ],
         )
         assert multi_axis_domain.dimension == 3
@@ -261,7 +166,7 @@ class TestProductDomain:
 
         # Single axis domain
         single_axis_domain = ProductDomain(
-            name="single", axes=[Axis(name="param1", min=0.0, max=1.0)]
+            name="single", axes=[UnbinnedAxis(name="param1", min=0.0, max=1.0)]
         )
         assert single_axis_domain.axis_names == ["param1"]
 
@@ -269,9 +174,9 @@ class TestProductDomain:
         multi_axis_domain = ProductDomain(
             name="multi",
             axes=[
-                Axis(name="param1", min=0.0, max=1.0),
-                Axis(name="param2", min=-5.0, max=5.0),
-                Axis(name="param3", min=0.0, max=10.0),
+                UnbinnedAxis(name="param1", min=0.0, max=1.0),
+                UnbinnedAxis(name="param2", min=-5.0, max=5.0),
+                UnbinnedAxis(name="param3", min=0.0, max=10.0),
             ],
         )
         assert multi_axis_domain.axis_names == ["param1", "param2", "param3"]
@@ -286,8 +191,8 @@ class TestProductDomain:
         domain = ProductDomain(
             name="test",
             axes=[
-                Axis(name="param1", min=0.0, max=1.0),
-                Axis(name="param2", min=-5.0, max=5.0),
+                UnbinnedAxis(name="param1", min=0.0, max=1.0),
+                UnbinnedAxis(name="param2", min=-5.0, max=5.0),
             ],
         )
         assert len(domain) == 2
@@ -297,8 +202,8 @@ class TestProductDomain:
         domain = ProductDomain(
             name="test",
             axes=[
-                Axis(name="param1", min=0.0, max=1.0),
-                Axis(name="param2", min=-5.0, max=5.0),
+                UnbinnedAxis(name="param1", min=0.0, max=1.0),
+                UnbinnedAxis(name="param2", min=-5.0, max=5.0),
             ],
         )
 
@@ -315,18 +220,16 @@ class TestProductDomain:
         domain = ProductDomain(
             name="test",
             axes=[
-                Axis(name="param1", min=0.0, max=1.0),
-                Axis(name="param2", min=-5.0, max=5.0),
-                Axis(name="param3"),  # No bounds
+                UnbinnedAxis(name="param1", min=0.0, max=1.0),
+                UnbinnedAxis(name="param2", min=-5.0, max=5.0),
+                UnbinnedAxis(name="param3", min=-10.0, max=10.0),
             ],
         )
 
         # Existing axes with bounds
         assert domain.get("param1") == (0.0, 1.0)
         assert domain.get("param2") == (-5.0, 5.0)
-
-        # Existing axis without bounds
-        assert domain.get("param3") == (None, None)
+        assert domain.get("param3") == (-10.0, 10.0)
 
         # Non-existing axis with default
         assert domain.get("nonexistent") == (None, None)
@@ -337,18 +240,16 @@ class TestProductDomain:
         domain = ProductDomain(
             name="test",
             axes=[
-                Axis(name="param1", min=0.0, max=1.0),
-                Axis(name="param2", min=-5.0, max=5.0),
-                Axis(name="param3"),  # No bounds
+                UnbinnedAxis(name="param1", min=0.0, max=1.0),
+                UnbinnedAxis(name="param2", min=-5.0, max=5.0),
+                UnbinnedAxis(name="param3", min=-10.0, max=10.0),
             ],
         )
 
         # Existing axes with bounds
         assert domain["param1"] == (0.0, 1.0)
         assert domain["param2"] == (-5.0, 5.0)
-
-        # Existing axis without bounds
-        assert domain["param3"] == (None, None)
+        assert domain.get("param3") == (-10.0, 10.0)
 
         # Non-existing axis should raise KeyError
         with pytest.raises(
@@ -368,10 +269,10 @@ class TestDomains:
     def test_domains_creation_with_domains(self):
         """Test Domains creation with domain list."""
         domain1 = ProductDomain(
-            name="domain1", axes=[Axis(name="param1", min=0.0, max=1.0)]
+            name="domain1", axes=[UnbinnedAxis(name="param1", min=0.0, max=1.0)]
         )
         domain2 = ProductDomain(
-            name="domain2", axes=[Axis(name="param2", min=-1.0, max=1.0)]
+            name="domain2", axes=[UnbinnedAxis(name="param2", min=-1.0, max=1.0)]
         )
 
         domains = Domains([domain1, domain2])
@@ -401,7 +302,8 @@ class TestDomains:
             ValueError, match=r"Axis 'param1': max \(5\.0\) must be >= min \(10\.0\)"
         ):
             ProductDomain(
-                name="invalid_domain", axes=[Axis(name="param1", min=10.0, max=5.0)]
+                name="invalid_domain",
+                axes=[UnbinnedAxis(name="param1", min=10.0, max=5.0)],
             )
 
 

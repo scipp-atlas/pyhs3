@@ -11,52 +11,9 @@ from typing import Annotated, Any, Literal
 
 from pydantic import ConfigDict, Field, PrivateAttr, model_validator
 
+from pyhs3.axes import ConstantAxis, DomainAxes, DomainAxis, UnbinnedAxis
 from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.exceptions import custom_error_msg
-
-
-class Axis(NamedModel):
-    """
-    Axis specification for parameter domains.
-
-    Defines a single axis of a parameter space with a name and numeric range.
-    Used within domains to specify multi-dimensional parameter spaces
-    for integration, likelihood evaluation, and parameter constraints.
-
-    Parameters:
-        name: Name identifier for the axis
-        min: Minimum value for the axis range (optional)
-        max: Maximum value for the axis range (optional)
-    """
-
-    model_config = ConfigDict()
-
-    min: float | None = Field(default=None, repr=False)
-    max: float | None = Field(default=None, repr=False)
-
-    @model_validator(mode="after")
-    def check_min_le_max(self) -> Axis:
-        """Validate that max >= min when both are provided."""
-        if self.max is not None and self.min is not None and self.max < self.min:
-            msg = f"Axis '{self.name}': max ({self.max}) must be >= min ({self.min})"
-            raise ValueError(msg)
-        return self
-
-    def to_hist(self) -> Any:
-        """
-        Convert this axis to a hist.axis object.
-
-        This is a base implementation that should be overridden by subclasses
-        that have specific binning information (like BinnedAxis).
-
-        Returns:
-            A hist.axis object
-
-        Raises:
-            ValueError: If axis has insufficient binning information
-        """
-        msg = f"Axis '{self.name}' does not have binning information for histogram conversion"
-        raise ValueError(msg)
 
 
 class Domain(NamedModel):
@@ -118,12 +75,12 @@ class ProductDomain(Domain):
     Parameters:
         name: Name identifier for the domain
         type: Domain type identifier (always "product_domain")
-        axes: List of Axis specifications defining each dimension
+        axes: List of axis specifications defining each dimension
     """
 
     type: Literal["product_domain"] = Field(default="product_domain", repr=False)
-    axes: list[Axis] = Field(default_factory=list, repr=False)
-    _axes_map: dict[str, Axis] = PrivateAttr(default_factory=dict)
+    axes: DomainAxes = Field(default_factory=lambda: DomainAxes([]), repr=False)
+    _axes_map: dict[str, DomainAxis] = PrivateAttr(default_factory=dict)
 
     @model_validator(mode="after")
     def initialize_axes_map(self) -> ProductDomain:
@@ -175,12 +132,19 @@ class ProductDomain(Domain):
             Tuple of (min, max) bounds if axis exists, otherwise default.
         """
         axis = self._axes_map.get(axis_name)
-        return (axis.min, axis.max) if axis is not None else default
+        return (
+            (axis.min, axis.max)
+            if axis is not None and isinstance(axis, UnbinnedAxis)
+            else default
+        )
 
     def __getitem__(self, axis_name: str) -> tuple[float | None, float | None]:
         """Get axis bounds for a parameter name (dict-like access)."""
         axis = self._axes_map.get(axis_name)
         if axis is not None:
+            if isinstance(axis, ConstantAxis):
+                msg = f"Axis '{axis_name}' is a constant axis with no min or max."
+                raise ValueError(msg)
             return (axis.min, axis.max)
         msg = f"No axis named '{axis_name}' found in domain '{self.name}'"
         raise KeyError(msg)

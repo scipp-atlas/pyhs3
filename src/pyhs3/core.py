@@ -42,7 +42,7 @@ log = logging.getLogger(__name__)
 
 TDefault = TypeVar("TDefault")
 
-Axis: TypeAlias = tuple[float | None, float | None]
+DomainBounds: TypeAlias = tuple[float | None, float | None]
 
 
 class Workspace(BaseModel):
@@ -324,9 +324,6 @@ class Workspace(BaseModel):
         Walks likelihoods to find distribution-data pairings. For each dataset axis,
         gets bounds from the data axis itself (axis.min/max). Propagates observable
         info through composite distributions (MixtureDist, ProductDist).
-
-        Args:
-            domain: Domain constraints for parameters
 
         Returns:
             Dictionary mapping observable names to (min, max) tuples
@@ -963,7 +960,7 @@ class Model:
 
 
 def create_bounded_tensor(
-    name: str, domain: Axis, kind: Callable[..., TensorVar] = pt.scalar
+    name: str, domain: DomainBounds, kind: Callable[..., TensorVar] = pt.scalar
 ) -> TensorVar:
     """
     Creates a tensor variable with optional domain constraints.

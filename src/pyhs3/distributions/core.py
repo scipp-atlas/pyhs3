@@ -18,6 +18,40 @@ from pyhs3.normalization import Normalizable, gauss_legendre_integral
 from pyhs3.typing.aliases import TensorVar
 
 
+def _apply_normalization(
+    raw: TensorVar,
+    distribution: Distribution,
+    context: Context,
+) -> TensorVar:
+    """
+    Apply normalization to a raw likelihood expression.
+
+    Helper function that normalizes a likelihood over observables present in
+    the context. Attempts analytical integration first via normalization_integral(),
+    then falls back to Gauss-Legendre quadrature.
+
+    Args:
+        raw: Raw (unnormalized) likelihood expression
+        distribution: Distribution instance (for normalization_integral() method)
+        context: Mapping of names to pytensor variables (includes observables)
+
+    Returns:
+        Normalized likelihood expression
+    """
+    normalized = raw
+    for obs_name, (lower, upper) in context.observables.items():
+        if obs_name not in distribution.parameters:
+            continue
+        # Try analytical integral from normalization_integral()
+        integral = distribution.normalization_integral(context, obs_name, lower, upper)
+        if integral is None:
+            # Fall back to numerical quadrature
+            obs_var = context[obs_name]
+            integral = gauss_legendre_integral(raw, obs_var, lower, upper)
+        normalized = normalized / integral
+    return normalized
+
+
 class Distribution(Evaluable, ABC):
     """
     Base class for probability distributions in HS3.
@@ -102,16 +136,7 @@ class Distribution(Evaluable, ABC):
 
         # Apply normalization if this distribution is Normalizable
         if isinstance(self, Normalizable):
-            for obs_name, (lower, upper) in context.observables.items():
-                if obs_name not in self.parameters:
-                    continue
-                # Try analytical integral from normalization_integral()
-                integral = self.normalization_integral(context, obs_name, lower, upper)
-                if integral is None:
-                    # Fall back to numerical quadrature
-                    obs_var = context[obs_name]
-                    integral = gauss_legendre_integral(raw, obs_var, lower, upper)
-                raw = raw / integral
+            raw = _apply_normalization(raw, self, context)
 
         return cast(TensorVar, raw * self.extended_likelihood(context))
 
@@ -134,26 +159,15 @@ class Distribution(Evaluable, ABC):
         Returns:
             TensorVar: Log-probability density
         """
-        log_raw = pt.log(self.likelihood(context))
+        raw = self.likelihood(context)
 
         # Apply normalization if this distribution is Normalizable
         if isinstance(self, Normalizable):
-            for obs_name, (lower, upper) in context.observables.items():
-                if obs_name not in self.parameters:
-                    continue
-                # Try analytical integral from normalization_integral()
-                integral = self.normalization_integral(context, obs_name, lower, upper)
-                if integral is None:
-                    # Fall back to numerical quadrature
-                    obs_var = context[obs_name]
-                    integral = gauss_legendre_integral(
-                        self.likelihood(context), obs_var, lower, upper
-                    )
-                log_raw = log_raw - pt.log(integral)
+            raw = _apply_normalization(raw, self, context)
 
         return cast(
             TensorVar,
-            log_raw + pt.log(self.extended_likelihood(context)),
+            pt.log(raw) + pt.log(self.extended_likelihood(context)),
         )
 
     def extended_likelihood(

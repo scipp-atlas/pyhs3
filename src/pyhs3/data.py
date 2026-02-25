@@ -282,7 +282,7 @@ class BinnedData(Datum):
             ...     name="example",
             ...     type="binned",
             ...     contents=[10, 20, 15],
-            ...     axes=[BinnedAxis(name="x", min=0, max=3, nbins=3)]
+            ...     axes=[{"name": "x", "min": 0, "max": 3, "nbins": 3}]
             ... )
             >>> data.to_hist()
             Hist(Regular(3, 0, 3, name='x'), storage=Double()) # Sum: 45.0

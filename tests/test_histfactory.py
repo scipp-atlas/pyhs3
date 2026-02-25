@@ -23,8 +23,8 @@ except ImportError:
     HAS_PYHF = False
 
 import pyhs3
+from pyhs3.axes import BinnedAxes
 from pyhs3.context import Context
-from pyhs3.data import BinnedAxes
 from pyhs3.distributions import HistFactoryDistChannel
 from pyhs3.distributions.histfactory.modifiers import (
     HistoSysModifier,

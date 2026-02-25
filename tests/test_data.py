@@ -9,185 +9,24 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter
 
+from pyhs3.axes import Axis, BinnedAxis, UnbinnedAxis
 from pyhs3.data import (
-    Axis,
-    BinnedAxis,
     BinnedData,
     Data,
     GaussianUncertainty,
     PointData,
-    UnbinnedAxis,
     UnbinnedData,
 )
 
 hist = pytest.importorskip("hist", reason="hist not installed")
 
-
-class TestAxis:
-    """Tests for the base Axis class."""
-
-    def test_axis_creation_with_bounds(self):
-        """Test Axis creation with required min/max bounds."""
-        axis = Axis(name="test_var", min=0.0, max=10.0)
-        assert axis.name == "test_var"
-        assert not hasattr(axis, "min")
-        assert not hasattr(axis, "max")
+binned_axis_adapter = TypeAdapter(BinnedAxis)
 
 
-class TestUnbinnedAxis:
-    """Tests for the UnbinnedAxis class."""
-
-    def test_unbinned_axis_creation(self):
-        """Test UnbinnedAxis creation with required min/max."""
-        axis = UnbinnedAxis(name="x", min=0.0, max=5.0)
-        assert axis.name == "x"
-        assert axis.min == 0.0
-        assert axis.max == 5.0
-
-    def test_unbinned_axis_min_required(self):
-        """Test that UnbinnedAxis requires min."""
-        with pytest.raises(ValidationError, match="Field required"):
-            UnbinnedAxis(name="x", max=5.0)
-
-    def test_unbinned_axis_max_required(self):
-        """Test that UnbinnedAxis requires max."""
-        with pytest.raises(ValidationError, match="Field required"):
-            UnbinnedAxis(name="x", min=0.0)
-
-    def test_unbinned_axis_both_required(self):
-        """Test that UnbinnedAxis requires both min and max."""
-        with pytest.raises(ValidationError):
-            UnbinnedAxis(name="x")
-
-
-class TestBinnedAxis:
-    """Tests for the BinnedAxis class."""
-
-    def test_binned_axis_creation_regular_binning(self):
-        """Test BinnedAxis creation with regular binning."""
-        axis = BinnedAxis(name="mass", min=100.0, max=200.0, nbins=50)
-        assert axis.name == "mass"
-        assert axis.min == 100.0
-        assert axis.max == 200.0
-        assert axis.nbins == 50
-        assert axis.edges is not None
-
-    def test_binned_axis_creation_irregular_binning(self):
-        """Test BinnedAxis creation with irregular binning."""
-        edges = [0.0, 1.0, 3.0, 10.0, 100.0]
-        axis = BinnedAxis(name="pt", edges=edges)
-        assert axis.name == "pt"
-        assert axis.min == 0.0
-        assert axis.max == 100.0
-        assert axis.nbins == 4
-        assert axis.edges == edges
-
-    def test_binned_axis_validation_mixed_binning_fails(self):
-        """Test that specifying both regular and irregular binning fails."""
-        with pytest.raises(
-            ValidationError, match="must specify either regular binning"
-        ):
-            BinnedAxis(name="test", min=0.0, max=10.0, nbins=5, edges=[0, 5, 10])
-
-    def test_binned_axis_validation_no_binning_fails(self):
-        """Test that BinnedAxis requires binning information."""
-        with pytest.raises(
-            ValidationError, match="must specify either regular binning"
-        ):
-            BinnedAxis(name="test")
-
-    def test_binned_axis_validation_no_binning_with_bounds_fails(self):
-        """Test that BinnedAxis requires binning, not just bounds."""
-        with pytest.raises(
-            ValidationError, match="must specify either regular binning"
-        ):
-            BinnedAxis(name="test", min=0.0, max=10.0)
-
-    def test_binned_axis_validation_edges_too_short(self):
-        """Test that edges array must have at least 2 elements."""
-        with pytest.raises(ValueError, match="must have at least 2 edges"):
-            BinnedAxis(name="test", edges=[1.0])
-
-    def test_binned_axis_validation_edges_not_ordered(self):
-        """Test that edges must be in non-decreasing order."""
-        with pytest.raises(ValueError, match="edges must be in ascending order"):
-            BinnedAxis(name="test", edges=[1.0, 3.0, 2.0, 4.0])
-
-    def test_binned_axis_validation_edges_equal_disallowed(self):
-        """Test that equal adjacent edges are allowed."""
-        with pytest.raises(ValueError, match="edges must be in ascending order"):
-            BinnedAxis(name="test", edges=[1.0, 2.0, 2.0, 3.0])
-
-    def test_binned_axis_edges_regular_binning(self):
-        """Test edges property with regular binning."""
-        axis = BinnedAxis(name="mass", min=0.0, max=10.0, nbins=5)
-
-        # Should return 6 edges for 5 bins: [0, 2, 4, 6, 8, 10]
-        expected_edges = [0.0, 2.0, 4.0, 6.0, 8.0, 10.0]
-        assert len(axis.edges) == 6
-        assert axis.edges == pytest.approx(expected_edges)
-
-    def test_binned_axis_edges_irregular_binning(self):
-        """Test edges property with irregular binning."""
-        custom_edges = [0.0, 1.0, 5.0, 12.0, 25.0]
-        axis = BinnedAxis(name="pt", edges=custom_edges)
-
-        # Should return the provided edges exactly
-        assert axis.edges == custom_edges
-
-    def test_binned_axis_edges_single_bin(self):
-        """Test edges property with single bin."""
-        axis = BinnedAxis(name="single", min=1.0, max=2.0, nbins=1)
-
-        # Should return 2 edges for 1 bin: [1.0, 2.0]
-        assert len(axis.edges) == 2
-        assert axis.edges == pytest.approx([1.0, 2.0])
-
-    def test_binned_axis_edges_zero_range(self):
-        """Test edges property with zero range (min=max)."""
-        axis = BinnedAxis(name="zero_range", min=5.0, max=5.0, nbins=1)
-
-        # Should return [5.0, 5.0] for zero range
-        assert len(axis.edges) == 2
-        assert axis.edges == pytest.approx([5.0, 5.0])
-
-    def test_binned_axis_edges_negative_range(self):
-        """Test edges property with negative values."""
-        axis = BinnedAxis(name="negative", min=-10.0, max=-2.0, nbins=4)
-
-        # Should handle negative values correctly: [-10, -8, -6, -4, -2]
-        expected_edges = [-10.0, -8.0, -6.0, -4.0, -2.0]
-        assert len(axis.edges) == 5
-        assert axis.edges == pytest.approx(expected_edges)
-
-    def test_binned_axis_edges_large_number_of_bins(self):
-        """Test edges property with large number of bins."""
-        axis = BinnedAxis(name="many_bins", min=0.0, max=100.0, nbins=1000)
-
-        # Should return 1001 edges for 1000 bins
-        assert len(axis.edges) == 1001
-        assert axis.edges[0] == pytest.approx(0.0)
-        assert axis.edges[-1] == pytest.approx(100.0)
-        assert axis.edges[500] == pytest.approx(50.0)  # Middle should be 50.0
-
-    def test_binned_axis_to_hist_regular(self):
-        """Test to_hist() method with regular binning."""
-        axis = BinnedAxis(name="x", min=0.0, max=10.0, nbins=5)
-        hist_axis = axis.to_hist()
-
-        assert hist_axis.name == "x"
-        assert len(hist_axis.edges) == 6  # 5 bins + 1
-
-    def test_binned_axis_to_hist_irregular(self):
-        """Test to_hist() method with irregular binning."""
-        edges = [0.0, 1.0, 5.0, 10.0]
-        axis = BinnedAxis(name="y", edges=edges)
-        hist_axis = axis.to_hist()
-
-        assert hist_axis.name == "y"
-        assert len(hist_axis.edges) == 4
+def make_binned_axis(**kwargs):
+    return binned_axis_adapter.validate_python(kwargs)
 
 
 class TestGaussianUncertainty:
@@ -477,7 +316,7 @@ class TestBinnedData:
     def test_binned_data_creation_basic(self):
         """Test basic BinnedData creation."""
         contents = [10.0, 20.0, 15.0, 5.0]
-        axes = [BinnedAxis(name="mass", min=100.0, max=200.0, nbins=4)]
+        axes = [make_binned_axis(name="mass", min=100.0, max=200.0, nbins=4)]
         data = BinnedData(name="histogram", type="binned", contents=contents, axes=axes)
 
         assert data.name == "histogram"
@@ -490,8 +329,8 @@ class TestBinnedData:
         """Test BinnedData creation with 2D histogram."""
         contents = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]  # 2x3 = 6 bins
         axes = [
-            BinnedAxis(name="x", min=0.0, max=2.0, nbins=2),
-            BinnedAxis(name="y", min=0.0, max=3.0, nbins=3),
+            make_binned_axis(name="x", min=0.0, max=2.0, nbins=2),
+            make_binned_axis(name="y", min=0.0, max=3.0, nbins=3),
         ]
         data = BinnedData(name="hist2d", type="binned", contents=contents, axes=axes)
 
@@ -501,7 +340,7 @@ class TestBinnedData:
     def test_binned_data_creation_irregular_binning(self):
         """Test BinnedData creation with irregular binning."""
         contents = [10.0, 25.0, 5.0]  # 3 bins
-        axes = [BinnedAxis(name="pt", edges=[0.0, 10.0, 50.0, 100.0])]  # 3 bins
+        axes = [make_binned_axis(name="pt", edges=[0.0, 10.0, 50.0, 100.0])]  # 3 bins
         data = BinnedData(
             name="irregular_hist", type="binned", contents=contents, axes=axes
         )
@@ -512,7 +351,7 @@ class TestBinnedData:
     def test_binned_data_creation_with_uncertainty(self):
         """Test BinnedData creation with uncertainty."""
         contents = [10.0, 20.0]
-        axes = [BinnedAxis(name="x", min=0.0, max=2.0, nbins=2)]
+        axes = [make_binned_axis(name="x", min=0.0, max=2.0, nbins=2)]
         uncertainty = GaussianUncertainty(type="gaussian_uncertainty", sigma=[3.0, 4.0])
         data = BinnedData(
             name="hist_with_errors",
@@ -527,7 +366,9 @@ class TestBinnedData:
     def test_binned_data_validation_contents_length_mismatch(self):
         """Test that contents length must match expected number of bins."""
         contents = [10.0, 20.0]  # 2 values
-        axes = [BinnedAxis(name="x", min=0.0, max=3.0, nbins=3)]  # 3 bins expected
+        axes = [
+            make_binned_axis(name="x", min=0.0, max=3.0, nbins=3)
+        ]  # 3 bins expected
 
         with pytest.raises(
             ValueError,
@@ -542,12 +383,12 @@ class TestBinnedData:
             ValueError,
             match=r"must specify either regular binning .* or irregular binning",
         ):
-            BinnedAxis(name="x", min=0.0, max=2.0)  # No nbins or edges
+            make_binned_axis(name="x", min=0.0, max=2.0)  # No nbins or edges
 
     def test_binned_data_validation_uncertainty_sigma_length_mismatch(self):
         """Test that uncertainty sigma length must match contents length."""
         contents = [10.0, 20.0, 15.0]
-        axes = [BinnedAxis(name="x", min=0.0, max=3.0, nbins=3)]
+        axes = [make_binned_axis(name="x", min=0.0, max=3.0, nbins=3)]
         uncertainty = GaussianUncertainty(
             type="gaussian_uncertainty", sigma=[3.0, 4.0]
         )  # Wrong length
@@ -570,7 +411,7 @@ class TestBinnedDataHistConversion:
     def test_to_hist_1d_regular_binning(self):
         """Test BinnedData.to_hist() with 1D regular binning."""
         contents = [10.0, 20.0, 15.0]
-        axes = [BinnedAxis(name="x", min=0.0, max=3.0, nbins=3)]
+        axes = [make_binned_axis(name="x", min=0.0, max=3.0, nbins=3)]
         data = BinnedData(name="test", type="binned", contents=contents, axes=axes)
 
         h = data.to_hist()
@@ -588,7 +429,7 @@ class TestBinnedDataHistConversion:
         """Test BinnedData.to_hist() with 1D irregular binning."""
         contents = [10.0, 25.0, 5.0]
         edges = [0.0, 10.0, 50.0, 100.0]  # 3 bins with variable widths
-        axes = [BinnedAxis(name="pt", edges=edges)]
+        axes = [make_binned_axis(name="pt", edges=edges)]
         data = BinnedData(
             name="test_irregular", type="binned", contents=contents, axes=axes
         )
@@ -607,7 +448,7 @@ class TestBinnedDataHistConversion:
         """Test BinnedData.to_hist() with gaussian uncertainties."""
         contents = [10.0, 20.0, 15.0]
         sigma = [3.0, 4.0, 2.5]
-        axes = [BinnedAxis(name="x", min=0.0, max=3.0, nbins=3)]
+        axes = [make_binned_axis(name="x", min=0.0, max=3.0, nbins=3)]
         uncertainty = GaussianUncertainty(type="gaussian_uncertainty", sigma=sigma)
         data = BinnedData(
             name="test_unc",
@@ -630,8 +471,8 @@ class TestBinnedDataHistConversion:
         # 2x3 = 6 bins, flattened in C-order (row-major)
         contents = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
         axes = [
-            BinnedAxis(name="x", min=0.0, max=2.0, nbins=2),
-            BinnedAxis(name="y", min=0.0, max=3.0, nbins=3),
+            make_binned_axis(name="x", min=0.0, max=2.0, nbins=2),
+            make_binned_axis(name="y", min=0.0, max=3.0, nbins=3),
         ]
         data = BinnedData(name="test_2d", type="binned", contents=contents, axes=axes)
 
@@ -654,7 +495,7 @@ class TestBinnedDataHistConversion:
                 name="empty",
                 type="binned",
                 contents=[],
-                axes=[BinnedAxis(name="x", min=0.0, max=1.0, nbins=1)],
+                axes=[make_binned_axis(name="x", min=0.0, max=1.0, nbins=1)],
             )
 
     def test_to_hist_3d_binning(self):
@@ -662,9 +503,9 @@ class TestBinnedDataHistConversion:
         # 2x3x2 = 12 bins
         contents = [float(i) for i in range(1, 13)]
         axes = [
-            BinnedAxis(name="x", min=0.0, max=2.0, nbins=2),
-            BinnedAxis(name="y", min=0.0, max=3.0, nbins=3),
-            BinnedAxis(name="z", min=0.0, max=2.0, nbins=2),
+            make_binned_axis(name="x", min=0.0, max=2.0, nbins=2),
+            make_binned_axis(name="y", min=0.0, max=3.0, nbins=3),
+            make_binned_axis(name="z", min=0.0, max=2.0, nbins=2),
         ]
         data = BinnedData(name="test_3d", type="binned", contents=contents, axes=axes)
 
@@ -813,7 +654,7 @@ class TestData:
             name="hist1",
             type="binned",
             contents=[10.0, 20.0],
-            axes=[BinnedAxis(name="mass", min=100.0, max=200.0, nbins=2)],
+            axes=[make_binned_axis(name="mass", min=100.0, max=200.0, nbins=2)],
         )
 
         data = Data([point, unbinned, binned])

@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from pyhs3.data import Axes
+from pyhs3.axes import BinnedAxes
 from pyhs3.distributions.histfactory.samples import Sample, SampleData, Samples
 
 hist = pytest.importorskip("hist", reason="hist not installed")
@@ -258,7 +258,7 @@ class TestSampleHistConversion:
             name="test_sample",
             data={"contents": [10.0, 20.0, 15.0], "errors": [3.0, 4.0, 2.5]},
         )
-        axes = Axes([{"name": "x", "min": 0.0, "max": 3.0, "nbins": 3}])
+        axes = BinnedAxes([{"name": "x", "min": 0.0, "max": 3.0, "nbins": 3}])
 
         h = sample.to_hist(axes)
 
@@ -277,7 +277,7 @@ class TestSampleHistConversion:
             data={"contents": [10.0, 25.0, 5.0], "errors": [3.0, 5.0, 2.0]},
         )
         edges = [0.0, 10.0, 50.0, 100.0]
-        axes = Axes([{"name": "pt", "edges": edges}])
+        axes = BinnedAxes([{"name": "pt", "edges": edges}])
 
         h = sample.to_hist(axes)
 
@@ -297,7 +297,7 @@ class TestSampleHistConversion:
                 "errors": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
             },
         )
-        axes = Axes(
+        axes = BinnedAxes(
             [
                 {"name": "x", "min": 0.0, "max": 2.0, "nbins": 2},
                 {"name": "y", "min": 0.0, "max": 3.0, "nbins": 3},
@@ -333,7 +333,7 @@ class TestSampleHistConversion:
                 "errors": [0.1 * i for i in range(1, 13)],
             },
         )
-        axes = Axes(
+        axes = BinnedAxes(
             [
                 {"name": "x", "min": 0.0, "max": 2.0, "nbins": 2},
                 {"name": "y", "min": 0.0, "max": 2.0, "nbins": 2},

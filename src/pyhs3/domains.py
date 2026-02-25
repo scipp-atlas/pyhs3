@@ -47,7 +47,7 @@ class Axis(NamedModel):
         Convert this axis to a hist.axis object.
 
         This is a base implementation that should be overridden by subclasses
-        that have specific binning information (like BinnedAxisRange or BinnedAxisEdges).
+        that have specific binning information (like BinnedAxis).
 
         Returns:
             A hist.axis object

@@ -18,7 +18,7 @@ from pyhs3.axes import (
     IrregularAxis,
     RegularAxis,
     UnbinnedAxis,
-    binned_axis_discriminator,
+    _binned_axis_discriminator,
 )
 
 hist = pytest.importorskip("hist", reason="hist not installed")
@@ -425,11 +425,11 @@ class TestBinnedAxisDiscriminator:
         """Test discriminator function with dictionary inputs."""
         # Test with nbins present - should select 'range'
         dict_with_nbins = {"name": "x", "min": 0.0, "max": 10.0, "nbins": 5}
-        assert binned_axis_discriminator(dict_with_nbins) == "regular"
+        assert _binned_axis_discriminator(dict_with_nbins) == "regular"
 
         # Test with edges present - should select 'edges'
         dict_with_edges = {"name": "x", "edges": [0.0, 5.0, 10.0]}
-        assert binned_axis_discriminator(dict_with_edges) == "irregular"
+        assert _binned_axis_discriminator(dict_with_edges) == "irregular"
 
         # Test with both present - nbins takes precedence, should select 'range'
         dict_with_both = {
@@ -439,21 +439,21 @@ class TestBinnedAxisDiscriminator:
             "nbins": 5,
             "edges": [0.0, 5.0, 10.0],
         }
-        assert binned_axis_discriminator(dict_with_both) is None
+        assert _binned_axis_discriminator(dict_with_both) is None
 
         # Test with neither present - should return None
         dict_with_neither = {"name": "x", "min": 0.0, "max": 10.0}
-        assert binned_axis_discriminator(dict_with_neither) is None
+        assert _binned_axis_discriminator(dict_with_neither) is None
 
     def test_discriminator_with_object_instances(self):
         """Test discriminator function with actual object instances."""
         # Test with RegularAxis instance
         regular_instance = RegularAxis(name="x", min=0.0, max=10.0, nbins=5)
-        assert binned_axis_discriminator(regular_instance) == "regular"
+        assert _binned_axis_discriminator(regular_instance) == "regular"
 
         # Test with IrregularAxis instance
         irregular_instance = IrregularAxis(name="x", edges=[0.0, 5.0, 10.0])
-        assert binned_axis_discriminator(irregular_instance) == "irregular"
+        assert _binned_axis_discriminator(irregular_instance) == "irregular"
 
     def test_discriminator_serialization_roundtrip(self):
         """Test that discriminator works correctly during serialization round-trips."""
@@ -491,8 +491,8 @@ class TestBinnedAxisDiscriminator:
 
         # Test that discriminator correctly identifies them as model instances
         # (This simulates what happens during serialization)
-        assert binned_axis_discriminator(regular_instance) == "regular"
-        assert binned_axis_discriminator(irregular_instance) == "irregular"
+        assert _binned_axis_discriminator(regular_instance) == "regular"
+        assert _binned_axis_discriminator(irregular_instance) == "irregular"
 
         # Test serialization works correctly
         range_serialized = regular_instance.model_dump()

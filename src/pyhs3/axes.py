@@ -154,7 +154,7 @@ class IrregularAxis(Axis):
         return hist.axis.Variable(self.edges, name=self.name)
 
 
-def binned_axis_discriminator(v: Any) -> str | None:
+def _binned_axis_discriminator(v: Any) -> str | None:
     if isinstance(v, dict):
         if "edges" in v and "nbins" not in v:
             return "irregular"
@@ -176,7 +176,7 @@ BinnedAxis = Annotated[
         Annotated[RegularAxis, Tag("regular")]
         | Annotated[IrregularAxis, Tag("irregular")]
     ),
-    Discriminator(binned_axis_discriminator),
+    Discriminator(_binned_axis_discriminator),
     custom_error_msg(
         {
             "union_tag_not_found": "Unknown axis {input}'. You must specify either regular binning (nbins/min/max) or irregular binning (edges).",
@@ -212,6 +212,10 @@ class AxesCollection(RootModel[list[TAxis]], Generic[TAxis]):
 
 
 class BinnedAxes(AxesCollection[BinnedAxis]):
+    """
+    Collection of binned axes.
+    """
+
     def get_total_bins(self) -> int:
         """Calculate total number of bins across all axes."""
         total = 1

@@ -225,6 +225,18 @@ class TestBinnedAxisDiscriminatedUnion:
         assert range_axis.nbins == 5
         assert edges_axis.nbins == 2
 
+    def test_discriminator_with_generic_objects(self):
+        """Test discriminator function with generic objects"""
+
+        # Create a mock object that has nbins attribute
+        class MockRangeObject:
+            def __init__(self):
+                self.nbins = 5
+                self.name = "mock_range"
+
+        mock_range = MockRangeObject()
+        assert _binned_axis_discriminator(mock_range) is None
+
     def test_nbins_works_for_both_types(self):
         """Test that nbins method works for both axis types."""
         range_axis_data = {"name": "x", "min": 0.0, "max": 10.0, "nbins": 5}

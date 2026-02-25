@@ -54,7 +54,7 @@ python = "<3.14,>=3.13"
 pytest = ">=9"
 pytest-cov = ">=3"
 pyhf = ">=0.7.6"
-scikit-hep-testdata = ">=0.5.7"
+scikit-hep-testdata = ">=0.6.2"
 pydot = "*"
 graphviz = "*"
 

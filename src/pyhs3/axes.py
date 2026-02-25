@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from itertools import pairwise
-from typing import Annotated, Any
+from typing import Annotated, Any, Generic, TypeVar
 
 import hist
 import numpy as np
@@ -171,7 +171,7 @@ def binned_axis_discriminator(v: Any) -> str | None:
     return None
 
 
-BinnedAxisUnion = Annotated[
+BinnedAxis = Annotated[
     (
         Annotated[RegularAxis, Tag("regular")]
         | Annotated[IrregularAxis, Tag("irregular")]
@@ -185,117 +185,20 @@ BinnedAxisUnion = Annotated[
     ),
 ]
 
-
-class BinnedAxis(RootModel[BinnedAxisUnion]):
-    """
-    Binned axis specification.
-
-    Supports both regular binning (min/max/nbins) and irregular binning (edges)
-    through a discriminated union. The discriminator automatically selects the
-    correct type based on the presence of 'nbins' or 'edges' fields.
-    """
-
-    root: BinnedAxisUnion
-
-    @property
-    def name(self) -> str:
-        """Get the axis name."""
-        return self.root.name
-
-    @property
-    def nbins(self) -> int:
-        """Get the number of bins."""
-        return self.root.nbins
-
-    @property
-    def min(self) -> float:
-        """Get the min."""
-        return self.root.min
-
-    @property
-    def max(self) -> float:
-        """Get the max."""
-        return self.root.max
-
-    @property
-    def edges(self) -> list[float]:
-        """Get the edges."""
-        return self.root.edges
-
-    def to_hist(self) -> hist.axis.Variable | hist.axis.Regular:
-        """
-        Convert this axis to a hist.axis object.
-
-        Returns:
-            A hist.axis.Variable object
-        """
-        return self.root.to_hist()
+TAxis = TypeVar("TAxis", bound=Axis)
 
 
-class BinnedAxes(RootModel[list[BinnedAxis]]):
-    """
-    Collection of binned axes.
-
-    Manages a list of BinnedAxis instances, providing list-like access and
-    validation. Each axis can use either regular or irregular binning.
-    """
-
-    root: list[BinnedAxis] = Field(default_factory=list)
-
-    def __getitem__(self, index: int) -> BinnedAxis:
-        """Get axis by index."""
-        return self.root[index]
-
-    def __len__(self) -> int:
-        """Get number of axes."""
-        return len(self.root)
-
-    def __iter__(self) -> Iterator[BinnedAxis]:  # type: ignore[override]  # https://github.com/pydantic/pydantic/issues/8872
-        """Iterate over axes."""
-        return iter(self.root)
-
-    def get_total_bins(self) -> int:
-        """Calculate total number of bins across all axes."""
-        total_bins = 1
-        for axis in self.root:
-            total_bins *= axis.nbins
-        return total_bins
-
-
-class UnbinnedAxes(RootModel[list[UnbinnedAxis]]):
-    """
-    Collection of unbinned axes.
-
-    Manages a list of UnbinnedAxis instances, providing list-like access and
-    validation. Each axis represents an unbinned observable with min/max bounds.
-    """
-
-    root: list[UnbinnedAxis] = Field(default_factory=list)
-
-    def __getitem__(self, index: int) -> UnbinnedAxis:
-        """Get axis by index."""
-        return self.root[index]
-
-    def __len__(self) -> int:
-        """Get number of axes."""
-        return len(self.root)
-
-    def __iter__(self) -> Iterator[UnbinnedAxis]:  # type: ignore[override]  # https://github.com/pydantic/pydantic/issues/8872
-        """Iterate over axes."""
-        return iter(self.root)
-
-
-class Axes(RootModel[list[BinnedAxis | UnbinnedAxis]]):
+class AxesCollection(RootModel[list[TAxis]], Generic[TAxis]):
     """
     Collection of axes.
 
-    Manages a list of BinnedAxis and UnbinnedAxis instances, providing list-like
-    access and validation. Each axis can be binned or unbinned.
+    Manages a list of TAxis instances, providing list-like access and
+    validation. Each axis can use either regular or irregular binning.
     """
 
-    root: list[BinnedAxis | UnbinnedAxis] = Field(default_factory=list)
+    root: list[TAxis] = Field(default_factory=list)
 
-    def __getitem__(self, index: int) -> BinnedAxis | UnbinnedAxis:
+    def __getitem__(self, index: int) -> TAxis:
         """Get axis by index."""
         return self.root[index]
 
@@ -303,6 +206,19 @@ class Axes(RootModel[list[BinnedAxis | UnbinnedAxis]]):
         """Get number of axes."""
         return len(self.root)
 
-    def __iter__(self) -> Iterator[BinnedAxis | UnbinnedAxis]:  # type: ignore[override]  # https://github.com/pydantic/pydantic/issues/8872
+    def __iter__(self) -> Iterator[TAxis]:  # type: ignore[override]  # https://github.com/pydantic/pydantic/issues/887
         """Iterate over axes."""
         return iter(self.root)
+
+
+class BinnedAxes(AxesCollection[BinnedAxis]):
+    def get_total_bins(self) -> int:
+        """Calculate total number of bins across all axes."""
+        total = 1
+        for axis in self:
+            total *= axis.nbins
+        return total
+
+
+UnbinnedAxes = AxesCollection[UnbinnedAxis]
+Axes = AxesCollection[BinnedAxis | UnbinnedAxis]

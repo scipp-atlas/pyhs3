@@ -53,7 +53,7 @@ class Sample(NamedModel):
         """
         # Convert axes to hist.axis objects
         # Access the root to get the actual axis (RegularAxis or IrregularAxis)
-        hist_axes = [axis.root.to_hist() for axis in axes]
+        hist_axes = [axis.to_hist() for axis in axes]
 
         # Create histogram with Weight storage since we always have errors
         h = hist.Hist(*hist_axes, storage=hist.storage.Weight())

@@ -19,7 +19,8 @@ BinnedData to hist
 .. plot::
    :include-source:
 
-   from pyhs3.data import BinnedData, BinnedAxis
+   from pyhs3.data import BinnedData
+   from pyhs3.axes import BinnedAxis
 
    # Create binned data with regular binning
    data = BinnedData(
@@ -43,7 +44,8 @@ BinnedData to hist
 .. plot::
    :include-source:
 
-   from pyhs3.data import BinnedData, BinnedAxis
+   from pyhs3.data import BinnedData
+   from pyhs3.axes import BinnedAxis
 
    # Create binned data with variable-width bins
    data = BinnedData(
@@ -67,7 +69,8 @@ Binned Data with Uncertainties
 .. plot::
    :include-source:
 
-   from pyhs3.data import BinnedData, BinnedAxis, GaussianUncertainty
+   from pyhs3.data import BinnedData, GaussianUncertainty
+   from pyhs3.axes import BinnedAxis
 
    # Create binned data with uncertainties
    contents = [12.5, 18.3, 15.7, 22.1, 19.4]
@@ -95,7 +98,8 @@ Binned Data with Uncertainties
 .. plot::
    :include-source:
 
-   from pyhs3.data import BinnedData, BinnedAxis
+   from pyhs3.data import BinnedData
+   from pyhs3.axes import BinnedAxis
 
    # Create 2D binned data (3x4 = 12 bins)
    contents = [1.0, 2.0, 3.0, 4.0,
@@ -131,7 +135,8 @@ UnbinnedData to hist
 .. plot::
    :include-source:
 
-   from pyhs3.data import UnbinnedData, UnbinnedAxis
+   from pyhs3.data import UnbinnedData
+   from pyhs3.axes import UnbinnedAxis
 
    # Create unbinned data points
    entries = [[0.5], [1.2], [1.8], [2.3], [0.9], [1.5], [2.7], [1.1]]
@@ -157,7 +162,8 @@ Unbinned Data with Weights
 .. plot::
    :include-source:
 
-   from pyhs3.data import UnbinnedData, UnbinnedAxis
+   from pyhs3.data import UnbinnedData
+   from pyhs3.axes import UnbinnedAxis
 
    # Create weighted unbinned data
    entries = [[0.5], [1.2], [1.8], [2.3], [0.9]]
@@ -185,7 +191,8 @@ Unbinned Data with Weights
 .. plot::
    :include-source:
 
-   from pyhs3.data import UnbinnedData, UnbinnedAxis
+   from pyhs3.data import UnbinnedData
+   from pyhs3.axes import UnbinnedAxis
 
    # Create 2D unbinned data points
    entries = [
@@ -223,7 +230,7 @@ Basic Sample Conversion
    :include-source:
 
    from pyhs3.distributions.histfactory.samples import Sample
-   from pyhs3.distributions.histfactory.axes import Axes
+   from pyhs3.axes import Axes
 
    # Create a HistFactory sample
    sample = Sample(
@@ -252,7 +259,7 @@ Comparing Multiple Samples
    :include-source:
 
    from pyhs3.distributions.histfactory.samples import Sample
-   from pyhs3.distributions.histfactory.axes import Axes
+   from pyhs3.axes import Axes
 
    # Create multiple samples
    signal = Sample(
@@ -380,7 +387,8 @@ The ``hist.Hist`` objects returned by ``to_hist()`` support the full matplotlib 
 .. plot::
    :include-source:
 
-   from pyhs3.data import BinnedData, BinnedAxis
+   from pyhs3.data import BinnedData
+   from pyhs3.axes import BinnedAxis
 
    data = BinnedData(
        name="custom",
@@ -415,7 +423,8 @@ Once you have a ``hist.Hist`` object, you can use all the features of the hist l
 
 .. code-block:: python
 
-   from pyhs3.data import BinnedData, BinnedAxis
+   from pyhs3.data import BinnedData
+   from pyhs3.axes import BinnedAxis
 
    data = BinnedData(
        name="analysis",

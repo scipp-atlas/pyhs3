@@ -74,6 +74,7 @@ class TestRegularAxis:
         """Test valid RegularAxis creation."""
         axis = RegularAxis(name="x", min=0.0, max=10.0, nbins=5)
         assert axis.name == "x"
+        assert axis.edges == [0.0, 2.0, 4.0, 6.0, 8.0, 10.0]
         assert axis.min == 0.0
         assert axis.max == 10.0
         assert axis.nbins == 5
@@ -128,6 +129,8 @@ class TestIrregularAxis:
         axis = IrregularAxis(name="x", edges=[0.0, 2.5, 5.0, 7.5, 10.0])
         assert axis.name == "x"
         assert axis.edges == [0.0, 2.5, 5.0, 7.5, 10.0]
+        assert axis.min == 0.0
+        assert axis.max == 10.0
         assert axis.nbins == 4
 
     def test_binned_axis_edges_minimum_edges(self):

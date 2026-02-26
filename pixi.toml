@@ -24,11 +24,15 @@ hatch-vcs = ">=0.4"
 [package.run-dependencies]
 rich = "*"
 rustworkx = "*"
-pytensor = "*"
+pytensor = ">=2.33.0"
 numpy = "*"
 sympy = "*"
 pydantic = "*"
 hist = "*"
+
+# incompatibility issues between root_base and pytensor for osx-64
+[feature.test]
+platforms = ["linux-64", "linux-aarch64", "osx-arm64"]
 
 # pytensor >=2.33 does not exist for win-64 for py310
 [feature.py310]
@@ -61,10 +65,10 @@ graphviz = "*"
 [feature.test.activation]
 scripts = [".pixi/setup_graphviz.sh"]
 
-[feature.test.target.linux-64.dependencies]
-root_base = ">=6.32.10,<7"
+[feature.root]
+platforms = ["linux-64", "linux-aarch64", "osx-arm64"]
 
-[feature.test.target.linux-aarch64.dependencies]
+[feature.root.dependencies]
 root_base = ">=6.32.10,<7"
 
 # root_base and pytensor do not resolve on py313
@@ -137,10 +141,10 @@ codeflash = { cmd = "codeflash", description = "Run codeflash to identify optimi
 [environments]
 docs = ["docs"]
 dev = ["dev"]
-py310 = ["test", "py310"]
-py311 = ["test", "py311"]
-py312 = ["test", "py312"]
-py313 = ["test", "py313"]
+py310 = ["test", "py310", "root"]
+py311 = ["test", "py311", "root"]
+py312 = ["test", "py312", "root"]
+py313 = ["test", "py313", "root"]
 # py314 = ["test", "py314"]
 
 [tasks]

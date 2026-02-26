@@ -191,6 +191,88 @@ class IrregularAxis(Axis):
         return hist.axis.Variable(self.edges, name=self.name)
 
 
+class DomainCoordinateAxis(Axis):
+    """
+    Axis for domain coordinates with optional bounds.
+
+    Represents a coordinate axis in a parameter domain, where bounds
+    may be fully specified, partially specified, or unbounded (infinite).
+
+    Attributes:
+        name: Name of the axis/variable
+        min: Minimum value (optional, defaults to -inf)
+        max: Maximum value (optional, defaults to +inf)
+
+    Examples:
+        Create an unbounded domain axis:
+
+        >>> from pyhs3.axes import DomainCoordinateAxis
+        >>> axis = DomainCoordinateAxis(name="x")
+        >>> axis
+        DomainCoordinateAxis(x ∈ (-∞, +∞))
+
+        Create a lower-bounded domain:
+
+        >>> axis = DomainCoordinateAxis(name="x", min=-5)
+        >>> axis
+        DomainCoordinateAxis(x ∈ [-5, +∞))
+
+        Create an upper-bounded domain:
+
+        >>> axis = DomainCoordinateAxis(name="x", max=10)
+        >>> axis
+        DomainCoordinateAxis(x ∈ (-∞, 10])
+
+        Create a fully bounded domain:
+
+        >>> axis = DomainCoordinateAxis(name="x", min=0, max=1)
+        >>> axis
+        DomainCoordinateAxis(x ∈ [0, 1])
+
+        Integers are displayed without trailing .0:
+
+        >>> axis = DomainCoordinateAxis(name="x", min=0.0, max=5.0)
+        >>> axis
+        DomainCoordinateAxis(x ∈ [0, 5])
+    """
+
+    model_config = ConfigDict(serialize_by_alias=True)
+
+    v_min: float | None = Field(
+        default=None, alias="min", repr=False, exclude_if=lambda v: v is None
+    )
+    v_max: float | None = Field(
+        default=None, alias="max", repr=False, exclude_if=lambda v: v is None
+    )
+
+    @property
+    def min(self) -> float:
+        return -np.inf if self.v_min is None else self.v_min
+
+    @property
+    def max(self) -> float:
+        return np.inf if self.v_max is None else self.v_max
+
+    @model_validator(mode="after")
+    def check_min_le_max(self) -> DomainCoordinateAxis:
+        """Validate that max >= min when both are provided."""
+        if self.max < self.min:
+            msg = f"DomainCoordinateAxis '{self.name}': max ({self.max}) must be >= min ({self.min})"
+            raise ValueError(msg)
+        return self
+
+    def __repr__(self) -> str:
+        # Determine interval brackets
+        left_bracket = "[" if self.v_min is not None else "("
+        right_bracket = "]" if self.v_max is not None else ")"
+
+        # Determine displayed bounds
+        min_str = f"{self.v_min:g}" if self.v_min is not None else "-∞"
+        max_str = f"{self.v_max:g}" if self.v_max is not None else "+∞"
+
+        return f"DomainCoordinateAxis({self.name} ∈ {left_bracket}{min_str}, {max_str}{right_bracket})"
+
+
 def _binned_axis_discriminator(v: Any) -> str | None:
     if isinstance(v, dict):
         if "edges" in v and "nbins" not in v:
@@ -238,7 +320,7 @@ class BinnedAxes(NamedCollection[BinnedAxis]):
         return total
 
 
-DomainAxis: TypeAlias = UnbinnedAxis | ConstantAxis
+DomainAxis: TypeAlias = DomainCoordinateAxis | ConstantAxis
 
 
 class UnbinnedAxes(NamedCollection[UnbinnedAxis]):

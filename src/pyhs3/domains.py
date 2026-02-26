@@ -11,7 +11,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import ConfigDict, Field, PrivateAttr, model_validator
 
-from pyhs3.axes import ConstantAxis, DomainAxes, DomainAxis, UnbinnedAxis
+from pyhs3.axes import ConstantAxis, DomainAxes, DomainAxis, DomainCoordinateAxis
 from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.exceptions import custom_error_msg
 
@@ -134,7 +134,7 @@ class ProductDomain(Domain):
         axis = self._axes_map.get(axis_name)
         return (
             (axis.min, axis.max)
-            if axis is not None and isinstance(axis, UnbinnedAxis)
+            if axis is not None and isinstance(axis, DomainCoordinateAxis)
             else default
         )
 

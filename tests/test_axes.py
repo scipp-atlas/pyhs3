@@ -16,6 +16,7 @@ from pyhs3.axes import (
     BinnedAxes,
     BinnedAxis,
     ConstantAxis,
+    DomainCoordinateAxis,
     IrregularAxis,
     RegularAxis,
     UnbinnedAxis,
@@ -632,3 +633,84 @@ class TestBinnedAxisDiscriminator:
         assert range_serialized["nbins"] == 5
         assert "edges" in edges_serialized
         assert edges_serialized["edges"] == [0.0, 5.0, 10.0]
+
+
+class TestDomainCoordinateAxis:
+    """Tests for the DomainCoordinateAxis class."""
+
+    def test_domain_axis_default_bounds(self):
+        """Test default domain axis has infinite bounds."""
+        axis = DomainCoordinateAxis(name="x")
+
+        assert axis.name == "x"
+        assert axis.min == float("-inf")
+        assert axis.max == float("inf")
+
+        # Internal storage should be None
+        assert axis.v_min is None
+        assert axis.v_max is None
+
+    def test_domain_axis_min_only(self):
+        """Test domain axis with only min specified."""
+        axis = DomainCoordinateAxis(name="x", min=-100)
+
+        assert axis.min == -100.0
+        assert axis.max == float("inf")
+
+        dumped = axis.model_dump()
+        assert dumped == {"name": "x", "min": -100.0}
+
+    def test_domain_axis_max_only(self):
+        """Test domain axis with only max specified."""
+        axis = DomainCoordinateAxis(name="x", max=-100)
+
+        assert axis.min == float("-inf")
+        assert axis.max == -100.0
+
+        dumped = axis.model_dump()
+        assert dumped == {"name": "x", "max": -100.0}
+
+    def test_domain_axis_finite_bounds(self):
+        """Test domain axis with both finite bounds."""
+        axis = DomainCoordinateAxis(name="x", min=-5, max=10)
+
+        assert axis.min == -5.0
+        assert axis.max == 10.0
+
+        dumped = axis.model_dump()
+        assert dumped == {"name": "x", "min": -5.0, "max": 10.0}
+
+    def test_domain_axis_validation_max_less_than_min(self):
+        """Test validation fails when max < min."""
+        with pytest.raises(
+            ValueError,
+            match=r"DomainCoordinateAxis 'x': max \(5\.0\) must be >= min \(10\.0\)",
+        ):
+            DomainCoordinateAxis(name="x", min=10, max=5)
+
+    def test_domain_axis_round_trip_unbounded(self):
+        """Test serialization round-trip for unbounded axis."""
+        axis = DomainCoordinateAxis(name="x")
+        dumped = axis.model_dump()
+        reconstructed = DomainCoordinateAxis(**dumped)
+
+        assert reconstructed.min == float("-inf")
+        assert reconstructed.max == float("inf")
+
+    def test_domain_axis_round_trip_partial(self):
+        """Test serialization round-trip for partially bounded axis."""
+        axis = DomainCoordinateAxis(name="x", min=-10)
+        dumped = axis.model_dump()
+        reconstructed = DomainCoordinateAxis(**dumped)
+
+        assert reconstructed.min == -10.0
+        assert reconstructed.max == float("inf")
+
+    def test_domain_axis_round_trip_full(self):
+        """Test serialization round-trip for fully bounded axis."""
+        axis = DomainCoordinateAxis(name="x", min=-5, max=5)
+        dumped = axis.model_dump()
+        reconstructed = DomainCoordinateAxis(**dumped)
+
+        assert reconstructed.min == -5.0
+        assert reconstructed.max == 5.0

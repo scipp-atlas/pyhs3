@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from pyhs3.axes import UnbinnedAxis
+from pyhs3.axes import DomainCoordinateAxis
 from pyhs3.domains import Domain, Domains, ProductDomain
 
 
@@ -61,8 +61,8 @@ class TestProductDomain:
     def test_product_domain_creation(self):
         """Test basic ProductDomain creation."""
         axes = [
-            UnbinnedAxis(name="param1", min=0.0, max=1.0),
-            UnbinnedAxis(name="param2", min=-5.0, max=5.0),
+            DomainCoordinateAxis(name="param1", min=0.0, max=1.0),
+            DomainCoordinateAxis(name="param2", min=-5.0, max=5.0),
         ]
         domain = ProductDomain(name="test_domain", axes=axes)
         assert domain.name == "test_domain"
@@ -110,9 +110,9 @@ class TestProductDomain:
     def test_product_domain_duplicate_axis_names_raises_error(self):
         """Test that ProductDomain raises ValueError for duplicate axis names."""
         axes = [
-            UnbinnedAxis(name="param1", min=0.0, max=1.0),
-            UnbinnedAxis(name="param2", min=-5.0, max=5.0),
-            UnbinnedAxis(name="param1", min=2.0, max=3.0),  # Duplicate name
+            DomainCoordinateAxis(name="param1", min=0.0, max=1.0),
+            DomainCoordinateAxis(name="param2", min=-5.0, max=5.0),
+            DomainCoordinateAxis(name="param1", min=2.0, max=3.0),  # Duplicate name
         ]
         with pytest.raises(
             ValueError,
@@ -123,11 +123,11 @@ class TestProductDomain:
     def test_product_domain_multiple_duplicate_axis_names_raises_error(self):
         """Test that ProductDomain raises ValueError for multiple duplicate axis names."""
         axes = [
-            UnbinnedAxis(name="param1", min=0.0, max=1.0),
-            UnbinnedAxis(name="param2", min=-5.0, max=5.0),
-            UnbinnedAxis(name="param1", min=2.0, max=3.0),  # Duplicate param1
-            UnbinnedAxis(name="param3", min=0.0, max=10.0),
-            UnbinnedAxis(name="param2", min=0.0, max=1.0),  # Duplicate param2
+            DomainCoordinateAxis(name="param1", min=0.0, max=1.0),
+            DomainCoordinateAxis(name="param2", min=-5.0, max=5.0),
+            DomainCoordinateAxis(name="param1", min=2.0, max=3.0),  # Duplicate param1
+            DomainCoordinateAxis(name="param3", min=0.0, max=10.0),
+            DomainCoordinateAxis(name="param2", min=0.0, max=1.0),  # Duplicate param2
         ]
         with pytest.raises(
             ValueError,
@@ -143,7 +143,7 @@ class TestProductDomain:
 
         # Single axis domain
         single_axis_domain = ProductDomain(
-            name="single", axes=[UnbinnedAxis(name="param1", min=0.0, max=1.0)]
+            name="single", axes=[DomainCoordinateAxis(name="param1", min=0.0, max=1.0)]
         )
         assert single_axis_domain.dimension == 1
 
@@ -151,9 +151,9 @@ class TestProductDomain:
         multi_axis_domain = ProductDomain(
             name="multi",
             axes=[
-                UnbinnedAxis(name="param1", min=0.0, max=1.0),
-                UnbinnedAxis(name="param2", min=-5.0, max=5.0),
-                UnbinnedAxis(name="param3", min=0.0, max=10.0),
+                DomainCoordinateAxis(name="param1", min=0.0, max=1.0),
+                DomainCoordinateAxis(name="param2", min=-5.0, max=5.0),
+                DomainCoordinateAxis(name="param3", min=0.0, max=10.0),
             ],
         )
         assert multi_axis_domain.dimension == 3
@@ -166,7 +166,7 @@ class TestProductDomain:
 
         # Single axis domain
         single_axis_domain = ProductDomain(
-            name="single", axes=[UnbinnedAxis(name="param1", min=0.0, max=1.0)]
+            name="single", axes=[DomainCoordinateAxis(name="param1", min=0.0, max=1.0)]
         )
         assert single_axis_domain.axis_names == ["param1"]
 
@@ -174,9 +174,9 @@ class TestProductDomain:
         multi_axis_domain = ProductDomain(
             name="multi",
             axes=[
-                UnbinnedAxis(name="param1", min=0.0, max=1.0),
-                UnbinnedAxis(name="param2", min=-5.0, max=5.0),
-                UnbinnedAxis(name="param3", min=0.0, max=10.0),
+                DomainCoordinateAxis(name="param1", min=0.0, max=1.0),
+                DomainCoordinateAxis(name="param2", min=-5.0, max=5.0),
+                DomainCoordinateAxis(name="param3", min=0.0, max=10.0),
             ],
         )
         assert multi_axis_domain.axis_names == ["param1", "param2", "param3"]
@@ -191,8 +191,8 @@ class TestProductDomain:
         domain = ProductDomain(
             name="test",
             axes=[
-                UnbinnedAxis(name="param1", min=0.0, max=1.0),
-                UnbinnedAxis(name="param2", min=-5.0, max=5.0),
+                DomainCoordinateAxis(name="param1", min=0.0, max=1.0),
+                DomainCoordinateAxis(name="param2", min=-5.0, max=5.0),
             ],
         )
         assert len(domain) == 2
@@ -202,8 +202,8 @@ class TestProductDomain:
         domain = ProductDomain(
             name="test",
             axes=[
-                UnbinnedAxis(name="param1", min=0.0, max=1.0),
-                UnbinnedAxis(name="param2", min=-5.0, max=5.0),
+                DomainCoordinateAxis(name="param1", min=0.0, max=1.0),
+                DomainCoordinateAxis(name="param2", min=-5.0, max=5.0),
             ],
         )
 
@@ -220,9 +220,9 @@ class TestProductDomain:
         domain = ProductDomain(
             name="test",
             axes=[
-                UnbinnedAxis(name="param1", min=0.0, max=1.0),
-                UnbinnedAxis(name="param2", min=-5.0, max=5.0),
-                UnbinnedAxis(name="param3", min=-10.0, max=10.0),
+                DomainCoordinateAxis(name="param1", min=0.0, max=1.0),
+                DomainCoordinateAxis(name="param2", min=-5.0, max=5.0),
+                DomainCoordinateAxis(name="param3", min=-10.0, max=10.0),
             ],
         )
 
@@ -240,9 +240,9 @@ class TestProductDomain:
         domain = ProductDomain(
             name="test",
             axes=[
-                UnbinnedAxis(name="param1", min=0.0, max=1.0),
-                UnbinnedAxis(name="param2", min=-5.0, max=5.0),
-                UnbinnedAxis(name="param3", min=-10.0, max=10.0),
+                DomainCoordinateAxis(name="param1", min=0.0, max=1.0),
+                DomainCoordinateAxis(name="param2", min=-5.0, max=5.0),
+                DomainCoordinateAxis(name="param3", min=-10.0, max=10.0),
             ],
         )
 
@@ -269,10 +269,11 @@ class TestDomains:
     def test_domains_creation_with_domains(self):
         """Test Domains creation with domain list."""
         domain1 = ProductDomain(
-            name="domain1", axes=[UnbinnedAxis(name="param1", min=0.0, max=1.0)]
+            name="domain1", axes=[DomainCoordinateAxis(name="param1", min=0.0, max=1.0)]
         )
         domain2 = ProductDomain(
-            name="domain2", axes=[UnbinnedAxis(name="param2", min=-1.0, max=1.0)]
+            name="domain2",
+            axes=[DomainCoordinateAxis(name="param2", min=-1.0, max=1.0)],
         )
 
         domains = Domains([domain1, domain2])
@@ -303,7 +304,7 @@ class TestDomains:
         ):
             ProductDomain(
                 name="invalid_domain",
-                axes=[UnbinnedAxis(name="param1", min=10.0, max=5.0)],
+                axes=[DomainCoordinateAxis(name="param1", min=10.0, max=5.0)],
             )
 
 

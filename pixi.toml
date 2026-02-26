@@ -32,7 +32,7 @@ hist = "*"
 
 # incompatibility issues between root_base and pytensor for osx-64
 [feature.test]
-platforms = ["linux-64", "linux-aarch64", "osx-arm64"]
+platforms = ["linux-64", "linux-aarch64", "osx-arm64", "win-64"]
 
 # pytensor >=2.33 does not exist for win-64 for py310
 [feature.py310]

@@ -6,6 +6,8 @@ Test coverage for all modifier types and their constraint handling.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytensor.tensor as pt
 import pytest
@@ -384,6 +386,159 @@ class TestShapeSysModifier:
         assert isinstance(constraint_val, (float, np.floating, np.ndarray))
         assert constraint_val > 0
 
+    def test_shapesys_default_is_poisson(self):
+        """Test that shapesys defaults to Poisson constraint."""
+        data = ShapeSysData(vals=[0.1, 0.15])
+        modifier = ShapeSysModifier(
+            name="uncorr_unc",
+            parameters=["gamma_0", "gamma_1"],
+            data=data,
+        )
+
+        assert modifier.constraint == "Poisson"
+
+    def test_shapesys_gaussian_constraint(self):
+        """Test shapesys with Gaussian constraint."""
+        data = ShapeSysData(vals=[10.0, 5.0])  # Absolute uncertainties
+        modifier = ShapeSysModifier(
+            name="uncorr_bkguncrt",
+            parameters=["uncorr_bkguncrt_0", "uncorr_bkguncrt_1"],
+            data=data,
+            constraint="Gauss",
+        )
+
+        context = Context(
+            {
+                "uncorr_bkguncrt_0": pt.constant(0.0),  # At nominal
+                "uncorr_bkguncrt_1": pt.constant(0.0),  # At nominal
+            }
+        )
+        sample_data = SampleData(contents=[100.0, 50.0], errors=[10.0, 7.0])
+
+        constraint = modifier.make_constraint(context, sample_data)
+        constraint_val = constraint.eval()
+
+        # Should be a valid probability value
+        assert isinstance(constraint_val, (float, np.floating, np.ndarray))
+        assert constraint_val > 0
+
+        # At gamma=0, Gauss(x=0|mean=0,sigma=1) should be at maximum
+        # Value should be close to 1/(sqrt(2*pi)) for each bin, multiplied together
+        expected_single = 1.0 / np.sqrt(2 * np.pi)
+        expected = expected_single**2  # Two bins
+        np.testing.assert_allclose(constraint_val, expected, rtol=1e-5)
+
+    def test_shapesys_gaussian_apply(self):
+        """Test shapesys Gaussian response function."""
+        data = ShapeSysData(vals=[10.0, 5.0])
+        modifier = ShapeSysModifier(
+            name="uncorr_unc",
+            parameters=["gamma_0", "gamma_1"],
+            data=data,
+            constraint="Gauss",
+        )
+
+        # Test at +1 sigma
+        context = Context(
+            {
+                "gamma_0": pt.constant(1.0),  # +1 sigma
+                "gamma_1": pt.constant(-1.0),  # -1 sigma
+            }
+        )
+        rates = pt.constant([100.0, 50.0])
+
+        result = modifier.apply(context, rates)
+        result_val = result.eval()
+
+        # Response function: nominal + gamma * vals
+        # bin 0: 100 + 1.0 * 10 = 110
+        # bin 1: 50 + (-1.0) * 5 = 45
+        expected = np.array([110.0, 45.0])
+        np.testing.assert_allclose(result_val, expected)
+
+    def test_shapesys_gaussian_one_sigma_shift(self):
+        """Test that ±1 sigma gives ±vals change for Gaussian shapesys."""
+        vals = [10.0, 5.0, 20.0]
+        data = ShapeSysData(vals=vals)
+        modifier = ShapeSysModifier(
+            name="test_sys",
+            parameters=["gamma_0", "gamma_1", "gamma_2"],
+            data=data,
+            constraint="Gauss",
+        )
+
+        nominal = np.array([100.0, 50.0, 200.0])
+
+        # Test +1 sigma
+        context_plus = Context(
+            {
+                "gamma_0": pt.constant(1.0),
+                "gamma_1": pt.constant(1.0),
+                "gamma_2": pt.constant(1.0),
+            }
+        )
+        result_plus = modifier.apply(context_plus, pt.constant(nominal))
+        result_plus_val = result_plus.eval()
+        expected_plus = nominal + np.array(vals)
+        np.testing.assert_allclose(result_plus_val, expected_plus)
+
+        # Test -1 sigma
+        context_minus = Context(
+            {
+                "gamma_0": pt.constant(-1.0),
+                "gamma_1": pt.constant(-1.0),
+                "gamma_2": pt.constant(-1.0),
+            }
+        )
+        result_minus = modifier.apply(context_minus, pt.constant(nominal))
+        result_minus_val = result_minus.eval()
+        expected_minus = nominal - np.array(vals)
+        np.testing.assert_allclose(result_minus_val, expected_minus)
+
+    def test_shapesys_poisson_vs_gaussian_different(self):
+        """Test that Poisson and Gaussian shapesys give different results."""
+        vals = [10.0, 5.0]
+        nominal = [100.0, 50.0]
+
+        # Poisson modifier
+        poisson_mod = ShapeSysModifier(
+            name="poisson_sys",
+            parameters=["gamma_0", "gamma_1"],
+            data=ShapeSysData(vals=vals),
+            constraint="Poisson",
+        )
+
+        # Gaussian modifier
+        gauss_mod = ShapeSysModifier(
+            name="gauss_sys",
+            parameters=["gamma_0", "gamma_1"],
+            data=ShapeSysData(vals=vals),
+            constraint="Gauss",
+        )
+
+        # Test with gamma != 0 or 1
+        context = Context(
+            {
+                "gamma_0": pt.constant(1.2),
+                "gamma_1": pt.constant(0.8),
+            }
+        )
+        rates = pt.constant(nominal)
+
+        poisson_result = poisson_mod.apply(context, rates).eval()
+        gauss_result = gauss_mod.apply(context, rates).eval()
+
+        # Results should be different
+        # Poisson: nominal * gamma
+        # Gaussian: nominal + gamma * vals
+        assert not np.allclose(poisson_result, gauss_result)
+
+        # Verify expected values
+        expected_poisson = np.array([120.0, 40.0])  # [100*1.2, 50*0.8]
+        expected_gauss = np.array([112.0, 54.0])  # [100+1.2*10, 50+0.8*5]
+        np.testing.assert_allclose(poisson_result, expected_poisson)
+        np.testing.assert_allclose(gauss_result, expected_gauss)
+
 
 class TestStatErrorModifier:
     """Test StatErrorModifier functionality."""
@@ -618,3 +773,97 @@ class TestModifierEdgeCases:
 
         np.testing.assert_allclose(result1_zero, 100.0, rtol=1e-6)
         np.testing.assert_allclose(result4_zero, 100.0, rtol=1e-6)
+
+
+class TestShapeSysGaussianValidation:
+    """Validation tests for Gaussian shapesys constraint evaluation."""
+
+    def test_gaussian_shapesys_constraint_at_nominal(self):
+        """Test Gaussian shapesys constraint at nominal (gamma=0).
+
+        Validates that Gauss(x=0 | mean=0, sigma=1) evaluates correctly.
+        """
+        data = ShapeSysData(vals=[10.0, 5.0])
+        modifier = ShapeSysModifier(
+            name="shape_sys",
+            constraint="Gauss",
+            parameters=["gamma_bin_0", "gamma_bin_1"],
+            data=data,
+        )
+
+        # Create context with gamma=0 (nominal)
+        context = Context(
+            {"gamma_bin_0": pt.constant(0.0), "gamma_bin_1": pt.constant(0.0)}
+        )
+
+        # Create sample data
+        sample_data = SampleData(contents=[100.0, 50.0], errors=[10.0, 7.1])
+
+        # Evaluate constraint
+        constraint = modifier.make_constraint(context, sample_data)
+        constraint_val = float(constraint.eval())
+
+        # Expected: Gauss(0|0,1) * Gauss(0|0,1) = (1/sqrt(2*pi))^2
+        expected = (1.0 / math.sqrt(2 * math.pi)) ** 2
+
+        np.testing.assert_allclose(constraint_val, expected, rtol=1e-6)
+
+    def test_gaussian_shapesys_constraint_at_plus_one_sigma(self):
+        """Test Gaussian shapesys constraint at +1 sigma (gamma=1).
+
+        Validates that Gauss(x=0 | mean=1, sigma=1) evaluates correctly.
+        """
+        data = ShapeSysData(vals=[10.0, 5.0])
+        modifier = ShapeSysModifier(
+            name="shape_sys",
+            constraint="Gauss",
+            parameters=["gamma_bin_0", "gamma_bin_1"],
+            data=data,
+        )
+
+        # Evaluate at +1 sigma (gamma=1 for both bins)
+        context = Context(
+            {"gamma_bin_0": pt.constant(1.0), "gamma_bin_1": pt.constant(1.0)}
+        )
+
+        # Create sample data
+        sample_data = SampleData(contents=[100.0, 50.0], errors=[10.0, 7.1])
+
+        # Evaluate constraint
+        constraint = modifier.make_constraint(context, sample_data)
+        constraint_val = float(constraint.eval())
+
+        # Expected: Gauss(0|1,1)^2 = (exp(-0.5) / sqrt(2*pi))^2
+        expected = (math.exp(-0.5) / math.sqrt(2 * math.pi)) ** 2
+
+        np.testing.assert_allclose(constraint_val, expected, rtol=1e-6)
+
+    def test_gaussian_shapesys_constraint_at_minus_one_sigma(self):
+        """Test Gaussian shapesys constraint at -1 sigma (gamma=-1).
+
+        Validates that Gauss(x=0 | mean=-1, sigma=1) evaluates correctly.
+        """
+        data = ShapeSysData(vals=[10.0, 5.0])
+        modifier = ShapeSysModifier(
+            name="shape_sys",
+            constraint="Gauss",
+            parameters=["gamma_bin_0", "gamma_bin_1"],
+            data=data,
+        )
+
+        # Evaluate at -1 sigma (gamma=-1 for both bins)
+        context = Context(
+            {"gamma_bin_0": pt.constant(-1.0), "gamma_bin_1": pt.constant(-1.0)}
+        )
+
+        # Create sample data
+        sample_data = SampleData(contents=[100.0, 50.0], errors=[10.0, 7.1])
+
+        # Evaluate constraint
+        constraint = modifier.make_constraint(context, sample_data)
+        constraint_val = float(constraint.eval())
+
+        # Expected: Gauss(0|-1,1)^2 = (exp(-0.5) / sqrt(2*pi))^2
+        expected = (math.exp(-0.5) / math.sqrt(2 * math.pi)) ** 2
+
+        np.testing.assert_allclose(constraint_val, expected, rtol=1e-6)

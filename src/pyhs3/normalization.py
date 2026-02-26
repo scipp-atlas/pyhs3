@@ -7,6 +7,7 @@ and Gauss-Legendre quadrature for computing normalization integrals symbolically
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
@@ -22,7 +23,7 @@ _GL_ORDER = 64
 _GL_NODES, _GL_WEIGHTS = np.polynomial.legendre.leggauss(_GL_ORDER)
 
 
-class Normalizable:
+class Normalizable(ABC):
     """
     Mixin for distributions that need numerical normalization over observables.
 
@@ -34,12 +35,13 @@ class Normalizable:
     normalization formulas instead of the numerical fallback.
     """
 
+    @abstractmethod
     def normalization_integral(
         self,
-        context: Context,  # noqa: ARG002
-        observable_name: str,  # noqa: ARG002
-        lower: TensorVar,  # noqa: ARG002
-        upper: TensorVar,  # noqa: ARG002
+        context: Context,
+        observable_name: str,
+        lower: TensorVar,
+        upper: TensorVar,
     ) -> TensorVar | None:
         """
         Analytical normalization integral over the observable domain.
@@ -56,7 +58,6 @@ class Normalizable:
         Returns:
             Symbolic integral expression, or None for numerical fallback.
         """
-        return None
 
 
 def gauss_legendre_integral(

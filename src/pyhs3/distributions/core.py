@@ -89,10 +89,10 @@ class Distribution(Evaluable, ABC):
 
     def normalization_integral(
         self,
-        context: Context,  # noqa: ARG002
-        observable_name: str,  # noqa: ARG002
-        lower: TensorVar,  # noqa: ARG002
-        upper: TensorVar,  # noqa: ARG002
+        _context: Context,
+        _observable_name: str,
+        _lower: TensorVar,
+        _upper: TensorVar,
     ) -> TensorVar | None:
         """
         Analytical normalization integral over the observable domain.

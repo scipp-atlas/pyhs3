@@ -24,7 +24,7 @@ hatch-vcs = ">=0.4"
 [package.run-dependencies]
 rich = "*"
 rustworkx = "*"
-pytensor = "*"
+pytensor = ">=2.33.0"
 numpy = "*"
 sympy = "*"
 pydantic = "*"

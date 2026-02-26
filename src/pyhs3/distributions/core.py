@@ -49,6 +49,7 @@ def _apply_normalization(
             obs_var = context[obs_name]
             integral = gauss_legendre_integral(raw, obs_var, lower, upper)
         normalized = normalized / integral
+
     return normalized
 
 

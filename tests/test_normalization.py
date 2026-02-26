@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytensor.tensor as pt
+import pytest
 from pytensor.compile.function import function
 from scipy.integrate import quad
 
@@ -182,6 +183,17 @@ class TestDistributionNormalization:
             context, "x", pt.constant(0.0), pt.constant(1.0)
         )
         assert result is None
+
+    def test_generic_dist_expression(self):
+        """Base class normalization_integral() returns None."""
+        dist = GenericDist(name="test", expression="x")
+        x_var = pt.dscalar("x")
+        context = Context(parameters={"x": x_var}, observables={"x": (0, 10)})
+
+        result = dist.expression(context)
+        func = function([x_var], result)
+        assert pytest.approx(func(1.0)) == 0.02
+        assert pytest.approx(func(10.0)) == 0.2
 
     def test_composite_dist_not_normalized(self):
         """MixtureDist/ProductDist skip normalization."""

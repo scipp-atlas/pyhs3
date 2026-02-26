@@ -247,10 +247,12 @@ class DomainCoordinateAxis(Axis):
 
     @property
     def min(self) -> float:
+        """Returns defined minimum or (negative) :data:`np.inf <numpy.inf>`"""
         return -np.inf if self.v_min is None else self.v_min
 
     @property
     def max(self) -> float:
+        """Returns defined maximum or (positive) :data:`np.inf <numpy.inf>`"""
         return np.inf if self.v_max is None else self.v_max
 
     @model_validator(mode="after")

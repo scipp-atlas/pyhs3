@@ -22,6 +22,7 @@ Modules
 
    distributions
    functions
+   axes
    domains
    parameter_points
    data
@@ -90,6 +91,28 @@ Distributions
    QQZZBackgroundDist
    FastVerticalInterpHistPdf2D2Dist
 
+Axes
+----
+
+.. currentmodule:: pyhs3.axes
+
+.. autosummary::
+   :toctree: _generated/
+   :nosignatures:
+
+   Axis
+   UnbinnedAxis
+   ConstantAxis
+   RegularAxis
+   IrregularAxis
+   DomainCoordinateAxis
+   BinnedAxis
+   BinnedAxes
+   UnbinnedAxes
+   Axes
+   DomainAxes
+   DomainAxis
+
 Domains
 -------
 
@@ -102,7 +125,6 @@ Domains
    Domains
    Domain
    ProductDomain
-   Axis
 
 Parameter Points
 ----------------
@@ -131,7 +153,6 @@ Data
    PointData
    UnbinnedData
    BinnedData
-   Axis
    GaussianUncertainty
 
 Parsing

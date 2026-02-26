@@ -82,6 +82,7 @@ intersphinx_mapping = get_intersphinx_mapping(
     packages={
         "python",
         "matplotlib",
+        "numpy",
     }
 )
 

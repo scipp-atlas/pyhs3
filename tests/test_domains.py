@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from pyhs3.axes import DomainCoordinateAxis
+from pyhs3.axes import ConstantAxis, DomainCoordinateAxis
 from pyhs3.domains import Domain, Domains, ProductDomain
 
 
@@ -243,6 +243,7 @@ class TestProductDomain:
                 DomainCoordinateAxis(name="param1", min=0.0, max=1.0),
                 DomainCoordinateAxis(name="param2", min=-5.0, max=5.0),
                 DomainCoordinateAxis(name="param3", min=-10.0, max=10.0),
+                ConstantAxis(name="param4"),
             ],
         )
 
@@ -256,6 +257,9 @@ class TestProductDomain:
             KeyError, match=r"No axis named 'nonexistent' found in domain 'test'"
         ):
             _ = domain["nonexistent"]
+
+        with pytest.raises(ValueError, match="is a constant axis"):
+            domain["param4"]
 
 
 class TestDomains:

@@ -11,9 +11,10 @@ import pytest
 
 from pyhs3 import Workspace
 from pyhs3.analyses import Analyses, Analysis
+from pyhs3.axes import DomainCoordinateAxis
 from pyhs3.data import Data, PointData
 from pyhs3.distributions import Distributions, GaussianDist
-from pyhs3.domains import Axis, Domain, Domains, ProductDomain
+from pyhs3.domains import Domain, Domains, ProductDomain
 from pyhs3.likelihoods import Likelihood, Likelihoods
 from pyhs3.metadata import Metadata
 
@@ -361,7 +362,7 @@ class TestWorkspaceFKResolution:
         """Test Analysis with preresolved Domain and Likelihood instances (branch #1)."""
         # Create Domain and Likelihood instances
         domain1 = ProductDomain(
-            name="domain1", axes=[Axis(name="x", min=0.0, max=10.0)]
+            name="domain1", axes=[DomainCoordinateAxis(name="x", min=0.0, max=10.0)]
         )
         dist1 = GaussianDist(name="dist1", x="x", mean=0.0, sigma=1.0)
         datum1 = PointData(name="obs1", value=1.5)

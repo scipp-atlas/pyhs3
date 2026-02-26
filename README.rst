@@ -71,7 +71,8 @@ This is how you use the ``pyhs3`` Python API to build a statistical model direct
    >>> import numpy as np
    >>> from pyhs3.distributions import GaussianDist
    >>> from pyhs3.parameter_points import ParameterPoint, ParameterSet
-   >>> from pyhs3.domains import ProductDomain, Axis
+   >>> from pyhs3.axes import DomainAxis
+   >>> from pyhs3.domains import ProductDomain
    >>> from pyhs3.metadata import Metadata
    >>>
    >>> # Create metadata
@@ -94,9 +95,9 @@ This is how you use the ``pyhs3`` Python API to build a statistical model direct
    >>> domain = ProductDomain(
    ...     name="default_domain",
    ...     axes=[
-   ...         Axis(name="x", min=-5.0, max=5.0),
-   ...         Axis(name="mu", min=-2.0, max=2.0),
-   ...         Axis(name="sigma", min=0.1, max=3.0),
+   ...         dict(name="x", min=-5.0, max=5.0),
+   ...         dict(name="mu", min=-2.0, max=2.0),
+   ...         dict(name="sigma", min=0.1, max=3.0),
    ...     ],
    ... )
    >>>

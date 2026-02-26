@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from pydantic import TypeAdapter
 
+from pyhs3.axes import Axis, BinnedAxis, UnbinnedAxis
 from pyhs3.data import (
-    Axis,
     BinnedData,
     Data,
     GaussianUncertainty,
@@ -21,139 +22,11 @@ from pyhs3.data import (
 
 hist = pytest.importorskip("hist", reason="hist not installed")
 
+binned_axis_adapter = TypeAdapter(BinnedAxis)
 
-class TestAxis:
-    """Tests for the Axis class."""
 
-    def test_axis_creation_basic(self):
-        """Test basic Axis creation with name only."""
-        axis = Axis(name="test_var")
-        assert axis.name == "test_var"
-        assert axis.min is None
-        assert axis.max is None
-        assert axis.nbins is None
-        assert axis.edges is None
-
-    def test_axis_creation_regular_binning(self):
-        """Test Axis creation with regular binning."""
-        axis = Axis(name="mass", min=100.0, max=200.0, nbins=50)
-        assert axis.name == "mass"
-        assert axis.min == 100.0
-        assert axis.max == 200.0
-        assert axis.nbins == 50
-        assert axis.edges is None
-
-    def test_axis_creation_irregular_binning(self):
-        """Test Axis creation with irregular binning."""
-        edges = [0.0, 1.0, 3.0, 10.0, 100.0]
-        axis = Axis(name="pt", edges=edges)
-        assert axis.name == "pt"
-        assert axis.min is None
-        assert axis.max is None
-        assert axis.nbins is None
-        assert axis.edges == edges
-
-    def test_axis_validation_mixed_binning_fails(self):
-        """Test that specifying both regular and irregular binning fails."""
-        with pytest.raises(ValueError, match="Cannot specify both regular binning"):
-            Axis(name="test", min=0.0, max=10.0, nbins=5, edges=[0, 5, 10])
-
-    def test_axis_validation_edges_too_short(self):
-        """Test that edges array must have at least 2 elements."""
-        with pytest.raises(
-            ValueError, match="Edges array must have at least 2 elements"
-        ):
-            Axis(name="test", edges=[1.0])
-
-    def test_axis_validation_edges_not_ordered(self):
-        """Test that edges must be in non-decreasing order."""
-        with pytest.raises(ValueError, match="Edges must be in non-decreasing order"):
-            Axis(name="test", edges=[1.0, 3.0, 2.0, 4.0])
-
-    def test_axis_validation_edges_equal_allowed(self):
-        """Test that equal adjacent edges are allowed."""
-        axis = Axis(name="test", edges=[1.0, 2.0, 2.0, 3.0])
-        assert axis.edges == [1.0, 2.0, 2.0, 3.0]
-
-    def test_axis_bin_edges_regular_binning(self):
-        """Test bin_edges property with regular binning."""
-        axis = Axis(name="mass", min=0.0, max=10.0, nbins=5)
-        edges = axis.bin_edges
-
-        # Should return 6 edges for 5 bins: [0, 2, 4, 6, 8, 10]
-        expected_edges = [0.0, 2.0, 4.0, 6.0, 8.0, 10.0]
-        assert len(edges) == 6
-        assert edges == pytest.approx(expected_edges)
-
-    def test_axis_bin_edges_irregular_binning(self):
-        """Test bin_edges property with irregular binning."""
-        custom_edges = [0.0, 1.0, 5.0, 12.0, 25.0]
-        axis = Axis(name="pt", edges=custom_edges)
-        edges = axis.bin_edges
-
-        # Should return the provided edges exactly
-        assert edges == custom_edges
-
-    def test_axis_bin_edges_no_binning_info(self):
-        """Test bin_edges property when no binning information is provided."""
-        axis = Axis(name="var")
-        edges = axis.bin_edges
-
-        # Should return empty list when no binning info
-        assert edges == []
-
-    def test_axis_bin_edges_partial_regular_info(self):
-        """Test bin_edges property with incomplete regular binning info."""
-        # Missing nbins
-        axis = Axis(name="var", min=0.0, max=5.0)
-        assert axis.bin_edges == []
-
-        # Missing max
-        axis = Axis(name="var", min=0.0, nbins=3)
-        assert axis.bin_edges == []
-
-        # Missing min
-        axis = Axis(name="var", max=5.0, nbins=3)
-        assert axis.bin_edges == []
-
-    def test_axis_bin_edges_single_bin(self):
-        """Test bin_edges property with single bin."""
-        axis = Axis(name="single", min=1.0, max=2.0, nbins=1)
-        edges = axis.bin_edges
-
-        # Should return 2 edges for 1 bin: [1.0, 2.0]
-        assert len(edges) == 2
-        assert edges == pytest.approx([1.0, 2.0])
-
-    def test_axis_bin_edges_zero_range(self):
-        """Test bin_edges property with zero range (min=max)."""
-        axis = Axis(name="zero_range", min=5.0, max=5.0, nbins=1)
-        edges = axis.bin_edges
-
-        # Should return [5.0, 5.0] for zero range
-        assert len(edges) == 2
-        assert edges == pytest.approx([5.0, 5.0])
-
-    def test_axis_bin_edges_negative_range(self):
-        """Test bin_edges property with negative values."""
-        axis = Axis(name="negative", min=-10.0, max=-2.0, nbins=4)
-        edges = axis.bin_edges
-
-        # Should handle negative values correctly: [-10, -8, -6, -4, -2]
-        expected_edges = [-10.0, -8.0, -6.0, -4.0, -2.0]
-        assert len(edges) == 5
-        assert edges == pytest.approx(expected_edges)
-
-    def test_axis_bin_edges_large_number_of_bins(self):
-        """Test bin_edges property with large number of bins."""
-        axis = Axis(name="many_bins", min=0.0, max=100.0, nbins=1000)
-        edges = axis.bin_edges
-
-        # Should return 1001 edges for 1000 bins
-        assert len(edges) == 1001
-        assert edges[0] == pytest.approx(0.0)
-        assert edges[-1] == pytest.approx(100.0)
-        assert edges[500] == pytest.approx(50.0)  # Middle should be 50.0
+def make_binned_axis(**kwargs):
+    return binned_axis_adapter.validate_python(kwargs)
 
 
 class TestGaussianUncertainty:
@@ -223,6 +96,31 @@ class TestPointData:
         with pytest.raises(ValueError, match="Field required"):
             PointData(name="test", type="point")
 
+    def test_point_data_without_axes(self):
+        """Test PointData without axes (default None)."""
+        data = PointData(name="measurement", type="point", value=42.5)
+        assert data.axes is None
+
+    def test_point_data_with_axes(self):
+        """Test PointData with axes for observable bounds."""
+        axes = [Axis(name="x", min=0.0, max=10.0)]
+        data = PointData(name="measurement", type="point", value=5.0, axes=axes)
+        assert data.axes is not None
+        assert len(data.axes) == 1
+        assert data.axes[0].name == "x"
+        assert not hasattr(data.axes[0], "min")
+        assert not hasattr(data.axes[0], "max")
+
+    def test_point_data_with_multiple_axes(self):
+        """Test PointData with multiple axes."""
+        axes = [
+            Axis(name="x", min=0.0, max=10.0),
+            Axis(name="y", min=-5.0, max=5.0),
+        ]
+        data = PointData(name="measurement", type="point", value=1.0, axes=axes)
+        assert data.axes is not None
+        assert len(data.axes) == 2
+
 
 class TestUnbinnedData:
     """Tests for the UnbinnedData class."""
@@ -230,7 +128,10 @@ class TestUnbinnedData:
     def test_unbinned_data_creation_basic(self):
         """Test basic UnbinnedData creation."""
         entries = [[1.0, 2.0], [3.0, 4.0]]
-        axes = [Axis(name="x", min=0.0, max=5.0), Axis(name="y", min=0.0, max=10.0)]
+        axes = [
+            UnbinnedAxis(name="x", min=0.0, max=5.0),
+            UnbinnedAxis(name="y", min=0.0, max=10.0),
+        ]
         data = UnbinnedData(name="events", type="unbinned", entries=entries, axes=axes)
 
         assert data.name == "events"
@@ -243,7 +144,7 @@ class TestUnbinnedData:
     def test_unbinned_data_creation_with_weights(self):
         """Test UnbinnedData creation with weights."""
         entries = [[1.0], [2.0], [3.0]]
-        axes = [Axis(name="x")]
+        axes = [UnbinnedAxis(name="x", min=0.0, max=5.0)]
         weights = [0.8, 1.2, 0.9]
         data = UnbinnedData(
             name="weighted_events",
@@ -259,7 +160,10 @@ class TestUnbinnedData:
     def test_unbinned_data_creation_with_uncertainties(self):
         """Test UnbinnedData creation with entry uncertainties."""
         entries = [[1.0, 2.0], [3.0, 4.0]]
-        axes = [Axis(name="x"), Axis(name="y")]
+        axes = [
+            UnbinnedAxis(name="x", min=0.0, max=5.0),
+            UnbinnedAxis(name="y", min=0.0, max=5.0),
+        ]
         uncertainties = [[0.1, 0.2], [0.3, 0.4]]
         data = UnbinnedData(
             name="events_with_errors",
@@ -274,7 +178,7 @@ class TestUnbinnedData:
     def test_unbinned_data_validation_weights_length_mismatch(self):
         """Test that weights array length must match entries length."""
         entries = [[1.0], [2.0], [3.0]]
-        axes = [Axis(name="x")]
+        axes = [UnbinnedAxis(name="x", min=0.0, max=5.0)]
         weights = [0.8, 1.2]  # Wrong length
 
         with pytest.raises(
@@ -291,7 +195,7 @@ class TestUnbinnedData:
     def test_unbinned_data_validation_uncertainties_length_mismatch(self):
         """Test that uncertainties array length must match entries length."""
         entries = [[1.0], [2.0]]
-        axes = [Axis(name="x")]
+        axes = [UnbinnedAxis(name="x", min=0.0, max=5.0)]
         uncertainties = [[0.1], [0.2], [0.3]]  # Wrong length
 
         with pytest.raises(
@@ -308,7 +212,10 @@ class TestUnbinnedData:
     def test_unbinned_data_validation_entry_dimensionality_mismatch(self):
         """Test that entry dimensionality must match number of axes."""
         entries = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]  # 3D entries
-        axes = [Axis(name="x"), Axis(name="y")]  # 2 axes
+        axes = [
+            UnbinnedAxis(name="x", min=0.0, max=5.0),
+            UnbinnedAxis(name="y", min=0.0, max=5.0),
+        ]  # 2 axes
 
         with pytest.raises(
             ValueError, match=r"Entry dimensionality .* must match number of axes"
@@ -318,7 +225,10 @@ class TestUnbinnedData:
     def test_unbinned_data_validation_inconsistent_entry_dimensions(self):
         """Test that all entries must have same dimensionality."""
         entries = [[1.0, 2.0], [3.0]]  # Inconsistent dimensions
-        axes = [Axis(name="x"), Axis(name="y")]
+        axes = [
+            UnbinnedAxis(name="x", min=0.0, max=5.0),
+            UnbinnedAxis(name="y", min=0.0, max=5.0),
+        ]
 
         with pytest.raises(ValueError, match=r"Entry.*has.*dimensions, expected"):
             UnbinnedData(name="test", type="unbinned", entries=entries, axes=axes)
@@ -326,7 +236,10 @@ class TestUnbinnedData:
     def test_unbinned_data_validation_inconsistent_uncertainty_dimensions(self):
         """Test that uncertainty entries must have same dimensionality as data entries."""
         entries = [[1.0, 2.0], [3.0, 4.0]]  # 2D entries
-        axes = [Axis(name="x"), Axis(name="y")]
+        axes = [
+            UnbinnedAxis(name="x", min=0.0, max=5.0),
+            UnbinnedAxis(name="y", min=0.0, max=5.0),
+        ]
         uncertainties = [[0.1, 0.2], [0.3]]  # Inconsistent uncertainty dimensions
 
         with pytest.raises(
@@ -343,7 +256,10 @@ class TestUnbinnedData:
     def test_unbinned_data_empty_entries_with_weights(self):
         """Test that empty entries with weights validates correctly."""
         entries = []  # Empty entries (n_entries = 0)
-        axes = [Axis(name="x"), Axis(name="y")]
+        axes = [
+            UnbinnedAxis(name="x", min=0.0, max=5.0),
+            UnbinnedAxis(name="y", min=0.0, max=5.0),
+        ]
         weights = []  # Empty weights to match
 
         # Should not raise any validation errors
@@ -360,7 +276,10 @@ class TestUnbinnedData:
     def test_unbinned_data_empty_entries_with_uncertainties(self):
         """Test that empty entries with uncertainties validates correctly."""
         entries = []  # Empty entries (n_entries = 0)
-        axes = [Axis(name="x"), Axis(name="y")]
+        axes = [
+            UnbinnedAxis(name="x", min=0.0, max=5.0),
+            UnbinnedAxis(name="y", min=0.0, max=5.0),
+        ]
         uncertainties = []  # Empty uncertainties to match
 
         # Should not raise any validation errors
@@ -377,7 +296,10 @@ class TestUnbinnedData:
     def test_unbinned_data_empty_entries_basic(self):
         """Test that empty entries validates correctly without weights or uncertainties."""
         entries = []  # Empty entries (n_entries = 0)
-        axes = [Axis(name="x"), Axis(name="y")]
+        axes = [
+            UnbinnedAxis(name="x", min=0.0, max=5.0),
+            UnbinnedAxis(name="y", min=0.0, max=5.0),
+        ]
 
         # Should not raise any validation errors
         data = UnbinnedData(
@@ -394,7 +316,7 @@ class TestBinnedData:
     def test_binned_data_creation_basic(self):
         """Test basic BinnedData creation."""
         contents = [10.0, 20.0, 15.0, 5.0]
-        axes = [Axis(name="mass", min=100.0, max=200.0, nbins=4)]
+        axes = [make_binned_axis(name="mass", min=100.0, max=200.0, nbins=4)]
         data = BinnedData(name="histogram", type="binned", contents=contents, axes=axes)
 
         assert data.name == "histogram"
@@ -407,8 +329,8 @@ class TestBinnedData:
         """Test BinnedData creation with 2D histogram."""
         contents = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]  # 2x3 = 6 bins
         axes = [
-            Axis(name="x", min=0.0, max=2.0, nbins=2),
-            Axis(name="y", min=0.0, max=3.0, nbins=3),
+            make_binned_axis(name="x", min=0.0, max=2.0, nbins=2),
+            make_binned_axis(name="y", min=0.0, max=3.0, nbins=3),
         ]
         data = BinnedData(name="hist2d", type="binned", contents=contents, axes=axes)
 
@@ -418,7 +340,7 @@ class TestBinnedData:
     def test_binned_data_creation_irregular_binning(self):
         """Test BinnedData creation with irregular binning."""
         contents = [10.0, 25.0, 5.0]  # 3 bins
-        axes = [Axis(name="pt", edges=[0.0, 10.0, 50.0, 100.0])]  # 3 bins
+        axes = [make_binned_axis(name="pt", edges=[0.0, 10.0, 50.0, 100.0])]  # 3 bins
         data = BinnedData(
             name="irregular_hist", type="binned", contents=contents, axes=axes
         )
@@ -429,7 +351,7 @@ class TestBinnedData:
     def test_binned_data_creation_with_uncertainty(self):
         """Test BinnedData creation with uncertainty."""
         contents = [10.0, 20.0]
-        axes = [Axis(name="x", min=0.0, max=2.0, nbins=2)]
+        axes = [make_binned_axis(name="x", min=0.0, max=2.0, nbins=2)]
         uncertainty = GaussianUncertainty(type="gaussian_uncertainty", sigma=[3.0, 4.0])
         data = BinnedData(
             name="hist_with_errors",
@@ -444,7 +366,9 @@ class TestBinnedData:
     def test_binned_data_validation_contents_length_mismatch(self):
         """Test that contents length must match expected number of bins."""
         contents = [10.0, 20.0]  # 2 values
-        axes = [Axis(name="x", min=0.0, max=3.0, nbins=3)]  # 3 bins expected
+        axes = [
+            make_binned_axis(name="x", min=0.0, max=3.0, nbins=3)
+        ]  # 3 bins expected
 
         with pytest.raises(
             ValueError,
@@ -453,20 +377,18 @@ class TestBinnedData:
             BinnedData(name="test", type="binned", contents=contents, axes=axes)
 
     def test_binned_data_validation_axis_missing_binning(self):
-        """Test that axis must specify binning for binned data."""
-        contents = [10.0, 20.0]
-        axes = [Axis(name="x", min=0.0, max=2.0)]  # No nbins or edges
-
+        """Test that BinnedAxis must specify binning."""
+        # BinnedAxis validation happens at axis creation, not at BinnedData creation
         with pytest.raises(
             ValueError,
             match=r"must specify either regular binning .* or irregular binning",
         ):
-            BinnedData(name="test", type="binned", contents=contents, axes=axes)
+            make_binned_axis(name="x", min=0.0, max=2.0)  # No nbins or edges
 
     def test_binned_data_validation_uncertainty_sigma_length_mismatch(self):
         """Test that uncertainty sigma length must match contents length."""
         contents = [10.0, 20.0, 15.0]
-        axes = [Axis(name="x", min=0.0, max=3.0, nbins=3)]
+        axes = [make_binned_axis(name="x", min=0.0, max=3.0, nbins=3)]
         uncertainty = GaussianUncertainty(
             type="gaussian_uncertainty", sigma=[3.0, 4.0]
         )  # Wrong length
@@ -489,7 +411,7 @@ class TestBinnedDataHistConversion:
     def test_to_hist_1d_regular_binning(self):
         """Test BinnedData.to_hist() with 1D regular binning."""
         contents = [10.0, 20.0, 15.0]
-        axes = [Axis(name="x", min=0.0, max=3.0, nbins=3)]
+        axes = [make_binned_axis(name="x", min=0.0, max=3.0, nbins=3)]
         data = BinnedData(name="test", type="binned", contents=contents, axes=axes)
 
         h = data.to_hist()
@@ -507,7 +429,7 @@ class TestBinnedDataHistConversion:
         """Test BinnedData.to_hist() with 1D irregular binning."""
         contents = [10.0, 25.0, 5.0]
         edges = [0.0, 10.0, 50.0, 100.0]  # 3 bins with variable widths
-        axes = [Axis(name="pt", edges=edges)]
+        axes = [make_binned_axis(name="pt", edges=edges)]
         data = BinnedData(
             name="test_irregular", type="binned", contents=contents, axes=axes
         )
@@ -526,7 +448,7 @@ class TestBinnedDataHistConversion:
         """Test BinnedData.to_hist() with gaussian uncertainties."""
         contents = [10.0, 20.0, 15.0]
         sigma = [3.0, 4.0, 2.5]
-        axes = [Axis(name="x", min=0.0, max=3.0, nbins=3)]
+        axes = [make_binned_axis(name="x", min=0.0, max=3.0, nbins=3)]
         uncertainty = GaussianUncertainty(type="gaussian_uncertainty", sigma=sigma)
         data = BinnedData(
             name="test_unc",
@@ -549,8 +471,8 @@ class TestBinnedDataHistConversion:
         # 2x3 = 6 bins, flattened in C-order (row-major)
         contents = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
         axes = [
-            Axis(name="x", min=0.0, max=2.0, nbins=2),
-            Axis(name="y", min=0.0, max=3.0, nbins=3),
+            make_binned_axis(name="x", min=0.0, max=2.0, nbins=2),
+            make_binned_axis(name="y", min=0.0, max=3.0, nbins=3),
         ]
         data = BinnedData(name="test_2d", type="binned", contents=contents, axes=axes)
 
@@ -573,7 +495,7 @@ class TestBinnedDataHistConversion:
                 name="empty",
                 type="binned",
                 contents=[],
-                axes=[Axis(name="x", min=0.0, max=1.0, nbins=1)],
+                axes=[make_binned_axis(name="x", min=0.0, max=1.0, nbins=1)],
             )
 
     def test_to_hist_3d_binning(self):
@@ -581,9 +503,9 @@ class TestBinnedDataHistConversion:
         # 2x3x2 = 12 bins
         contents = [float(i) for i in range(1, 13)]
         axes = [
-            Axis(name="x", min=0.0, max=2.0, nbins=2),
-            Axis(name="y", min=0.0, max=3.0, nbins=3),
-            Axis(name="z", min=0.0, max=2.0, nbins=2),
+            make_binned_axis(name="x", min=0.0, max=2.0, nbins=2),
+            make_binned_axis(name="y", min=0.0, max=3.0, nbins=3),
+            make_binned_axis(name="z", min=0.0, max=2.0, nbins=2),
         ]
         data = BinnedData(name="test_3d", type="binned", contents=contents, axes=axes)
 
@@ -606,12 +528,12 @@ class TestUnbinnedDataHistConversion:
         """Test UnbinnedData.to_hist() with 1D data without weights."""
         # Create some unbinned data points
         entries = [[0.5], [1.2], [1.8], [2.3], [0.9]]
-        axes = [Axis(name="x", min=0.0, max=3.0, nbins=3)]
+        axes = [UnbinnedAxis(name="x", min=0.0, max=3.0)]
         data = UnbinnedData(
             name="test_unbinned", type="unbinned", entries=entries, axes=axes
         )
 
-        h = data.to_hist()
+        h = data.to_hist(nbins=3)
 
         # Check that axis is configured correctly
         assert len(h.axes) == 1
@@ -628,7 +550,7 @@ class TestUnbinnedDataHistConversion:
         """Test UnbinnedData.to_hist() with 1D data with weights."""
         entries = [[0.5], [1.2], [1.8]]
         weights = [2.0, 3.0, 1.5]
-        axes = [Axis(name="x", min=0.0, max=3.0, nbins=3)]
+        axes = [UnbinnedAxis(name="x", min=0.0, max=3.0)]
         data = UnbinnedData(
             name="test_weighted",
             type="unbinned",
@@ -637,7 +559,7 @@ class TestUnbinnedDataHistConversion:
             weights=weights,
         )
 
-        h = data.to_hist()
+        h = data.to_hist(nbins=3)
 
         # Check that weighted entries were binned correctly
         # Bin 0: [0, 1) -> 0.5 with weight 2.0 = 2.0
@@ -650,14 +572,14 @@ class TestUnbinnedDataHistConversion:
         """Test UnbinnedData.to_hist() with 2D data."""
         entries = [[0.5, 0.3], [1.2, 1.8], [0.8, 2.5]]
         axes = [
-            Axis(name="x", min=0.0, max=2.0, nbins=2),
-            Axis(name="y", min=0.0, max=3.0, nbins=3),
+            UnbinnedAxis(name="x", min=0.0, max=2.0),
+            UnbinnedAxis(name="y", min=0.0, max=3.0),
         ]
         data = UnbinnedData(
             name="test_2d_unbinned", type="unbinned", entries=entries, axes=axes
         )
 
-        h = data.to_hist()
+        h = data.to_hist(nbins=3)
 
         # Check dimensions
         assert len(h.axes) == 2
@@ -670,12 +592,12 @@ class TestUnbinnedDataHistConversion:
     def test_to_hist_empty_entries(self):
         """Test UnbinnedData.to_hist() with empty entries."""
         entries = []
-        axes = [Axis(name="x", min=0.0, max=1.0, nbins=10)]
+        axes = [UnbinnedAxis(name="x", min=0.0, max=1.0)]
         data = UnbinnedData(
             name="empty_unbinned", type="unbinned", entries=entries, axes=axes
         )
 
-        h = data.to_hist()
+        h = data.to_hist(nbins=10)
 
         # Should create histogram with all zeros
         assert len(h.axes) == 1
@@ -690,15 +612,15 @@ class TestUnbinnedDataHistConversion:
             [0.5, 2.5, 0.5],
         ]
         axes = [
-            Axis(name="x", min=0.0, max=2.0, nbins=2),
-            Axis(name="y", min=0.0, max=3.0, nbins=3),
-            Axis(name="z", min=0.0, max=2.0, nbins=2),
+            UnbinnedAxis(name="x", min=0.0, max=2.0),
+            UnbinnedAxis(name="y", min=0.0, max=3.0),
+            UnbinnedAxis(name="z", min=0.0, max=2.0),
         ]
         data = UnbinnedData(
             name="test_3d_unbinned", type="unbinned", entries=entries, axes=axes
         )
 
-        h = data.to_hist()
+        h = data.to_hist(nbins=2)
 
         # Check dimensions
         assert len(h.axes) == 3
@@ -723,13 +645,16 @@ class TestData:
         """Test Data creation with mixed data types."""
         point = PointData(name="point1", type="point", value=42.0)
         unbinned = UnbinnedData(
-            name="events1", type="unbinned", entries=[[1.0]], axes=[Axis(name="x")]
+            name="events1",
+            type="unbinned",
+            entries=[[1.0]],
+            axes=[UnbinnedAxis(name="x", min=0.0, max=5.0)],
         )
         binned = BinnedData(
             name="hist1",
             type="binned",
             contents=[10.0, 20.0],
-            axes=[Axis(name="mass", min=100.0, max=200.0, nbins=2)],
+            axes=[make_binned_axis(name="mass", min=100.0, max=200.0, nbins=2)],
         )
 
         data = Data([point, unbinned, binned])

@@ -54,7 +54,7 @@ python = "<3.14,>=3.13"
 pytest = ">=9"
 pytest-cov = ">=3"
 pyhf = ">=0.7.6"
-scikit-hep-testdata = ">=0.5.7"
+scikit-hep-testdata = ">=0.6.2"
 pydot = "*"
 graphviz = "*"
 
@@ -103,7 +103,7 @@ lychee = ">=0.22.0,<0.23"
 
 [feature.docs.tasks]
 docs-fetch-root-tag = { cmd = "python docs/_scripts/fetch_root_tag.py", description = "Download ROOT Doxygen tag file" }
-docs-build = { cmd = "sphinx-build -n -T -b html docs docs/_build/html", depends-on = ["docs-fetch-root-tag"], description = "Build documentation (static)", inputs = ["docs/"], outputs = ["docs/_build/html"] }
+docs-build = { cmd = "sphinx-build -n -T -b html docs docs/_build/html", depends-on = ["docs-fetch-root-tag"], description = "Build documentation (static)", inputs = ["src/", "docs/"], outputs = ["docs/_build/html"] }
 docs-linkcheck = { cmd = "lychee docs/", description = "Check documentation for broken links" }
 docs-serve = { cmd = "python -m http.server -d docs/_build/html", depends-on = ["docs-build"], description = "Build and serve documentation" }
 docs-watch = { cmd = "sphinx-autobuild --open-browser -n -T -b html docs docs/_build/html", depends-on = ["docs-fetch-root-tag"], description = "Build and serve documentation with live reload", inputs = ["docs/"], outputs = ["docs/_build/html"] }

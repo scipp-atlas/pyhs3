@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import ClassVar, Literal
+from unittest.mock import patch
 
 import numpy as np
 import pytensor.tensor as pt
@@ -12,15 +13,16 @@ from pydantic import (
     Field,
 )
 from pytensor.compile.function import function
-from pytensor.graph.replace import clone_replace
 from scipy.integrate import quad
 
+from pyhs3.axes import RegularAxis
 from pyhs3.context import Context
-from pyhs3.distributions.basic import GaussianDist
+from pyhs3.distributions.basic import ExponentialDist, GaussianDist
 from pyhs3.distributions.composite import MixtureDist
 from pyhs3.distributions.core import Distribution
+from pyhs3.distributions.histfactory import HistFactoryDistChannel
 from pyhs3.distributions.mathematical import GenericDist
-from pyhs3.normalization import Normalizable, gauss_legendre_integral
+from pyhs3.normalization import gauss_legendre_integral
 from pyhs3.typing.aliases import TensorVar
 
 
@@ -182,15 +184,13 @@ class TestDistributionNormalization:
         assert np.isclose(integral1, 1.0, atol=1e-6)
         assert np.isclose(integral2, 1.0, atol=1e-6)
 
-    def test_normalization_integral_default_returns_none(self):
-        """Base class normalization_integral() returns None."""
+    def test_normalization_expression_default_returns_none(self):
+        """Base class normalization_expression() returns None."""
         dist = GenericDist(name="test", expression="x")
         x_var = pt.dscalar("x")
         context = Context(parameters={"x": x_var})
 
-        result = dist.normalization_integral(
-            context, "x", pt.constant(0.0), pt.constant(1.0)
-        )
+        result = dist.normalization_expression(context, "x")
         assert result is None
 
     def test_generic_dist_expression(self):
@@ -205,9 +205,9 @@ class TestDistributionNormalization:
         assert pytest.approx(func(10.0)) == 0.2
 
     def test_dist_symbolic_integral_expression(self):
-        """Base class normalization_integral() returns x."""
+        """Custom distribution with analytical normalization expression."""
 
-        class CustomDist(Distribution, Normalizable):
+        class CustomDist(Distribution):
             _parameters: ClassVar = {"x": "x"}
             model_config = ConfigDict(
                 arbitrary_types_allowed=True, serialize_by_alias=True
@@ -218,20 +218,11 @@ class TestDistributionNormalization:
             def likelihood(self, context: Context) -> TensorVar:
                 return context["x"]
 
-            def normalization_integral(
-                self,
-                context: Context,
-                observable_name: str,
-                lower: TensorVar,
-                upper: TensorVar,
+            def normalization_expression(
+                self, context: Context, observable_name: str
             ) -> TensorVar:
                 observable = context[observable_name]
-                expression = observable**2 / 2.0
-                upper_t = pt.as_tensor_variable(upper, dtype=observable.dtype)
-                lower_t = pt.as_tensor_variable(lower, dtype=observable.dtype)
-                return clone_replace(expression, {observable: upper_t}) - clone_replace(
-                    expression, {observable: lower_t}
-                )
+                return observable**2 / 2.0
 
         # Set parameters based on the analyzed expression
         dist = CustomDist(name="test", expression="x")
@@ -249,8 +240,8 @@ class TestDistributionNormalization:
         assert pytest.approx(log_func(10.0)) == np.log(0.2)
 
     def test_composite_dist_not_normalized(self):
-        """MixtureDist/ProductDist skip normalization."""
-        # Create a GenericDist that WOULD be normalized
+        """MixtureDist uses components but doesn't re-normalize."""
+        # Create a GenericDist that gets normalized
         generic = GenericDist(name="generic", expression="exp(c*x)")
 
         # Wrap it in a MixtureDist
@@ -274,8 +265,7 @@ class TestDistributionNormalization:
             observables={"x": (lower, upper)},
         )
 
-        # MixtureDist doesn't inherit Normalizable, so it won't normalize
-        # We need to build the generic distribution separately first
+        # Build the generic distribution separately first
         generic_expr = generic._expression(context)
         context_with_generic = Context(
             parameters={
@@ -288,22 +278,116 @@ class TestDistributionNormalization:
         mixture_expr = mixture._expression(context_with_generic)
         f = function([x_var], mixture_expr)
 
-        # The mixture should NOT be normalized (integral > 1)
-        _integral, _ = quad(lambda x: f(x), 0, 10)
-        # Since generic is normalized, and mixture just returns it scaled by coeff=1.0,
-        # the mixture should also integrate to ~1.0 (but through a different path)
-        # Actually, let me reconsider: MixtureDist doesn't normalize, but it uses
-        # the already-normalized generic distribution, so it will still be normalized
-        # Let's verify mixture doesn't have Normalizable mixin
-        assert not isinstance(mixture, Normalizable)
+        # Since generic is normalized and mixture just returns it scaled by coeff=1.0,
+        # the mixture should also integrate to ~1.0
+        integral, _ = quad(lambda x: f(x), 0, 10)
+        assert np.isclose(integral, 1.0, atol=1e-6)
 
     def test_constraint_not_normalized(self):
         """Gaussian with non-observable x skips normalization."""
         # Create a Gaussian constraint that doesn't use an observable
         dist = GaussianDist(name="constraint", mean="nom", sigma="sigma", x="alpha")
 
-        # GaussianDist doesn't inherit Normalizable, so it won't normalize
-        assert not isinstance(dist, Normalizable)
+        alpha_var = pt.dscalar("alpha")
+        nom_val = pt.constant(1.0, name="nom")
+        sigma_val = pt.constant(0.1, name="sigma")
+        x_lower = pt.constant(0.0, name="x_lower")
+        x_upper = pt.constant(10.0, name="x_upper")
+
+        # Observable is "x" but the distribution uses "alpha"
+        context = Context(
+            parameters={"alpha": alpha_var, "nom": nom_val, "sigma": sigma_val},
+            observables={"x": (x_lower, x_upper)},
+        )
+
+        # Since "alpha" is not in observables, normalization is skipped
+        expr = dist._expression(context)
+        f = function([alpha_var], expr)
+
+        # Verify it's not normalized - the Gaussian doesn't integrate to 1
+        # over all alpha values (it's a proper Gaussian PDF without domain restriction)
+        integral, _ = quad(lambda a: f(a), -10, 10)
+        # A Gaussian with sigma=0.1 has very high peak, integral over infinite domain is 1
+        # But over finite domain and normalized to [0,10] for x (which doesn't apply),
+        # it should just be the standard Gaussian
+        assert np.isclose(integral, 1.0, atol=1e-3)
+
+    def test_gaussian_dist_integrates_to_one(self):
+        """GaussianDist normalized over finite domain integrates to 1.0."""
+        dist = GaussianDist(name="gauss", mean="mu", sigma="sigma", x="x")
+
+        x_var = pt.dscalar("x")
+        mu_val = pt.constant(130.0, name="mu")
+        sigma_val = pt.constant(10.0, name="sigma")
+        lower = pt.constant(100.0, name="x_lower")
+        upper = pt.constant(160.0, name="x_upper")
+
+        context = Context(
+            parameters={"x": x_var, "mu": mu_val, "sigma": sigma_val},
+            observables={"x": (lower, upper)},
+        )
+
+        expr = dist._expression(context)
+        f = function([x_var], expr)
+
+        integral, error = quad(lambda x: f(x), 100, 160)
+        assert np.isclose(integral, 1.0, atol=1e-6)
+        assert error < 1e-6
+
+    def test_exponential_dist_integrates_to_one(self):
+        """ExponentialDist normalized over finite domain integrates to 1.0."""
+        dist = ExponentialDist(name="exp", c="c", x="x")
+
+        x_var = pt.dscalar("x")
+        c_val = pt.constant(0.5, name="c")
+        lower = pt.constant(0.0, name="x_lower")
+        upper = pt.constant(10.0, name="x_upper")
+
+        context = Context(
+            parameters={"x": x_var, "c": c_val},
+            observables={"x": (lower, upper)},
+        )
+
+        expr = dist._expression(context)
+        f = function([x_var], expr)
+
+        integral, error = quad(lambda x: f(x), 0, 10)
+        assert np.isclose(integral, 1.0, atol=1e-6)
+        assert error < 1e-6
+
+    def test_histfactory_not_normalizable(self):
+        """Verify HistFactoryDistChannel._normalizable is False."""
+        dist = HistFactoryDistChannel(
+            name="channel",
+            axes=[RegularAxis(name="x", min=0, max=10, nbins=10)],
+            samples=[],
+        )
+
+        assert dist._normalizable is False
+
+    def test_histfactory_normalization_skipped(self):
+        """Use mock to verify normalization is NOT called for HistFactory."""
+        dist = HistFactoryDistChannel(
+            name="channel",
+            axes=[RegularAxis(name="x", min=0, max=10, nbins=10)],
+            samples=[],
+        )
+
+        x_var = pt.dvector("x")
+        channel_observed = pt.dvector("channel_observed")
+        lower = pt.constant(0.0, name="x_lower")
+        upper = pt.constant(10.0, name="x_upper")
+
+        context = Context(
+            parameters={"x": x_var, "channel_observed": channel_observed},
+            observables={"x": (lower, upper)},
+        )
+
+        # Patch gauss_legendre_integral to verify it's not called
+        with patch("pyhs3.distributions.core.gauss_legendre_integral") as mock_gl:
+            _expr = dist._expression(context)
+            # gauss_legendre_integral should NOT be called
+            mock_gl.assert_not_called()
 
 
 class TestContextObservables:

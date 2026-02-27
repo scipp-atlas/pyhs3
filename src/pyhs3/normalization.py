@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pytensor.tensor as pt
-from pytensor.graph import clone_replace  # type: ignore[attr-defined]
+from pytensor.graph.replace import clone_replace
 
 if TYPE_CHECKING:
     from pyhs3.context import Context

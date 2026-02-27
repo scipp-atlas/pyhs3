@@ -18,7 +18,7 @@ from pydantic import (
     model_validator,
 )
 
-from pyhs3.axes import Axis, BinnedAxis, UnbinnedAxis
+from pyhs3.axes import BinnedAxis, UnbinnedAxis
 from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.exceptions import custom_error_msg
 
@@ -92,7 +92,7 @@ class PointData(Datum):
     type: Literal["point"] = Field(default="point", repr=False)
     value: float = Field(..., repr=False)
     uncertainty: float | None = Field(default=None, repr=False)
-    axes: list[Axis] | None = Field(default=None, repr=False)
+    axes: list[UnbinnedAxis] | None = Field(default=None, repr=False)
 
 
 class UnbinnedData(Datum):

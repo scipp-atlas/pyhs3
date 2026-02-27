@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
+from typing import ClassVar, Literal
+
 import numpy as np
 import pytensor.tensor as pt
 import pytest
+from pydantic import (
+    ConfigDict,
+    Field,
+)
 from pytensor.compile.function import function
+from pytensor.graph.replace import clone_replace
 from scipy.integrate import quad
 
 from pyhs3.context import Context
 from pyhs3.distributions.basic import GaussianDist
 from pyhs3.distributions.composite import MixtureDist
+from pyhs3.distributions.core import Distribution
 from pyhs3.distributions.mathematical import GenericDist
 from pyhs3.normalization import Normalizable, gauss_legendre_integral
+from pyhs3.typing.aliases import TensorVar
 
 
 class TestGaussLegendreIntegral:
@@ -187,6 +196,45 @@ class TestDistributionNormalization:
     def test_generic_dist_expression(self):
         """Base class normalization_integral() returns None."""
         dist = GenericDist(name="test", expression="x")
+        x_var = pt.dscalar("x")
+        context = Context(parameters={"x": x_var}, observables={"x": (0, 10)})
+
+        result = dist.expression(context)
+        func = function([x_var], result)
+        assert pytest.approx(func(1.0)) == 0.02
+        assert pytest.approx(func(10.0)) == 0.2
+
+    def test_dist_symbolic_integral_expression(self):
+        """Base class normalization_integral() returns x."""
+
+        class CustomDist(Distribution, Normalizable):
+            _parameters: ClassVar = {"x": "x"}
+            model_config = ConfigDict(
+                arbitrary_types_allowed=True, serialize_by_alias=True
+            )
+
+            type: Literal["custom_dist"] = Field(default="custom_dist", repr=False)
+
+            def likelihood(self, context: Context) -> TensorVar:
+                return context["x"]
+
+            def normalization_integral(
+                self,
+                context: Context,
+                observable_name: str,
+                lower: TensorVar,
+                upper: TensorVar,
+            ) -> TensorVar:
+                observable = context[observable_name]
+                expression = observable**2 / 2.0
+                upper_t = pt.as_tensor_variable(upper, dtype=observable.dtype)
+                lower_t = pt.as_tensor_variable(lower, dtype=observable.dtype)
+                return clone_replace(expression, {observable: upper_t}) - clone_replace(
+                    expression, {observable: lower_t}
+                )
+
+        # Set parameters based on the analyzed expression
+        dist = CustomDist(name="test", expression="x")
         x_var = pt.dscalar("x")
         context = Context(parameters={"x": x_var}, observables={"x": (0, 10)})
 

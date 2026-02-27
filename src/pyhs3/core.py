@@ -353,11 +353,7 @@ class Workspace(BaseModel):
                     continue
 
                 # For each axis, extract bounds
-                # At this point: PointData with axes, UnbinnedData, or BinnedData (all have axes)
-                if not hasattr(datum, "axes") or datum.axes is None:
-                    continue
-
-                for axis in datum.axes:
+                for axis in datum.axes or []:
                     observables[axis.name] = (axis.min, axis.max)
 
         return observables

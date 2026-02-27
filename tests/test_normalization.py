@@ -243,6 +243,11 @@ class TestDistributionNormalization:
         assert pytest.approx(func(1.0)) == 0.02
         assert pytest.approx(func(10.0)) == 0.2
 
+        log_result = dist.log_expression(context)
+        log_func = function([x_var], log_result)
+        assert pytest.approx(log_func(1.0)) == np.log(0.02)
+        assert pytest.approx(log_func(10.0)) == np.log(0.2)
+
     def test_composite_dist_not_normalized(self):
         """MixtureDist/ProductDist skip normalization."""
         # Create a GenericDist that WOULD be normalized

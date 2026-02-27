@@ -9,6 +9,7 @@ from scipy.integrate import quad
 from pyhs3.core import Model, Workspace
 from pyhs3.data import BinnedData, Data
 from pyhs3.distributions import Distributions
+from pyhs3.distributions.basic import GaussianDist
 from pyhs3.distributions.mathematical import GenericDist
 from pyhs3.domains import Domains, ProductDomain
 from pyhs3.functions import Functions
@@ -243,3 +244,62 @@ class TestWorkspaceNormalization:
 
         # Should NOT integrate to 1.0 (unnormalized)
         assert not np.isclose(integral, 1.0, atol=1e-6)
+
+    def test_workspace_model_normalizes_gaussian_dist(self):
+        """Workspace.model() normalizes GaussianDist over finite observable domain."""
+        # Create a GaussianDist
+        gaussian_dist = GaussianDist(name="gauss_dist", mean="mu", sigma="sigma", x="x")
+
+        # Create a minimal workspace with likelihoods and data
+        workspace = Workspace(
+            metadata=Metadata(hs3_version="0.3.0"),
+            distributions=Distributions([gaussian_dist]),
+            data=Data(
+                [
+                    BinnedData(
+                        name="test_data",
+                        axes=[{"name": "x", "min": 100.0, "max": 160.0, "nbins": 60}],
+                        contents=[1.0] * 60,
+                    )
+                ]
+            ),
+            likelihoods=Likelihoods(
+                [
+                    Likelihood(
+                        name="test_likelihood",
+                        distributions=["gauss_dist"],
+                        data=["test_data"],
+                    )
+                ]
+            ),
+            domains=Domains([ProductDomain(name="default")]),
+            parameter_points=ParameterPoints(
+                [
+                    ParameterSet(
+                        name="default",
+                        parameters=[
+                            ParameterPoint(name="mu", value=130.0),
+                            ParameterPoint(name="sigma", value=10.0),
+                        ],
+                    )
+                ]
+            ),
+        )
+
+        # Create model
+        model = workspace.model(progress=False)
+
+        # Get the compiled distribution
+        dist_expr = model.distributions["gauss_dist"]
+
+        # Create a function to evaluate it
+        x_var = model.parameters["x"]
+        mu_var = model.parameters["mu"]
+        sigma_var = model.parameters["sigma"]
+        f = function([x_var, mu_var, sigma_var], dist_expr)
+
+        # Integrate over the domain
+        integral, _ = quad(lambda x: f(x, 130.0, 10.0), 100, 160)
+
+        # Should integrate to 1.0 (normalized over finite domain)
+        assert np.isclose(integral, 1.0, atol=1e-6)

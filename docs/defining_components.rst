@@ -384,6 +384,54 @@ Override ``extended_likelihood()`` only when your distribution needs additional 
 - ``log_expression()`` handles the conversion: ``log(likelihood()) + log(extended_likelihood())``
 - Most distributions only need to implement ``likelihood()``
 
+Distribution Normalization
+---------------------------
+
+All continuous distributions in pyhs3 are **automatically normalized** over the domain of their observables. This ensures that probability density functions (PDFs) integrate to 1.0 over the specified observable range.
+
+**When normalization applies:**
+
+- **With observables**: When a model specifies observable bounds (e.g., ``observables={"x": (0, 10)}``), distributions are normalized over that domain
+- **Without observables**: Distributions remain unnormalized (raw likelihood)
+- **HistFactory**: Explicitly opts out via ``_normalizable = False`` (already normalized by design)
+
+**Example:**
+
+.. code-block:: python
+
+    from pyhs3.distributions.basic import GaussianDist
+
+    # Define distribution
+    gauss = GaussianDist(name="signal", mean="mu", sigma="sigma", x="x")
+
+    # With observables: normalized over [100, 160]
+    model = Model(
+        distributions=[gauss],
+        observables={"x": (100.0, 160.0)},
+        # ... other fields
+    )
+    # The distribution will integrate to 1.0 over [100, 160]
+
+**Providing analytical normalization:**
+
+Override ``normalization_expression()`` to return the antiderivative for efficient analytical integration:
+
+.. code-block:: python
+
+    class LinearDist(Distribution):
+        def likelihood(self, context: Context) -> TensorVar:
+            return context["x"]  # f(x) = x
+
+        def normalization_expression(
+            self, context: Context, observable_name: str
+        ) -> TensorVar:
+            observable = context[observable_name]
+            return observable**2 / 2.0  # F(x) = x²/2
+
+Without an analytical expression, pyhs3 uses 64-point Gauss-Legendre quadrature for numerical integration.
+
+For complete details, see :ref:`normalization`.
+
 Best Practices
 --------------
 

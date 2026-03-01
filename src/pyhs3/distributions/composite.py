@@ -152,18 +152,20 @@ class MixtureDist(Distribution):
         n_summands = len(summands)
 
         # Validate extended matches coefficient configuration
-        if n_coeffs == n_summands and not extended:
-            msg = (
-                f"extended must be True when N coefficients = N summands "
-                f"({n_coeffs} coefficients, {n_summands} summands)."
-            )
-            raise ValueError(msg)
-        if n_coeffs == n_summands - 1 and extended:
-            msg = (
-                f"extended must be False when N-1 coefficients with N summands "
-                f"({n_coeffs} coefficients, {n_summands} summands)."
-            )
-            raise ValueError(msg)
+        if n_coeffs == n_summands:
+            if not extended:
+                msg = (
+                    f"extended must be True when N coefficients = N summands "
+                    f"({n_coeffs} coefficients, {n_summands} summands)."
+                )
+                raise ValueError(msg)
+        elif n_coeffs == n_summands - 1:
+            if extended:
+                msg = (
+                    f"extended must be False when N-1 coefficients with N summands "
+                    f"({n_coeffs} coefficients, {n_summands} summands)."
+                )
+                raise ValueError(msg)
 
         return extended
 

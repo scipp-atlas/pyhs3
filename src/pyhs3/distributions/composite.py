@@ -159,14 +159,12 @@ class MixtureDist(Distribution):
                     f"({n_coeffs} coefficients, {n_summands} summands)."
                 )
                 raise ValueError(msg)
-        elif n_coeffs == n_summands - 1:  # noqa: SIM102
-            # for noqa -> see https://github.com/scipp-atlas/pyhs3/pull/152
-            if extended:
-                msg = (
-                    f"extended must be False when N-1 coefficients with N summands "
-                    f"({n_coeffs} coefficients, {n_summands} summands)."
-                )
-                raise ValueError(msg)
+        elif extended:
+            msg = (
+                f"extended must be False when N-1 coefficients with N summands "
+                f"({n_coeffs} coefficients, {n_summands} summands)."
+            )
+            raise ValueError(msg)
 
         return extended
 

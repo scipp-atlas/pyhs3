@@ -13,6 +13,7 @@ import math
 import numpy as np
 import pytensor.tensor as pt
 import pytest
+from pydantic import ValidationError
 from pytensor import function
 
 from pyhs3 import Workspace
@@ -2536,6 +2537,19 @@ class TestMixtureDist:
         assert dist.coefficients == ["coeff1", "coeff2"]
         assert dist.extended is False
         assert dist.ref_coef_norm is None
+
+    def test_mixture_dist_n_minus_1_coefficients_fails(self):
+        """Test traditional N-1 coefficient case (2 coefficients, 3 PDFs)."""
+        with pytest.raises(
+            ValidationError,
+            match="extended must be False when N-1 coefficients with N summands",
+        ):
+            MixtureDist(
+                name="test_mixture",
+                summands=["pdf1", "pdf2", "pdf3"],
+                coefficients=["coeff1", "coeff2"],
+                extended=True,
+            )
 
     def test_mixture_dist_n_minus_1_coefficients(self):
         """Test traditional N-1 coefficient case (2 coefficients, 3 PDFs)."""

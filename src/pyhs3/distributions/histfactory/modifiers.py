@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from typing import Annotated, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 import pytensor.tensor as pt
-from pydantic import BaseModel, Field, RootModel, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    PrivateAttr,
+    RootModel,
+    model_validator,
+)
 from pytensor.compile.function import function
 
 from pyhs3.context import Context
@@ -179,6 +185,15 @@ class NormSysModifier(HasConstraint, ParameterModifier):
     application: Literal["multiplicative"] = Field("multiplicative", exclude=True)
     constraint: Literal["Gauss", "Poisson", "LogNormal"] = "Gauss"
     data: NormSysData
+    _nominal_factor: TensorVar = PrivateAttr()
+    _hi_factor_tensor: TensorVar = PrivateAttr()
+    _lo_factor_tensor: TensorVar = PrivateAttr()
+
+    def model_post_init(self, __context: Any, /) -> None:
+        """Initialize computed collections after Pydantic validation."""
+        self._nominal_factor = pt.constant(1.0)
+        self._hi_factor_tensor = pt.constant(self.data.hi)
+        self._lo_factor_tensor = pt.constant(self.data.lo)
 
     @property
     def auxdata(self) -> float:
@@ -241,13 +256,6 @@ class NormSysModifier(HasConstraint, ParameterModifier):
         # Use the distribution's constants to augment the context
         augmented_context = {**context, **constraint_dist.constants}
         return constraint_dist.expression(Context(augmented_context))
-
-    def __init__(self, **data):
-        super().__init__(**data)
-        # Cache constant tensors during initialization to avoid repeated creation
-        self._nominal_factor = pt.constant(1.0)
-        self._hi_factor_tensor = pt.constant(self.data.hi)
-        self._lo_factor_tensor = pt.constant(self.data.lo)
 
 
 class HistoSysModifier(HasConstraint, ParameterModifier):

@@ -11,10 +11,60 @@ from abc import ABC, abstractmethod
 from typing import cast
 
 import pytensor.tensor as pt
+from pydantic import PrivateAttr
+from pytensor.graph.replace import clone_replace
 
 from pyhs3.base import Evaluable
 from pyhs3.context import Context
+from pyhs3.normalization import gauss_legendre_integral
 from pyhs3.typing.aliases import TensorVar
+
+
+def _apply_normalization(
+    raw: TensorVar,
+    distribution: Distribution,
+    context: Context,
+) -> TensorVar:
+    """
+    Apply normalization to a raw likelihood expression.
+
+    Helper function that normalizes a likelihood over observables present in
+    the context. Attempts analytical integration first via _normalization_integral(),
+    then falls back to nested Gauss-Legendre quadrature for multi-dimensional integrals.
+
+    Args:
+        raw: Raw (unnormalized) likelihood expression
+        distribution: Distribution instance (for _normalization_integral() method)
+        context: Mapping of names to pytensor variables (includes observables)
+
+    Returns:
+        Normalized likelihood expression
+    """
+    # Explicit opt-out for distributions that should not be normalized
+    if not distribution._normalizable:
+        return raw
+
+    matching = [
+        (name, lower, upper)
+        for name, (lower, upper) in context.observables.items()
+        if name in distribution.parameters
+    ]
+    if not matching:
+        return raw
+
+    # Single observable: try analytical integral first
+    if len(matching) == 1:
+        obs_name, lower, upper = matching[0]
+        integral = distribution._normalization_integral(context, obs_name, lower, upper)
+        if integral is not None:
+            return cast(TensorVar, raw / integral)
+
+    # N-dimensional integral via nested Gauss-Legendre quadrature
+    integral_expr = raw
+    for obs_name, lower, upper in matching:
+        obs_var = context[obs_name]
+        integral_expr = gauss_legendre_integral(integral_expr, obs_var, lower, upper)
+    return cast(TensorVar, raw / integral_expr)
 
 
 class Distribution(Evaluable, ABC):
@@ -29,9 +79,14 @@ class Distribution(Evaluable, ABC):
     additional extended likelihood terms (e.g., constraints). The complete
     probability is the product of both terms.
 
+    All distributions are automatically normalized over the domain of their
+    observables unless explicitly opted out via _normalizable = False.
+
     Inherits parameter processing functionality from Evaluable.
     Subclasses must implement _expression() to define computation logic.
     """
+
+    _normalizable: bool = PrivateAttr(default=True)
 
     @abstractmethod
     def likelihood(self, context: Context) -> TensorVar:
@@ -52,12 +107,62 @@ class Distribution(Evaluable, ABC):
             TypeError: Must be implemented by subclasses
         """
 
+    def normalization_expression(
+        self, _context: Context, _observable_name: str
+    ) -> TensorVar | None:
+        """
+        Return the antiderivative expression, or None for numerical fallback.
+
+        Override in subclasses to provide analytical normalization. The returned
+        expression should be the antiderivative F(x) such that the integral
+        ∫f(x)dx from a to b equals F(b) - F(a).
+
+        Args:
+            context: Mapping of names to pytensor variables
+            observable_name: Name of the observable to integrate over
+
+        Returns:
+            Symbolic antiderivative expression, or None for numerical fallback.
+        """
+        return None
+
+    def _normalization_integral(
+        self, context: Context, obs_name: str, lower: TensorVar, upper: TensorVar
+    ) -> TensorVar | None:
+        """
+        Evaluate normalization integral using the antiderivative expression.
+
+        This is a private method that evaluates F(upper) - F(lower) where F is
+        the antiderivative returned by normalization_expression().
+
+        Args:
+            context: Mapping of names to pytensor variables
+            obs_name: Name of the observable to integrate over
+            lower: Lower integration bound
+            upper: Upper integration bound
+
+        Returns:
+            Symbolic integral expression, or None if normalization_expression() returns None.
+        """
+        expr = self.normalization_expression(context, obs_name)
+        if expr is None:
+            return None
+        observable = context[obs_name]
+        upper_t = pt.as_tensor_variable(upper, dtype=observable.dtype)
+        lower_t = pt.as_tensor_variable(lower, dtype=observable.dtype)
+        upper_val = clone_replace(expr, {observable: upper_t})  # type: ignore[arg-type]
+        lower_val = clone_replace(expr, {observable: lower_t})  # type: ignore[arg-type]
+        return cast(TensorVar, upper_val - lower_val)  # type: ignore[operator]
+
     def _expression(self, context: Context) -> TensorVar:
         """
         Complete probability combining main likelihood with extended terms.
 
         Returns the product of likelihood() and extended_likelihood().
         This provides the complete probability for the distribution.
+
+        All distributions are automatically normalized over observables present
+        in the context, unless explicitly opted out via _normalizable = False.
 
         Subclasses typically do not need to override this method - just
         implement likelihood() and optionally extended_likelihood().
@@ -68,9 +173,12 @@ class Distribution(Evaluable, ABC):
         Returns:
             TensorVar: Complete probability density
         """
-        return cast(
-            TensorVar, self.likelihood(context) * self.extended_likelihood(context)
-        )
+        raw = self.likelihood(context)
+
+        # Apply normalization (respects _normalizable flag internally)
+        raw = _apply_normalization(raw, self, context)
+
+        return cast(TensorVar, raw * self.extended_likelihood(context))
 
     def log_expression(self, context: Context) -> TensorVar:
         """
@@ -80,6 +188,9 @@ class Distribution(Evaluable, ABC):
         This is mathematically equivalent to log(likelihood * extended_likelihood)
         but can be more numerically stable.
 
+        All distributions are automatically normalized over observables present
+        in the context, unless explicitly opted out via _normalizable = False.
+
         PyTensor handles optimization and simplification automatically.
 
         Args:
@@ -88,10 +199,14 @@ class Distribution(Evaluable, ABC):
         Returns:
             TensorVar: Log-probability density
         """
+        raw = self.likelihood(context)
+
+        # Apply normalization (respects _normalizable flag internally)
+        raw = _apply_normalization(raw, self, context)
+
         return cast(
             TensorVar,
-            pt.log(self.likelihood(context))
-            + pt.log(self.extended_likelihood(context)),
+            pt.log(raw) + pt.log(self.extended_likelihood(context)),
         )
 
     def extended_likelihood(

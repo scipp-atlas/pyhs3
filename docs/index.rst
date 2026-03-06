@@ -7,6 +7,7 @@
    model
    broadcasting
    defining_components
+   normalization
    visualization
    api
 

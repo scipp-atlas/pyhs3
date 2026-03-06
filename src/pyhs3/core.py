@@ -27,7 +27,7 @@ from rich.progress import (
 
 from pyhs3.analyses import Analyses, Analysis
 from pyhs3.context import Context
-from pyhs3.data import Data, DataType
+from pyhs3.data import Data, DataType, PointData
 from pyhs3.distributions import Distributions, DistributionType
 from pyhs3.domains import Domain, Domains, DomainType, ProductDomain
 from pyhs3.exceptions import WorkspaceValidationError
@@ -42,7 +42,7 @@ log = logging.getLogger(__name__)
 
 TDefault = TypeVar("TDefault")
 
-Axis: TypeAlias = tuple[float | None, float | None]
+DomainBounds: TypeAlias = tuple[float | None, float | None]
 
 
 class Workspace(BaseModel):
@@ -317,6 +317,47 @@ class Workspace(BaseModel):
 
         return "".join(parts)
 
+    def _compute_observables(self) -> dict[str, tuple[float, float]]:
+        """
+        Extract observable names and bounds from likelihoods + data + domain.
+
+        Walks likelihoods to find distribution-data pairings. For each dataset axis,
+        gets bounds from the data axis itself (axis.min/max). Propagates observable
+        info through composite distributions (MixtureDist, ProductDist).
+
+        Returns:
+            Dictionary mapping observable names to (min, max) tuples
+        """
+        observables: dict[str, tuple[float, float]] = {}
+
+        if not self.likelihoods or not self.data:
+            return observables
+
+        # For each likelihood, extract observable axes from paired data
+        for likelihood in self.likelihoods:
+            for data_item in likelihood.data:
+                # FK resolution guarantees data items are resolved objects
+                datum = (
+                    data_item
+                    if not isinstance(data_item, str)
+                    else self.data[data_item]
+                )
+
+                # PointData axes are optional; UnbinnedData/BinnedData always have them
+                if isinstance(datum, PointData) and datum.axes is None:
+                    log.warning(
+                        "The likelihood '%s' references a PointData '%s' without axes. This cannot be used to normalize any distribution.",
+                        likelihood.name,
+                        datum.name,
+                    )
+                    continue
+
+                # For each axis, extract bounds
+                for axis in datum.axes or []:
+                    observables[axis.name] = (axis.min, axis.max)
+
+        return observables
+
     def model(
         self,
         *,
@@ -358,6 +399,9 @@ class Workspace(BaseModel):
             else ParameterSet(name="default", parameters=[])
         )
 
+        # Compute observables from likelihoods + data + domain
+        observables = self._compute_observables()
+
         return Model(
             parameterset=parameterset or ParameterSet(name="default"),
             distributions=self.distributions or Distributions(),
@@ -365,6 +409,7 @@ class Workspace(BaseModel):
             functions=self.functions or Functions(),
             progress=progress,
             mode=mode,
+            observables=observables,
         )
 
 
@@ -394,6 +439,7 @@ class Model:
         functions: Functions,
         progress: bool = True,
         mode: str = "FAST_RUN",
+        observables: dict[str, tuple[float, float]] | None = None,
     ):
         """
         Represents a probabilistic model composed of parameters, domains, distributions, and functions.
@@ -410,6 +456,7 @@ class Model:
                        "NUMBA" (compile using Numba), "JAX" (compile using JAX),
                        "PYTORCH" (compile using PyTorch), "DebugMode" (debugging),
                        "NanGuardMode" (NaN detection).
+            observables (dict[str, tuple[float, float]] | None): Dictionary mapping observable names to (lower, upper) bounds.
 
         Attributes:
             domain (Domain): The original domain with constraints for parameters.
@@ -422,6 +469,10 @@ class Model:
         """
         self.parameterset = parameterset
         self.domain = domain
+        self._observables = {
+            name: (pt.constant(lower), pt.constant(upper))
+            for name, (lower, upper) in (observables or {}).items()
+        }
         self._distribution_objects = (
             distributions  # Store original distribution objects
         )
@@ -518,7 +569,10 @@ class Model:
                     **self.distributions,
                     **self.modifiers,
                 }
-                context = Context(parameters=context_data)
+                context = Context(
+                    parameters=context_data,
+                    observables=self._observables,
+                )
 
                 if node_type == "parameter":
                     # Create parameter tensor with domain bounds applied
@@ -902,7 +956,7 @@ class Model:
 
 
 def create_bounded_tensor(
-    name: str, domain: Axis, kind: Callable[..., TensorVar] = pt.scalar
+    name: str, domain: DomainBounds, kind: Callable[..., TensorVar] = pt.scalar
 ) -> TensorVar:
     """
     Creates a tensor variable with optional domain constraints.

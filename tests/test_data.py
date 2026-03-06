@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from pydantic import TypeAdapter
 
-from pyhs3.axes import Axis, BinnedAxis, UnbinnedAxis
+from pyhs3.axes import BinnedAxis, UnbinnedAxis
 from pyhs3.data import (
     BinnedData,
     Data,
@@ -103,19 +103,19 @@ class TestPointData:
 
     def test_point_data_with_axes(self):
         """Test PointData with axes for observable bounds."""
-        axes = [Axis(name="x", min=0.0, max=10.0)]
+        axes = [UnbinnedAxis(name="x", min=0.0, max=10.0)]
         data = PointData(name="measurement", type="point", value=5.0, axes=axes)
         assert data.axes is not None
         assert len(data.axes) == 1
         assert data.axes[0].name == "x"
-        assert not hasattr(data.axes[0], "min")
-        assert not hasattr(data.axes[0], "max")
+        assert data.axes[0].min == 0.0
+        assert data.axes[0].max == 10.0
 
     def test_point_data_with_multiple_axes(self):
         """Test PointData with multiple axes."""
         axes = [
-            Axis(name="x", min=0.0, max=10.0),
-            Axis(name="y", min=-5.0, max=5.0),
+            UnbinnedAxis(name="x", min=0.0, max=10.0),
+            UnbinnedAxis(name="y", min=-5.0, max=5.0),
         ]
         data = PointData(name="measurement", type="point", value=1.0, axes=axes)
         assert data.axes is not None

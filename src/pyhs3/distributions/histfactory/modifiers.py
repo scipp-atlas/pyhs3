@@ -412,70 +412,110 @@ class ShapeSysModifier(HasConstraint, ParametersModifier):
 
 
 class StatErrorModifier(HasConstraint, ParametersModifier):
-    """Statistical uncertainty modifier (Barlow-Beeston method)."""
+    """Statistical uncertainty modifier (Barlow-Beeston method).
+
+    The ``data`` field is optional per the HS3 specification.  When absent,
+    per-bin uncertainties are derived at constraint-build time from the parent
+    sample's ``errors`` array.
+
+    The constraint type can be specified either via the ``constraint`` field
+    (internal pyhs3 convention) or via the ``constraint_type`` field used in
+    ATLAS-generated HS3 files.  Supported values are ``"Gauss"`` (default)
+    and ``"Poisson"``.
+    """
 
     type: Literal["staterror"] = "staterror"
     application: Literal["multiplicative"] = Field("multiplicative", exclude=True)
     parameters: list[str]
-    constraint: Literal["Gauss"] = "Gauss"
-    data: StatErrorData
+    constraint: Literal["Gauss", "Poisson"] = "Gauss"
+    data: StatErrorData | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalise_constraint_type(cls, values: dict) -> dict:
+        """Map the HS3 ``constraint_type`` field to the internal ``constraint`` field."""
+        if isinstance(values, dict) and "constraint_type" in values:
+            ct = values.pop("constraint_type")
+            # Only override if ``constraint`` is not already explicitly set
+            if "constraint" not in values and ct is not None:
+                values["constraint"] = ct
+        return values
 
     @property
     def auxdata(self) -> list[float]:
         """Auxiliary data values for staterror (list of 1.0)."""
-        # For staterror, each auxiliary measurement is typically 1.0 (or derived).
         return [1.0] * len(self.parameters)
 
     def expression(self, context: Context) -> TensorVar:
         """Return multiplicative factors for staterror."""
-        param_names = self.parameters
-        factors = pt.stack([context[name] for name in param_names])
+        factors = pt.stack([context[name] for name in self.parameters])
         return cast("TensorVar", factors)
 
     def apply(self, context: Context, rates: TensorVar) -> TensorVar:
         """Apply staterror modifier (Barlow-Beeston statistical uncertainties)."""
-
-        param_names = self.parameters
-        # Staterror is bin-by-bin statistical uncertainty
-        # Each bin gets its own gamma parameter
-        factors = pt.stack([context[name] for name in param_names])
+        factors = pt.stack([context[name] for name in self.parameters])
         return cast("TensorVar", rates * factors)
 
     def make_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
-        """Create constraint term using PyTensor operations."""
+        """Create constraint terms using PyTensor operations.
 
-        # Barlow-Beeston method: per-bin Gaussian constraints with relative uncertainties
+        Uncertainties are taken from ``self.data.uncertainties`` when the
+        ``data`` field is present, or derived from ``sample_data.errors``
+        otherwise (the HS3-standard derivation path).
+        """
+        # Resolve per-bin uncertainties
+        if self.data is not None:
+            uncertainties = self.data.uncertainties
+        else:
+            # HS3 standard: derive from parent sample errors
+            uncertainties = list(sample_data.errors or [])
+
         name = f"constraint_{self.name}"
         augmented_context = dict(context)
         dists = []
 
-        for i, (parameter, uncertainty) in enumerate(
-            zip(self.parameters, self.data.uncertainties, strict=False)
-        ):
-            # Calculate relative uncertainty: sigma = uncertainty / nominal_yield
-            nominal_yield = sample_data.contents[i]
-            sigma_value = uncertainty / nominal_yield if nominal_yield > 0 else 1.0
+        if self.constraint == "Poisson":
+            # Poisson Barlow-Beeston: gamma * tau ~ Poisson(tau * gamma_hat)
+            # where tau = (nominal / error)^2 controls the effective count
+            for i, (parameter, uncertainty) in enumerate(
+                zip(self.parameters, uncertainties, strict=False)
+            ):
+                nominal_yield = sample_data.contents[i]
+                tau = (nominal_yield / uncertainty) ** 2 if uncertainty > 0 else 1.0
 
-            # Create sigma parameter in augmented context
-            sigma_param_name = f"{parameter}_sigma"
-            augmented_context[sigma_param_name] = pt.constant(sigma_value)
+                scaled_param_name = f"{parameter}_scaled"
+                augmented_context[scaled_param_name] = context[parameter] * tau
 
-            # Create Gaussian constraint: N(auxdata=1.0 | mean=parameter, sigma=relative_uncertainty)
-            dist = GaussianDist(
-                name=f"{name}_{parameter}",
-                x=1.0,  # Auxiliary data (typically 1.0 for staterror)
-                mean=parameter,
-                sigma=sigma_param_name,
-            )
-            dists.append(dist)
+                dist = PoissonDist(
+                    name=f"{name}_{parameter}",
+                    x=tau,
+                    mean=scaled_param_name,
+                )
+                dists.append(dist)
+        else:
+            # Gaussian Barlow-Beeston: N(1.0 | gamma, sigma_rel)
+            for i, (parameter, uncertainty) in enumerate(
+                zip(self.parameters, uncertainties, strict=False)
+            ):
+                nominal_yield = sample_data.contents[i]
+                sigma_value = uncertainty / nominal_yield if nominal_yield > 0 else 1.0
+
+                sigma_param_name = f"{parameter}_sigma"
+                augmented_context[sigma_param_name] = pt.constant(sigma_value)
+
+                dist = GaussianDist(
+                    name=f"{name}_{parameter}",
+                    x=1.0,
+                    mean=parameter,
+                    sigma=sigma_param_name,
+                )
+                dists.append(dist)
 
         if not dists:
             return pt.constant(1.0)
 
-        # Evaluate all distributions with augmented context (including constants) and multiply
         factors = []
         for dist in dists:
-            # Use the distribution's constants to augment the context
             dist_augmented_context = {**augmented_context, **dist.constants}
             augmented_ctx = Context(dist_augmented_context)
             factors.append(dist.expression(augmented_ctx))
@@ -483,9 +523,44 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
         return cast(TensorVar, pt.prod(pt.stack(factors), axis=0))  # type: ignore[no-untyped-call]
 
 
+class CustomModifier(Modifier):
+    """Modifier that delegates to a named workspace function.
+
+    This is an ATLAS-specific extension (not part of the HS3 v0.2.9 standard)
+    that allows a sample's normalization to be controlled by an arbitrary
+    function already registered in the workspace ``functions`` section.  The
+    modifier's ``name`` is the identifier of that function.
+
+    At model-compilation time the workspace evaluator places the function's
+    output into the context under its name, so ``context[self.name]`` yields
+    the function value when ``apply`` or ``expression`` is called.
+
+    Semantically this is equivalent to a ``normfactor`` whose scale factor is
+    computed by a workspace function rather than being a bare free parameter.
+    """
+
+    type: Literal["custom"] = "custom"
+    application: Literal["multiplicative"] = Field("multiplicative", exclude=True)
+
+    @property
+    def dependencies(self) -> set[str]:
+        """The function referenced by name must be evaluated before this modifier."""
+        return {self.name}
+
+    def expression(self, context: Context) -> TensorVar:
+        """Return the function value from the evaluation context."""
+        return context[self.name]
+
+    def apply(self, context: Context, rates: TensorVar) -> TensorVar:
+        """Multiply rates by the referenced workspace function's value."""
+        factor = context[self.name]
+        return cast("TensorVar", rates * factor)
+
+
 # Discriminated union of all modifier types.
 ModifierType = Annotated[
-    NormFactorModifier
+    CustomModifier
+    | NormFactorModifier
     | NormSysModifier
     | HistoSysModifier
     | ShapeFactorModifier

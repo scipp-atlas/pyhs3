@@ -9,14 +9,16 @@ from __future__ import annotations
 
 from typing import Any, Literal, cast
 
+import hist
+import numpy as np
 import pytensor.tensor as pt
 from pydantic import Field
 
+from pyhs3.axes import BinnedAxes
 from pyhs3.context import Context
 
 # Import existing distributions for constraint terms
 from pyhs3.distributions.core import Distribution
-from pyhs3.distributions.histfactory.axes import Axes, BinnedAxis
 from pyhs3.distributions.histfactory.modifiers import HasConstraint, Modifier
 from pyhs3.distributions.histfactory.samples import Sample, Samples
 from pyhs3.networks import HasDependencies, HasInternalNodes
@@ -89,7 +91,7 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     """
 
     type: Literal["histfactory_dist"] = "histfactory_dist"
-    axes: Axes = Field(..., json_schema_extra={"preprocess": False})
+    axes: BinnedAxes = Field(..., json_schema_extra={"preprocess": False})
     samples: Samples = Field(..., json_schema_extra={"preprocess": False})
 
     def get_internal_nodes(self) -> list[Any]:
@@ -204,7 +206,7 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         Applies all modifiers to sample predictions to get final rates.
         """
         # Start with zeros for total prediction
-        total_rates = pt.zeros(total_bins)  # type: ignore[no-untyped-call]
+        total_rates = pt.zeros(total_bins)
 
         # Process each sample
         for sample in self.samples:
@@ -266,6 +268,66 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
 
         return cast(TensorVar, main_prob)
 
+    def to_hist(self) -> Any:
+        """
+        Convert HistFactory channel to hist.Hist with categorical process axis.
+
+        Creates a single histogram combining all samples using a categorical axis.
+        The first axis is a categorical axis with sample names (labeled "process"),
+        followed by the original binning axes.
+
+        Returns:
+            hist.Hist: Histogram with shape (n_samples, *binning_shape) where:
+                - Axis 0: Categorical axis "process" with sample names
+                - Remaining axes: Original binning axes from self.axes
+                - Values: Sample contents (with errors as variances)
+
+        Examples:
+            >>> channel = HistFactoryDistChannel(
+            ...     name="SR",
+            ...     axes=[{"name": "mass", "min": 100, "max": 150, "nbins": 5}],
+            ...     samples=[
+            ...         {"name": "signal", "data": {"contents": [105, 106, 107, 108, 109], "errors": [0.5, 0.6, 0.7, 0.8, 0.9]}},
+            ...         {"name": "background", "data": {"contents": [110, 111, 112, 113, 114], "errors": [0.05, 0.06, 0.07, 0.08, 0.09]}}
+            ...     ]
+            ... )
+            >>> h = channel.to_hist()
+            >>> h
+            Hist(
+              StrCategory(['signal', 'background'], name='process'),
+              Regular(5, 100, 150, name='mass'),
+              storage=Weight()) # Sum: WeightedSum(value=1095, variance=2.5755)
+            >>> h.axes[0]
+            StrCategory(['signal', 'background'], name='process')
+            >>> h["signal", :]  # Get all mass bins for signal sample
+            Hist(Regular(5, 100, 150, name='mass'), storage=Weight()) # Sum: WeightedSum(value=535, variance=2.55)
+        """
+        # First axis: categorical sample axis (use "process" since "sample" is a protected keyword in hist)
+        sample_names = [sample.name for sample in self.samples]
+        process_axis = hist.axis.StrCategory(sample_names, name="process")
+
+        # Convert remaining axes to hist.axis objects
+        binning_axes = [axis.to_hist() for axis in self.axes]
+
+        # Create histogram with all axes (categorical first, then binning axes)
+        h = hist.Hist(process_axis, *binning_axes, storage=hist.storage.Weight())
+
+        # Calculate shape from axes (excluding the sample axis)
+        binning_shape = tuple(axis.nbins for axis in self.axes)
+
+        # Fill histogram by iterating over samples
+        for i, sample in enumerate(self.samples):
+            # Reshape contents and variances for this sample
+            contents_nd = np.array(sample.data.contents).reshape(binning_shape)
+            variances_nd = np.square(sample.data.errors).reshape(binning_shape)
+
+            # Set values for this sample using integer indexing
+            # The sample order matches the categorical axis order, so h[i, ...] corresponds to sample.name
+            stacked = np.stack([contents_nd, variances_nd], axis=-1)
+            h[i, ...] = stacked
+
+        return h
+
 
 # Registry of histfactory distributions
 distributions: dict[str, type[Distribution]] = {
@@ -274,8 +336,6 @@ distributions: dict[str, type[Distribution]] = {
 
 # Define what should be exported from this module
 __all__ = [
-    "Axes",
-    "BinnedAxis",
     "HistFactoryDistChannel",
     "distributions",
 ]

@@ -233,6 +233,8 @@ The typical flow through pyhs3:
 
    .. code-block:: python
 
+      import pyhs3
+
       # HS3 JSON → Pydantic models
       ws = pyhs3.Workspace(**json_data)
 
@@ -372,7 +374,7 @@ Custom exceptions in ``src/pyhs3/exceptions.py``:
 - ``HS3Exception``: Base exception
 - ``ExpressionParseError``: Expression parsing failures
 - ``ExpressionEvaluationError``: Runtime evaluation errors
-- ``UnknownInterpolationCodeError``: Invalid interpolation codes
+- ``WorkspaceValidationError``: Workspace validation failures (e.g. unresolved references)
 
 Extension Points
 ----------------
@@ -391,34 +393,29 @@ Adding New Distributions
 
 Example skeleton:
 
-.. code-block:: python
+.. doctest::
 
-   from __future__ import annotations
-
-   from typing import Literal, cast
-   import pytensor.tensor as pt
-
-   from pyhs3.distributions.core import Distribution
-   from pyhs3.context import Context
-   from pyhs3.typing.aliases import TensorVar
-
-
-   class MyDistribution(Distribution):
-       """My custom distribution."""
-
-       type: Literal["my_dist"] = "my_dist"
-       param1: str | float  # Parameter name or numeric value
-       param2: str | float  # Parameter name or numeric value
-
-       def likelihood(self, context: Context) -> TensorVar:
-           """Main probability model implementation."""
-           # Get processed parameters from context
-           p1 = context[self._parameters["param1"]]
-           p2 = context[self._parameters["param2"]]
-
-           # Implement your PDF/PMF here
-           # Example: return some_probability_expression
-           return cast(TensorVar, pt.constant(1.0))  # Replace with actual implementation
+   >>> from __future__ import annotations
+   >>> from typing import Literal, cast
+   >>> import pytensor.tensor as pt
+   >>> from pyhs3.distributions.core import Distribution
+   >>> from pyhs3.context import Context
+   >>> from pyhs3.typing.aliases import TensorVar
+   >>>
+   >>> class MyDistribution(Distribution):
+   ...     """My custom distribution."""
+   ...     type: Literal["my_dist"] = "my_dist"
+   ...     param1: str | float  # Parameter name or numeric value
+   ...     param2: str | float  # Parameter name or numeric value
+   ...     def likelihood(self, context: Context) -> TensorVar:
+   ...         """Main probability model implementation."""
+   ...         # Get processed parameters from context
+   ...         p1 = context[self._parameters["param1"]]
+   ...         p2 = context[self._parameters["param2"]]
+   ...         # Implement your PDF/PMF here
+   ...         # Example: return some_probability_expression
+   ...         return cast(TensorVar, pt.constant(1.0))  # Replace with actual implementation
+   ...
 
 Adding New Functions
 ~~~~~~~~~~~~~~~~~~~~
@@ -508,7 +505,7 @@ External Documentation
 
 - `HS3 Specification <https://hep-statistics-serialization-standard.github.io/>`_
 - `PyTensor Documentation <https://pytensor.readthedocs.io/>`_
-- `Pydantic Documentation <https://docs.pydantic.dev/>`_
+- `Pydantic Documentation <https://docs.pydantic.dev/latest/>`_
 - `Scientific Python Developer Guide <https://learn.scientific-python.org/development/>`_
 
 Internal Documentation

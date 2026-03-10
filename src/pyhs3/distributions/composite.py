@@ -61,7 +61,7 @@ class MixtureDist(Distribution):
             Only valid when using N coefficients (extended=True).
 
     ROOT Reference:
-        :rootref:`RooAddPdf <classRooAddPdf.html>`
+        :root:`RooAddPdf`
     """
 
     type: Literal["mixture_dist"] = "mixture_dist"
@@ -152,13 +152,14 @@ class MixtureDist(Distribution):
         n_summands = len(summands)
 
         # Validate extended matches coefficient configuration
-        if n_coeffs == n_summands and not extended:
-            msg = (
-                f"extended must be True when N coefficients = N summands "
-                f"({n_coeffs} coefficients, {n_summands} summands)."
-            )
-            raise ValueError(msg)
-        if n_coeffs == n_summands - 1 and extended:
+        if n_coeffs == n_summands:
+            if not extended:
+                msg = (
+                    f"extended must be True when N coefficients = N summands "
+                    f"({n_coeffs} coefficients, {n_summands} summands)."
+                )
+                raise ValueError(msg)
+        elif extended:
             msg = (
                 f"extended must be False when N-1 coefficients with N summands "
                 f"({n_coeffs} coefficients, {n_summands} summands)."

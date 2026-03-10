@@ -50,6 +50,11 @@ class ExpressionEvaluationError(HS3Exception):
 class WorkspaceValidationError(HS3Exception):
     """
     Raised when a workspace fails to validate.
+
+    This typically occurs when:
+    - Foreign key references cannot be resolved (e.g. a likelihood references
+      a distribution that doesn't exist in the workspace)
+    - A JSON file cannot be parsed into a valid workspace
     """
 
 

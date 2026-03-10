@@ -544,18 +544,24 @@ class TestWorkspaceWithLikelihoodsAndAnalyses:
         assert workspace.likelihoods is not None
         assert len(workspace.likelihoods) == 2
 
-        # Check first likelihood
+        # Check first likelihood (FK references are resolved to objects)
         signal_likelihood = workspace.likelihoods["signal_likelihood"]
         assert signal_likelihood.name == "signal_likelihood"
-        assert signal_likelihood.distributions == ["signal_dist"]
-        assert signal_likelihood.data == ["observed_data"]
+        assert len(signal_likelihood.distributions) == 1
+        assert signal_likelihood.distributions[0].name == "signal_dist"
+        assert len(signal_likelihood.data) == 1
+        assert signal_likelihood.data[0].name == "observed_data"
         assert signal_likelihood.aux_distributions is None
 
         # Check second likelihood with aux_distributions
         combined_likelihood = workspace.likelihoods["combined_likelihood"]
         assert combined_likelihood.name == "combined_likelihood"
-        assert combined_likelihood.distributions == ["signal_dist", "background_dist"]
-        assert combined_likelihood.data == ["observed_data", "observed_data"]
+        assert len(combined_likelihood.distributions) == 2
+        assert combined_likelihood.distributions[0].name == "signal_dist"
+        assert combined_likelihood.distributions[1].name == "background_dist"
+        assert len(combined_likelihood.data) == 2
+        assert combined_likelihood.data[0].name == "observed_data"
+        assert combined_likelihood.data[1].name == "observed_data"
         assert combined_likelihood.aux_distributions == ["background_dist"]
 
     def test_workspace_loads_analyses_correctly(
@@ -569,21 +575,23 @@ class TestWorkspaceWithLikelihoodsAndAnalyses:
         assert workspace.analyses is not None
         assert len(workspace.analyses) == 2
 
-        # Check first analysis
+        # Check first analysis (FK references are resolved to objects)
         signal_analysis = workspace.analyses["signal_analysis"]
         assert signal_analysis.name == "signal_analysis"
-        assert signal_analysis.likelihood == "signal_likelihood"
+        assert signal_analysis.likelihood.name == "signal_likelihood"
         assert signal_analysis.parameters_of_interest == ["mu"]
-        assert signal_analysis.domains == ["poi_domain"]
+        assert len(signal_analysis.domains) == 1
+        assert signal_analysis.domains[0].name == "poi_domain"
         assert signal_analysis.init == "nominal_values"
         assert signal_analysis.prior is None
 
         # Check second analysis
         combined_analysis = workspace.analyses["combined_analysis"]
         assert combined_analysis.name == "combined_analysis"
-        assert combined_analysis.likelihood == "combined_likelihood"
+        assert combined_analysis.likelihood.name == "combined_likelihood"
         assert combined_analysis.parameters_of_interest == ["mu", "sigma"]
-        assert combined_analysis.domains == ["poi_domain"]
+        assert len(combined_analysis.domains) == 1
+        assert combined_analysis.domains[0].name == "poi_domain"
         assert combined_analysis.init == "nominal_values"
         assert combined_analysis.prior is None
 

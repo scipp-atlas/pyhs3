@@ -13,6 +13,7 @@ import math
 import numpy as np
 import pytensor.tensor as pt
 import pytest
+from pydantic import ValidationError
 from pytensor import function
 
 from pyhs3 import Workspace
@@ -1263,7 +1264,7 @@ class TestExponentialDist:
         result = dist.expression(params)
         f = function([], result)
         result_val = f()
-        expected = np.exp(-1.0)
+        expected = 0.5 * np.exp(-1.0)
         np.testing.assert_allclose(result_val, expected, rtol=1e-6)
 
         # Test exp(-2 * 0) = exp(0) = 1
@@ -1271,7 +1272,7 @@ class TestExponentialDist:
         result = dist.expression(params)
         f = function([], result)
         result_val = f()
-        expected = 1.0
+        expected = 2.0
         np.testing.assert_allclose(result_val, expected, rtol=1e-6)
 
     @pytest.mark.parametrize(
@@ -1279,9 +1280,9 @@ class TestExponentialDist:
         [
             pytest.param(0.0, 1.0, 1.0, id="x0_c1"),  # exp(-1*0) = 1
             pytest.param(1.0, 1.0, np.exp(-1.0), id="x1_c1"),  # exp(-1*1)
-            pytest.param(2.0, 0.5, np.exp(-1.0), id="x2_c0.5"),  # exp(-0.5*2)
-            pytest.param(0.5, 2.0, np.exp(-1.0), id="x0.5_c2"),  # exp(-2*0.5)
-            pytest.param(1.0, 2.0, np.exp(-2.0), id="x1_c2"),  # exp(-2*1)
+            pytest.param(2.0, 0.5, 0.5 * np.exp(-1.0), id="x2_c0.5"),  # exp(-0.5*2)
+            pytest.param(0.5, 2.0, 2.0 * np.exp(-1.0), id="x0.5_c2"),  # exp(-2*0.5)
+            pytest.param(1.0, 2.0, 2.0 * np.exp(-2.0), id="x1_c2"),  # exp(-2*1)
         ],
     )
     def test_exponential_dist_parameterized_values(self, x_val, c_val, expected):
@@ -1311,9 +1312,9 @@ class TestExponentialDist:
         # exp(-1*0) = 1
         assert np.isclose(f(0.0, 1.0), 1.0)
         # exp(-2*1) = exp(-2)
-        assert np.isclose(f(1.0, 2.0), np.exp(-2.0))
+        assert np.isclose(f(1.0, 2.0), 2.0 * np.exp(-2.0))
         # exp(-0.5*3) = exp(-1.5)
-        assert np.isclose(f(3.0, 0.5), np.exp(-1.5))
+        assert np.isclose(f(3.0, 0.5), 0.5 * np.exp(-1.5))
 
     def test_exponential_dist_properties(self):
         """Test that ExponentialDist has correct mathematical properties."""
@@ -1378,7 +1379,7 @@ class TestExponentialDist:
         # Verify we can evaluate the PDF: exp(-0.5 * 1.0) = exp(-0.5)
         pdf_value = model.pdf("exp_decay", time=np.array(1.0), rate=np.array(0.5))
         assert pdf_value is not None
-        expected = np.exp(-0.5)
+        expected = 0.5 * np.exp(-0.5)
         np.testing.assert_allclose(pdf_value, expected, rtol=1e-6)
 
 
@@ -1452,10 +1453,9 @@ class TestLogNormalDist:
         result = dist.expression(params)
         f = function([], result)
         result_val = f()
-        expected = 1.0
+        expected = 1.0 / math.sqrt(2.0 * math.pi)
         np.testing.assert_allclose(result_val, expected, rtol=1e-6)
 
-        # Test at x=e with mu=1, sigma=1
         # ln(e) = 1, so we get (1/e) * exp(-(1-1)^2 / (2*1^2)) = (1/e) * exp(0) = 1/e
         e_val = np.exp(1.0)
         params = {
@@ -1466,7 +1466,7 @@ class TestLogNormalDist:
         result = dist.expression(params)
         f = function([], result)
         result_val = f()
-        expected = 1.0 / e_val
+        expected = 1.0 / (e_val * math.sqrt(2.0 * math.pi))
         np.testing.assert_allclose(result_val, expected, rtol=1e-6)
 
     @pytest.mark.parametrize(
@@ -1497,7 +1497,9 @@ class TestLogNormalDist:
         # Calculate expected value: (1/x) * exp(-((ln(x) - mu)^2) / (2 * sigma^2))
         log_x = np.log(x_val)
         normalized_log = (log_x - mu_val) / sigma_val
-        expected = (1.0 / x_val) * np.exp(-0.5 * normalized_log**2)
+        expected = (1.0 / (x_val * sigma_val * math.sqrt(2.0 * math.pi))) * np.exp(
+            -0.5 * normalized_log**2
+        )
 
         np.testing.assert_allclose(result_val, expected, rtol=1e-6)
 
@@ -1515,11 +1517,11 @@ class TestLogNormalDist:
         f = function([x_var, mu_var, sigma_var], result)
 
         # Test at x=1, mu=0, sigma=1: should give 1.0
-        assert np.isclose(f(1.0, 0.0, 1.0), 1.0)
+        assert np.isclose(f(1.0, 0.0, 1.0), 1.0 / math.sqrt(2.0 * math.pi))
 
         # Test at x=e, mu=1, sigma=1: should give 1/e
         e_val = np.exp(1.0)
-        assert np.isclose(f(e_val, 1.0, 1.0), 1.0 / e_val)
+        assert np.isclose(f(e_val, 1.0, 1.0), 1.0 / (e_val * math.sqrt(2.0 * math.pi)))
 
     def test_lognormal_dist_properties(self):
         """Test that LogNormalDist has correct mathematical properties."""
@@ -1607,7 +1609,7 @@ class TestLogNormalDist:
             log_width=np.array(1.0),
         )
         assert pdf_value is not None
-        expected = 1.0
+        expected = 1.0 / math.sqrt(2.0 * math.pi)
         np.testing.assert_allclose(pdf_value, expected, rtol=1e-6)
 
 
@@ -2134,6 +2136,9 @@ class TestLandauDist:
         assert np.isfinite(result_val)
         assert result_val > 0.0
 
+        expected = 0.0491938
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
     def test_landau_symmetry_properties(self):
         """Test LandauDist asymmetric properties."""
         dist = LandauDist(
@@ -2532,6 +2537,19 @@ class TestMixtureDist:
         assert dist.coefficients == ["coeff1", "coeff2"]
         assert dist.extended is False
         assert dist.ref_coef_norm is None
+
+    def test_mixture_dist_n_minus_1_coefficients_fails(self):
+        """Test traditional N-1 coefficient case (2 coefficients, 3 PDFs)."""
+        with pytest.raises(
+            ValidationError,
+            match="extended must be False when N-1 coefficients with N summands",
+        ):
+            MixtureDist(
+                name="test_mixture",
+                summands=["pdf1", "pdf2", "pdf3"],
+                coefficients=["coeff1", "coeff2"],
+                extended=True,
+            )
 
     def test_mixture_dist_n_minus_1_coefficients(self):
         """Test traditional N-1 coefficient case (2 coefficients, 3 PDFs)."""

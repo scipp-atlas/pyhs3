@@ -3,7 +3,8 @@
     {
       "axes": [
         {
-          "const": true,
+          "min": 0.0,
+          "max": 20.0,
           "name": "n_obs_binsignal_region",
           "value": 10.0
         }

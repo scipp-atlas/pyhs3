@@ -12,8 +12,9 @@ from abc import ABC, abstractmethod
 from typing import Any, cast, get_args, get_origin
 
 import pytensor.tensor as pt
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import ConfigDict, Field, PrivateAttr, model_validator
 
+from pyhs3.collections import NamedModel
 from pyhs3.context import Context
 from pyhs3.typing.aliases import TensorVar
 
@@ -38,7 +39,7 @@ def find_field_definition_line(cls: type, field_name: str) -> str | None:
     return None
 
 
-class Evaluable(BaseModel, ABC):
+class Evaluable(NamedModel, ABC):
     """Base class for HS3 distributions and functions with automatic parameter preprocessing.
 
     This class provides automatic parameter processing that eliminates the need for manual

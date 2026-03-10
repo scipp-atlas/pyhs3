@@ -7,6 +7,7 @@
    model
    broadcasting
    defining_components
+   visualization
    api
 
 .. toctree::

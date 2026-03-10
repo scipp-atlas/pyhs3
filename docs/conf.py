@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import pathlib
 from typing import Any
 
 from intersphinx_registry import get_intersphinx_mapping
@@ -27,6 +28,8 @@ extensions = [
     "sphinx_issues",
     "sphinxcontrib.mermaid",
     "sphinxcontrib.bibtex",
+    "sphinxcontrib.doxylink",
+    "matplotlib.sphinxext.plot_directive",
 ]
 
 # GitHub repo
@@ -78,6 +81,8 @@ myst_enable_extensions = [
 intersphinx_mapping = get_intersphinx_mapping(
     packages={
         "python",
+        "matplotlib",
+        "numpy",
     }
 )
 
@@ -86,6 +91,8 @@ intersphinx_mapping["hs3"] = (
     "https://hep-statistics-serialization-standard.github.io/",
     None,
 )
+
+intersphinx_mapping["hist"] = ("http://hist.readthedocs.io/en/latest/", None)
 
 nitpick_ignore = [
     ("py:class", "_io.StringIO"),
@@ -97,7 +104,18 @@ always_document_param_types = True
 # Napoleon configuration for custom sections
 napoleon_custom_sections = [
     ("HS3 Reference", "references_style"),
+    ("ROOT Reference", "references_style"),
 ]
+
+# ROOT Doxygen cross-references
+_root_doxygen_version = "v636"
+
+doxylink = {
+    "root": (
+        str(pathlib.Path(__file__).parent / "ROOT.tag"),
+        f"https://root.cern/doc/{_root_doxygen_version}/",
+    ),
+}
 
 # sphinx-copybutton configuration
 copybutton_prompt_text = r">>> |\.\.\. |\$ "
@@ -117,4 +135,37 @@ html_static_path = ["_static"]
 
 html_css_files = [
     "css/custom.css",
+]
+
+# https://github.com/sphinx-contrib/doxylink/issues/72
+doxylink_parse_error_ignore_regexes = [
+    "^Skipping define RLogger.hxx::",
+    "^Skipping function TClingCallFunc.cxx::",
+    "^Skipping function TDavixFile.cxx::",
+    "^Skipping function TProof.h::",
+    "^Skipping function TProofLite.h::",
+    "^Skipping function TStringLong.h::",
+    "^Skipping function civetweb.c::",
+    "^Skipping function entrylistblock_figure1.C::",
+    "^Skipping function legend1.C::",
+    "^Skipping function legend2.C::",
+    "^Skipping function legend3.C::",
+    "^Skipping function polyline.C::",
+    "^Skipping function rootcling_impl.cxx::",
+    "^Skipping function textalign.C::",
+    "^Skipping function textangle.C::",
+    "^Skipping function PassiveKeyGrab::",
+    "^Skipping function QuartzImage::",
+    "^Skipping function QuartzPixmap::",
+    "^Skipping function QuartzView::",
+    "^Skipping function QuartzWindow::",
+    "^Skipping function ROOT::",
+    "^Skipping function cout_redirect::",
+    "^Skipping function CPyCppyy::",
+    "^Skipping function ROOTOpenGLView::",
+    "^Skipping function RooStats::",
+    "^Skipping function THnBase::",
+    "^Skipping function THnSparse::",
+    "^Skipping function THnSparseT::",
+    "^Skipping function TThreadTimer::",
 ]

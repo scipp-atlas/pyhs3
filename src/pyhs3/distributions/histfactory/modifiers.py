@@ -2,24 +2,28 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Annotated, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 import pytensor.tensor as pt
-from pydantic import BaseModel, Field, RootModel, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    PrivateAttr,
+    RootModel,
+    model_validator,
+)
 from pytensor.compile.function import function
 
 from pyhs3.context import Context
 from pyhs3.distributions.basic import GaussianDist, LogNormalDist, PoissonDist
 from pyhs3.distributions.core import Distribution
 from pyhs3.distributions.histfactory import interpolations
+from pyhs3.distributions.histfactory.data import SampleData
 
 # Import existing distributions for constraint terms
 from pyhs3.exceptions import custom_error_msg
 from pyhs3.networks import HasDependencies
 from pyhs3.typing.aliases import TensorVar
-
-if TYPE_CHECKING:
-    from pyhs3.distributions.histfactory.samples import SampleData
 
 
 class ModifierData(BaseModel):
@@ -181,6 +185,15 @@ class NormSysModifier(HasConstraint, ParameterModifier):
     application: Literal["multiplicative"] = Field("multiplicative", exclude=True)
     constraint: Literal["Gauss", "Poisson", "LogNormal"] = "Gauss"
     data: NormSysData
+    _nominal_factor: TensorVar = PrivateAttr()
+    _hi_factor_tensor: TensorVar = PrivateAttr()
+    _lo_factor_tensor: TensorVar = PrivateAttr()
+
+    def model_post_init(self, __context: Any, /) -> None:
+        """Initialize computed collections after Pydantic validation."""
+        self._nominal_factor = pt.constant(1.0)
+        self._hi_factor_tensor = pt.constant(self.data.hi)
+        self._lo_factor_tensor = pt.constant(self.data.lo)
 
     @property
     def auxdata(self) -> float:
@@ -211,17 +224,12 @@ class NormSysModifier(HasConstraint, ParameterModifier):
         """Apply normsys modifier (systematic with hi/lo interpolation)."""
         alpha = context[self.parameter]
 
-        hi_factor = self.data.hi
-        lo_factor = self.data.lo
-
-        # Apply interpolation method
-        interpolation = self.data.interpolation
-        nominal_factor = pt.constant(1.0)
-        hi_factor_tensor = pt.constant(hi_factor)
-        lo_factor_tensor = pt.constant(lo_factor)
-
         factor = interpolations.apply_interpolation(
-            interpolation, alpha, nominal_factor, hi_factor_tensor, lo_factor_tensor
+            self.data.interpolation,
+            alpha,
+            self._nominal_factor,
+            self._hi_factor_tensor,
+            self._lo_factor_tensor,
         )
 
         return cast("TensorVar", rates * factor)

@@ -11,6 +11,7 @@ import pytensor.tensor as pt
 import pytest
 
 from pyhs3.context import Context
+from pyhs3.distributions.histfactory.data import SampleData
 from pyhs3.distributions.histfactory.modifiers import (
     HistoSysData,
     HistoSysDataContents,
@@ -24,7 +25,6 @@ from pyhs3.distributions.histfactory.modifiers import (
     StatErrorData,
     StatErrorModifier,
 )
-from pyhs3.distributions.histfactory.samples import SampleData
 
 
 class TestNormFactorModifier:

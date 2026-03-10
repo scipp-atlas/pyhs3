@@ -7,49 +7,71 @@ with samples and modifiers as defined in the HS3 specification.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import Any
+import hist
+import numpy as np
+from pydantic import Field
 
-from pydantic import BaseModel, Field, PrivateAttr, RootModel, model_validator
+from pyhs3.axes import BinnedAxes
+from pyhs3.collections import NamedCollection, NamedModel
 
 # Import existing distributions for constraint terms
+from pyhs3.distributions.histfactory.data import SampleData
 from pyhs3.distributions.histfactory.modifiers import Modifiers
 
 
-class SampleData(BaseModel):
-    """Sample data containing bin contents and errors.
-
-    The ``errors`` field is optional per the HS3 specification.  When absent
-    (common in real-world ATLAS workspaces for samples where MC statistical
-    uncertainties are negligible), it is defaulted to zero for every bin.
-    """
-
-    contents: list[float]
-    errors: list[float] | None = None
-
-    @model_validator(mode="after")
-    def validate_lengths(self) -> SampleData:
-        """Fill missing errors with zeros and ensure same length as contents."""
-        if self.errors is None:
-            self.errors = [0.0] * len(self.contents)
-        if len(self.contents) != len(self.errors):
-            msg = (
-                f"Sample data contents ({len(self.contents)}) and errors "
-                f"({len(self.errors)}) must have same length"
-            )
-            raise ValueError(msg)
-        return self
-
-
-class Sample(BaseModel):
+class Sample(NamedModel):
     """HistFactory sample specification."""
 
-    name: str
     data: SampleData
     modifiers: Modifiers = Field(default_factory=Modifiers)
 
+    def to_hist(self, axes: BinnedAxes) -> hist.Hist[hist.storage.Weight]:
+        """
+        Convert to scikit-hep hist.Hist object for visualization.
 
-class Samples(RootModel[list[Sample]]):
+        Creates a hist.Hist histogram from this sample's contents and errors.
+        The axes must be provided since SampleData doesn't contain axis information.
+
+        Args:
+            axes: BinnedAxes specification defining the binning
+
+        Returns:
+            hist.Hist: Histogram representation with:
+                - Axes matching the provided axes
+                - Values from sample contents
+                - Variances from sample errors (squared)
+
+        Examples:
+            >>> from pyhs3.axes import BinnedAxes
+            >>> sample = Sample(
+            ...     name="signal",
+            ...     data={"contents": [10, 20, 15], "errors": [3, 4, 2.5]}
+            ... )
+            >>> axes = BinnedAxes([{"name": "x", "min": 0, "max": 3, "nbins": 3}])
+            >>> sample.to_hist(axes)
+            Hist(Regular(3, 0, 3, name='x'), storage=Weight()) # Sum: WeightedSum(value=45, variance=31.25)
+        """
+        # Convert axes to hist.axis objects
+        # Access the root to get the actual axis (RegularAxis or IrregularAxis)
+        hist_axes = [axis.to_hist() for axis in axes]
+
+        # Create histogram with Weight storage since we always have errors
+        h = hist.Hist(*hist_axes, storage=hist.storage.Weight())
+
+        # Calculate shape from axes
+        shape = tuple(axis.nbins for axis in axes)
+
+        # Reshape contents and variances (errors squared)
+        contents_nd = np.array(self.data.contents).reshape(shape)
+        variances_nd = np.square(self.data.errors).reshape(shape)
+
+        stacked = np.stack([contents_nd, variances_nd], axis=-1)
+        h[...] = stacked
+
+        return h
+
+
+class Samples(NamedCollection[Sample]):
     """
     Collection of samples for a HistFactory distribution.
 
@@ -58,25 +80,6 @@ class Samples(RootModel[list[Sample]]):
     """
 
     root: list[Sample] = Field(default_factory=list)
-    _map: dict[str, Sample] = PrivateAttr(default_factory=dict)
-
-    def model_post_init(self, __context: Any, /) -> None:
-        """Initialize computed collections after Pydantic validation."""
-        self._map = {sample.name: sample for sample in self.root}
-
-    def __getitem__(self, item: str | int) -> Sample:
-        if isinstance(item, int):
-            return self.root[item]
-        return self._map[item]
-
-    def __contains__(self, item: str) -> bool:
-        return item in self._map
-
-    def __iter__(self) -> Iterator[Sample]:  # type: ignore[override]
-        return iter(self.root)
-
-    def __len__(self) -> int:
-        return len(self.root)
 
 
 __all__ = ("Sample", "Samples")

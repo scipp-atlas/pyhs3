@@ -7,12 +7,22 @@ including likelihood mappings between distributions and data.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from pydantic import ConfigDict, Field, model_validator
+
+from pyhs3.collections import NamedCollection, NamedModel
+from pyhs3.data import Data, Datum
+from pyhs3.distributions import Distributions
+from pyhs3.distributions.core import Distribution
+from pyhs3.typing.annotations import (
+    FKListSchema,
+    FKListSerializer,
+    make_fk_list_validator,
+)
 
 
-class Likelihood(BaseModel):
+class Likelihood(NamedModel):
     """
     Likelihood specification mapping distributions to observations.
 
@@ -29,13 +39,39 @@ class Likelihood(BaseModel):
 
     model_config = ConfigDict()
 
-    name: str = Field(..., repr=True)
-    distributions: list[str] = Field(..., repr=False)
-    data: list[str | int | float | int] = Field(..., repr=False)
+    distributions: Annotated[
+        list[str] | Distributions,
+        make_fk_list_validator(Distribution),
+        FKListSerializer,
+        FKListSchema,
+    ] = Field(..., repr=False)
+    data: Annotated[
+        list[str] | Data,
+        make_fk_list_validator(Datum),
+        FKListSerializer,
+        FKListSchema,
+    ] = Field(..., repr=False)
     aux_distributions: list[str] | None = Field(default=None, repr=False)
 
+    @model_validator(mode="after")
+    def validate_distributions_data_pairing(self) -> Likelihood:
+        """Validate that distributions and data are properly paired."""
+        if len(self.distributions) != len(self.data):
+            msg = (
+                f"Likelihood '{self.name}': distributions and data must have the same length, "
+                f"got {len(self.distributions)} distributions and {len(self.data)} data entries"
+            )
+            raise ValueError(msg)
+        if len(self.distributions) == 0 and not self.aux_distributions:
+            msg = (
+                f"Likelihood '{self.name}': must have at least one distribution/data pair "
+                f"or provide aux_distributions"
+            )
+            raise ValueError(msg)
+        return self
 
-class Likelihoods(RootModel[list[Likelihood]]):
+
+class Likelihoods(NamedCollection[Likelihood]):
     """
     Collection of HS3 likelihood specifications.
 
@@ -45,32 +81,3 @@ class Likelihoods(RootModel[list[Likelihood]]):
     """
 
     root: list[Likelihood] = Field(default_factory=list)
-
-    @property
-    def likelihood_map(self) -> dict[str, Likelihood]:
-        """Mapping from likelihood names to Likelihood instances."""
-        return {likelihood.name: likelihood for likelihood in self.root}
-
-    def __len__(self) -> int | float:
-        """Number of likelihoods in this collection."""
-        return len(self.root)
-
-    def __contains__(self, likelihood_name: str) -> bool:
-        """Check if a likelihood with the given name exists."""
-        return likelihood_name in self.likelihood_map
-
-    def __getitem__(self, item: str | int) -> Likelihood:
-        """Get a likelihood by name or index."""
-        if isinstance(item, int):
-            return self.root[item]
-        return self.likelihood_map[item]
-
-    def get(
-        self, likelihood_name: str, default: Likelihood | None = None
-    ) -> Likelihood | None:
-        """Get a likelihood by name, returning default if not found."""
-        return self.likelihood_map.get(likelihood_name, default)
-
-    def __iter__(self) -> Iterator[Likelihood]:  # type: ignore[override]
-        """Iterate over the likelihoods."""
-        return iter(self.root)

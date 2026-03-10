@@ -304,3 +304,32 @@ def test_workspace_validation_error_with_named_fields(tmp_path):
     # Verify that loading raises WorkspaceValidationError
     with pytest.raises(WorkspaceValidationError, match="Workspace validation failed"):
         Workspace.load(invalid_json_path)
+
+
+def test_format_validation_error_handles_empty_loc(tmp_path):
+    class DummyValidationError:
+        def __init__(self, errors):
+            self._errors = errors
+
+        def errors(self):
+            return self._errors
+
+    dummy_errors = [
+        {
+            "loc": [],  # 👈 forces loc_parts = []
+            "msg": "Something broke",
+            "type": "value_error",
+            "input": {},
+        }
+    ]
+
+    dummy_ve = DummyValidationError(dummy_errors)
+
+    result = Workspace._format_validation_error(
+        validation_error=dummy_ve,
+        path=tmp_path / "config.yaml",
+        verbose=True,
+    )
+
+    # Location should be blank before the colon
+    assert "1. : Something broke" in result

@@ -1,5 +1,5 @@
 Defining Custom Functions and Distributions
-==========================================
+============================================
 
 This guide shows how to create custom Functions and Distributions for use with pyhs3. These custom components should follow the :hs3:label:`HS3 specification <hs3.sec:distributions>` for distributions and :hs3:label:`functions <hs3.sec:functions>`.
 Both Functions and Distributions inherit from the ``Evaluable`` base class, which provides
@@ -210,12 +210,11 @@ Add your components to the appropriate registry:
 .. code-block:: python
 
     # For distributions
-    from pyhs3.distributions.core import registered_distributions
+    from pyhs3.distributions import registered_distributions
 
     registered_distributions["custom_gaussian"] = CustomGaussianDist
-
     # For functions
-    from pyhs3.functions.core import registered_functions
+    from pyhs3.functions import registered_functions
 
     registered_functions["weighted_product"] = WeightedProductFunction
 
@@ -295,11 +294,14 @@ Error Handling and Debugging
 
     # Inspect what was auto-processed
     dist = MyDist(name="test", param1="alpha", param2=1.5)
-
     print("Parameters:", dist.parameters)  # All parameter names
+    # Parameters: ...
     print("Internal mapping:", dist._parameters)  # Field -> parameter mapping
+    # Internal mapping: ...
     print("Constants:", list(dist.constants.keys()))  # Generated constant names
+    # Constants: ...
     print("Constant values:", dist._constants_values)  # Stored numeric values
+    # Constant values: ...
 
 Distribution Architecture: likelihood() vs extended_likelihood()
 -----------------------------------------------------------------

@@ -286,8 +286,8 @@ Add doctests to docstrings:
 
        Examples
        --------
-       >>> calculate_nll(-0.91893853)
-       1.83787706
+       ...
+
        """
        return -2 * logpdf
 

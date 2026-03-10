@@ -1,7 +1,7 @@
 Efficient Statistical Modeling for Particle Physics Using Computational Graphs in Python
 ========================================================================================
 
-**Used for:** :cite:ps:`Stark_20251028,Smith_20251011`
+**Used for:** :cite:ps:`Stark_20251028,Smith_20251011,Stark_20260128,Stark_20260302`
 
 **Abstract:**
 

@@ -124,7 +124,7 @@ class PolynomialDist(Distribution):
         we require all coefficients to be explicitly specified.
 
     ROOT Reference:
-        :rootref:`RooPolynomial <classRooPolynomial.html>`
+        :root:`RooPolynomial`
     """
 
     type: Literal["polynomial_dist"] = "polynomial_dist"
@@ -174,7 +174,7 @@ class BernsteinPolyDist(Distribution):
         The normalization to this interval is typically handled by the domain.
 
     ROOT Reference:
-        :rootref:`RooBernstein <classRooBernstein.html>`
+        :root:`RooBernstein`
     """
 
     type: Literal["bernstein_poly_dist"] = "bernstein_poly_dist"

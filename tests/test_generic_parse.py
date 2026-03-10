@@ -6,6 +6,8 @@ Tests for SymPy expression parsing and conversion to PyTensor operations.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pytensor.tensor as pt
 import pytest
@@ -27,6 +29,13 @@ class TestAnalyzeSymPyExpr:
         assert result["expression"] == expr
         assert result["independent_vars"] == {sp.Symbol("x")}
         assert result["dependent_vars"] == set()
+
+    def test_simple_expression_analysis_with_debug(self, caplog):
+        """Test analysis of a simple polynomial expression."""
+        expr = sp.parse_expr("x**2 + 2*x + 1")
+
+        with caplog.at_level(logging.DEBUG, logger="pyhs3.generic_parse"):
+            analyze_sympy_expr(expr)
 
     def test_multi_variable_expression(self):
         """Test analysis of expression with multiple variables."""

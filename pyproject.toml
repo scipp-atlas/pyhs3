@@ -10,7 +10,8 @@ authors = [
 ]
 description = "pure-Python HS3 implementation with tensors and autodiff"
 readme = "README.rst"
-license.file = "LICENSE"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 classifiers = [
   "Development Status :: 1 - Planning",
@@ -32,15 +33,17 @@ dynamic = ["version"]
 dependencies = [
     'rich',
     'rustworkx',
-    'pytensor >= 2.33.0',
+    # https://github.com/pymc-devs/pytensor/commit/f1a2ac660efdbb3527e9a6b4d71a16e3d1c81b07
+    'pytensor >= 2.33.0', # pytensor.graph.traversal
     'numpy',
     'sympy',
     'pydantic',
+    'hist >= 2.7.0',
 ]
 
 [project.optional-dependencies]
 test = [
-  "pytest >=6",
+  "pytest >=9",
   "pytest-cov >=3",
   "pyhf >= 0.7.6",
   "pydocstyle",
@@ -48,7 +51,7 @@ test = [
   "pydot",
 ]
 dev = [
-  "pytest >=6",
+  "pytest >=9",
   "pytest-cov >=3",
   "tbump>=6.7.0",
 ]
@@ -64,6 +67,12 @@ docs = [
   "sphinx-issues",
   "sphinxcontrib-mermaid",
   "sphinxcontrib-bibtex",
+  "sphinxcontrib-doxylink",
+  "matplotlib",
+  "hist[plot] > 2.7.0", # keep synced with dependencies
+]
+develop = [
+  "pyhs3[test,docs,dev]",
 ]
 
 [project.urls]
@@ -77,14 +86,25 @@ Changelog = "https://github.com/scipp-atlas/pyhs3/releases"
 version.source = "vcs"
 build.hooks.vcs.version-file = "src/pyhs3/_version.py"
 
+[tool.hatch.build.targets.sdist]
+# hatchling always includes:
+# pyproject.toml, .gitignore, any README, any LICENSE, AUTHORS
+only-include = [
+    "/src",
+    "/CITATION.cff"
+]
+exclude = [ ]
+
+
+
 [tool.hatch.envs.default]
 features = ["test"]
 scripts.test = "pytest {args}"
 scripts.doctest = "pytest --doctest-modules src/pyhs3 {args}"
 installer = "uv"
 
-[tool.pytest.ini_options]
-minversion = "6.0"
+[tool.pytest]
+minversion = "9.0"
 addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config", "--doctest-glob=docs/*.rst"]
 xfail_strict = true
 filterwarnings = [
@@ -170,7 +190,6 @@ isort.required-imports = ["from __future__ import annotations"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["T20"]
-"noxfile.py" = ["T20"]
 "src/pyhs3/parse.py" = ["T201"]
 
 
@@ -199,3 +218,26 @@ add_ignore = [
   "D100",
   "D105",
 ]
+
+[tool.rstcheck]
+ignore_directives = [
+    "autosummary",
+    "bibliography",
+    "doctest",
+    "mermaid",
+    "plot", # matplotlib
+    "testsetup"
+]
+ignore_roles = [
+    "cite:p",
+    "cite:ps",
+    "hs3:label",
+    "root"
+]
+
+[tool.codeflash]
+# All paths are relative to this pyproject.toml's directory.
+module-root = "src/pyhs3"
+tests-root = "tests"
+ignore-paths = []
+formatter-cmds = ["pixi run -e dev ruff check --exit-zero --fix $file", "pixi run -e dev ruff format $file"]

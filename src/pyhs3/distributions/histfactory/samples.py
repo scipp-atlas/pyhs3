@@ -17,16 +17,26 @@ from pyhs3.distributions.histfactory.modifiers import Modifiers
 
 
 class SampleData(BaseModel):
-    """Sample data containing bin contents and errors."""
+    """Sample data containing bin contents and errors.
+
+    The ``errors`` field is optional per the HS3 specification.  When absent
+    (common in real-world ATLAS workspaces for samples where MC statistical
+    uncertainties are negligible), it is defaulted to zero for every bin.
+    """
 
     contents: list[float]
-    errors: list[float]
+    errors: list[float] | None = None
 
     @model_validator(mode="after")
     def validate_lengths(self) -> SampleData:
-        """Ensure contents and errors have same length."""
+        """Fill missing errors with zeros and ensure same length as contents."""
+        if self.errors is None:
+            self.errors = [0.0] * len(self.contents)
         if len(self.contents) != len(self.errors):
-            msg = f"Sample data contents ({len(self.contents)}) and errors ({len(self.errors)}) must have same length"
+            msg = (
+                f"Sample data contents ({len(self.contents)}) and errors "
+                f"({len(self.errors)}) must have same length"
+            )
             raise ValueError(msg)
         return self
 

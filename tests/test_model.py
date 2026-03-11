@@ -488,6 +488,48 @@ class TestModelWithoutParameterPoints:
         # obs_x should be scalar (override respected)
         assert model.parameters["obs_x"].type.ndim == 0
 
+    def test_parameter_kind_override_no_warns_when_default(self):
+        """Test that overriding observable parameter kind to vector emits no warning."""
+        workspace_data = {
+            "metadata": {"hs3_version": "0.2"},
+            "distributions": [
+                {
+                    "name": "signal",
+                    "type": "gaussian_dist",
+                    "x": "obs_x",
+                    "mean": 0.0,
+                    "sigma": 1.0,
+                }
+            ],
+            "parameter_points": [
+                {
+                    "name": "default",
+                    "parameters": [{"name": "obs_x", "value": 0.0}],
+                }
+            ],
+            "data": [
+                {
+                    "name": "data1",
+                    "type": "point",
+                    "value": 1.5,
+                    "axes": [{"name": "obs_x", "min": -5.0, "max": 5.0}],
+                }
+            ],
+            "likelihoods": [
+                {
+                    "name": "likelihood1",
+                    "distributions": ["signal"],
+                    "data": ["data1"],
+                }
+            ],
+        }
+        workspace = hs3.Workspace(**workspace_data)
+
+        # Override the kind programmatically
+        workspace.parameter_points[0]["obs_x"].kind = pt.vector
+        model = workspace.model()
+        assert model.parameters["obs_x"].type.ndim == 1
+
     def test_non_observable_parameter_stays_scalar(self):
         """Test that non-observable parameters stay scalar even with ParameterPoint(kind=None)."""
         workspace_data = {

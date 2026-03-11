@@ -356,14 +356,14 @@ class TestDistributionNormalization:
         assert error < 1e-6
 
     def test_histfactory_not_normalizable(self):
-        """Verify HistFactoryDistChannel.normalizable is False."""
+        """Verify HistFactoryDistChannel._normalizable is False."""
         dist = HistFactoryDistChannel(
             name="channel",
             axes=[RegularAxis(name="x", min=0, max=10, nbins=10)],
             samples=[],
         )
 
-        assert dist.normalizable is False
+        assert dist._normalizable is False
 
     def test_histfactory_normalization_skipped(self):
         """Use mock to verify normalization is NOT called for HistFactory."""

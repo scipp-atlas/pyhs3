@@ -29,19 +29,19 @@ def _apply_normalization(
     Apply normalization to a raw likelihood expression.
 
     Helper function that normalizes a likelihood over observables present in
-    the context. Attempts analytical integration first via normalization_integral(),
+    the context. Attempts analytical integration first via _normalization_integral(),
     then falls back to nested Gauss-Legendre quadrature for multi-dimensional integrals.
 
     Args:
         raw: Raw (unnormalized) likelihood expression
-        distribution: Distribution instance (for normalization_integral() method)
+        distribution: Distribution instance (for _normalization_integral() method)
         context: Mapping of names to pytensor variables (includes observables)
 
     Returns:
         Normalized likelihood expression
     """
     # Explicit opt-out for distributions that should not be normalized
-    if not distribution.normalizable:
+    if not distribution._normalizable:
         return raw
 
     matching = [
@@ -55,7 +55,7 @@ def _apply_normalization(
     # Single observable: try analytical integral first
     if len(matching) == 1:
         obs_name, lower, upper = matching[0]
-        integral = distribution.normalization_integral(context, obs_name, lower, upper)
+        integral = distribution._normalization_integral(context, obs_name, lower, upper)
         if integral is not None:
             return cast(TensorVar, raw / integral)
 
@@ -80,13 +80,13 @@ class Distribution(Evaluable, ABC):
     probability is the product of both terms.
 
     All distributions are automatically normalized over the domain of their
-    observables unless explicitly opted out via normalizable = False.
+    observables unless explicitly opted out via _normalizable = False.
 
     Inherits parameter processing functionality from Evaluable.
     Subclasses must implement _expression() to define computation logic.
     """
 
-    normalizable: bool = PrivateAttr(default=True)
+    _normalizable: bool = PrivateAttr(default=True)
 
     @abstractmethod
     def likelihood(self, context: Context) -> TensorVar:
@@ -126,7 +126,7 @@ class Distribution(Evaluable, ABC):
         """
         return None
 
-    def normalization_integral(
+    def _normalization_integral(
         self, context: Context, obs_name: str, lower: TensorVar, upper: TensorVar
     ) -> TensorVar | None:
         """
@@ -162,7 +162,7 @@ class Distribution(Evaluable, ABC):
         This provides the complete probability for the distribution.
 
         All distributions are automatically normalized over observables present
-        in the context, unless explicitly opted out via normalizable = False.
+        in the context, unless explicitly opted out via _normalizable = False.
 
         Subclasses typically do not need to override this method - just
         implement likelihood() and optionally extended_likelihood().
@@ -175,7 +175,7 @@ class Distribution(Evaluable, ABC):
         """
         raw = self.likelihood(context)
 
-        # Apply normalization (respects normalizable flag internally)
+        # Apply normalization (respects _normalizable flag internally)
         raw = _apply_normalization(raw, self, context)
 
         return cast(TensorVar, raw * self.extended_likelihood(context))
@@ -189,7 +189,7 @@ class Distribution(Evaluable, ABC):
         but can be more numerically stable.
 
         All distributions are automatically normalized over observables present
-        in the context, unless explicitly opted out via normalizable = False.
+        in the context, unless explicitly opted out via _normalizable = False.
 
         PyTensor handles optimization and simplification automatically.
 
@@ -201,7 +201,7 @@ class Distribution(Evaluable, ABC):
         """
         raw = self.likelihood(context)
 
-        # Apply normalization (respects normalizable flag internally)
+        # Apply normalization (respects _normalizable flag internally)
         raw = _apply_normalization(raw, self, context)
 
         return cast(

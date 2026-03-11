@@ -103,9 +103,9 @@ class Distribution(Evaluable, ABC):
         observable = context[obs_name]
         upper_t = pt.as_tensor_variable(upper, dtype=observable.dtype)
         lower_t = pt.as_tensor_variable(lower, dtype=observable.dtype)
-        upper_val = clone_replace(expr, {observable: upper_t})  # type: ignore[arg-type]
-        lower_val = clone_replace(expr, {observable: lower_t})  # type: ignore[arg-type]
-        return cast(TensorVar, upper_val - lower_val)  # type: ignore[operator]
+        upper_val = cast(TensorVar, clone_replace(expr, [(observable, upper_t)]))
+        lower_val = cast(TensorVar, clone_replace(expr, [(observable, lower_t)]))
+        return cast(TensorVar, upper_val - lower_val)
 
     def _apply_normalization(
         self,

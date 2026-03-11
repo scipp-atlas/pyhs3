@@ -6,15 +6,14 @@ Provides Gauss-Legendre quadrature for computing normalization integrals symboli
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import numpy as np
-import pytensor
 import pytensor.tensor as pt
 from pytensor.graph.replace import clone_replace
+from pytensor.scan.basic import scan
 
-if TYPE_CHECKING:
-    from pyhs3.typing.aliases import TensorVar
+from pyhs3.typing.aliases import TensorVar
 
 # Precompute 64-point Gauss-Legendre nodes and weights (fixed, deterministic)
 _GL_ORDER = 64
@@ -31,7 +30,7 @@ def gauss_legendre_integral(
     Compute a definite integral symbolically via Gauss-Legendre quadrature.
 
     Builds a PyTensor expression: integral = (b-a)/2 * sum_i(w_i * f(x_i))
-    using pytensor.scan for a compact symbolic loop.
+    using pytensor.scan.basic.scan for a compact symbolic loop.
 
     Args:
         expression: The PyTensor expression to integrate
@@ -51,10 +50,10 @@ def gauss_legendre_integral(
     x_points = half_width * nodes + midpoint
 
     def step(x_i: TensorVar, w_i: TensorVar) -> TensorVar:
-        f_i = clone_replace(expression, replace={variable: x_i})  # type: ignore[arg-type]
+        f_i = clone_replace(expression, replace=[(variable, x_i)])
         return cast("TensorVar", w_i * f_i)
 
-    results = pytensor.scan(  # type: ignore[attr-defined]
-        fn=step, sequences=[x_points, weights], return_updates=False
+    results = cast(
+        TensorVar, scan(fn=step, sequences=[x_points, weights], return_updates=False)
     )
-    return cast("TensorVar", half_width * pt.sum(results))  # type: ignore[no-untyped-call]
+    return cast(TensorVar, half_width * pt.sum(results))  # type: ignore[no-untyped-call]

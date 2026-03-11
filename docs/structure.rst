@@ -358,9 +358,12 @@ Here's how data flows through a complete PyHS3 model:
    <BLANKLINE>
    >>> # 4. Evaluate (compile and compute)
    >>> signal_pdf = model.pdf(
-   ...     "signal", mass=np.array(125.0), higgs_mass=np.array(125.0), resolution=np.array(2.5)
+   ...     "signal",
+   ...     mass=np.array([125.0]),
+   ...     higgs_mass=np.array(125.0),
+   ...     resolution=np.array(2.5),
    ... )
-   >>> background_pdf = model.pdf("background", mass=np.array(125.0), slope=np.array(50.0))
+   >>> background_pdf = model.pdf("background", mass=np.array([125.0]), slope=np.array(50.0))
 
 Common Patterns
 ---------------

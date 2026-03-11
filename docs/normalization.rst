@@ -52,7 +52,9 @@ Let's see how normalization affects a Gaussian distribution over a finite domain
    >>> from pyhs3.functions import Functions
    >>> from pyhs3.context import Context
    >>> import pytensor.tensor as pt
+   >>> import warnings
    >>> from pytensor.compile.function import function
+   >>> import numpy as np
    >>> from scipy.integrate import quad
    >>>
    >>> # Create a GaussianDist
@@ -75,30 +77,34 @@ Let's see how normalization affects a Gaussian distribution over a finite domain
    ... )
    >>>
    >>> # Model WITHOUT observables - raw PDF
-   >>> model_unnorm = Model(
-   ...     parameterset=ParameterSet(
-   ...         name="default",
-   ...         parameters=[
-   ...             ParameterPoint(name="mu", value=130.0),
-   ...             ParameterPoint(name="sigma", value=10.0),
-   ...         ],
-   ...     ),
-   ...     distributions=Distributions([gaussian]),
-   ...     domain=ProductDomain(name="default"),
-   ...     functions=Functions([]),
-   ...     observables=None,  # No observables
-   ...     progress=False,
-   ... )
+   >>> with warnings.catch_warnings(record=True) as w:
+   ...     warnings.simplefilter("always")
+   ...     model_unnorm = Model(
+   ...         parameterset=ParameterSet(
+   ...             name="default",
+   ...             parameters=[
+   ...                 ParameterPoint(name="x", value=100.0, kind=pt.vector),
+   ...                 ParameterPoint(name="mu", value=130.0),
+   ...                 ParameterPoint(name="sigma", value=10.0),
+   ...             ],
+   ...         ),
+   ...         distributions=Distributions([gaussian]),
+   ...         domain=ProductDomain(name="default"),
+   ...         functions=Functions([]),
+   ...         observables=None,  # No observables
+   ...         progress=False,
+   ...     )
+   ...
    >>>
    >>> # Compare the expressions using pytensor printing
    >>> from pytensor.printing import pp
    >>> expr_norm = model_norm.distributions["signal"]
    >>> expr_unnorm = model_unnorm.distributions["signal"]
    >>>
-   >>> # The normalized version includes a division by the integral (using Scan for quadrature)
-   >>> "Scan" in pp(expr_norm)  # Scan operation for numerical integration
+   >>> # The normalized version includes a division by the integral (using sum for quadrature)
+   >>> "sum" in pp(expr_norm)  # summing for numerical integration
    True
-   >>> "Scan" in pp(expr_unnorm)  # No Scan in raw PDF
+   >>> "sum" in pp(expr_unnorm)  # No sum in raw PDF
    False
    >>>
    >>> # Verify normalization: integral over [100, 160] = 1.0
@@ -106,20 +112,23 @@ Let's see how normalization affects a Gaussian distribution over a finite domain
    >>> mu_var = model_norm.parameters["mu"]
    >>> sigma_var = model_norm.parameters["sigma"]
    >>> f_norm = function([x_var, mu_var, sigma_var], expr_norm)
-   >>> integral_norm, _ = quad(lambda x: f_norm(x, 130.0, 10.0), 100, 160)
+   >>> xs = np.linspace(100, 160, 10000)
+   >>> ys = f_norm(xs, 130.0, 10.0)
+   >>> integral_norm = np.trapezoid(ys, xs)
    >>> abs(integral_norm - 1.0) < 1e-5  # Normalized PDF integrates to 1
-   True
+   np.True_
    >>>
    >>> # Raw PDF integrates to something less than 1 over finite domain
    >>> x_var_u = model_unnorm.parameters["x"]
    >>> mu_var_u = model_unnorm.parameters["mu"]
    >>> sigma_var_u = model_unnorm.parameters["sigma"]
    >>> f_unnorm = function([x_var_u, mu_var_u, sigma_var_u], expr_unnorm)
-   >>> integral_unnorm, _ = quad(lambda x: f_unnorm(x, 130.0, 10.0), 100, 160)
+   >>> ys_unnorm = f_unnorm(xs, 130.0, 10.0)
+   >>> integral_unnorm = np.trapezoid(ys_unnorm, xs)
    >>> 0.99 < integral_unnorm < 1.0  # Gaussian over [100, 160] is almost all of the probability
-   True
+   np.True_
    >>> abs(integral_unnorm - 1.0) > 1e-5  # But not exactly 1.0
-   True
+   np.True_
 
 Providing Analytical Normalization
 ===================================
@@ -152,16 +161,17 @@ Distributions can provide analytical normalization expressions to avoid numerica
    >>>
    >>> # Verify the distribution normalizes correctly
    >>> dist = LinearDist(name="linear", expression="x")
-   >>> x_var = pt.dscalar("x")
+   >>> x_var = pt.vector("x")
    >>> from pyhs3.context import Context
    >>> context = Context(parameters={"x": x_var}, observables={"x": (0, 10)})
    >>> expr = dist.expression(context)
    >>> from pytensor.compile.function import function
    >>> f = function([x_var], expr)
-   >>> from scipy.integrate import quad
-   >>> integral, _ = quad(lambda x: f(x), 0, 10)
+   >>> xs = np.linspace(0, 10, 10000)
+   >>> ys = f(xs)
+   >>> integral = np.trapezoid(ys, xs)
    >>> abs(integral - 1.0) < 1e-10  # Perfectly normalized
-   True
+   np.True_
 
 The framework automatically evaluates :math:`F(x_{\max}) - F(x_{\min})` using the antiderivative you provide. You only need to return the expression—the framework handles bound substitution via ``clone_replace``.
 

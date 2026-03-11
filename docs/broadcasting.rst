@@ -50,15 +50,23 @@ Converting Parameters to Vectors
 
 To enable broadcasting, you need to modify the parameter's ``kind`` before creating the model:
 
-.. code-block:: pycon
+.. doctest::
 
+    :options: +ELLIPSIS
+
+    >>> import warnings
     >>> # Get the parameter set
     >>> parameterset = ws.parameter_points[0]
     >>> # Convert 'x' parameter to vector
     >>> parameterset["x"].kind = pt.vector
-    >>> # Create new model with vector parameter
-    >>> new_model = ws.model(parameter_set=parameterset)
+    >>> with warnings.catch_warnings(record=True) as w:
+    ...     warnings.simplefilter("always")
+    ...     # Create new model with vector parameter
+    ...     new_model = ws.model(parameter_set=parameterset)
+    ...     print(w[0].message)  # shows the warning in the docs
+    ...
     <BLANKLINE>
+    Parameter 'x' has kind override vector (default would be scalar)
 
 Now you can pass vector values for the ``x`` parameter:
 
@@ -119,9 +127,12 @@ Here's a complete working example:
 
 .. doctest::
 
+    :options: +ELLIPSIS
+
     >>> import pyhs3
     >>> import pytensor.tensor as pt
     >>> import numpy as np
+    >>> import warnings
     >>> # Define workspace
     >>> workspace_data = {
     ...     "metadata": {"hs3_version": "0.2"},
@@ -155,8 +166,13 @@ Here's a complete working example:
     >>> # Method 2: Vector evaluation
     >>> parameterset = ws.parameter_points[0]
     >>> parameterset["x"].kind = pt.vector
-    >>> vector_model = ws.model(parameter_set=parameterset)
+    >>> with warnings.catch_warnings(record=True) as w:
+    ...     warnings.simplefilter("always")
+    ...     vector_model = ws.model(parameter_set=parameterset)
+    ...     print(w[0].message)  # shows the warning in the docs
+    ...
     <BLANKLINE>
+    Parameter 'x' has kind override vector (default would be scalar)
     >>> # Evaluate at multiple x values
     >>> x_values = np.linspace(-2, 2, 5)
     >>> vector_results = vector_model.logpdf_unsafe(

@@ -8,7 +8,7 @@ import numpy as np
 import pytensor.tensor as pt
 from pytensor.compile.function import function
 
-from pyhs3.core import Model, Workspace
+from pyhs3 import Model, Workspace
 from pyhs3.data import BinnedData, Data
 from pyhs3.distributions import Distributions
 from pyhs3.distributions.basic import GaussianDist

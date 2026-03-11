@@ -44,7 +44,7 @@ Let's see how normalization affects a Gaussian distribution over a finite domain
 
 .. doctest::
 
-   >>> from pyhs3.core import Model
+   >>> from pyhs3 import Model
    >>> from pyhs3.distributions.basic import GaussianDist
    >>> from pyhs3.domains import ProductDomain
    >>> from pyhs3.parameter_points import ParameterSet, ParameterPoint
@@ -188,7 +188,7 @@ Observable parameters are automatically created as 1D vectors (``pt.vector``) to
 
 The model will then normalize all distributions over :math:`x \in [100, 160]` without requiring explicit ``observables`` specification.
 
-See :class:`~pyhs3.core.Workspace` for more details on observable extraction.
+See :class:`~pyhs3.workspace.Workspace` for more details on observable extraction.
 
 See Also
 ========

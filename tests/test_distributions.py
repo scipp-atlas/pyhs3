@@ -18,7 +18,6 @@ from pytensor import function
 
 from pyhs3 import Workspace
 from pyhs3.context import Context
-from pyhs3.core import create_bounded_tensor
 from pyhs3.distributions import (
     ArgusDist,
     AsymmetricCrystalBallDist,
@@ -42,6 +41,7 @@ from pyhs3.distributions import (
     QQZZBackgroundDist,
     UniformDist,
 )
+from pyhs3.model import create_bounded_tensor
 
 
 class TestDistribution:

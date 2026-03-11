@@ -32,7 +32,7 @@ The ``Workspace`` is the top-level container that holds all components of a stat
 - **Likelihoods**: Likelihood definitions combining distributions and data
 - **Analyses**: Complete analysis specifications
 
-Located in: ``src/pyhs3/core.py``
+Located in: ``src/pyhs3/workspace.py``
 
 Model
 ~~~~~
@@ -44,7 +44,7 @@ The ``Model`` is built from a ``Workspace`` and represents a compiled computatio
 - Provides methods for PDF evaluation (``logpdf``, ``pdf``)
 - Handles parameter transformations and constraints
 
-Located in: ``src/pyhs3/core.py``
+Located in: ``src/pyhs3/model.py``
 
 Distributions
 ~~~~~~~~~~~~~
@@ -142,7 +142,9 @@ Project Structure
    pyhs3/
    ├── src/pyhs3/                    # Source code
    │   ├── __init__.py               # Public API (Workspace, Model)
-   │   ├── core.py                   # Workspace and Model classes
+   │   ├── workspace.py              # Workspace class
+   │   ├── model.py                  # Model class
+   │   ├── core.py                   # Backward-compatibility shim
    │   ├── base.py                   # Base classes and utilities
    │   ├── context.py                # PyTensor context management
    │   ├── networks.py               # Computational graph construction

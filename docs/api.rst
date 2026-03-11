@@ -30,6 +30,7 @@ Modules
    analyses
    generic_parse
    exceptions
+   normalization
 
 Base Classes
 ------------
@@ -205,3 +206,25 @@ Exceptions
    ExpressionParseError
    ExpressionEvaluationError
    WorkspaceValidationError
+
+Utilities
+---------
+
+.. currentmodule:: pyhs3
+
+.. autosummary::
+   :toctree: _generated/
+   :nosignatures:
+
+    normalization.gauss_legendre_integral
+
+Typing
+------
+
+.. currentmodule:: pyhs3.typing
+
+.. autosummary::
+   :toctree: _generated/
+   :nosignatures:
+
+    TensorVar

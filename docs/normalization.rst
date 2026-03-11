@@ -26,7 +26,9 @@ For multi-dimensional distributions with observables :math:`x` and :math:`y`, no
 
     Z = \int_{x_{\min}}^{x_{\max}} \int_{y_{\min}}^{y_{\max}} f(x,y)\,dx\,dy
 
-pyhs3 computes this via nested Gauss-Legendre quadrature using Fubini's theorem, treating the inner integral as a function to be integrated over. See :func:`~pyhs3.normalization.gauss_legendre_integral` for the implementation.
+pyhs3 computes this via nested Gauss-Legendre quadrature using Fubini's theorem, treating the inner integral as a function to be integrated over.
+
+See :func:`~pyhs3.normalization.gauss_legendre_integral` for the implementation details.
 
 pyhs3 Behavior
 ==============

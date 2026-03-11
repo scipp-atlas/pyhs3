@@ -587,7 +587,7 @@ class Model:
                     # Default to vector for observed data parameters, scalar for others
                     if param_point:
                         param_kind = param_point.kind
-                    elif "_observed" in node_name:
+                    elif "_observed" in node_name or node_name in context.observables:
                         param_kind = pt.vector
                     else:
                         param_kind = pt.scalar

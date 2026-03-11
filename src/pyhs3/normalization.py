@@ -11,18 +11,19 @@ from typing import cast
 import numpy as np
 import pytensor.tensor as pt
 from pytensor.graph.replace import clone_replace
-from pytensor.scan.basic import scan
 
 from pyhs3.typing.aliases import TensorVar
 
 # Precompute 64-point Gauss-Legendre nodes and weights (fixed, deterministic)
 _GL_ORDER = 64
 _GL_NODES, _GL_WEIGHTS = np.polynomial.legendre.leggauss(_GL_ORDER)
+_GL_NODES_T = pt.constant(_GL_NODES)
+_GL_WEIGHTS_T = pt.constant(_GL_WEIGHTS)
 
 
 def gauss_legendre_integral(
     expression: TensorVar,
-    variable: TensorVar,
+    variable: TensorVar,  # note: variable is expected to be a 1D vector (not a scalar)
     lower: TensorVar,
     upper: TensorVar,
 ) -> TensorVar:
@@ -44,16 +45,13 @@ def gauss_legendre_integral(
     half_width = (upper - lower) / 2.0
     midpoint = (upper + lower) / 2.0
 
-    # Convert nodes and weights to tensors
-    nodes = pt.as_tensor_variable(_GL_NODES)
-    weights = pt.as_tensor_variable(_GL_WEIGHTS)
-    x_points = half_width * nodes + midpoint
+    # evaluation points
+    x_points = half_width * _GL_NODES_T + midpoint
 
-    def step(x_i: TensorVar, w_i: TensorVar) -> TensorVar:
-        f_i = clone_replace(expression, replace=[(variable, x_i)])
-        return cast("TensorVar", w_i * f_i)
+    # directly replace the variable with the vector of points
+    f_vals = clone_replace(expression, replace=[(variable, x_points)])
 
-    results = cast(
-        TensorVar, scan(fn=step, sequences=[x_points, weights], return_updates=False)
-    )
-    return cast(TensorVar, half_width * pt.sum(results))  # type: ignore[no-untyped-call]
+    # weighted sum
+    integral = half_width * pt.sum(_GL_WEIGHTS_T * f_vals)  # type: ignore[no-untyped-call]
+
+    return cast(TensorVar, integral)

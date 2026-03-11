@@ -13,7 +13,6 @@ from pydantic import (
     Field,
 )
 from pytensor.compile.function import function
-from scipy.integrate import quad
 
 from pyhs3.axes import RegularAxis
 from pyhs3.context import Context
@@ -31,7 +30,7 @@ class TestGaussLegendreIntegral:
 
     def test_constant_function(self):
         """∫1 dx over [0,1] = 1.0"""
-        x = pt.dscalar("x")
+        x = pt.vector("x")
         expr = pt.constant(1.0)
         lower = pt.constant(0.0)
         upper = pt.constant(1.0)
@@ -44,7 +43,7 @@ class TestGaussLegendreIntegral:
 
     def test_polynomial(self):
         """∫x² dx over [0,1] = 1/3"""
-        x = pt.dscalar("x")
+        x = pt.vector("x")
         expr = x**2
         lower = pt.constant(0.0)
         upper = pt.constant(1.0)
@@ -58,7 +57,7 @@ class TestGaussLegendreIntegral:
 
     def test_exponential(self):
         """∫exp(-x) dx over [0,5] = 1-exp(-5)"""
-        x = pt.dscalar("x")
+        x = pt.vector("x")
         expr = pt.exp(-x)
         lower = pt.constant(0.0)
         upper = pt.constant(5.0)
@@ -72,9 +71,9 @@ class TestGaussLegendreIntegral:
 
     def test_result_is_symbolic(self):
         """Integral depends on PyTensor variables."""
-        x = pt.dscalar("x")
-        lower = pt.dscalar("lower")
-        upper = pt.dscalar("upper")
+        x = pt.vector("x")
+        lower = pt.scalar("lower")
+        upper = pt.scalar("upper")
         expr = pt.constant(1.0)
 
         integral = gauss_legendre_integral(expr, x, lower, upper)
@@ -89,8 +88,8 @@ class TestGaussLegendreIntegral:
 
     def test_parameter_dependence(self):
         """∫exp(c*x) dx changes with c."""
-        x = pt.dscalar("x")
-        c = pt.dscalar("c")
+        x = pt.vector("x")
+        c = pt.scalar("c")
         expr = pt.exp(c * x)
         lower = pt.constant(0.0)
         upper = pt.constant(1.0)
@@ -115,7 +114,7 @@ class TestDistributionNormalization:
     def test_no_normalization_without_observables(self):
         """Unchanged behavior when observables={}."""
         dist = GenericDist(name="test", expression="exp(c*x)")
-        x_var = pt.dscalar("x")
+        x_var = pt.scalar("x")
         c_val = pt.constant(-0.5, name="c")
         context_no_obs = Context(
             parameters={"x": x_var, "c": c_val},
@@ -137,7 +136,7 @@ class TestDistributionNormalization:
     def test_generic_dist_integrates_to_one(self):
         """Normalized GenericDist integrates to ~1.0."""
         dist = GenericDist(name="test", expression="exp(c*x)")
-        x_var = pt.dscalar("x")
+        x_var = pt.vector("x")
         c_val = pt.constant(-0.5, name="c")
         lower = pt.constant(0.0, name="x_lower")
         upper = pt.constant(10.0, name="x_upper")
@@ -146,16 +145,17 @@ class TestDistributionNormalization:
             observables={"x": (lower, upper)},
         )
         expr = dist._expression(context)
-        compiled = function([x_var], expr)
 
-        integral, error = quad(compiled, 0, 10)
+        compiled = function([x_var], expr)
+        xs = np.linspace(0, 10, 10000)
+        ys = compiled(xs)
+        integral = np.trapezoid(ys, xs)
         assert np.isclose(integral, 1.0, atol=1e-6)
-        assert error < 1e-6
 
     def test_normalization_changes_with_domain(self):
         """Different bounds → still integrates to 1.0."""
         dist = GenericDist(name="test", expression="exp(c*x)")
-        x_var = pt.dscalar("x")
+        x_var = pt.vector("x")
         c_val = pt.constant(-0.5, name="c")
 
         # Domain [0, 5]
@@ -167,7 +167,9 @@ class TestDistributionNormalization:
         )
         expr1 = dist._expression(context1)
         compiled1 = function([x_var], expr1)
-        integral1, _ = quad(compiled1, 0, 5)
+        xs1 = np.linspace(0, 5, 10000)
+        ys1 = compiled1(xs1)
+        integral1 = np.trapezoid(ys1, xs1)
 
         # Domain [0, 10]
         lower2 = pt.constant(0.0, name="x_lower2")
@@ -178,7 +180,9 @@ class TestDistributionNormalization:
         )
         expr2 = dist._expression(context2)
         compiled2 = function([x_var], expr2)
-        integral2, _ = quad(compiled2, 0, 10)
+        xs2 = np.linspace(0, 10, 10000)
+        ys2 = compiled2(xs2)
+        integral2 = np.trapezoid(ys2, xs2)
 
         # Both should integrate to 1.0
         assert np.isclose(integral1, 1.0, atol=1e-6)
@@ -187,7 +191,7 @@ class TestDistributionNormalization:
     def test_normalization_expression_default_returns_none(self):
         """Base class normalization_expression() returns None."""
         dist = GenericDist(name="test", expression="x")
-        x_var = pt.dscalar("x")
+        x_var = pt.scalar("x")
         context = Context(parameters={"x": x_var})
 
         result = dist.normalization_expression(context, "x")
@@ -196,13 +200,13 @@ class TestDistributionNormalization:
     def test_generic_dist_expression(self):
         """Base class normalization_integral() returns None."""
         dist = GenericDist(name="test", expression="x")
-        x_var = pt.dscalar("x")
+        x_var = pt.vector("x")
         context = Context(parameters={"x": x_var}, observables={"x": (0, 10)})
 
         result = dist.expression(context)
         func = function([x_var], result)
-        assert pytest.approx(func(1.0)) == 0.02
-        assert pytest.approx(func(10.0)) == 0.2
+        assert pytest.approx(func(np.array([1.0]))[0]) == 0.02
+        assert pytest.approx(func(np.array([10.0]))[0]) == 0.2
 
     def test_dist_symbolic_integral_expression(self):
         """Custom distribution with analytical normalization expression."""
@@ -226,18 +230,18 @@ class TestDistributionNormalization:
 
         # Set parameters based on the analyzed expression
         dist = CustomDist(name="test", expression="x")
-        x_var = pt.dscalar("x")
+        x_var = pt.vector("x")
         context = Context(parameters={"x": x_var}, observables={"x": (0, 10)})
 
         result = dist.expression(context)
         func = function([x_var], result)
-        assert pytest.approx(func(1.0)) == 0.02
-        assert pytest.approx(func(10.0)) == 0.2
+        assert pytest.approx(func(np.array([1.0]))[0]) == 0.02
+        assert pytest.approx(func(np.array([10.0]))[0]) == 0.2
 
         log_result = dist.log_expression(context)
         log_func = function([x_var], log_result)
-        assert pytest.approx(log_func(1.0)) == np.log(0.02)
-        assert pytest.approx(log_func(10.0)) == np.log(0.2)
+        assert pytest.approx(log_func(np.array([1.0]))[0]) == np.log(0.02)
+        assert pytest.approx(log_func(np.array([10.0]))[0]) == np.log(0.2)
 
     def test_composite_dist_not_normalized(self):
         """MixtureDist uses components but doesn't re-normalize."""
@@ -251,7 +255,7 @@ class TestDistributionNormalization:
             coefficients=["coeff"],
         )
 
-        x_var = pt.dscalar("x")
+        x_var = pt.vector("x")
         c_val = pt.constant(-0.5, name="c")
         coeff_val = pt.constant(1.0, name="coeff")
         lower = pt.constant(0.0, name="x_lower")
@@ -280,7 +284,9 @@ class TestDistributionNormalization:
 
         # Since generic is normalized and mixture just returns it scaled by coeff=1.0,
         # the mixture should also integrate to ~1.0
-        integral, _ = quad(compiled, 0, 10)
+        xs = np.linspace(0, 10, 10000)
+        ys = compiled(xs)
+        integral = np.trapezoid(ys, xs)
         assert np.isclose(integral, 1.0, atol=1e-6)
 
     def test_constraint_not_normalized(self):
@@ -288,7 +294,7 @@ class TestDistributionNormalization:
         # Create a Gaussian constraint that doesn't use an observable
         dist = GaussianDist(name="constraint", mean="nom", sigma="sigma", x="alpha")
 
-        alpha_var = pt.dscalar("alpha")
+        alpha_var = pt.vector("alpha")
         nom_val = pt.constant(1.0, name="nom")
         sigma_val = pt.constant(0.1, name="sigma")
         x_lower = pt.constant(0.0, name="x_lower")
@@ -306,7 +312,9 @@ class TestDistributionNormalization:
 
         # Verify it's not normalized - the Gaussian doesn't integrate to 1
         # over all alpha values (it's a proper Gaussian PDF without domain restriction)
-        integral, _ = quad(compiled, -10, 10)
+        alphas = np.linspace(-10, 10, 10000)
+        ys = compiled(alphas)
+        integral = np.trapezoid(ys, alphas)
         # A Gaussian with sigma=0.1 has very high peak, integral over infinite domain is 1
         # But over finite domain and normalized to [0,10] for x (which doesn't apply),
         # it should just be the standard Gaussian
@@ -316,7 +324,7 @@ class TestDistributionNormalization:
         """GaussianDist normalized over finite domain integrates to 1.0."""
         dist = GaussianDist(name="gauss", mean="mu", sigma="sigma", x="x")
 
-        x_var = pt.dscalar("x")
+        x_var = pt.vector("x")
         mu_val = pt.constant(130.0, name="mu")
         sigma_val = pt.constant(10.0, name="sigma")
         lower = pt.constant(100.0, name="x_lower")
@@ -330,15 +338,16 @@ class TestDistributionNormalization:
         expr = dist._expression(context)
         compiled = function([x_var], expr)
 
-        integral, error = quad(compiled, 100, 160)
+        xs = np.linspace(100, 160, 10000)
+        ys = compiled(xs)
+        integral = np.trapezoid(ys, xs)
         assert np.isclose(integral, 1.0, atol=1e-6)
-        assert error < 1e-6
 
     def test_exponential_dist_integrates_to_one(self):
         """ExponentialDist normalized over finite domain integrates to 1.0."""
         dist = ExponentialDist(name="exp", c="c", x="x")
 
-        x_var = pt.dscalar("x")
+        x_var = pt.vector("x")
         c_val = pt.constant(0.5, name="c")
         lower = pt.constant(0.0, name="x_lower")
         upper = pt.constant(10.0, name="x_upper")
@@ -351,9 +360,10 @@ class TestDistributionNormalization:
         expr = dist._expression(context)
         compiled = function([x_var], expr)
 
-        integral, error = quad(compiled, 0, 10)
+        xs = np.linspace(0, 10, 10000)
+        ys = compiled(xs)
+        integral = np.trapezoid(ys, xs)
         assert np.isclose(integral, 1.0, atol=1e-6)
-        assert error < 1e-6
 
     def test_histfactory_not_normalizable(self):
         """Verify HistFactoryDistChannel._normalizable is False."""
@@ -395,7 +405,7 @@ class TestContextObservables:
 
     def test_context_with_observables(self):
         """Verify observables property works."""
-        x_var = pt.dscalar("x")
+        x_var = pt.vector("x")
         lower = pt.constant(0.0, name="x_lower")
         upper = pt.constant(10.0, name="x_upper")
         obs_dict = {"x": (lower, upper)}
@@ -410,14 +420,14 @@ class TestContextObservables:
 
     def test_context_default_no_observables(self):
         """Backward compatible - observables defaults to empty dict."""
-        x_var = pt.dscalar("x")
+        x_var = pt.scalar("x")
         context = Context(parameters={"x": x_var})
 
         assert context.observables == {}
 
     def test_context_copy_preserves_observables(self):
         """Context.copy() preserves observables."""
-        x_var = pt.dscalar("x")
+        x_var = pt.vector("x")
         lower = pt.constant(0.0, name="x_lower")
         upper = pt.constant(10.0, name="x_upper")
         obs_dict = {"x": (lower, upper)}

@@ -101,8 +101,8 @@ class Distribution(Evaluable, ABC):
         if expr is None:
             return None
         observable = context[obs_name]
-        upper_t = pt.as_tensor_variable(upper, dtype=observable.dtype)
-        lower_t = pt.as_tensor_variable(lower, dtype=observable.dtype)
+        upper_t = pt.as_tensor_variable([upper], dtype=observable.dtype)
+        lower_t = pt.as_tensor_variable([lower], dtype=observable.dtype)
         upper_val = cast(TensorVar, clone_replace(expr, [(observable, upper_t)]))
         lower_val = cast(TensorVar, clone_replace(expr, [(observable, lower_t)]))
         return cast(TensorVar, upper_val - lower_val)

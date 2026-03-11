@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import numpy as np
+import pytensor.tensor as pt
 from pytensor.compile.function import function
-from scipy.integrate import quad
 
 from pyhs3.core import Model, Workspace
 from pyhs3.data import BinnedData, Data
@@ -57,7 +57,9 @@ class TestModelNormalization:
         f = function([x_var, c_var], dist_expr)
 
         # Integrate over the domain
-        integral, _ = quad(lambda x: f(x, -0.5), 0, 10)
+        xs = np.linspace(0, 10, 10000)
+        ys = f(xs, -0.5)
+        integral = np.trapezoid(ys, xs)
 
         # Should integrate to 1.0
         assert np.isclose(integral, 1.0, atol=1e-6)
@@ -71,6 +73,9 @@ class TestModelNormalization:
         parameterset = ParameterSet(
             name="default",
             parameters=[
+                ParameterPoint(
+                    name="x", value=0.0, kind=pt.vector
+                ),  # for evaluating f(xs, -0.5) later
                 ParameterPoint(name="c", value=-0.5),
             ],
         )
@@ -96,7 +101,9 @@ class TestModelNormalization:
         f = function([x_var, c_var], dist_expr)
 
         # Integrate over the domain
-        integral, _ = quad(lambda x: f(x, -0.5), 0, 10)
+        xs = np.linspace(0, 10, 10000)
+        ys = f(xs, -0.5)
+        integral = np.trapezoid(ys, xs)
 
         # Should NOT integrate to 1.0 (unnormalized)
         assert not np.isclose(integral, 1.0, atol=1e-6)
@@ -198,7 +205,9 @@ class TestWorkspaceNormalization:
         f = function([x_var, c_var], dist_expr)
 
         # Integrate over the domain
-        integral, _ = quad(lambda x: f(x, -0.5), 0, 10)
+        xs = np.linspace(0, 10, 10000)
+        ys = f(xs, -0.5)
+        integral = np.trapezoid(ys, xs)
 
         # Should integrate to 1.0
         assert np.isclose(integral, 1.0, atol=1e-6)
@@ -216,7 +225,12 @@ class TestWorkspaceNormalization:
                 [
                     ParameterSet(
                         name="default",
-                        parameters=[ParameterPoint(name="c", value=-0.5)],
+                        parameters=[
+                            ParameterPoint(
+                                name="x", value=0.0, kind=pt.vector
+                            ),  # for evaluating f(xs, -0.5) later
+                            ParameterPoint(name="c", value=-0.5),
+                        ],
                     )
                 ]
             ),
@@ -240,7 +254,9 @@ class TestWorkspaceNormalization:
         f = function([x_var, c_var], dist_expr)
 
         # Integrate over the domain
-        integral, _ = quad(lambda x: f(x, -0.5), 0, 10)
+        xs = np.linspace(0, 10, 10000)
+        ys = f(xs, -0.5)
+        integral = np.trapezoid(ys, xs)
 
         # Should NOT integrate to 1.0 (unnormalized)
         assert not np.isclose(integral, 1.0, atol=1e-6)
@@ -299,7 +315,9 @@ class TestWorkspaceNormalization:
         f = function([x_var, mu_var, sigma_var], dist_expr)
 
         # Integrate over the domain
-        integral, _ = quad(lambda x: f(x, 130.0, 10.0), 100, 160)
+        xs = np.linspace(100, 160, 10000)
+        ys = f(xs, 130.0, 10.0)
+        integral = np.trapezoid(ys, xs)
 
         # Should integrate to 1.0 (normalized over finite domain)
         assert np.isclose(integral, 1.0, atol=1e-6)

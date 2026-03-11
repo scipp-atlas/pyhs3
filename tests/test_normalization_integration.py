@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytensor.tensor as pt
 from pytensor.compile.function import function
@@ -83,14 +85,17 @@ class TestModelNormalization:
         domain = ProductDomain(name="default")
         functions = Functions([])
 
-        model = Model(
-            parameterset=parameterset,
-            distributions=distributions,
-            domain=domain,
-            functions=functions,
-            progress=False,
-            observables=None,
-        )
+        # Expect warning when overriding x to vector (not an observable)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            model = Model(
+                parameterset=parameterset,
+                distributions=distributions,
+                domain=domain,
+                functions=functions,
+                progress=False,
+                observables=None,
+            )
 
         # Get the compiled distribution
         dist_expr = model.distributions["test_dist"]
@@ -242,8 +247,10 @@ class TestWorkspaceNormalization:
         # Should be empty
         assert len(observables) == 0
 
-        # Create model
-        model = workspace.model(progress=False)
+        # Create model (suppress warning for kind override)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            model = workspace.model(progress=False)
 
         # Get the compiled distribution
         dist_expr = model.distributions["test_dist"]

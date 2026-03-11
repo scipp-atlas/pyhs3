@@ -6,7 +6,7 @@ PyHS3 supports broadcasting operations by allowing parameters to be vectors inst
 Basic Usage
 -----------
 
-By default, all parameters are scalar tensors:
+By default, most parameters are scalar tensors. However, parameters identified as observables (via likelihood data axes) are automatically created as 1D vectors to enable batched evaluation and numerical integration:
 
 .. doctest::
 
@@ -165,12 +165,14 @@ Here's a complete working example:
     >>> print(f"Vector: {vector_results}")
     Vector: [-2.91893853 -1.41893853 -0.91893853 -1.41893853 -2.91893853]
 
-Current Limitations
+Current Behavior
 -------------------
 
-- Users must manually specify which parameters should be vectors
-- The ``kind`` must be set before creating the model
-- No automatic inference of parameter dimensionality
-
-.. note::
-   A more user-friendly API for automatic broadcasting detection is planned for future releases.
+- Parameters identified as observables (via likelihood data axes) are automatically
+  created as 1D vectors (``pt.vector``). This enables batched evaluation and
+  numerical integration over the observable domain.
+- Non-observable parameters default to scalars (``pt.scalar``).
+- Users can override the default ``kind`` on a ``ParameterPoint`` before model
+  creation. A warning is emitted when the override differs from the automatically
+  determined default.
+- The ``kind`` must be set before creating the model.

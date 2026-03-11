@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sys
+import warnings
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
@@ -584,13 +585,25 @@ class Model:
                     param_point = (
                         self.parameterset.get(node_name) if self.parameterset else None
                     )
-                    # Default to vector for observed data parameters, scalar for others
-                    if param_point:
-                        param_kind = param_point.kind
-                    elif "_observed" in node_name or node_name in context.observables:
-                        param_kind = pt.vector
+                    # Determine default kind: vector for observables, scalar otherwise
+                    default_kind: Callable[..., TensorVar]
+                    if "_observed" in node_name or node_name in context.observables:
+                        default_kind = pt.vector
                     else:
-                        param_kind = pt.scalar
+                        default_kind = pt.scalar
+
+                    # Allow explicit override from ParameterPoint.kind
+                    if param_point and param_point.kind is not None:
+                        param_kind = param_point.kind
+                        if param_kind is not default_kind:
+                            warnings.warn(
+                                f"Parameter '{node_name}' has kind override"
+                                f" {param_kind.__name__} (default would be"
+                                f" {default_kind.__name__})",
+                                stacklevel=2,
+                            )
+                    else:
+                        param_kind = default_kind
                     self.parameters[node_name] = create_bounded_tensor(
                         node_name, domain_bounds, param_kind
                     )

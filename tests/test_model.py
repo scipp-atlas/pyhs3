@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
+import pytensor.tensor as pt
 import pytest
 
 import pyhs3 as hs3
@@ -389,6 +391,131 @@ class TestModelWithoutParameterPoints:
         # Should compute successfully with scalar inputs
         assert isinstance(result, int | float | np.ndarray)
         assert float(result) > 0  # PDF should be positive
+
+    def test_observable_parameter_defaults_to_vector_kind(self):
+        """Test that observable parameters default to vector kind even with ParameterPoint(kind=None)."""
+        workspace_data = {
+            "metadata": {"hs3_version": "0.2"},
+            "distributions": [
+                {
+                    "name": "signal",
+                    "type": "gaussian_dist",
+                    "x": "obs_x",
+                    "mean": 0.0,
+                    "sigma": 1.0,
+                }
+            ],
+            "parameter_points": [
+                {
+                    "name": "default",
+                    "parameters": [
+                        {"name": "obs_x", "value": 0.0}  # kind defaults to None
+                    ],
+                }
+            ],
+            "data": [
+                {
+                    "name": "data1",
+                    "type": "point",
+                    "value": 1.5,
+                    "axes": [{"name": "obs_x", "min": -5.0, "max": 5.0}],
+                }
+            ],
+            "likelihoods": [
+                {
+                    "name": "likelihood1",
+                    "distributions": ["signal"],
+                    "data": ["data1"],
+                }
+            ],
+        }
+        workspace = hs3.Workspace(**workspace_data)
+        model = workspace.model()
+
+        # obs_x should be a vector because it's an observable
+        assert model.parameters["obs_x"].type.ndim == 1
+
+    def test_parameter_kind_override_warns(self):
+        """Test that overriding observable parameter kind to scalar emits a warning."""
+        workspace_data = {
+            "metadata": {"hs3_version": "0.2"},
+            "distributions": [
+                {
+                    "name": "signal",
+                    "type": "gaussian_dist",
+                    "x": "obs_x",
+                    "mean": 0.0,
+                    "sigma": 1.0,
+                }
+            ],
+            "parameter_points": [
+                {
+                    "name": "default",
+                    "parameters": [{"name": "obs_x", "value": 0.0}],
+                }
+            ],
+            "data": [
+                {
+                    "name": "data1",
+                    "type": "point",
+                    "value": 1.5,
+                    "axes": [{"name": "obs_x", "min": -5.0, "max": 5.0}],
+                }
+            ],
+            "likelihoods": [
+                {
+                    "name": "likelihood1",
+                    "distributions": ["signal"],
+                    "data": ["data1"],
+                }
+            ],
+        }
+        workspace = hs3.Workspace(**workspace_data)
+
+        # Override the kind programmatically
+        workspace.parameter_points[0]["obs_x"].kind = pt.scalar
+
+        # Mock _normalization_integral to bypass normalization evaluation issues
+        with (
+            patch(
+                "pyhs3.distributions.core.Distribution._normalization_integral",
+                return_value=pt.constant(1.0),
+            ),
+            pytest.warns(UserWarning, match=r"Parameter 'obs_x' has kind override"),
+        ):
+            model = workspace.model()
+
+        # obs_x should be scalar (override respected)
+        assert model.parameters["obs_x"].type.ndim == 0
+
+    def test_non_observable_parameter_stays_scalar(self):
+        """Test that non-observable parameters stay scalar even with ParameterPoint(kind=None)."""
+        workspace_data = {
+            "metadata": {"hs3_version": "0.2"},
+            "distributions": [
+                {
+                    "name": "gauss",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "mu",
+                    "sigma": 1.0,
+                }
+            ],
+            "parameter_points": [
+                {
+                    "name": "default",
+                    "parameters": [
+                        {"name": "x", "value": 0.0},
+                        {"name": "mu", "value": 0.0},  # kind defaults to None
+                    ],
+                }
+            ],
+        }
+        workspace = hs3.Workspace(**workspace_data)
+        model = workspace.model()
+
+        # mu should be scalar (not an observable)
+        assert model.parameters["mu"].type.ndim == 0
 
     def test_repr_shows_discovered_parameters(self, workspace_no_params):
         """Test that __repr__ correctly shows discovered parameters."""

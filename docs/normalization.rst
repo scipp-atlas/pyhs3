@@ -168,7 +168,7 @@ The framework automatically evaluates :math:`F(x_{\max}) - F(x_{\min})` using th
 Default Numerical Integration
 ==============================
 
-When ``normalization_expression()`` returns ``None`` (the default), pyhs3 uses 64-point Gauss-Legendre quadrature to compute the normalization integral numerically. The implementation uses ``pytensor.scan`` for compact symbolic loops that create a single optimized computation graph rather than 64 separate graph copies.
+When ``normalization_expression()`` returns ``None`` (the default), pyhs3 uses 64-point Gauss-Legendre quadrature to compute the normalization integral numerically. The implementation uses vectorized Gauss-Legendre quadrature that evaluates the distribution at all quadrature points simultaneously, enabling efficient batched computation.
 
 See :func:`~pyhs3.normalization.gauss_legendre_integral` for the implementation details.
 
@@ -183,6 +183,8 @@ Integration with Workspace
 ===========================
 
 The ``Workspace`` class automatically extracts observable domains from data objects when creating a model. When you define data with axes (e.g., ``BinnedData`` with ``axes=[{"name": "x", "min": 100.0, "max": 160.0, "nbins": 60}]``), the workspace identifies ``x`` as an observable with bounds ``(100, 160)`` and passes this to the model.
+
+Observable parameters are automatically created as 1D vectors (``pt.vector``) to support batched evaluation and numerical integration. Non-observable parameters remain scalars. If a ``ParameterPoint`` explicitly sets ``kind=pt.scalar`` for an observable, the override is respected but a warning is emitted.
 
 The model will then normalize all distributions over :math:`x \in [100, 160]` without requiring explicit ``observables`` specification.
 

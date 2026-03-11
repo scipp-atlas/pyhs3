@@ -66,6 +66,50 @@ class TestModelNormalization:
         # Should integrate to 1.0
         assert np.isclose(integral, 1.0, atol=1e-6)
 
+    def test_model_with_two_observables(self):
+        """Model with observables normalizes distributions correctly."""
+        # Create a simple GenericDist
+        generic_dist = GenericDist(name="test_dist", expression="exp(c*x)")
+
+        # Create Model with observables
+        parameterset = ParameterSet(
+            name="default",
+            parameters=[
+                ParameterPoint(name="c", value=-0.5),
+            ],
+        )
+        distributions = Distributions([generic_dist])
+        domain = ProductDomain(name="default")
+        functions = Functions([])
+
+        observables = {"x": (0.0, 10.0), "c": (-5.0, 5.0)}
+
+        model = Model(
+            parameterset=parameterset,
+            distributions=distributions,
+            domain=domain,
+            functions=functions,
+            progress=False,
+            observables=observables,
+        )
+
+        # Get the compiled distribution
+        dist_expr = model.distributions["test_dist"]
+
+        # Create a function to evaluate it
+        x_var = model.parameters["x"]
+        c_var = model.parameters["c"]
+        f = function([x_var, c_var], dist_expr)
+
+        # Integrate over the domain
+        xs = np.linspace(0, 10, 10000)
+        cs = np.linspace(-5.0, 5.0, 10000)
+        ys = f(xs, cs)
+        integral = np.trapezoid(ys, xs)
+
+        # Should integrate to 0.1 (integral over x gives 1.0, then over c gives 1/(5-(-5)) = 0.1
+        assert np.isclose(integral, 0.1, atol=1e-6)
+
     def test_model_without_observables(self):
         """Model without observables doesn't normalize."""
         # Create a simple GenericDist

@@ -327,8 +327,8 @@ class ProductDist(Distribution):
         if not self.factors:
             return cast(TensorVar, pt.constant(1.0))
 
-        pt_factors = pt.stack([context[factor] for factor in self.factors])
-        return cast(TensorVar, pt.prod(pt_factors, axis=0))  # type: ignore[no-untyped-call]
+        vals = [context[factor] for factor in self.factors]
+        return cast(TensorVar, pt.mul(*vals))
 
 
 # Registry of composite distributions

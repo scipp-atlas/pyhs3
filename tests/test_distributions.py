@@ -117,6 +117,19 @@ class TestProductDist:
 
         np.testing.assert_allclose(result_val, expected_val)
 
+    def test_product_dist_mixed_dimensions(self):
+        """Test ProductDist handles factors with different dimensions (scalar x vector)."""
+        dist = ProductDist(name="mixed_product", factors=["scalar_f", "vector_f"])
+        params = {
+            "scalar_f": pt.constant(2.0),
+            "vector_f": pt.constant([1.0, 3.0, 5.0]),
+        }
+        result = dist.expression(Context(params))
+        expected = pt.constant([2.0, 6.0, 10.0])
+        f = function([], [result, expected])
+        result_val, expected_val = f()
+        np.testing.assert_allclose(result_val, expected_val)
+
     def test_product_dist_empty_factors(self):
         """Test ProductDist with empty factors returns 1.0 and doesn't crash."""
         dist = ProductDist(name="empty_product", factors=[])

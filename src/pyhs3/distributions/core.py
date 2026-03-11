@@ -144,7 +144,7 @@ class Distribution(Evaluable, ABC):
         Returns:
             Symbolic integral expression, or None if normalization_expression() returns None.
         """
-        expr = self.normalization_expression(context, obs_name)
+        expr = self.normalization_expression(context, obs_name)  # pylint: disable=assignment-from-none
         if expr is None:
             return None
         observable = context[obs_name]

@@ -146,9 +146,9 @@ class TestDistributionNormalization:
             observables={"x": (lower, upper)},
         )
         expr = dist._expression(context)
-        f = function([x_var], expr)
+        compiled = function([x_var], expr)
 
-        integral, error = quad(lambda x: f(x), 0, 10)
+        integral, error = quad(compiled, 0, 10)
         assert np.isclose(integral, 1.0, atol=1e-6)
         assert error < 1e-6
 
@@ -166,8 +166,8 @@ class TestDistributionNormalization:
             observables={"x": (lower1, upper1)},
         )
         expr1 = dist._expression(context1)
-        f1 = function([x_var], expr1)
-        integral1, _ = quad(lambda x: f1(x), 0, 5)
+        compiled1 = function([x_var], expr1)
+        integral1, _ = quad(compiled1, 0, 5)
 
         # Domain [0, 10]
         lower2 = pt.constant(0.0, name="x_lower2")
@@ -177,8 +177,8 @@ class TestDistributionNormalization:
             observables={"x": (lower2, upper2)},
         )
         expr2 = dist._expression(context2)
-        f2 = function([x_var], expr2)
-        integral2, _ = quad(lambda x: f2(x), 0, 10)
+        compiled2 = function([x_var], expr2)
+        integral2, _ = quad(compiled2, 0, 10)
 
         # Both should integrate to 1.0
         assert np.isclose(integral1, 1.0, atol=1e-6)
@@ -276,11 +276,11 @@ class TestDistributionNormalization:
         )
 
         mixture_expr = mixture._expression(context_with_generic)
-        f = function([x_var], mixture_expr)
+        compiled = function([x_var], mixture_expr)
 
         # Since generic is normalized and mixture just returns it scaled by coeff=1.0,
         # the mixture should also integrate to ~1.0
-        integral, _ = quad(lambda x: f(x), 0, 10)
+        integral, _ = quad(compiled, 0, 10)
         assert np.isclose(integral, 1.0, atol=1e-6)
 
     def test_constraint_not_normalized(self):
@@ -302,11 +302,11 @@ class TestDistributionNormalization:
 
         # Since "alpha" is not in observables, normalization is skipped
         expr = dist._expression(context)
-        f = function([alpha_var], expr)
+        compiled = function([alpha_var], expr)
 
         # Verify it's not normalized - the Gaussian doesn't integrate to 1
         # over all alpha values (it's a proper Gaussian PDF without domain restriction)
-        integral, _ = quad(lambda a: f(a), -10, 10)
+        integral, _ = quad(compiled, -10, 10)
         # A Gaussian with sigma=0.1 has very high peak, integral over infinite domain is 1
         # But over finite domain and normalized to [0,10] for x (which doesn't apply),
         # it should just be the standard Gaussian
@@ -328,9 +328,9 @@ class TestDistributionNormalization:
         )
 
         expr = dist._expression(context)
-        f = function([x_var], expr)
+        compiled = function([x_var], expr)
 
-        integral, error = quad(lambda x: f(x), 100, 160)
+        integral, error = quad(compiled, 100, 160)
         assert np.isclose(integral, 1.0, atol=1e-6)
         assert error < 1e-6
 
@@ -349,9 +349,9 @@ class TestDistributionNormalization:
         )
 
         expr = dist._expression(context)
-        f = function([x_var], expr)
+        compiled = function([x_var], expr)
 
-        integral, error = quad(lambda x: f(x), 0, 10)
+        integral, error = quad(compiled, 0, 10)
         assert np.isclose(integral, 1.0, atol=1e-6)
         assert error < 1e-6
 

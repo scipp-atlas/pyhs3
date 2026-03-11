@@ -1,5 +1,3 @@
-.. _normalization:
-
 ==================
 PDF Normalization
 ==================

@@ -36,11 +36,9 @@ class Axis(NamedModel):
     model_config = ConfigDict()
 
 
-class UnbinnedAxis(Axis):
+class BoundedAxis(Axis):
     """
-    Axis for unbinned data.
-
-    Alias for Axis with required min/max bounds.
+    Axis with required finite min/max bounds.
 
     Attributes:
         name: Name of the axis/variable
@@ -52,12 +50,23 @@ class UnbinnedAxis(Axis):
     max: float = Field(..., repr=False)
 
     @model_validator(mode="after")
-    def check_min_le_max(self) -> UnbinnedAxis:
-        """Validate that max >= min when both are provided."""
+    def check_min_le_max(self) -> BoundedAxis:
+        """Validate that max >= min."""
         if self.max < self.min:
-            msg = f"UnbinnedAxis '{self.name}': max ({self.max}) must be >= min ({self.min})"
+            msg = f"{type(self).__name__} '{self.name}': max ({self.max}) must be >= min ({self.min})"
             raise ValueError(msg)
         return self
+
+
+class UnbinnedAxis(BoundedAxis):
+    """
+    Axis for unbinned data with required finite bounds.
+
+    Attributes:
+        name: Name of the axis/variable
+        min: Minimum value (required, inherited from BoundedAxis)
+        max: Maximum value (required, inherited from BoundedAxis)
+    """
 
     def to_hist(self) -> Any:
         """
@@ -92,26 +101,16 @@ class ConstantAxis(Axis):
     const: Literal[True] = Field(True, repr=False, init=False)
 
 
-class RegularAxis(Axis):
+class RegularAxis(BoundedAxis):
     """
     Attributes:
         name: Name of the axis/variable
-        min: Minimum value
-        max: Maximum value
+        min: Minimum value (inherited from BoundedAxis)
+        max: Maximum value (inherited from BoundedAxis)
         nbins: Number of bins (for regular binning)
     """
 
-    min: float = Field(..., repr=False)
-    max: float = Field(..., repr=False)
     nbins: int = Field(repr=False)
-
-    @model_validator(mode="after")
-    def check_min_le_max(self) -> RegularAxis:
-        """Validate that max >= min."""
-        if self.max < self.min:
-            msg = f"Axis '{self.name}': max ({self.max}) must be >= min ({self.min})"
-            raise ValueError(msg)
-        return self
 
     @model_validator(mode="after")
     def check_binning(self) -> RegularAxis:

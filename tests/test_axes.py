@@ -15,6 +15,7 @@ from pyhs3.axes import (
     Axis,
     BinnedAxes,
     BinnedAxis,
+    BoundedAxis,
     ConstantAxis,
     DomainCoordinateAxis,
     IrregularAxis,
@@ -41,6 +42,57 @@ class TestAxis:
         assert axis.name == "test_var"
         assert not hasattr(axis, "min")
         assert not hasattr(axis, "max")
+
+
+class TestBoundedAxis:
+    """Tests for the BoundedAxis class."""
+
+    def test_bounded_axis_creation(self):
+        """Test BoundedAxis creation with required min/max."""
+        axis = BoundedAxis(name="x", min=0.0, max=5.0)
+        assert axis.name == "x"
+        assert axis.min == 0.0
+        assert axis.max == 5.0
+
+    def test_bounded_axis_min_required(self):
+        """Test that BoundedAxis requires min."""
+        with pytest.raises(ValidationError, match="Field required"):
+            BoundedAxis(name="x", max=5.0)
+
+    def test_bounded_axis_max_required(self):
+        """Test that BoundedAxis requires max."""
+        with pytest.raises(ValidationError, match="Field required"):
+            BoundedAxis(name="x", min=0.0)
+
+    def test_bounded_axis_validation_max_less_than_min_raises_error(self):
+        """Test that BoundedAxis validation raises ValueError when max < min."""
+        with pytest.raises(
+            ValueError,
+            match=r"BoundedAxis 'test_param': max \(5\.0\) must be >= min \(10\.0\)",
+        ):
+            BoundedAxis(name="test_param", min=10.0, max=5.0)
+
+    def test_bounded_axis_validation_max_equal_min_allowed(self):
+        """Test that BoundedAxis allows max == min."""
+        axis = BoundedAxis(name="test_param", min=5.0, max=5.0)
+        assert axis.min == 5.0
+        assert axis.max == 5.0
+
+    def test_bounded_axis_validation_max_greater_than_min_allowed(self):
+        """Test that BoundedAxis allows max > min."""
+        axis = BoundedAxis(name="test_param", min=5.0, max=10.0)
+        assert axis.min == 5.0
+        assert axis.max == 10.0
+
+    def test_unbinned_axis_is_bounded_axis(self):
+        """Test that UnbinnedAxis is an instance of BoundedAxis."""
+        axis = UnbinnedAxis(name="x", min=0.0, max=5.0)
+        assert isinstance(axis, BoundedAxis)
+
+    def test_regular_axis_is_bounded_axis(self):
+        """Test that RegularAxis is an instance of BoundedAxis."""
+        axis = RegularAxis(name="x", min=0.0, max=5.0, nbins=10)
+        assert isinstance(axis, BoundedAxis)
 
 
 class TestUnbinnedAxis:

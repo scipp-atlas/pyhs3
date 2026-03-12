@@ -102,6 +102,7 @@ Axes
    :nosignatures:
 
    Axis
+   BoundedAxis
    UnbinnedAxis
    ConstantAxis
    RegularAxis

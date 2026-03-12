@@ -12,7 +12,7 @@ from typing import Any, Literal, cast
 import hist
 import numpy as np
 import pytensor.tensor as pt
-from pydantic import Field
+from pydantic import Field, PrivateAttr
 
 from pyhs3.axes import BinnedAxes
 from pyhs3.context import Context
@@ -93,6 +93,7 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     type: Literal["histfactory_dist"] = "histfactory_dist"
     axes: BinnedAxes = Field(..., json_schema_extra={"preprocess": False})
     samples: Samples = Field(..., json_schema_extra={"preprocess": False})
+    _normalizable: bool = PrivateAttr(default=False)
 
     def get_internal_nodes(self) -> list[Any]:
         """

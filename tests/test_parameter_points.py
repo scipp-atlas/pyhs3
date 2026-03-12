@@ -7,9 +7,24 @@ including validation and access methods.
 
 from __future__ import annotations
 
+import pytensor.tensor as pt
 import pytest
 
 from pyhs3.parameter_points import ParameterPoint, ParameterPoints, ParameterSet
+
+
+class TestParameterPoint:
+    """Tests for the ParameterPoint class."""
+
+    def test_parameter_point_kind_defaults_to_none(self):
+        """Test that ParameterPoint.kind defaults to None when not specified."""
+        param = ParameterPoint(name="x", value=0.0)
+        assert param.kind is None
+
+    def test_parameter_point_kind_explicit(self):
+        """Test that ParameterPoint.kind can be explicitly set."""
+        param = ParameterPoint(name="x", value=0.0, kind=pt.vector)
+        assert param.kind is pt.vector
 
 
 class TestParameterSet:

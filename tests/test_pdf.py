@@ -9,8 +9,8 @@ import pytest
 from pytensor import function
 
 from pyhs3 import Workspace
-from pyhs3.core import create_bounded_tensor
 from pyhs3.exceptions import WorkspaceValidationError
+from pyhs3.model import create_bounded_tensor
 
 
 def test_workspace_load_from_file(datadir):

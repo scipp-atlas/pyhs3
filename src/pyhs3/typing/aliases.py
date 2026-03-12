@@ -14,8 +14,10 @@ TensorVar: TypeAlias = TensorVariable[TensorType, Apply[Any]]
 EntityType: TypeAlias = Literal[
     "distribution", "function", "parameter", "modifier", "constant"
 ]
+DomainBounds: TypeAlias = tuple[float | None, float | None]
 
 __all__ = (
+    "DomainBounds",
     "EntityType",
     "TensorVar",
 )

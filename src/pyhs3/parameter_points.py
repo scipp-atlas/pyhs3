@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 
-import pytensor.tensor as pt
 from pydantic import ConfigDict, Field
 
 from pyhs3.collections import NamedCollection, NamedModel
@@ -29,7 +28,7 @@ class ParameterPoint(NamedModel):
         value: Numeric value of the parameter
         const: Whether parameter is constant (optional, defaults to False)
         nbins: Number of bins for binned parameters (optional)
-        kind: Type of tensor to create (optional, defaults to pt.scalar)
+        kind: Type of tensor to create (optional)
     """
 
     model_config = ConfigDict()
@@ -37,7 +36,9 @@ class ParameterPoint(NamedModel):
     value: float = Field(..., repr=False)
     const: bool = Field(default=False, repr=False)
     nbins: int | None = Field(default=None, repr=False)
-    kind: Callable[..., TensorVar] = Field(default=pt.scalar, exclude=True, repr=False)
+    kind: Callable[..., TensorVar] | None = Field(
+        default=None, exclude=True, repr=False
+    )
 
 
 class ParameterSet(NamedModel):

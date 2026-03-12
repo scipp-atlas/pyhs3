@@ -404,10 +404,13 @@ Here's a more realistic example of a workspace for a physics analysis using both
    <BLANKLINE>
    >>> # Evaluate signal and background separately
    >>> signal_pdf = physics_model.pdf(
-   ...     "signal", mass=np.array(125.0), higgs_mass=np.array(125.0), resolution=np.array(2.5)
+   ...     "signal",
+   ...     mass=np.array([125.0]),
+   ...     higgs_mass=np.array(125.0),
+   ...     resolution=np.array(2.5),
    ... )
    >>> background_pdf = physics_model.pdf(
-   ...     "background", mass=np.array(125.0), lifetime=np.array(50.0), norm=np.array(1.0)
+   ...     "background", mass=np.array([125.0]), lifetime=np.array(50.0), norm=np.array(1.0)
    ... )
    >>> print(f"Signal PDF at 125 GeV: {signal_pdf}")
    Signal PDF at 125 GeV: ...

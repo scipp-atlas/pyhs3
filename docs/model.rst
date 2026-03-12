@@ -347,18 +347,18 @@ Advanced Topics
 Tensor Types
 ~~~~~~~~~~~~
 
-Parameters can have different tensor types based on their intended use:
+Parameters can have different tensor types based on their intended use.
+Observable parameters are automatically created as 1D vectors. For other
+parameters, you can control the tensor type programmatically:
 
 .. code-block:: python
 
-   # In parameter_points, you can specify tensor kinds:
-   vector_params = {
-       "name": "vector_params",
-       "parameters": [
-           {"name": "scalar_param", "value": 1.0, "kind": "scalar"},  # Default
-           {"name": "vector_param", "value": [1.0, 2.0], "kind": "vector"},
-       ],
-   }
+   # Override parameter kind before model creation
+   parameterset = workspace.parameter_points[0]
+   parameterset["x"].kind = pt.vector  # Force vector
+   model = workspace.model(parameter_set=parameterset)
+
+See :doc:`broadcasting` for details on vector parameter evaluation.
 
 Custom Functions
 ~~~~~~~~~~~~~~~~

@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 import pyhs3 as hs3
-from pyhs3.core import Model
+from pyhs3 import Model
 
 
 @pytest.fixture

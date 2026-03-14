@@ -425,8 +425,8 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
     type: Literal["staterror"] = "staterror"
     application: Literal["multiplicative"] = Field("multiplicative", exclude=True)
     parameters: list[str]
-    constraint: Literal["Gauss"] = "Gauss"
-    data: StatErrorData
+    constraint: Literal["Gauss", "Poisson"] = "Gauss"
+    data: StatErrorData | None = None
 
     @property
     def auxdata(self) -> list[float]:
@@ -450,7 +450,15 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
         return cast("TensorVar", rates * factors)
 
     def make_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
-        """Create constraint term using PyTensor operations."""
+        """Create constraint term using PyTensor operations.
+
+        Only used in BB-full mode. In BB-lite mode, constraints are built at channel level.
+        """
+        if self.data is None:
+            msg = (
+                "StatErrorModifier.data is required for BB-full mode (make_constraint)"
+            )
+            raise ValueError(msg)
 
         # Barlow-Beeston method: per-bin Gaussian constraints with relative uncertainties
         name = f"constraint_{self.name}"

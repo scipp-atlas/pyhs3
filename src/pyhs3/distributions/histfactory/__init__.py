@@ -18,8 +18,13 @@ from pyhs3.axes import BinnedAxes
 from pyhs3.context import Context
 
 # Import existing distributions for constraint terms
+from pyhs3.distributions.basic import GaussianDist, PoissonDist
 from pyhs3.distributions.core import Distribution
-from pyhs3.distributions.histfactory.modifiers import HasConstraint, Modifier
+from pyhs3.distributions.histfactory.modifiers import (
+    HasConstraint,
+    Modifier,
+    StatErrorModifier,
+)
 from pyhs3.distributions.histfactory.samples import Sample, Samples
 from pyhs3.networks import HasDependencies, HasInternalNodes
 from pyhs3.typing.aliases import TensorVar
@@ -93,6 +98,10 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     type: Literal["histfactory_dist"] = "histfactory_dist"
     axes: BinnedAxes = Field(..., json_schema_extra={"preprocess": False})
     samples: Samples = Field(..., json_schema_extra={"preprocess": False})
+    barlow_beeston_method: Literal["full", "lite"] = Field(
+        default="lite",
+        json_schema_extra={"preprocess": False},
+    )
     _normalizable: bool = PrivateAttr(default=False)
 
     def get_internal_nodes(self) -> list[Any]:
@@ -174,6 +183,9 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         """
         Build constraint model for nuisance parameters.
 
+        In BB-lite mode, staterror modifiers use a channel-level constraint
+        instead of per-sample constraints.
+
         Args:
             context: Mapping of parameter names to PyTensor variables
             data: Not used for HistFactory constraints (observed data is in main model)
@@ -187,8 +199,19 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         for sample in self.samples:
             for modifier in sample.modifiers:
                 if isinstance(modifier, HasConstraint):
+                    # Skip StatErrorModifier in lite mode - constraint built at channel level
+                    if self.barlow_beeston_method == "lite" and isinstance(
+                        modifier, StatErrorModifier
+                    ):
+                        continue
                     prob = modifier.make_constraint(context, sample.data)
                     constraint_probs.append(prob)
+
+        # Add channel-level BB-lite constraint if in lite mode
+        if self.barlow_beeston_method == "lite":
+            lite_constraint = self._make_barlow_beeston_lite_constraint(context)
+            if lite_constraint is not None:
+                constraint_probs.append(lite_constraint)
 
         if not constraint_probs:
             return pt.constant(1.0)
@@ -199,6 +222,106 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     def _get_total_bins(self) -> int:
         """Calculate total number of bins across all axes."""
         return self.axes.get_total_bins()
+
+    def _find_staterror_modifier(self) -> StatErrorModifier | None:
+        """Find the first staterror modifier from any sample.
+
+        In BB-lite mode, staterror modifiers share gamma parameters across samples,
+        so we only need one modifier to get the parameter names and constraint type.
+        """
+        for sample in self.samples:
+            for modifier in sample.modifiers:
+                if isinstance(modifier, StatErrorModifier):
+                    return modifier
+        return None
+
+    def _make_barlow_beeston_lite_constraint(
+        self, context: Context
+    ) -> TensorVar | None:
+        """Build BB-lite constraint from combined sample uncertainties.
+
+        BB-lite uses shared gamma parameters across samples with a channel-level
+        constraint built from combined MC statistical uncertainties.
+
+        The constraint can be either Poisson or Gaussian:
+        - Poisson: Poisson(tau | gamma * tau) where tau = (nu/sigma)^2
+        - Gaussian: N(1.0 | gamma, relerr) where relerr = sigma/nu
+
+        Combined uncertainties from samples:
+        - total_nominal = sum(sample.data.contents)
+        - total_sigma = sqrt(sum(sample.data.errors^2))
+        """
+        total_bins = self._get_total_bins()
+
+        # Find staterror modifier to get gamma params and constraint type
+        staterror_mod = self._find_staterror_modifier()
+        if staterror_mod is None:
+            return None
+
+        gamma_params = staterror_mod.parameters
+        constraint_type = staterror_mod.constraint
+
+        # Compute combined uncertainties from sample.data.errors
+        total_nominal = np.zeros(total_bins)
+        total_variance = np.zeros(total_bins)
+
+        for sample in self.samples:
+            # Only include samples that have the staterror modifier
+            has_staterror = any(
+                isinstance(mod, StatErrorModifier) for mod in sample.modifiers
+            )
+            if has_staterror:
+                total_nominal += np.array(sample.data.contents)
+                total_variance += np.square(sample.data.errors)
+
+        total_sigma = np.sqrt(total_variance)
+
+        augmented_context = dict(context)
+        dists: list[GaussianDist | PoissonDist] = []
+
+        for i, param_name in enumerate(gamma_params):
+            nu, sigma = total_nominal[i], total_sigma[i]
+
+            # Skip bins with zero or invalid values
+            if nu <= 0 or sigma <= 0:
+                continue
+
+            if constraint_type == "Poisson":
+                # Poisson: Poisson(tau | gamma * tau) where tau = (nu/sigma)^2
+                tau = (nu / sigma) ** 2
+                scaled_name = f"{param_name}_scaled"
+                augmented_context[scaled_name] = context[param_name] * tau
+                dists.append(
+                    PoissonDist(
+                        name=f"constraint_bblite_{self.name}_{i}",
+                        x=float(tau),
+                        mean=scaled_name,
+                    )
+                )
+            else:  # "Gauss"
+                # Gaussian: N(1.0 | gamma, relerr) where relerr = sigma / nu
+                relerr = sigma / nu
+                sigma_name = f"{param_name}_sigma"
+                augmented_context[sigma_name] = pt.constant(relerr)
+                dists.append(
+                    GaussianDist(
+                        name=f"constraint_bblite_{self.name}_{i}",
+                        x=1.0,
+                        mean=param_name,
+                        sigma=sigma_name,
+                    )
+                )
+
+        if not dists:
+            return None
+
+        # Evaluate all distributions with augmented context and multiply
+        factors = []
+        for dist in dists:
+            dist_ctx = Context({**augmented_context, **dist.constants})
+            factors.append(dist.expression(dist_ctx))
+
+        return cast(TensorVar, pt.prod(pt.stack(factors), axis=0))  # type: ignore[no-untyped-call]
 
     def _compute_expected_rates(self, context: Context, total_bins: int) -> TensorVar:
         """

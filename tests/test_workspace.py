@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from pyhs3 import Workspace
 from pyhs3.analyses import Analyses, Analysis
@@ -169,105 +170,54 @@ class TestWorkspaceRepr:
 
 
 class TestRootVersionHint:
-    """Tests for ROOT version hint functionality."""
+    """Tests for ROOT version validation functionality."""
 
-    def test_metadata_root_version_hint_old_version(self):
-        """Test that old ROOT version (6.34.04) returns hint."""
-        metadata = Metadata(
-            hs3_version="1.0.0",
-            packages=[PackageInfo(name="ROOT", version="6.34.04")],
-        )
-        hint = metadata.root_version_hint()
-        assert hint is not None
-        assert "6.34.04" in hint
-        assert "6.38" in hint
+    def test_packageinfo_validator_old_version(self):
+        """Test that old ROOT version (6.34.04) raises ValidationError."""
+        with pytest.raises(ValidationError, match=r"ROOT version 6.34.04 is older"):
+            PackageInfo(name="ROOT", version="6.34.04")
 
-    def test_metadata_root_version_hint_new_version(self):
-        """Test that new ROOT version (6.38.0) returns None."""
-        metadata = Metadata(
-            hs3_version="1.0.0",
-            packages=[PackageInfo(name="ROOT", version="6.38.0")],
-        )
-        hint = metadata.root_version_hint()
-        assert hint is None
+    def test_packageinfo_validator_new_version(self):
+        """Test that new ROOT version (6.38.0) succeeds."""
+        pkg = PackageInfo(name="ROOT", version="6.38.0")
+        assert pkg.name == "ROOT"
+        assert pkg.version == "6.38.0"
 
-    def test_metadata_root_version_hint_exactly_min_version(self):
-        """Test that exactly version 6.38 returns None."""
-        metadata = Metadata(
-            hs3_version="1.0.0",
-            packages=[PackageInfo(name="ROOT", version="6.38")],
-        )
-        hint = metadata.root_version_hint()
-        assert hint is None
+    def test_packageinfo_validator_exactly_min_version(self):
+        """Test that exactly version 6.38 succeeds."""
+        pkg = PackageInfo(name="ROOT", version="6.38")
+        assert pkg.name == "ROOT"
+        assert pkg.version == "6.38"
 
-    def test_metadata_root_version_hint_no_packages(self):
-        """Test that missing packages field returns None."""
-        metadata = Metadata(hs3_version="1.0.0")
-        hint = metadata.root_version_hint()
-        assert hint is None
+    def test_packageinfo_validator_non_root_package(self):
+        """Test that non-ROOT packages succeed regardless of version."""
+        pkg = PackageInfo(name="pyhf", version="0.7.6")
+        assert pkg.name == "pyhf"
+        # Even old version strings pass for non-ROOT packages
+        pkg2 = PackageInfo(name="pyhf", version="0.1.0")
+        assert pkg2.version == "0.1.0"
 
-    def test_metadata_root_version_hint_empty_packages(self):
-        """Test that empty packages list returns None."""
-        metadata = Metadata(hs3_version="1.0.0", packages=[])
-        hint = metadata.root_version_hint()
-        assert hint is None
+    def test_packageinfo_validator_invalid_version(self):
+        """Test that invalid version string succeeds (can't compare)."""
+        # Invalid versions can't be compared, so they pass
+        pkg = PackageInfo(name="ROOT", version="invalid.version")
+        assert pkg.version == "invalid.version"
 
-    def test_metadata_root_version_hint_no_root_package(self):
-        """Test that packages without ROOT returns None."""
-        metadata = Metadata(
-            hs3_version="1.0.0",
-            packages=[PackageInfo(name="pyhf", version="0.7.6")],
-        )
-        hint = metadata.root_version_hint()
-        assert hint is None
-
-    def test_metadata_root_version_hint_invalid_version(self):
-        """Test that invalid version string returns None."""
-        metadata = Metadata(
-            hs3_version="1.0.0",
-            packages=[PackageInfo(name="ROOT", version="invalid.version")],
-        )
-        hint = metadata.root_version_hint()
-        assert hint is None
-
-    def test_workspace_get_root_version_hint_valid_old_root(self):
-        """Test _get_root_version_hint with valid spec_dict containing old ROOT."""
-        spec_dict = {
-            "metadata": {
-                "hs3_version": "1.0.0",
-                "packages": [{"name": "ROOT", "version": "6.34.04"}],
-            }
-        }
-        hint = Workspace._get_root_version_hint(spec_dict)
-        assert hint is not None
-        assert "6.34.04" in hint
-
-    def test_workspace_get_root_version_hint_missing_metadata(self):
-        """Test _get_root_version_hint with missing metadata key returns None."""
-        spec_dict = {"analyses": []}
-        hint = Workspace._get_root_version_hint(spec_dict)
-        assert hint is None
-
-    def test_workspace_get_root_version_hint_malformed_metadata(self):
-        """Test _get_root_version_hint with malformed metadata returns None."""
-        spec_dict = {"metadata": "bad"}
-        hint = Workspace._get_root_version_hint(spec_dict)
-        assert hint is None
-
-    def test_workspace_get_root_version_hint_metadata_missing_required(self):
-        """Test _get_root_version_hint with metadata missing required field returns None."""
-        spec_dict = {"metadata": {"packages": []}}
-        hint = Workspace._get_root_version_hint(spec_dict)
-        assert hint is None
+    def test_metadata_propagates_root_validation_error(self):
+        """Test that Metadata with old ROOT in packages raises ValidationError."""
+        with pytest.raises(ValidationError, match=r"ROOT version 6.34.04 is older"):
+            Metadata(
+                hs3_version="1.0.0",
+                packages=[PackageInfo(name="ROOT", version="6.34.04")],
+            )
 
     def test_workspace_load_validation_error_with_old_root(self, tmp_path):
-        """Test Workspace.load() with ValidationError appends hint for old ROOT."""
+        """Test Workspace.load() with old ROOT shows ROOT version in error."""
         invalid_workspace = {
             "metadata": {
                 "hs3_version": "1.0.0",
                 "packages": [{"name": "ROOT", "version": "6.34.04"}],
             },
-            "analyses": [{"invalid": "field"}],  # Invalid analysis
         }
         workspace_path = tmp_path / "workspace.json"
         workspace_path.write_text(json.dumps(invalid_workspace))
@@ -276,11 +226,11 @@ class TestRootVersionHint:
             Workspace.load(workspace_path)
 
         error_msg = str(exc_info.value)
-        assert "6.34.04" in error_msg
+        assert "ROOT version 6.34.04 is older" in error_msg
         assert "6.38" in error_msg
 
     def test_workspace_load_validation_error_with_new_root(self, tmp_path):
-        """Test Workspace.load() with ValidationError does not append hint for new ROOT."""
+        """Test Workspace.load() with new ROOT and other errors doesn't mention ROOT."""
         invalid_workspace = {
             "metadata": {
                 "hs3_version": "1.0.0",
@@ -295,31 +245,5 @@ class TestRootVersionHint:
             Workspace.load(workspace_path)
 
         error_msg = str(exc_info.value)
-        assert "6.38" not in error_msg or "6.38.0" in error_msg  # Should not have hint
-
-    def test_workspace_load_fk_error_with_old_root(self, tmp_path):
-        """Test Workspace.load() with FK resolution error appends hint for old ROOT."""
-        # Valid Pydantic structure but invalid FK reference
-        workspace_with_fk_error = {
-            "metadata": {
-                "hs3_version": "1.0.0",
-                "packages": [{"name": "ROOT", "version": "6.34.04"}],
-            },
-            "analyses": [
-                {
-                    "name": "test_analysis",
-                    "domains": ["nonexistent_domain"],  # FK error
-                    "likelihood": "test_likelihood",
-                }
-            ],
-            "likelihoods": [{"name": "test_likelihood", "distribution": "test_dist"}],
-        }
-        workspace_path = tmp_path / "workspace_fk.json"
-        workspace_path.write_text(json.dumps(workspace_with_fk_error))
-
-        with pytest.raises(WorkspaceValidationError) as exc_info:
-            Workspace.load(workspace_path)
-
-        error_msg = str(exc_info.value)
-        assert "6.34.04" in error_msg
-        assert "6.38" in error_msg
+        # Error should be about the invalid analysis, not ROOT version
+        assert "ROOT version" not in error_msg or "6.38.0" in error_msg

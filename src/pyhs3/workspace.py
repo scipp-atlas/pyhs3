@@ -182,6 +182,23 @@ class Workspace(BaseModel):
         else:
             errors.append(f"Analysis '{analysis.name}' references unknown domains")
 
+    @staticmethod
+    def _get_root_version_hint(spec_dict: dict[str, Any]) -> str | None:
+        """
+        Extract ROOT version hint from workspace spec_dict metadata.
+
+        Args:
+            spec_dict: The workspace specification dictionary
+
+        Returns:
+            Hint string if ROOT version is older than required, None otherwise
+        """
+        try:
+            metadata = Metadata.model_validate(spec_dict.get("metadata", {}))
+            return metadata.root_version_hint()
+        except ValidationError:
+            return None
+
     @classmethod
     def load(
         cls,
@@ -209,10 +226,19 @@ class Workspace(BaseModel):
             return cls(**spec_dict)
         except ValidationError as e:
             error_summary = cls._format_validation_error(e, path, verbose)
+            hint = cls._get_root_version_hint(spec_dict)
+            if hint:
+                error_summary += f"\n\n{hint}"
 
             if suppress_traceback:
                 sys.tracebacklimit = 0
             raise WorkspaceValidationError(error_summary) from None
+        except WorkspaceValidationError as e:
+            hint = cls._get_root_version_hint(spec_dict)
+            if hint:
+                error_with_hint = f"{e}\n\n{hint}"
+                raise WorkspaceValidationError(error_with_hint) from e
+            raise
 
     @classmethod
     def _format_validation_error(

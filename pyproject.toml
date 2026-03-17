@@ -38,6 +38,7 @@ dependencies = [
     'numpy',
     'sympy',
     'pydantic',
+    'packaging',
     'hist >= 2.7.0',
 ]
 

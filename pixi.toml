@@ -28,6 +28,7 @@ pytensor = ">=2.33.0"
 numpy = "*"
 sympy = "*"
 pydantic = "*"
+packaging = "*"
 hist = "*"
 
 # pytensor >=2.33 does not exist for win-64 for py310

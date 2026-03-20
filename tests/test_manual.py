@@ -246,7 +246,7 @@ def base_name(name):
 def plot_dist(model, parameters, dist_name, data_set, plot_name=None):
     xs = [val[0] for val in data_set.entries]
     ys = [
-        model.pdf_unsafe(dist_name, **{**parameters, data_set.axes[0].name: x})
+        model.pdf_unsafe(dist_name, **{**parameters, data_set.axes[0].name: [x]})
         for x in xs
     ]
 
@@ -288,7 +288,7 @@ def main():
     nlls = []
     parameters = {par.name: par.value for par in model.parameterset}
 
-    with Path.open("nll_output_test.json", "w") as f:
+    with Path("nll_output_test.json").open("w") as f:
         nlls.append(sum(nlls[i] for i in range(len(nlls))))
         json.dump(nlls, f, indent=2)
         print("NLLs output saved to nll_output_test.json")
@@ -312,6 +312,11 @@ def main():
 
     nll_given_mu = []
     mus = [-1000, -100, -10, -1, 0, 1, 10, 100, 1000]
+
+    for dataset in unbinned_filtered:
+        key = dataset.axes[0].name
+        value = parameters[key]
+        parameters[key] = [value] if np.ndim(value) == 0 else value
 
     # _modelSB_Run2HM_3
     # dist type: "crystalball_doublesided_dist"
@@ -383,7 +388,7 @@ def main():
             nll = 0
             print(f"datset = {data_set.name}")
             for val in nz_weighted_entries(data_set.entries, data_set.weights):
-                temp = {**parameters, data_set.axes[0].name: val}
+                temp = {**parameters, data_set.axes[0].name: [val]}
                 contribution = (
                     -2
                     * model.logpdf_unsafe(dist.name, **temp)

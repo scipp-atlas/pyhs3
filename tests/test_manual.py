@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 import pickle
 from pathlib import Path
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
 
+import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.backends.backend_pdf import PdfPages
 from skhep_testdata import data_path as skhep_testdata_path
 
 import pyhs3 as hs3
@@ -210,14 +210,15 @@ def nz_weighted_entries(entries, weights):
 
     return sorted(non_zero_terms)
 
+
 def build_histogram(points, bins, range, figname=None):
     if figname:
         fig = plt.figure(num=figname)
     hist, bin_edges = np.histogram(points, bins=bins, range=range)
     bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
     width = bin_edges[1] - bin_edges[0]
-    plt.bar(bin_centers, hist, width=width, align='center')
-    return 
+    plt.bar(bin_centers, hist, width=width, align="center")
+
 
 def plot_histogram_from_bins(heights, num_bins, data_range, figname=None):
     if figname:
@@ -230,25 +231,8 @@ def plot_histogram_from_bins(heights, num_bins, data_range, figname=None):
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
     bin_width = (x_max - x_min) / num_bins
 
-    plt.bar(bin_centers, heights, width=bin_width, align='center')
-    return
+    plt.bar(bin_centers, heights, width=bin_width, align="center")
 
-# def plot_crystallball_doublesided(x, distribution_name, ws):
-#     dist = ws.distributions[distribution_name]
-
-#     t = (x - m0) / sigma_L
-#     if t < -alpha_L:
-#         A = (n_L / abs(alpha_L))**n_L * np.exp(-0.5 * alpha_L**2)
-#         B = n_L/abs(alpha_L) - abs(alpha_L)
-#         return A * (B - t)**(-n_L)
-#     # Right side
-#     t = (x - m0) / sigma_R
-#     if t > alpha_R:
-#         A = (n_R / abs(alpha_R))**n_R * np.exp(-0.5 * alpha_R**2)
-#         B = n_R/abs(alpha_R) - abs(alpha_R)
-#         return A * (B + t)**(-n_R)
-#     # Core
-#     return np.exp(-0.5 * ((x - m0) / sigma_L)**2)
 
 def base_name(name):
     return (
@@ -258,14 +242,17 @@ def base_name(name):
         .strip("_")
     )
 
+
 def plot_dist(model, parameters, dist_name, data_set, plot_name=None):
     xs = [val[0] for val in data_set.entries]
-    ys = [model.pdf_unsafe(dist_name, **{**parameters, data_set.axes[0].name : x}) for x in xs]
+    ys = [
+        model.pdf_unsafe(dist_name, **{**parameters, data_set.axes[0].name: x})
+        for x in xs
+    ]
 
     plt.figure(plot_name)
     plt.title(plot_name)
     plt.scatter(xs, ys)
-    return
 
 
 def main():
@@ -282,7 +269,13 @@ def main():
             model = pickle.load(f)
 
     else:
-        merged_pset = ParameterSet(name="merged", parameters=[*ws.parameter_points[0].parameters, *ws.parameter_points['unconditionalGlobs_muhat'].parameters])
+        merged_pset = ParameterSet(
+            name="merged",
+            parameters=[
+                *ws.parameter_points[0].parameters,
+                *ws.parameter_points["unconditionalGlobs_muhat"].parameters,
+            ],
+        )
         print("building model")
         model = ws.model(parameter_set=merged_pset)
 
@@ -290,7 +283,7 @@ def main():
         pickle.dump(model, f)
 
     asys = ws.analyses["CombinedPdf_combData"]
-    like = ws.likelihoods[asys.likelihood]
+    like = asys.likelihood
 
     nlls = []
     parameters = {par.name: par.value for par in model.parameterset}
@@ -318,7 +311,7 @@ def main():
     unbinned_filtered = [data for data in unbinned if "binned" not in data.name]
 
     nll_given_mu = []
-    mus = [-1000,-100,-10,-1,0,1,10,100,1000]
+    mus = [-1000, -100, -10, -1, 0, 1, 10, 100, 1000]
 
     # _modelSB_Run2HM_3
     # dist type: "crystalball_doublesided_dist"
@@ -341,23 +334,25 @@ def main():
 
     # 1/9:
     # investigate: yield__ggFH_mc20ade_Run2HM_1 and the pdf version which the yield is multiplied by
-    ggFH_dist = ws.distributions['_modelSB_Run2HM_1']
+    ggFH_dist = ws.distributions["_modelSB_Run2HM_1"]
     with PdfPages("ggFH_plot.pdf") as pdf:
         plot_dist(model, parameters, ggFH_dist.name, unbinned_filtered[0])
         pdf.savefig()
         plt.close()
 
-    ggFH_yield = ws.functions['yield__VBFH_mc20ade_Run2HM_1']
+    ggFH_yield = ws.functions["yield__VBFH_mc20ade_Run2HM_1"]
     # ggFH_yield = ws.functions['yield__background_Run2HM_1']
     for factor in ggFH_yield.factors:
         if factor in parameters:
-            print(f'factor: {factor}, value: {parameters[factor]}')
+            print(f"factor: {factor}, value: {parameters[factor]}")
         else:
-            print(f'function: {factor}, with factors:\n\t{ws.functions[factor].factors}')
+            print(
+                f"function: {factor}, with factors:\n\t{ws.functions[factor].factors}"
+            )
 
     # 1/16:
     # modelSB is a term within model, continue checking contraint terms within model to find why the overall normalization is so small
-    run2hm1 = ws.distributions['_model_Run2HM_1']
+    run2hm1 = ws.distributions["_model_Run2HM_1"]
     # for con in run2hm1.factors[1:]:
     #     if con in ws.distributions:
     #         con = ws.distributions[con]
@@ -366,7 +361,6 @@ def main():
     #             print(f'constraint = {con.name}, gauss mean = {parameters[con.mean]}')
 
     # breakpoint()
-    
 
     # with PdfPages("log_distribution_plots.pdf") as pdf:
     #     for dist_name, data_set in zip(like.distributions, unbinned_filtered):
@@ -380,23 +374,28 @@ def main():
         print(f"computing nll given mu = {mu}{s:>{20}}")
         parameters["mu_HH"] = mu
         nlls = []
-        for i, (dist_name, data_set) in enumerate(zip(like.distributions, unbinned_filtered)):
+        for i, (topdist, data_set) in enumerate(
+            zip(like.distributions, unbinned_filtered)
+        ):
             # print(f"building dist {dist_name} {i}/{len(like.distributions)}")
-            dist = ws.distributions[ws.distributions[dist_name].factors[0]]
+            dist = ws.distributions[topdist.factors[0]]
 
             nll = 0
             print(f"datset = {data_set.name}")
             for val in nz_weighted_entries(data_set.entries, data_set.weights):
                 temp = {**parameters, data_set.axes[0].name: val}
-                contribution = -2 * model.logpdf_unsafe(dist.name, **temp) / len(nz_weighted_entries(data_set.entries, data_set.weights))
+                contribution = (
+                    -2
+                    * model.logpdf_unsafe(dist.name, **temp)
+                    / len(nz_weighted_entries(data_set.entries, data_set.weights))
+                )
                 nll += contribution
                 # print(f"value {val} results in nll sum == {nll}, contribution == {contribution}, dataset = {data_set.name}, distname = {dist_name}")
 
             # pdf__ggFHH_kl1p0_mc23a_Run3LM_4
-                        
 
             nlls.append(nll)
-        
+
         nll_given_mu.append(np.sum(nlls))
 
     breakpoint()
@@ -410,11 +409,8 @@ def main():
     for b in binned:
         axis = b.axes[0]
         plot_histogram_from_bins(
-            b.contents, 
-            axis.nbins, 
-            (axis.min, axis.max), 
-            figname=b.name
-            )
+            b.contents, axis.nbins, (axis.min, axis.max), figname=b.name
+        )
     with PdfPages("binned_histograms.pdf") as pdf:
         for num in plt.get_fignums():
             fig = plt.figure(num)
@@ -422,15 +418,15 @@ def main():
             if name:
                 fig.suptitle(name, fontsize=12, y=0.98)
             pdf.savefig(fig, bbox_inches="tight")
-            plt.close(fig)  
-    
+            plt.close(fig)
+
     for u in unbinned:
         # if "binned" in u.name:
         build_histogram(
             nz_weighted_entries(u.entries, u.weights),
             bins=220,
             range=(100, 200),
-            figname=u.name
+            figname=u.name,
         )
     with PdfPages("unbinned_histograms.pdf") as pdf:
         for num in plt.get_fignums():
@@ -440,17 +436,15 @@ def main():
                 fig.suptitle(name, fontsize=12, y=0.98)
             pdf.savefig(fig, bbox_inches="tight")
             plt.close(fig)
-            
+
     print(f"{'Binned Data':<45} | {'Unbinned Data'}")
     print("-" * 80)
     while len(binned) > len(unbinned):
         unbinned.append("")
     for b, u in zip(binned, unbinned):
         print(f"{b.name:<45} | {u}")
-    
+
     out_pdf = "all_histograms.pdf"
-
-
 
 
 if __name__ == "__main__":

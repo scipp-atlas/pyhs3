@@ -311,6 +311,7 @@ def main():
     unbinned_filtered = [data for data in unbinned if "binned" not in data.name]
 
     nll_given_mu = []
+    nll_given_mu_without_constraints = []
     mus = [-1000, -100, -10, -1, 0, 1, 10, 100, 1000]
 
     for dataset in unbinned_filtered:
@@ -379,36 +380,54 @@ def main():
         print(f"computing nll given mu = {mu}{s:>{20}}")
         parameters["mu_HH"] = mu
         nlls = []
+        unconstrained_nlls = []
         for i, (topdist, data_set) in enumerate(
             zip(like.distributions, unbinned_filtered)
         ):
             # print(f"building dist {dist_name} {i}/{len(like.distributions)}")
-            dist = ws.distributions[topdist.factors[0]]
+            unconstrained_dist = ws.distributions[topdist.factors[0]]
+            dist = topdist
 
             nll = 0
+            unll = 0
+
             print(f"datset = {data_set.name}")
             for val in nz_weighted_entries(data_set.entries, data_set.weights):
                 temp = {**parameters, data_set.axes[0].name: [val]}
+                unconstrained_contribution = (
+                    -2
+                    * model.logpdf_unsafe(unconstrained_dist.name, **temp)
+                    / len(nz_weighted_entries(data_set.entries, data_set.weights))
+                )
                 contribution = (
                     -2
                     * model.logpdf_unsafe(dist.name, **temp)
                     / len(nz_weighted_entries(data_set.entries, data_set.weights))
                 )
                 nll += contribution
+                unll += unconstrained_contribution
                 # print(f"value {val} results in nll sum == {nll}, contribution == {contribution}, dataset = {data_set.name}, distname = {dist_name}")
 
             # pdf__ggFHH_kl1p0_mc23a_Run3LM_4
 
             nlls.append(nll)
+            unconstrained_nlls.append(unll)
 
         nll_given_mu.append(np.sum(nlls))
+        nll_given_mu_without_constraints.append(np.sum(unconstrained_nlls))
 
     breakpoint()
     plt.figure()
-    plt.plot(test_mus, nll_given_mu)
+    plt.scatter(test_mus, nll_given_mu_without_constraints)
     plt.xlabel("mu_HH")
     plt.ylabel("nll")
-    plt.savefig("nll_values_with_some_normalized_functions.pdf")
+    plt.savefig("nll_curve_without_constraints.pdf")
+    breakpoint()
+    plt.figure()
+    plt.scatter(test_mus, nll_given_mu)
+    plt.xlabel("mu_HH")
+    plt.ylabel("nll")
+    plt.savefig("nll_curve.pdf")
     breakpoint()
 
     for b in binned:

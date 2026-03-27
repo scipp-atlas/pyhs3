@@ -416,13 +416,11 @@ def main():
         nll_given_mu.append(np.sum(nlls))
         nll_given_mu_without_constraints.append(np.sum(unconstrained_nlls))
 
-    breakpoint()
     plt.figure()
     plt.scatter(test_mus, nll_given_mu_without_constraints)
     plt.xlabel("mu_HH")
     plt.ylabel("nll")
     plt.savefig("nll_curve_without_constraints.pdf")
-    breakpoint()
     plt.figure()
     plt.scatter(test_mus, nll_given_mu)
     plt.xlabel("mu_HH")

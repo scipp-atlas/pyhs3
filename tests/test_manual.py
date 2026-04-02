@@ -246,7 +246,7 @@ def base_name(name):
 def plot_dist(model, parameters, dist_name, data_set, plot_name=None):
     xs = [val[0] for val in data_set.entries]
     ys = [
-        -1 * model.logpdf_unsafe(dist_name, **{**parameters, data_set.axes[0].name: [x]})
+        model.logpdf_unsafe(dist_name, **{**parameters, data_set.axes[0].name: [x]})
         for x in xs
     ]
 
@@ -368,11 +368,19 @@ def main():
 
     # breakpoint()
 
-    with PdfPages("log_distribution_plots.pdf") as pdf:
-        for dist, data_set in zip(like.distributions, unbinned_filtered):
-            plot_dist(model, parameters, dist.name, data_set, plot_name=f"distribution: {dist.name}")
-            pdf.savefig()
-            plt.close()
+    # with PdfPages("log_distribution_plots.pdf") as pdf:
+    #     for dist, data_set in zip(like.distributions, unbinned_filtered):
+    #         plot_dist(model, parameters, dist.name, data_set, plot_name=f"distribution: {dist.name}")
+    #         pdf.savefig()
+    #         plt.close()
+    sb_2hm1 = ws.distributions[run2hm1.factors[0]]
+    with PdfPages("sb_2hm1_likelihood.pdf") as pdf:
+        combdatarun2hm1 = unbinned_filtered[0]
+        plot_dist(model, parameters, sb_2hm1.name, combdatarun2hm1, plot_name=f"distribution: {sb_2hm1.name}")
+        pdf.savefig()
+        plt.close()
+    breakpoint()
+
     i = 0
     for mu in test_mus:
         i += 1

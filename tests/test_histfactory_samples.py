@@ -24,10 +24,10 @@ class TestSampleData:
         assert data.contents == [1.0, 2.0, 3.0]
         assert data.errors == [0.1, 0.2, 0.3]
 
-    def test_sampledata_requires_errors(self):
-        """Test that SampleData requires errors field."""
-        with pytest.raises(ValueError, match="Field required"):
-            SampleData(contents=[1.0, 2.0, 3.0])  # Missing errors field
+    def test_sampledata_errors_optional_defaults_to_zeros(self):
+        """Test that SampleData.errors is optional and defaults to zeros (HS3 spec)."""
+        data = SampleData(contents=[1.0, 2.0, 3.0])  # errors omitted
+        assert data.errors == [0.0, 0.0, 0.0]
 
     def test_sampledata_mismatched_lengths_raises_error(self):
         """Test that SampleData raises error when contents and errors have different lengths."""

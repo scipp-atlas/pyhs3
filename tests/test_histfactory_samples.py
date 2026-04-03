@@ -18,16 +18,17 @@ hist = pytest.importorskip("hist", reason="hist not installed")
 class TestSampleData:
     """Test SampleData validation and functionality."""
 
+    def test_valid_sampledata_without_errors(self):
+        """Test valid SampleData with contents and errors of same length all zeros."""
+        data = SampleData(contents=[1.0, 2.0, 3.0])
+        assert data.contents == [1.0, 2.0, 3.0]
+        assert data.errors == [0.0, 0.0, 0.0]
+
     def test_valid_sampledata_with_errors(self):
         """Test valid SampleData with matching contents and errors."""
         data = SampleData(contents=[1.0, 2.0, 3.0], errors=[0.1, 0.2, 0.3])
         assert data.contents == [1.0, 2.0, 3.0]
         assert data.errors == [0.1, 0.2, 0.3]
-
-    def test_sampledata_requires_errors(self):
-        """Test that SampleData requires errors field."""
-        with pytest.raises(ValueError, match="Field required"):
-            SampleData(contents=[1.0, 2.0, 3.0])  # Missing errors field
 
     def test_sampledata_mismatched_lengths_raises_error(self):
         """Test that SampleData raises error when contents and errors have different lengths."""
@@ -50,6 +51,18 @@ class TestSampleData:
             match="Sample data contents \\(0\\) and errors \\(1\\) must have same length",
         ):
             SampleData(contents=[], errors=[0.1])
+
+    def test_sampledata_roundtrip(self):
+        """Test SampleData roundtrips properly"""
+        assert SampleData(contents=[1.0], errors=[0.1]).model_dump() == {
+            "contents": [1.0],
+            "errors": [0.1],
+        }
+        assert SampleData(contents=[], errors=[]).model_dump() == {
+            "contents": [],
+            "errors": [],
+        }
+        assert SampleData(contents=[1.0]).model_dump() == {"contents": [1.0]}
 
 
 class TestSample:

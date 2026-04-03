@@ -76,6 +76,7 @@ develop = [
 ]
 
 [project.urls]
+Documentation = "https://pyhs3.readthedocs.io/"
 Homepage = "https://github.com/scipp-atlas/pyhs3"
 "Bug Tracker" = "https://github.com/scipp-atlas/pyhs3/issues"
 Discussions = "https://github.com/scipp-atlas/pyhs3/discussions"

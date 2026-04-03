@@ -11,7 +11,33 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 
 class SampleData(BaseModel):
-    """Sample data containing bin contents and errors."""
+    """Sample data containing bin contents and optional per-bin uncertainties.
+
+    This class represents the binned values for a single sample in a HistFactory-
+    style model, along with optional statistical uncertainties ("errors") per bin.
+
+    .. note::
+
+        - The ``errors`` field is optional in serialized form. If omitted, it is
+          interpreted as an array of zeros with the same length as ``contents``.
+          This follows the convention used in ROOT HistFactory/HS3 workflows,
+          where some samples may not carry explicit bin-by-bin uncertainties
+          (e.g. when BBlight is not applied).
+        - Internally, errors are always materialized and accessible via the
+          ``errors`` property.
+        - If provided, ``errors`` must have the same length as ``contents``.
+
+    Parameters:
+        contents : list[float]
+            The bin contents (yields) for the sample.
+        errors : list[float] | None
+            Optional serialized representation of per-bin uncertainties. This is
+            aliased to ``"errors"`` when exporting. If ``None``, errors are implicitly
+            treated as zeros and omitted from serialization.
+
+    Raises:
+        ValueError: If ``contents`` and ``errors`` are both provided and have different lengths.
+    """
 
     model_config = ConfigDict(serialize_by_alias=True)
 
@@ -36,6 +62,18 @@ class SampleData(BaseModel):
 
     @property
     def errors(self) -> list[float]:
+        """Return the per-bin uncertainties for the sample.
+
+        This property always returns a list of the same length as ``contents``.
+
+        - If uncertainties were explicitly provided, they are returned as-is.
+        - If the ``errors`` field was omitted during initialization (e.g. in HS3
+          JSON where missing errors imply zeros), this returns a zero-filled
+          list.
+
+        Returns:
+            list[float]: The per-bin uncertainties corresponding to ``contents``.
+        """
         return self._errors
 
 

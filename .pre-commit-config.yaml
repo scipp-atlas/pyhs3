@@ -44,6 +44,11 @@ repos:
         types_or: [yaml, markdown, html, css, scss, javascript, json]
         args: [--prose-wrap=always]
 
+  - repo: https://github.com/bwhmather/ssort
+    rev: master
+    hooks:
+      - id: ssort
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: "v0.15.4"
     hooks:

@@ -63,13 +63,11 @@ class ParameterSet(NamedModel):
         """Compatibility property for core.py access."""
         return {param.name: param for param in self.parameters}
 
-    def __len__(self) -> int:
-        """Number of parameters in this set."""
-        return len(self.parameters)
-
-    def __contains__(self, param_name: str) -> bool:
-        """Check if a parameter with the given name exists in this set."""
-        return param_name in self.points
+    def get(
+        self, param_name: str, default: ParameterPoint | None = None
+    ) -> ParameterPoint | None:
+        """Get a parameter by name, returning default if not found."""
+        return self.points.get(param_name, default)
 
     def __getitem__(self, item: str | int) -> ParameterPoint:
         """Get a parameter by name or index."""
@@ -77,15 +75,17 @@ class ParameterSet(NamedModel):
             return self.parameters[item]
         return self.points[item]
 
-    def get(
-        self, param_name: str, default: ParameterPoint | None = None
-    ) -> ParameterPoint | None:
-        """Get a parameter by name, returning default if not found."""
-        return self.points.get(param_name, default)
-
     def __iter__(self) -> Iterator[ParameterPoint]:  # type: ignore[override]
         """Iterate over the parameters."""
         return iter(self.parameters)
+
+    def __contains__(self, param_name: str) -> bool:
+        """Check if a parameter with the given name exists in this set."""
+        return param_name in self.points
+
+    def __len__(self) -> int:
+        """Number of parameters in this set."""
+        return len(self.parameters)
 
 
 class ParameterPoints(NamedCollection[ParameterSet]):

@@ -51,32 +51,6 @@ class Context:
             msg = f"Parameter names cannot overlap between parameters and auxiliaries. Overlapping names: {sorted(overlap)}"
             raise ValueError(msg)
 
-    def __getitem__(self, key: str) -> TensorVar:
-        """
-        Get parameter value from context.
-
-        Checks parameters first, then auxiliaries.
-
-        Args:
-            key: Parameter name (str)
-
-        Returns:
-            TensorVar: The parameter value
-
-        Raises:
-            KeyError: If parameter is not found in either parameters or auxiliaries
-        """
-        if key in self._parameters:
-            return self._parameters[key]
-        if key in self._auxiliaries:
-            return self._auxiliaries[key]
-        msg = f"Parameter '{key}' not found in context"
-        raise KeyError(msg)
-
-    def __contains__(self, key: str) -> bool:
-        """Check if parameter name exists in context."""
-        return key in self._parameters or key in self._auxiliaries
-
     @property
     def parameters(self) -> dict[str, TensorVar]:
         """Get read-only view of parameters."""
@@ -117,3 +91,29 @@ class Context:
             auxiliaries=self._auxiliaries.copy(),
             observables=self._observables.copy(),
         )
+
+    def __getitem__(self, key: str) -> TensorVar:
+        """
+        Get parameter value from context.
+
+        Checks parameters first, then auxiliaries.
+
+        Args:
+            key: Parameter name (str)
+
+        Returns:
+            TensorVar: The parameter value
+
+        Raises:
+            KeyError: If parameter is not found in either parameters or auxiliaries
+        """
+        if key in self._parameters:
+            return self._parameters[key]
+        if key in self._auxiliaries:
+            return self._auxiliaries[key]
+        msg = f"Parameter '{key}' not found in context"
+        raise KeyError(msg)
+
+    def __contains__(self, key: str) -> bool:
+        """Check if parameter name exists in context."""
+        return key in self._parameters or key in self._auxiliaries

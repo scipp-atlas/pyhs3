@@ -31,20 +31,20 @@ class NamedCollection(RootModel[list[T]]):
         """Initialize computed collections after Pydantic validation."""
         self._map = {item.name: item for item in self.root}
 
+    def get(self, name: str, default: T | None = None) -> T | None:
+        """Get an item by name, returning default if not found."""
+        return self._map.get(name, default)
+
     def __getitem__(self, item: str | int) -> T:
         if isinstance(item, int):
             return self.root[item]
         return self._map[item]
 
-    def get(self, name: str, default: T | None = None) -> T | None:
-        """Get an item by name, returning default if not found."""
-        return self._map.get(name, default)
+    def __iter__(self) -> Iterator[T]:  # type: ignore[override]
+        return iter(self.root)
 
     def __contains__(self, name: str) -> bool:
         return name in self._map
-
-    def __iter__(self) -> Iterator[T]:  # type: ignore[override]
-        return iter(self.root)
 
     def __len__(self) -> int:
         return len(self.root)

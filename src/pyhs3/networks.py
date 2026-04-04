@@ -96,36 +96,6 @@ class NamedDiGraph:
 
         self.graph.add_edge(from_idx, to_idx, edge_data)
 
-    def __getitem__(self, key: str | int) -> dict[str, Any]:
-        """
-        Get node data by name or index using dictionary-style access.
-
-        Args:
-            key: Name of the node (str) or index (int)
-
-        Returns:
-            Node data dictionary
-
-        Raises:
-            KeyError: If node name/index doesn't exist
-            TypeError: If key is not str or int
-        """
-        if isinstance(key, str):
-            # Access by name
-            try:
-                idx = self.name_to_index[key]
-                return cast(dict[str, Any], self.graph[idx])
-            except KeyError:
-                msg = f"Node '{key}' not found in graph"
-                raise KeyError(msg) from None
-        if isinstance(key, int):
-            # Access by index
-            return cast(dict[str, Any], self.graph[key])
-
-        # This should never happen due to type annotations, but kept for runtime safety
-        msg = f"Key must be str (name) or int (index), got {type(key)}"  # type: ignore[unreachable]
-        raise TypeError(msg)
-
     def get(
         self, key: str | int, default: T | None = None
     ) -> dict[str, Any] | T | None:
@@ -183,6 +153,41 @@ class NamedDiGraph:
             msg = "Circular dependency detected in graph"
             raise ValueError(msg) from e
 
+    @property
+    def node_names(self) -> list[str]:
+        """List of all node names."""
+        return list(self.name_to_index.keys())
+
+    def __getitem__(self, key: str | int) -> dict[str, Any]:
+        """
+        Get node data by name or index using dictionary-style access.
+
+        Args:
+            key: Name of the node (str) or index (int)
+
+        Returns:
+            Node data dictionary
+
+        Raises:
+            KeyError: If node name/index doesn't exist
+            TypeError: If key is not str or int
+        """
+        if isinstance(key, str):
+            # Access by name
+            try:
+                idx = self.name_to_index[key]
+                return cast(dict[str, Any], self.graph[idx])
+            except KeyError:
+                msg = f"Node '{key}' not found in graph"
+                raise KeyError(msg) from None
+        if isinstance(key, int):
+            # Access by index
+            return cast(dict[str, Any], self.graph[key])
+
+        # This should never happen due to type annotations, but kept for runtime safety
+        msg = f"Key must be str (name) or int (index), got {type(key)}"  # type: ignore[unreachable]
+        raise TypeError(msg)
+
     def __contains__(self, name: str) -> bool:
         """Check if a named node exists."""
         return name in self.name_to_index
@@ -190,11 +195,6 @@ class NamedDiGraph:
     def __len__(self) -> int:
         """Number of nodes in the graph."""
         return len(self.name_to_index)
-
-    @property
-    def node_names(self) -> list[str]:
-        """List of all node names."""
-        return list(self.name_to_index.keys())
 
 
 def build_entity_mappings(

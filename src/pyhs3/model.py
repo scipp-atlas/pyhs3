@@ -32,6 +32,46 @@ from pyhs3.typing.aliases import DomainBounds, TensorVar
 log = logging.getLogger(__name__)
 
 
+def create_bounded_tensor(
+    name: str, domain: DomainBounds, kind: Callable[..., TensorVar] = pt.scalar
+) -> TensorVar:
+    """
+    Creates a tensor variable with optional domain constraints.
+
+    Args:
+        name: Name of the parameter.
+        domain (tuple): Tuple specifying (min, max) range. Use None for unbounded sides.
+                       For example: (0.0, None) for lower bound only, (None, 1.0) for upper bound only.
+                       If both bounds are None, returns an unbounded tensor.
+        kind: pt.scalar for scalars, pt.vector for vectors (default: pt.scalar).
+
+    Returns:
+        pytensor.tensor.variable.TensorVariable: The tensor variable, clipped to domain if bounds exist.
+
+    Examples:
+        >>> sigma = create_bounded_tensor("sigma", (0.0, None))  # sigma >= 0 (scalar)
+        >>> fraction = create_bounded_tensor("fraction", (0.0, 1.0))  # 0 <= fraction <= 1 (scalar)
+        >>> temperatures = create_bounded_tensor("temperatures", (None, 100.0), pt.vector)  # vector <= 100
+        >>> unbounded = create_bounded_tensor("unbounded", (None, None))  # no bounds applied
+    """
+    min_bound, max_bound = domain
+
+    # Create the base tensor
+    tensor = kind(name)
+
+    # If both bounds are None, return unbounded tensor
+    if min_bound is None and max_bound is None:
+        return tensor
+
+    # Use infinity constants for unbounded sides
+    min_val = pt.constant(-np.inf) if min_bound is None else pt.constant(min_bound)
+    max_val = pt.constant(np.inf) if max_bound is None else pt.constant(max_bound)
+
+    clipped = pt.clip(tensor, min_val, max_val)
+    clipped.name = tensor.name  # Preserve the original name
+    return cast(TensorVar, clipped)
+
+
 class Model:
     """
     Probabilistic model with compiled tensor operations.
@@ -48,82 +88,6 @@ class Model:
     HS3 Reference:
         Models are computational representations of :hs3:label:`HS3 workspaces <hs3.file-format>`.
     """
-
-    def __init__(
-        self,
-        *,
-        parameterset: ParameterSet,
-        distributions: Distributions,
-        domain: Domain,
-        functions: Functions,
-        progress: bool = True,
-        mode: str = "FAST_RUN",
-        observables: dict[str, tuple[float, float]] | None = None,
-    ):
-        """
-        Represents a probabilistic model composed of parameters, domains, distributions, and functions.
-
-        Args:
-            parameterset (ParameterSet): The parameter set used in the model.
-            distributions (Distributions): Set of distributions to include.
-            domain (Domain): Domain constraints for parameters.
-            functions (Functions): Set of functions that compute parameter values.
-            progress (bool): Whether to show progress bar during dependency graph construction.
-            mode (str): PyTensor compilation mode. Defaults to "FAST_RUN".
-                       Options: "FAST_RUN" (apply all rewrites, use C implementations),
-                       "FAST_COMPILE" (few rewrites, Python implementations),
-                       "NUMBA" (compile using Numba), "JAX" (compile using JAX),
-                       "PYTORCH" (compile using PyTorch), "DebugMode" (debugging),
-                       "NanGuardMode" (NaN detection).
-            observables (dict[str, tuple[float, float]] | None): Dictionary mapping observable names to (lower, upper) bounds.
-
-        Attributes:
-            domain (Domain): The original domain with constraints for parameters.
-            parameterset (ParameterSet): The original parameter set with parameter values.
-            distributions (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic distribution expressions.
-            parameters (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic parameter variables.
-            functions (dict[str, pytensor.tensor.variable.TensorVariable]): Computed function values.
-            mode (str): PyTensor compilation mode.
-            _compiled_functions (dict[str, Callable[..., npt.NDArray[np.float64]]]): Cache of compiled PyTensor functions.
-        """
-        self.parameterset = parameterset
-        self.domain = domain
-        self._observables = {
-            name: (pt.constant(lower), pt.constant(upper))
-            for name, (lower, upper) in (observables or {}).items()
-        }
-        self._distribution_objects = (
-            distributions  # Store original distribution objects
-        )
-        self._function_objects = functions  # Store original function objects
-        self.parameters: dict[str, TensorVar] = {}
-        self.functions: dict[str, TensorVar] = {}
-        self.distributions: dict[str, TensorVar] = {}
-        self.modifiers: dict[str, TensorVar] = {}
-        self.mode = mode
-        self._compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]] = {}
-        self._compiled_inputs: dict[str, list[TensorVar]] = {}
-
-        # Build dependency graph with proper entity identification
-        self._build_dependency_graph(functions, distributions, progress)
-
-    @staticmethod
-    def _ensure_array(
-        value: float | list[float] | npt.NDArray[np.float64],
-    ) -> npt.NDArray[np.float64]:
-        """
-        Ensure a value is a numpy array with dtype float64.
-
-        Converts scalars to 0-d arrays and lists to 1-d arrays.
-        Existing numpy arrays are converted to float64 dtype if needed.
-
-        Args:
-            value: Input value (scalar, list, or array)
-
-        Returns:
-            NumPy array with dtype float64
-        """
-        return np.asarray(value, dtype=np.float64)
 
     def _build_dependency_graph(
         self,
@@ -250,6 +214,82 @@ class Model:
                 # Advance progress
                 progress_bar.advance(task)
 
+    def __init__(
+        self,
+        *,
+        parameterset: ParameterSet,
+        distributions: Distributions,
+        domain: Domain,
+        functions: Functions,
+        progress: bool = True,
+        mode: str = "FAST_RUN",
+        observables: dict[str, tuple[float, float]] | None = None,
+    ):
+        """
+        Represents a probabilistic model composed of parameters, domains, distributions, and functions.
+
+        Args:
+            parameterset (ParameterSet): The parameter set used in the model.
+            distributions (Distributions): Set of distributions to include.
+            domain (Domain): Domain constraints for parameters.
+            functions (Functions): Set of functions that compute parameter values.
+            progress (bool): Whether to show progress bar during dependency graph construction.
+            mode (str): PyTensor compilation mode. Defaults to "FAST_RUN".
+                       Options: "FAST_RUN" (apply all rewrites, use C implementations),
+                       "FAST_COMPILE" (few rewrites, Python implementations),
+                       "NUMBA" (compile using Numba), "JAX" (compile using JAX),
+                       "PYTORCH" (compile using PyTorch), "DebugMode" (debugging),
+                       "NanGuardMode" (NaN detection).
+            observables (dict[str, tuple[float, float]] | None): Dictionary mapping observable names to (lower, upper) bounds.
+
+        Attributes:
+            domain (Domain): The original domain with constraints for parameters.
+            parameterset (ParameterSet): The original parameter set with parameter values.
+            distributions (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic distribution expressions.
+            parameters (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic parameter variables.
+            functions (dict[str, pytensor.tensor.variable.TensorVariable]): Computed function values.
+            mode (str): PyTensor compilation mode.
+            _compiled_functions (dict[str, Callable[..., npt.NDArray[np.float64]]]): Cache of compiled PyTensor functions.
+        """
+        self.parameterset = parameterset
+        self.domain = domain
+        self._observables = {
+            name: (pt.constant(lower), pt.constant(upper))
+            for name, (lower, upper) in (observables or {}).items()
+        }
+        self._distribution_objects = (
+            distributions  # Store original distribution objects
+        )
+        self._function_objects = functions  # Store original function objects
+        self.parameters: dict[str, TensorVar] = {}
+        self.functions: dict[str, TensorVar] = {}
+        self.distributions: dict[str, TensorVar] = {}
+        self.modifiers: dict[str, TensorVar] = {}
+        self.mode = mode
+        self._compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]] = {}
+        self._compiled_inputs: dict[str, list[TensorVar]] = {}
+
+        # Build dependency graph with proper entity identification
+        self._build_dependency_graph(functions, distributions, progress)
+
+    @staticmethod
+    def _ensure_array(
+        value: float | list[float] | npt.NDArray[np.float64],
+    ) -> npt.NDArray[np.float64]:
+        """
+        Ensure a value is a numpy array with dtype float64.
+
+        Converts scalars to 0-d arrays and lists to 1-d arrays.
+        Existing numpy arrays are converted to float64 dtype if needed.
+
+        Args:
+            value: Input value (scalar, list, or array)
+
+        Returns:
+            NumPy array with dtype float64
+        """
+        return np.asarray(value, dtype=np.float64)
+
     def _get_compiled_function(
         self, name: str
     ) -> Callable[..., npt.NDArray[np.float64]]:
@@ -327,6 +367,24 @@ class Model:
             key: self._ensure_array(value) for key, value in parametervalues.items()
         }
         return self.pdf(name, **converted_params)
+
+    def _reorder_params(
+        self,
+        name: str,
+        params: Mapping[str, npt.NDArray[np.float64]],
+    ) -> list[npt.NDArray[np.float64]]:
+        """
+        Reorder parameters to match the expected input order for a distribution.
+
+        Args:
+            name: Distribution name
+            params: Dictionary of parameter values (numpy arrays)
+
+        Returns:
+            List of values in the correct order for the compiled function
+        """
+        input_order = self.pars(name)
+        return [params[param_name] for param_name in input_order]
 
     def pdf(
         self, name: str, **parametervalues: npt.NDArray[np.float64]
@@ -459,24 +517,6 @@ class Model:
         """
         return [names.index(par) for par in self.pars(name)]
 
-    def _reorder_params(
-        self,
-        name: str,
-        params: Mapping[str, npt.NDArray[np.float64]],
-    ) -> list[npt.NDArray[np.float64]]:
-        """
-        Reorder parameters to match the expected input order for a distribution.
-
-        Args:
-            name: Distribution name
-            params: Dictionary of parameter values (numpy arrays)
-
-        Returns:
-            List of values in the correct order for the compiled function
-        """
-        input_order = self.pars(name)
-        return [params[param_name] for param_name in input_order]
-
     def visualize_graph(
         self,
         name: str,
@@ -527,31 +567,6 @@ class Model:
         )
         return filename
 
-    def __repr__(self) -> str:
-        """Provide a concise overview of the model structure."""
-        param_names = list(self.parameters.keys())
-        dist_names = list(self.distributions.keys())
-        func_names = list(self.functions.keys())
-
-        param_display = ", ".join(param_names[:5]) + (
-            "..." if len(param_names) > 5 else ""
-        )
-        dist_display = ", ".join(dist_names[:3]) + (
-            "..." if len(dist_names) > 3 else ""
-        )
-        func_display = ", ".join(func_names[:3]) + (
-            "..." if len(func_names) > 3 else ""
-        )
-
-        mode_status = self.mode
-
-        return f"""Model(
-    mode: {mode_status}
-    parameters: {len(param_names)} ({param_display})
-    distributions: {len(dist_names)} ({dist_display})
-    functions: {len(func_names)} ({func_display})
-)"""
-
     def graph_summary(self, name: str) -> str:
         """
         Get a summary of the computation graph structure.
@@ -585,42 +600,27 @@ class Model:
     Operation types: {dict(sorted(op_types.items()))}{compile_info}
 """
 
+    def __repr__(self) -> str:
+        """Provide a concise overview of the model structure."""
+        param_names = list(self.parameters.keys())
+        dist_names = list(self.distributions.keys())
+        func_names = list(self.functions.keys())
 
-def create_bounded_tensor(
-    name: str, domain: DomainBounds, kind: Callable[..., TensorVar] = pt.scalar
-) -> TensorVar:
-    """
-    Creates a tensor variable with optional domain constraints.
+        param_display = ", ".join(param_names[:5]) + (
+            "..." if len(param_names) > 5 else ""
+        )
+        dist_display = ", ".join(dist_names[:3]) + (
+            "..." if len(dist_names) > 3 else ""
+        )
+        func_display = ", ".join(func_names[:3]) + (
+            "..." if len(func_names) > 3 else ""
+        )
 
-    Args:
-        name: Name of the parameter.
-        domain (tuple): Tuple specifying (min, max) range. Use None for unbounded sides.
-                       For example: (0.0, None) for lower bound only, (None, 1.0) for upper bound only.
-                       If both bounds are None, returns an unbounded tensor.
-        kind: pt.scalar for scalars, pt.vector for vectors (default: pt.scalar).
+        mode_status = self.mode
 
-    Returns:
-        pytensor.tensor.variable.TensorVariable: The tensor variable, clipped to domain if bounds exist.
-
-    Examples:
-        >>> sigma = create_bounded_tensor("sigma", (0.0, None))  # sigma >= 0 (scalar)
-        >>> fraction = create_bounded_tensor("fraction", (0.0, 1.0))  # 0 <= fraction <= 1 (scalar)
-        >>> temperatures = create_bounded_tensor("temperatures", (None, 100.0), pt.vector)  # vector <= 100
-        >>> unbounded = create_bounded_tensor("unbounded", (None, None))  # no bounds applied
-    """
-    min_bound, max_bound = domain
-
-    # Create the base tensor
-    tensor = kind(name)
-
-    # If both bounds are None, return unbounded tensor
-    if min_bound is None and max_bound is None:
-        return tensor
-
-    # Use infinity constants for unbounded sides
-    min_val = pt.constant(-np.inf) if min_bound is None else pt.constant(min_bound)
-    max_val = pt.constant(np.inf) if max_bound is None else pt.constant(max_bound)
-
-    clipped = pt.clip(tensor, min_val, max_val)
-    clipped.name = tensor.name  # Preserve the original name
-    return cast(TensorVar, clipped)
+        return f"""Model(
+    mode: {mode_status}
+    parameters: {len(param_names)} ({param_display})
+    distributions: {len(dist_names)} ({dist_display})
+    functions: {len(func_names)} ({func_display})
+)"""

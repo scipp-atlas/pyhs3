@@ -63,6 +63,12 @@ def analyze_sympy_expr(sympy_expr: sp.Expr) -> dict[str, Any]:
     }
 
 
+@lru_cache(maxsize=2048)
+def _parse_expr_cached(expr_str: str) -> sp.Expr:
+    # Delegate to SymPy's parser; results are cached to avoid repeated work
+    return sympy_parser.parse_expr(expr_str, transformations=_transformations)
+
+
 def parse_expression(expr_str: str) -> sp.Expr:
     """
     Parse a mathematical expression string into a SymPy expression.
@@ -139,9 +145,3 @@ def sympy_to_pytensor(
     except Exception as exc:
         msg = f"Failed to convert expression to PyTensor: {sympy_expr}. {exc}"
         raise ExpressionEvaluationError(msg) from exc
-
-
-@lru_cache(maxsize=2048)
-def _parse_expr_cached(expr_str: str) -> sp.Expr:
-    # Delegate to SymPy's parser; results are cached to avoid repeated work
-    return sympy_parser.parse_expr(expr_str, transformations=_transformations)

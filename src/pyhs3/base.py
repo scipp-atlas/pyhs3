@@ -284,40 +284,6 @@ class Evaluable(NamedModel, ABC):
             i += 1
         return result
 
-    @model_validator(mode="after")
-    def _auto_process_parameters(self) -> Evaluable:
-        """
-        Automatically process parameters based on model fields.
-
-        This eliminates the need for manual @model_validator methods in subclasses.
-        Processes all fields that aren't part of the base Evaluable class.
-        """
-        # Skip if already processed (allow manual override)
-        if self._parameters:
-            return self
-
-        # Build excluded fields from base Evaluable class
-        excluded_fields = {
-            name
-            for name, info in Evaluable.model_fields.items()
-            if info.json_schema_extra
-            and isinstance(info.json_schema_extra, dict)
-            and info.json_schema_extra.get("preprocess") is False
-        }
-
-        # Process all fields except excluded ones
-        for field_name, field_info in self.__class__.model_fields.items():
-            if self._should_skip_field(field_name, field_info, excluded_fields):
-                continue
-
-            field_value = getattr(self, field_name)
-            if field_value is None:
-                continue
-
-            self._process_field(field_name, field_info, field_value)
-
-        return self
-
     def _should_skip_field(
         self, field_name: str, field_info: Any, excluded_fields: set[str]
     ) -> bool:
@@ -353,18 +319,6 @@ class Evaluable(NamedModel, ABC):
             return has_str and has_numeric and not non_processable
 
         return False
-
-    def _process_field(
-        self, field_name: str, field_info: Any, field_value: Any
-    ) -> None:
-        """Process a single field during auto-processing."""
-        # Let process_parameter* methods handle the type detection
-        if get_origin(field_info.annotation) is list:
-            self._process_list_field(field_name, field_info, field_value)
-        elif self._is_processable_single_field(field_info.annotation):
-            self._process_single_field(field_name)
-        else:
-            self._raise_unsupported_field_error(field_name, field_info)
 
     def _process_list_field(
         self, field_name: str, field_info: Any, field_value: list[Any]
@@ -418,6 +372,67 @@ class Evaluable(NamedModel, ABC):
         msg += ' If this is not a parameter to preprocess, add `json_schema_extra={"preprocess": False}`.'
         raise RuntimeError(msg)
 
+    def _process_field(
+        self, field_name: str, field_info: Any, field_value: Any
+    ) -> None:
+        """Process a single field during auto-processing."""
+        # Let process_parameter* methods handle the type detection
+        if get_origin(field_info.annotation) is list:
+            self._process_list_field(field_name, field_info, field_value)
+        elif self._is_processable_single_field(field_info.annotation):
+            self._process_single_field(field_name)
+        else:
+            self._raise_unsupported_field_error(field_name, field_info)
+
+    @model_validator(mode="after")
+    def _auto_process_parameters(self) -> Evaluable:
+        """
+        Automatically process parameters based on model fields.
+
+        This eliminates the need for manual @model_validator methods in subclasses.
+        Processes all fields that aren't part of the base Evaluable class.
+        """
+        # Skip if already processed (allow manual override)
+        if self._parameters:
+            return self
+
+        # Build excluded fields from base Evaluable class
+        excluded_fields = {
+            name
+            for name, info in Evaluable.model_fields.items()
+            if info.json_schema_extra
+            and isinstance(info.json_schema_extra, dict)
+            and info.json_schema_extra.get("preprocess") is False
+        }
+
+        # Process all fields except excluded ones
+        for field_name, field_info in self.__class__.model_fields.items():
+            if self._should_skip_field(field_name, field_info, excluded_fields):
+                continue
+
+            field_value = getattr(self, field_name)
+            if field_value is None:
+                continue
+
+            self._process_field(field_name, field_info, field_value)
+
+        return self
+
+    @abstractmethod
+    def _expression(self, context: Context) -> TensorVar:
+        """
+        Subclass-specific expression implementation.
+
+        Subclasses must implement this method to define their computation logic.
+        The result will be automatically named by the expression() method.
+
+        Args:
+            context: Mapping of names to PyTensor variables
+
+        Returns:
+            PyTensor expression representing the component (will be named automatically)
+        """
+
     def expression(self, context: Context) -> TensorVar:
         """
         Evaluate and return a named PyTensor expression.
@@ -434,18 +449,3 @@ class Evaluable(NamedModel, ABC):
         result = self._expression(context)
         result.name = self.name
         return result
-
-    @abstractmethod
-    def _expression(self, context: Context) -> TensorVar:
-        """
-        Subclass-specific expression implementation.
-
-        Subclasses must implement this method to define their computation logic.
-        The result will be automatically named by the expression() method.
-
-        Args:
-            context: Mapping of names to PyTensor variables
-
-        Returns:
-            PyTensor expression representing the component (will be named automatically)
-        """

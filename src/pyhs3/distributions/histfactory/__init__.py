@@ -146,6 +146,79 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
                 params.update(modifier.dependencies)
         return params
 
+    def _get_total_bins(self) -> int:
+        """Calculate total number of bins across all axes."""
+        return self.axes.get_total_bins()
+
+    def _process_sample(
+        self, context: Context, sample: Sample, total_bins: int
+    ) -> TensorVar:
+        """Process a single sample with its modifiers."""
+        # Get nominal bin contents
+        contents = sample.data.contents
+        if len(contents) != total_bins:
+            msg = (
+                f"Sample {sample.name} has {len(contents)} bins, expected {total_bins}"
+            )
+            raise ValueError(msg)
+
+        nominal_rates = pt.as_tensor_variable(contents)
+
+        # Apply modifiers using pre-computed results where possible
+        modified_rates = nominal_rates
+
+        for modifier in sample.modifiers:
+            modified_rates = modifier.apply(context, modified_rates)
+
+        return cast(TensorVar, modified_rates)
+
+    def _compute_expected_rates(self, context: Context, total_bins: int) -> TensorVar:
+        """
+        Compute expected event rates for all bins.
+
+        Applies all modifiers to sample predictions to get final rates.
+        """
+        # Start with zeros for total prediction
+        total_rates = pt.zeros(total_bins)
+
+        # Process each sample
+        for sample in self.samples:
+            sample_rates = self._process_sample(context, sample, total_bins)
+            total_rates = total_rates + sample_rates
+
+        return cast(TensorVar, total_rates)
+
+    def _build_main_model(
+        self, context: Context, expected_rates: TensorVar
+    ) -> TensorVar:
+        """
+        Build the main Poisson model for observed data.
+
+        Observed data must be provided in the context as '{name}_observed' where
+        name is the HistFactory distribution name. This is a required parameter
+        for likelihood evaluation.
+
+        Returns:
+            PyTensor expression for the Poisson probability (not log probability)
+        """
+        # Create a Poisson likelihood for the observed bin counts
+        # Observed data is required - no defensive programming needed
+        observed_data_param = f"{self.name}_observed"
+        observed_data = context[observed_data_param]
+
+        # Build product of individual Poisson probabilities for each bin
+        # P(observed_i | expected_i) = exp(observed_i * log(expected_i) - expected_i - log(observed_i!))
+        log_probs = (
+            observed_data * pt.log(expected_rates)
+            - expected_rates
+            - pt.gammaln(observed_data + 1)
+        )
+        # Convert from log probabilities to probabilities
+        probs = pt.exp(log_probs)
+        main_prob = pt.prod(probs)  # type: ignore[no-untyped-call]
+
+        return cast(TensorVar, main_prob)
+
     def likelihood(self, context: Context) -> TensorVar:
         """
         Build the HistFactory main Poisson likelihood.
@@ -195,79 +268,6 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
 
         # Multiply all constraint probabilities
         return cast(TensorVar, pt.prod(pt.stack(constraint_probs)))  # type: ignore[no-untyped-call]
-
-    def _get_total_bins(self) -> int:
-        """Calculate total number of bins across all axes."""
-        return self.axes.get_total_bins()
-
-    def _compute_expected_rates(self, context: Context, total_bins: int) -> TensorVar:
-        """
-        Compute expected event rates for all bins.
-
-        Applies all modifiers to sample predictions to get final rates.
-        """
-        # Start with zeros for total prediction
-        total_rates = pt.zeros(total_bins)
-
-        # Process each sample
-        for sample in self.samples:
-            sample_rates = self._process_sample(context, sample, total_bins)
-            total_rates = total_rates + sample_rates
-
-        return cast(TensorVar, total_rates)
-
-    def _process_sample(
-        self, context: Context, sample: Sample, total_bins: int
-    ) -> TensorVar:
-        """Process a single sample with its modifiers."""
-        # Get nominal bin contents
-        contents = sample.data.contents
-        if len(contents) != total_bins:
-            msg = (
-                f"Sample {sample.name} has {len(contents)} bins, expected {total_bins}"
-            )
-            raise ValueError(msg)
-
-        nominal_rates = pt.as_tensor_variable(contents)
-
-        # Apply modifiers using pre-computed results where possible
-        modified_rates = nominal_rates
-
-        for modifier in sample.modifiers:
-            modified_rates = modifier.apply(context, modified_rates)
-
-        return cast(TensorVar, modified_rates)
-
-    def _build_main_model(
-        self, context: Context, expected_rates: TensorVar
-    ) -> TensorVar:
-        """
-        Build the main Poisson model for observed data.
-
-        Observed data must be provided in the context as '{name}_observed' where
-        name is the HistFactory distribution name. This is a required parameter
-        for likelihood evaluation.
-
-        Returns:
-            PyTensor expression for the Poisson probability (not log probability)
-        """
-        # Create a Poisson likelihood for the observed bin counts
-        # Observed data is required - no defensive programming needed
-        observed_data_param = f"{self.name}_observed"
-        observed_data = context[observed_data_param]
-
-        # Build product of individual Poisson probabilities for each bin
-        # P(observed_i | expected_i) = exp(observed_i * log(expected_i) - expected_i - log(observed_i!))
-        log_probs = (
-            observed_data * pt.log(expected_rates)
-            - expected_rates
-            - pt.gammaln(observed_data + 1)
-        )
-        # Convert from log probabilities to probabilities
-        probs = pt.exp(log_probs)
-        main_prob = pt.prod(probs)  # type: ignore[no-untyped-call]
-
-        return cast(TensorVar, main_prob)
 
     def to_hist(self) -> Any:
         """

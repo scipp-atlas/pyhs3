@@ -71,30 +71,6 @@ class Workspace(BaseModel):
     analyses: Analyses | None = Field(default_factory=lambda: Analyses([]))
     misc: dict[str, Any] | None = Field(default_factory=dict)
 
-    def model_post_init(self, __context: Any, /) -> None:
-        """Resolve foreign key references after workspace construction."""
-        self._resolve_foreign_keys()
-
-    def _resolve_foreign_keys(self) -> None:
-        """Resolve string references to actual objects with referential integrity checking."""
-        errors: list[str] = []
-
-        # Resolve Likelihood fields first (analyses reference likelihoods)
-        if self.likelihoods is not None:
-            for likelihood in self.likelihoods:
-                self._resolve_likelihood_fields(likelihood, errors)
-
-        # Resolve Analysis fields
-        if self.analyses is not None:
-            for analysis in self.analyses:
-                self._resolve_analysis_fields(analysis, errors)
-
-        if errors:
-            msg = "Workspace has unresolved references:\n" + "\n".join(
-                f"  - {e}" for e in errors
-            )
-            raise WorkspaceValidationError(msg)
-
     def _resolve_fk_list(
         self,
         refs: Iterable[Any],
@@ -182,37 +158,29 @@ class Workspace(BaseModel):
         else:
             errors.append(f"Analysis '{analysis.name}' references unknown domains")
 
-    @classmethod
-    def load(
-        cls,
-        path: str | os.PathLike[str],
-        *,
-        verbose: bool = False,
-        suppress_traceback: bool = True,
-    ) -> Workspace:
-        """
-        Load workspace from a JSON file.
+    def _resolve_foreign_keys(self) -> None:
+        """Resolve string references to actual objects with referential integrity checking."""
+        errors: list[str] = []
 
-        Args:
-            path: Path to the JSON file containing the HS3 specification
-            verbose: If True, show all errors. If False, show first 20 and summarize rest.
-            suppress_traceback: If True, suppress traceback on validation errors (default True).
+        # Resolve Likelihood fields first (analyses reference likelihoods)
+        if self.likelihoods is not None:
+            for likelihood in self.likelihoods:
+                self._resolve_likelihood_fields(likelihood, errors)
 
-        Returns:
-            Workspace: The loaded workspace instance
-        """
-        path_obj = Path(path)
-        with path_obj.open("r", encoding="utf-8") as f:
-            spec_dict = json.load(f)
+        # Resolve Analysis fields
+        if self.analyses is not None:
+            for analysis in self.analyses:
+                self._resolve_analysis_fields(analysis, errors)
 
-        try:
-            return cls(**spec_dict)
-        except ValidationError as e:
-            error_summary = cls._format_validation_error(e, path, verbose)
+        if errors:
+            msg = "Workspace has unresolved references:\n" + "\n".join(
+                f"  - {e}" for e in errors
+            )
+            raise WorkspaceValidationError(msg)
 
-            if suppress_traceback:
-                sys.tracebacklimit = 0
-            raise WorkspaceValidationError(error_summary) from None
+    def model_post_init(self, __context: Any, /) -> None:
+        """Resolve foreign key references after workspace construction."""
+        self._resolve_foreign_keys()
 
     @classmethod
     def _format_validation_error(
@@ -296,6 +264,38 @@ class Workspace(BaseModel):
             )
 
         return "".join(parts)
+
+    @classmethod
+    def load(
+        cls,
+        path: str | os.PathLike[str],
+        *,
+        verbose: bool = False,
+        suppress_traceback: bool = True,
+    ) -> Workspace:
+        """
+        Load workspace from a JSON file.
+
+        Args:
+            path: Path to the JSON file containing the HS3 specification
+            verbose: If True, show all errors. If False, show first 20 and summarize rest.
+            suppress_traceback: If True, suppress traceback on validation errors (default True).
+
+        Returns:
+            Workspace: The loaded workspace instance
+        """
+        path_obj = Path(path)
+        with path_obj.open("r", encoding="utf-8") as f:
+            spec_dict = json.load(f)
+
+        try:
+            return cls(**spec_dict)
+        except ValidationError as e:
+            error_summary = cls._format_validation_error(e, path, verbose)
+
+            if suppress_traceback:
+                sys.tracebacklimit = 0
+            raise WorkspaceValidationError(error_summary) from None
 
     def _compute_observables(self) -> dict[str, tuple[float, float]]:
         """

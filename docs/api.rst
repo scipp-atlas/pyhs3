@@ -92,6 +92,36 @@ Distributions
    QQZZBackgroundDist
    FastVerticalInterpHistPdf2D2Dist
 
+HistFactory
+-----------
+
+.. currentmodule:: pyhs3.distributions.histfactory
+
+.. autosummary::
+   :toctree: _generated/
+   :nosignatures:
+
+   samples.Sample
+   samples.Samples
+   data.SampleData
+   modifiers.Modifier
+   modifiers.ModifierData
+   modifiers.HasConstraint
+   modifiers.ParameterModifier
+   modifiers.ParametersModifier
+   modifiers.NormFactorModifier
+   modifiers.NormSysModifier
+   modifiers.HistoSysModifier
+   modifiers.ShapeFactorModifier
+   modifiers.ShapeSysModifier
+   modifiers.StatErrorModifier
+   modifiers.NormSysData
+   modifiers.HistoSysData
+   modifiers.HistoSysDataContents
+   modifiers.ShapeSysData
+   modifiers.StatErrorData
+   modifiers.Modifiers
+
 Axes
 ----
 

@@ -44,14 +44,6 @@ class Domain(NamedModel):
         """List of axis names in this domain. Note: may not be implemented for all domain types."""
         raise NotImplementedError
 
-    def __len__(self) -> int:
-        """Number of axes in this domain."""
-        return 0
-
-    def __contains__(self, _axis_name: str) -> bool:
-        """Check if an axis with the given name exists in this domain."""
-        return False
-
     def get(self, _axis_name: str, default: Any = None) -> Any:
         """Get axis bounds for a parameter name. Note: may not be implemented for all domain types."""
         return default
@@ -59,6 +51,14 @@ class Domain(NamedModel):
     def __getitem__(self, axis_name: str) -> Any:
         """Get axis bounds for a parameter name (dict-like access)."""
         raise KeyError(axis_name)
+
+    def __contains__(self, _axis_name: str) -> bool:
+        """Check if an axis with the given name exists in this domain."""
+        return False
+
+    def __len__(self) -> int:
+        """Number of axes in this domain."""
+        return 0
 
 
 class ProductDomain(Domain):
@@ -110,14 +110,6 @@ class ProductDomain(Domain):
         """List of axis names in this domain."""
         return [axis.name for axis in self.axes]
 
-    def __len__(self) -> int:
-        """Number of axes in this domain."""
-        return len(self.axes)
-
-    def __contains__(self, axis_name: str) -> bool:
-        """Check if an axis with the given name exists in this domain."""
-        return axis_name in self._axes_map
-
     def get(
         self, axis_name: str, default: tuple[float | None, float | None] = (None, None)
     ) -> tuple[float | None, float | None]:
@@ -148,6 +140,14 @@ class ProductDomain(Domain):
             return (axis.min, axis.max)
         msg = f"No axis named '{axis_name}' found in domain '{self.name}'"
         raise KeyError(msg)
+
+    def __contains__(self, axis_name: str) -> bool:
+        """Check if an axis with the given name exists in this domain."""
+        return axis_name in self._axes_map
+
+    def __len__(self) -> int:
+        """Number of axes in this domain."""
+        return len(self.axes)
 
 
 # Define the union type for all domain configurations

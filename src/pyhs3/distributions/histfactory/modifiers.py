@@ -526,11 +526,11 @@ class Modifiers(RootModel[list[ModifierType]]):
         ),
     ] = Field(default_factory=list)
 
+    def __getitem__(self, index: int) -> ModifierType:
+        return self.root[index]
+
     def __iter__(self) -> Iterator[ModifierType]:  # type: ignore[override]
         return iter(self.root)
 
     def __len__(self) -> int:
         return len(self.root)
-
-    def __getitem__(self, index: int) -> ModifierType:
-        return self.root[index]

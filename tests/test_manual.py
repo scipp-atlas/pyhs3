@@ -233,34 +233,22 @@ def plot_histogram_from_bins(heights, num_bins, data_range, figname=None):
 
     plt.bar(bin_centers, heights, width=bin_width, align="center")
 
-
-def base_name(name):
-    return (
-        name.replace("AsimovData_", "")
-        .replace("combData", "")
-        .replace("binned_", "")
-        .strip("_")
-    )
-
-
-def plot_dist(model, parameters, dist_name, data_set, plot_name=None):
+def plot_dist(model, parameters, dist_name, data_set, factor=1, plot_name=None):
     xs = [val[0] for val in data_set.entries]
     ys = [
-        model.logpdf_unsafe(dist_name, **{**parameters, data_set.axes[0].name: [x]})
+        model.pdf_unsafe(dist_name, **{**parameters, data_set.axes[0].name: [x]}) * factor
         for x in xs
     ]
 
     plt.figure(plot_name)
     plt.title(plot_name)
     plt.scatter(xs, ys)
+    plt.ylim(0,18)
 
 
 def main():
     ws = hs3.Workspace(**ws_json())
-
     test_mus = json.loads(test_data)["mu_HH"]
-    # test_mus = np.linspace(-10,-5,20)
-
     cached_file = "ws.pkl"
 
     if Path(cached_file).exists():
@@ -288,23 +276,6 @@ def main():
     nlls = []
     parameters = {par.name: par.value for par in model.parameterset}
 
-    with Path("nll_output_test.json").open("w") as f:
-        nlls.append(sum(nlls[i] for i in range(len(nlls))))
-        json.dump(nlls, f, indent=2)
-        print("NLLs output saved to nll_output_test.json")
-
-    data = ws.data["combDatabinned_Run2HM_2"]
-    nz = nz_weighted_entries(data.entries, data.weights)
-    occurrences = np.zeros(220)
-    ms = np.linspace(100, 200, 220)
-    for i in range(1, 220):
-        for m_obs in nz:
-            if (m_obs > ms[i - 1]) and (m_obs < ms[i + 1]):
-                occurrences[i] += 1
-
-    print(nz)
-    print(occurrences)
-
     binned = [d for d in ws.data.root if getattr(d, "type", None) == "binned"]
     unbinned = [d for d in ws.data.root if getattr(d, "type", None) == "unbinned"]
 
@@ -312,71 +283,18 @@ def main():
 
     nll_given_mu = []
     nll_given_mu_without_constraints = []
-    mus = [-1000, -100, -10, -1, 0, 1, 10, 100, 1000]
 
     for dataset in unbinned_filtered:
         key = dataset.axes[0].name
         value = parameters[key]
         parameters[key] = [value] if np.ndim(value) == 0 else value
 
-    # _modelSB_Run2HM_3
-    # dist type: "crystalball_doublesided_dist"
-    # _modelSB_Run2HM_1
-    # _modelSB_Run2HM_2
-    # _modelSB_Run2HM_3
-    # _modelSB_Run2LM_1
-    # _modelSB_Run2LM_2
-    # _modelSB_Run2LM_3
-    # _modelSB_Run2LM_4
-    # _modelSB_Run3HM_1
-    # _modelSB_Run3HM_2
-    # _modelSB_Run3HM_3
-    # _modelSB_Run3LM_1
-    # _modelSB_Run3LM_2
-    # _modelSB_Run3LM_3
-    # _modelSB_Run3LM_4
-
-    # for each plot plot pdfs and coefficients on same plot
-
-    # 1/9:
-    # investigate: yield__ggFH_mc20ade_Run2HM_1 and the pdf version which the yield is multiplied by
-    ggFH_dist = ws.distributions["_modelSB_Run2HM_1"]
-    with PdfPages("ggFH_plot.pdf") as pdf:
-        plot_dist(model, parameters, ggFH_dist.name, unbinned_filtered[0])
-        pdf.savefig()
-        plt.close()
-
-    ggFH_yield = ws.functions["yield__VBFH_mc20ade_Run2HM_1"]
-    # ggFH_yield = ws.functions['yield__background_Run2HM_1']
-    for factor in ggFH_yield.factors:
-        if factor in parameters:
-            print(f"factor: {factor}, value: {parameters[factor]}")
-        else:
-            print(
-                f"function: {factor}, with factors:\n\t{ws.functions[factor].factors}"
-            )
-
-    # 1/16:
-    # modelSB is a term within model, continue checking contraint terms within model to find why the overall normalization is so small
     run2hm1 = ws.distributions["_model_Run2HM_1"]
-    # for con in run2hm1.factors[1:]:
-    #     if con in ws.distributions:
-    #         con = ws.distributions[con]
-    #         if con.type == 'gaussian_dist':
-    #             parameters[con.mean] = 1.0
-    #             print(f'constraint = {con.name}, gauss mean = {parameters[con.mean]}')
 
-    # breakpoint()
-
-    # with PdfPages("log_distribution_plots.pdf") as pdf:
-    #     for dist, data_set in zip(like.distributions, unbinned_filtered):
-    #         plot_dist(model, parameters, dist.name, data_set, plot_name=f"distribution: {dist.name}")
-    #         pdf.savefig()
-    #         plt.close()
-    sb_2hm1 = ws.distributions[run2hm1.factors[0]]
-    with PdfPages("sb_2hm1_likelihood.pdf") as pdf:
+    sb_run2hm1 = ws.distributions[run2hm1.factors[0]]
+    with PdfPages("sb_run2hm1_likelihood.pdf") as pdf:
         combdatarun2hm1 = unbinned_filtered[0]
-        plot_dist(model, parameters, sb_2hm1.name, combdatarun2hm1, plot_name=f"distribution: {sb_2hm1.name}")
+        plot_dist(model, parameters, sb_run2hm1.name, combdatarun2hm1, plot_name=f"distribution: {sb_run2hm1.name}", factor=56*2.5)
         pdf.savefig()
         plt.close()
     breakpoint()
@@ -420,6 +338,7 @@ def main():
 
             nlls.append(nll)
             unconstrained_nlls.append(unll)
+        # 4/3: make plot of nll minimization overlayed with alex wangs values, both with min set to zero for scale
 
         nll_given_mu.append(np.sum(nlls))
         nll_given_mu_without_constraints.append(np.sum(unconstrained_nlls))
@@ -434,48 +353,6 @@ def main():
     plt.xlabel("mu_HH")
     plt.ylabel("nll")
     plt.savefig("nll_curve.pdf")
-    breakpoint()
-
-    for b in binned:
-        axis = b.axes[0]
-        plot_histogram_from_bins(
-            b.contents, axis.nbins, (axis.min, axis.max), figname=b.name
-        )
-    with PdfPages("binned_histograms.pdf") as pdf:
-        for num in plt.get_fignums():
-            fig = plt.figure(num)
-            name = fig.get_label()
-            if name:
-                fig.suptitle(name, fontsize=12, y=0.98)
-            pdf.savefig(fig, bbox_inches="tight")
-            plt.close(fig)
-
-    for u in unbinned:
-        # if "binned" in u.name:
-        build_histogram(
-            nz_weighted_entries(u.entries, u.weights),
-            bins=220,
-            range=(100, 200),
-            figname=u.name,
-        )
-    with PdfPages("unbinned_histograms.pdf") as pdf:
-        for num in plt.get_fignums():
-            fig = plt.figure(num)
-            name = fig.get_label()
-            if name:
-                fig.suptitle(name, fontsize=12, y=0.98)
-            pdf.savefig(fig, bbox_inches="tight")
-            plt.close(fig)
-
-    print(f"{'Binned Data':<45} | {'Unbinned Data'}")
-    print("-" * 80)
-    while len(binned) > len(unbinned):
-        unbinned.append("")
-    for b, u in zip(binned, unbinned):
-        print(f"{b.name:<45} | {u}")
-
-    out_pdf = "all_histograms.pdf"
-
 
 if __name__ == "__main__":
     main()

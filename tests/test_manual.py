@@ -4,7 +4,7 @@ from inspect import Parameter
 import json
 import pickle
 from pathlib import Path
-from symbol import parameters
+# from symbol import parameters
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -196,7 +196,7 @@ def ws_json():
     This workspace is from Alex Wang for the diHiggs gamgam bb analysis,
     related to GitHub issue #41.
     """
-    fpath = Path(skhep_testdata_path("test_hs3_unbinned_pyhs3_validation_issue41.json"))
+    fpath = Path.home() / ".local" / "skhepdata" / "new_WS-bbyy-non-resonant-non-param.json"
     return json.loads(fpath.read_text(encoding="utf-8"))
 
 
@@ -429,6 +429,8 @@ def main():
 
     # plot seperate regions of nll curves
     # plot total nll curve over all parameter sets
+
+    breakpoint()
 
 if __name__ == "__main__":
     main()

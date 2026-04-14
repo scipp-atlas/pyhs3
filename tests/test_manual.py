@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from inspect import Parameter
 import json
 import pickle
 from pathlib import Path
+from symbol import parameters
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
+from pyhs3 import parameter_points
 from skhep_testdata import data_path as skhep_testdata_path
 
 import pyhs3 as hs3
@@ -233,18 +236,61 @@ def plot_histogram_from_bins(heights, num_bins, data_range, figname=None):
 
     plt.bar(bin_centers, heights, width=bin_width, align="center")
 
-def plot_dist(model, parameters, dist_name, data_set, factor=1, plot_name=None):
+def plot_dist(
+    model, 
+    parameters, 
+    dist_name, 
+    data_set, 
+    factor=1, 
+    plot_name=None,
+    label=None,
+    linewidth=2.5,
+    color="red"
+    ):
     xs = [val[0] for val in data_set.entries]
     ys = [
         model.pdf_unsafe(dist_name, **{**parameters, data_set.axes[0].name: [x]}) * factor
         for x in xs
     ]
 
+    sorted_pairs = sorted(zip(xs, ys), key=lambda p: p[0])
+    xs, ys = zip(*sorted_pairs) if sorted_pairs else ([], [])
+
     plt.figure(plot_name)
     plt.title(plot_name)
-    plt.scatter(xs, ys)
+    if label != None:
+        plt.plot(xs, ys, color=color, linewidth=linewidth, label=label)
+    else:
+        plt.plot(xs, ys, color=color, linewidth=linewidth)
     plt.ylim(0,18)
 
+def get_all_psets(workspace):
+    psets = []
+    for i in range(len(workspace.parameter_points)):
+        if i == 0:
+            continue
+        psets.append(
+            ParameterSet(
+                name=f"pset {i}",
+                parameters=[
+                    *workspace.parameter_points[0].parameters
+                    *workspace.parameter_points[i].parameters
+                ]
+            )
+        )
+    psets.append(
+        ParameterSet(
+            name=f'main_set',
+            parameters=[
+                *workspace.parameter_points[0].parameters
+                *workspace.parameter_points["unconditionalGlabs_muhat"].parameters
+                *workspace.parameter_points["unconditionalNuis_muhat"].parameters
+                *workspace.parameters_points["POI_muhat"].parameters
+            ]
+        )
+    )
+
+    return psets
 
 def main():
     ws = hs3.Workspace(**ws_json())
@@ -276,7 +322,6 @@ def main():
     nlls = []
     parameters = {par.name: par.value for par in model.parameterset}
 
-    binned = [d for d in ws.data.root if getattr(d, "type", None) == "binned"]
     unbinned = [d for d in ws.data.root if getattr(d, "type", None) == "unbinned"]
 
     unbinned_filtered = [data for data in unbinned if "binned" not in data.name]
@@ -290,24 +335,39 @@ def main():
         parameters[key] = [value] if np.ndim(value) == 0 else value
 
     run2hm1 = ws.distributions["_model_Run2HM_1"]
-
     sb_run2hm1 = ws.distributions[run2hm1.factors[0]]
+
+    breakpoint()
+
+    # reproduce likelihood plot for run2hm1
+
     with PdfPages("sb_run2hm1_likelihood.pdf") as pdf:
         combdatarun2hm1 = unbinned_filtered[0]
-        plot_dist(model, parameters, sb_run2hm1.name, combdatarun2hm1, plot_name=f"distribution: {sb_run2hm1.name}", factor=56*2.5)
+        plot_dist(model, parameters, sb_run2hm1.name, combdatarun2hm1, plot_name=f"distribution: {sb_run2hm1.name}", factor=56*2.5, label="Total Background")
+
+        # overlay histogram of combdata_run2hm1 bin heights
+        h = combdatarun2hm1.to_hist(nbins=22)
+        bin_edges = h.axes[0].edges
+        bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
+        heights = h.values()
+        mask = heights > 0.001
+        plt.scatter(bin_centers[mask], heights[mask], color="black", label="combdata_run2hm1")
+        plt.legend()
+
         pdf.savefig()
         plt.close()
-    breakpoint()
+
+    # calculate nll values
 
     i = 0
     for mu in test_mus:
         i += 1
         s = f"({i}/{len(test_mus)})"
-        print(f"computing nll given mu = {mu}{s:>{20}}")
+        print(f"computing nll given mu = {mu }{s:>{20}}")
         parameters["mu_HH"] = mu
         nlls = []
         unconstrained_nlls = []
-        for i, (topdist, data_set) in enumerate(
+        for j, (topdist, data_set) in enumerate(
             zip(like.distributions, unbinned_filtered)
         ):
             # print(f"building dist {dist_name} {i}/{len(like.distributions)}")
@@ -334,7 +394,7 @@ def main():
                 unll += unconstrained_contribution
                 # print(f"value {val} results in nll sum == {nll}, contribution == {contribution}, dataset = {data_set.name}, distname = {dist_name}")
 
-            # pdf__ggFHH_kl1p0_mc23a_Run3LM_4
+            # pdf__ggFHH_kl1p0_mc23a_Run3LM_4 
 
             nlls.append(nll)
             unconstrained_nlls.append(unll)
@@ -353,6 +413,22 @@ def main():
     plt.xlabel("mu_HH")
     plt.ylabel("nll")
     plt.savefig("nll_curve.pdf")
+
+    # make plot of comparison graph:
+    provided_nll = json.loads(test_data)["nll"]
+    provided_nll_shifted = [v - min(provided_nll) for v in provided_nll]
+    computed_nll_shifted = [v - min(nll_given_mu_without_constraints) for v in nll_given_mu_without_constraints]
+    plt.figure()
+    plt.scatter(test_mus, provided_nll_shifted, label="provided nll", marker="o")
+    plt.scatter(test_mus, computed_nll_shifted, label="computed nll (unconstrained)", marker="x")
+    plt.xlabel("mu_HH")
+    plt.ylabel("nll")
+    plt.title("NLL Comparison")
+    plt.legend()
+    plt.savefig("nll_comparison.pdf")
+
+    # plot seperate regions of nll curves
+    # plot total nll curve over all parameter sets
 
 if __name__ == "__main__":
     main()

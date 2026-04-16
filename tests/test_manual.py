@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from inspect import Parameter
 import json
 import pickle
 from pathlib import Path
+# from symbol import parameters
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
+from pyhs3 import parameter_points
 from skhep_testdata import data_path as skhep_testdata_path
 
 import pyhs3 as hs3
@@ -193,7 +196,7 @@ def ws_json():
     This workspace is from Alex Wang for the diHiggs gamgam bb analysis,
     related to GitHub issue #41.
     """
-    fpath = Path(skhep_testdata_path("test_hs3_unbinned_pyhs3_validation_issue41.json"))
+    fpath = Path.home() / ".local" / "skhepdata" / "WS-bbyy-non-resonant-non-param-isofix-unbinnedFix.json"
     return json.loads(fpath.read_text(encoding="utf-8"))
 
 
@@ -233,51 +236,84 @@ def plot_histogram_from_bins(heights, num_bins, data_range, figname=None):
 
     plt.bar(bin_centers, heights, width=bin_width, align="center")
 
-
-def base_name(name):
-    return (
-        name.replace("AsimovData_", "")
-        .replace("combData", "")
-        .replace("binned_", "")
-        .strip("_")
-    )
-
-
-def plot_dist(model, parameters, dist_name, data_set, plot_name=None):
+def plot_dist(
+    model, 
+    parameters, 
+    dist_name, 
+    data_set, 
+    factor=1, 
+    plot_name=None,
+    label=None,
+    linewidth=2.5,
+    color="red"
+    ):
     xs = [val[0] for val in data_set.entries]
     ys = [
-        model.pdf_unsafe(dist_name, **{**parameters, data_set.axes[0].name: [x]})
+        model.pdf_unsafe(dist_name, **{**parameters, data_set.axes[0].name: [x]}) * factor
         for x in xs
     ]
 
+    sorted_pairs = sorted(zip(xs, ys), key=lambda p: p[0])
+    xs, ys = zip(*sorted_pairs) if sorted_pairs else ([], [])
+
     plt.figure(plot_name)
     plt.title(plot_name)
-    plt.scatter(xs, ys)
+    if label != None:
+        plt.plot(xs, ys, color=color, linewidth=linewidth, label=label)
+    else:
+        plt.plot(xs, ys, color=color, linewidth=linewidth)
+    plt.ylim(0,18)
 
+def get_all_psets(workspace):
+    psets = []
+    for i in range(len(workspace.parameter_points)):
+        if i == 0:
+            continue
+        psets.append(
+            ParameterSet(
+                name=f"pset {i}",
+                parameters=[
+                    *workspace.parameter_points[0].parameters
+                    *workspace.parameter_points[i].parameters
+                ]
+            )
+        )
+    psets.append(
+        ParameterSet(
+            name=f'main_set',
+            parameters=[
+                *workspace.parameter_points[0].parameters
+                *workspace.parameter_points["unconditionalGlabs_muhat"].parameters
+                *workspace.parameter_points["unconditionalNuis_muhat"].parameters
+                *workspace.parameters_points["POI_muhat"].parameters
+            ]
+        )
+    )
+
+    return psets
 
 def main():
     ws = hs3.Workspace(**ws_json())
-
     test_mus = json.loads(test_data)["mu_HH"]
-    # test_mus = np.linspace(-10,-5,20)
-
     cached_file = "ws.pkl"
 
-    if Path(cached_file).exists():
-        print("loading model...")
-        with Path(cached_file).open("rb") as f:
-            model = pickle.load(f)
+    # if Path(cached_file).exists():
+    #     print("loading model...")
+    #     with Path(cached_file).open("rb") as f:
+    #         model = pickle.load(f)
 
-    else:
-        merged_pset = ParameterSet(
-            name="merged",
-            parameters=[
-                *ws.parameter_points[0].parameters,
-                *ws.parameter_points["unconditionalGlobs_muhat"].parameters,
-            ],
-        )
-        print("building model")
-        model = ws.model(parameter_set=merged_pset)
+    # else:
+    merged_pset = ParameterSet(
+        name="merged",
+        parameters=[
+            *ws.parameter_points[0].parameters,
+            *ws.parameter_points["unconditionalGlobs_muhat"].parameters,
+            *ws.parameter_points["unconditionalNuis_muhat"].parameters,
+            *ws.parameter_points["POI_muhat"].parameters
+        ],
+    )
+    print("building model")
+    model = ws.model(parameter_set=merged_pset)
 
     with Path(cached_file).open("wb") as f:
         pickle.dump(model, f)
@@ -288,169 +324,113 @@ def main():
     nlls = []
     parameters = {par.name: par.value for par in model.parameterset}
 
-    with Path("nll_output_test.json").open("w") as f:
-        nlls.append(sum(nlls[i] for i in range(len(nlls))))
-        json.dump(nlls, f, indent=2)
-        print("NLLs output saved to nll_output_test.json")
-
-    data = ws.data["combDatabinned_Run2HM_2"]
-    nz = nz_weighted_entries(data.entries, data.weights)
-    occurrences = np.zeros(220)
-    ms = np.linspace(100, 200, 220)
-    for i in range(1, 220):
-        for m_obs in nz:
-            if (m_obs > ms[i - 1]) and (m_obs < ms[i + 1]):
-                occurrences[i] += 1
-
-    print(nz)
-    print(occurrences)
-
-    binned = [d for d in ws.data.root if getattr(d, "type", None) == "binned"]
     unbinned = [d for d in ws.data.root if getattr(d, "type", None) == "unbinned"]
 
     unbinned_filtered = [data for data in unbinned if "binned" not in data.name]
 
     nll_given_mu = []
-    mus = [-1000, -100, -10, -1, 0, 1, 10, 100, 1000]
+    nll_given_mu_without_constraints = []
 
     for dataset in unbinned_filtered:
         key = dataset.axes[0].name
         value = parameters[key]
-        parameters[key] = [value] if np.ndim(value) == 0 else value
+        parameters[key] = [value] if np.ndim(value) == 0 else value 
 
-    # _modelSB_Run2HM_3
-    # dist type: "crystalball_doublesided_dist"
-    # _modelSB_Run2HM_1
-    # _modelSB_Run2HM_2
-    # _modelSB_Run2HM_3
-    # _modelSB_Run2LM_1
-    # _modelSB_Run2LM_2
-    # _modelSB_Run2LM_3
-    # _modelSB_Run2LM_4
-    # _modelSB_Run3HM_1
-    # _modelSB_Run3HM_2
-    # _modelSB_Run3HM_3
-    # _modelSB_Run3LM_1
-    # _modelSB_Run3LM_2
-    # _modelSB_Run3LM_3
-    # _modelSB_Run3LM_4
+    run2hm1 = ws.distributions["_model_Run2HM_1"]
+    sb_run2hm1 = ws.distributions[run2hm1.factors[0]]
 
-    # for each plot plot pdfs and coefficients on same plot
+    # reproduce likelihood plot for run2hm1
 
-    # 1/9:
-    # investigate: yield__ggFH_mc20ade_Run2HM_1 and the pdf version which the yield is multiplied by
-    ggFH_dist = ws.distributions["_modelSB_Run2HM_1"]
-    with PdfPages("ggFH_plot.pdf") as pdf:
-        plot_dist(model, parameters, ggFH_dist.name, unbinned_filtered[0])
+    with PdfPages("sb_run2hm1_likelihood.pdf") as pdf:
+        combdatarun2hm1 = unbinned_filtered[0]
+        plot_dist(model, parameters, sb_run2hm1.name, combdatarun2hm1, plot_name=f"distribution: {sb_run2hm1.name}", factor=56*2.5, label="Total Background")
+
+        # overlay histogram of combdata_run2hm1 bin heights
+        h = combdatarun2hm1.to_hist(nbins=22)
+        bin_edges = h.axes[0].edges
+        bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
+        heights = h.values()
+        mask = heights > 0.001
+        plt.scatter(bin_centers[mask], heights[mask], color="black", label="combdata_run2hm1")
+        plt.legend()
+
         pdf.savefig()
         plt.close()
 
-    ggFH_yield = ws.functions["yield__VBFH_mc20ade_Run2HM_1"]
-    # ggFH_yield = ws.functions['yield__background_Run2HM_1']
-    for factor in ggFH_yield.factors:
-        if factor in parameters:
-            print(f"factor: {factor}, value: {parameters[factor]}")
-        else:
-            print(
-                f"function: {factor}, with factors:\n\t{ws.functions[factor].factors}"
-            )
+    # calculate nll values
 
-    # 1/16:
-    # modelSB is a term within model, continue checking contraint terms within model to find why the overall normalization is so small
-    run2hm1 = ws.distributions["_model_Run2HM_1"]
-    # for con in run2hm1.factors[1:]:
-    #     if con in ws.distributions:
-    #         con = ws.distributions[con]
-    #         if con.type == 'gaussian_dist':
-    #             parameters[con.mean] = 1.0
-    #             print(f'constraint = {con.name}, gauss mean = {parameters[con.mean]}')
-
-    # breakpoint()
-
-    # with PdfPages("log_distribution_plots.pdf") as pdf:
-    #     for dist_name, data_set in zip(like.distributions, unbinned_filtered):
-    #         plot_dist(model, parameters, dist_name, data_set, plot_name=f"distribution: {dist_name}")
-    #         pdf.savefig()
-    #         plt.close()
     i = 0
     for mu in test_mus:
         i += 1
         s = f"({i}/{len(test_mus)})"
-        print(f"computing nll given mu = {mu}{s:>{20}}")
+        print(f"computing nll given mu = {mu }{s:>{20}}")
         parameters["mu_HH"] = mu
         nlls = []
-        for i, (topdist, data_set) in enumerate(
+        unconstrained_nlls = []
+        for j, (topdist, data_set) in enumerate(
             zip(like.distributions, unbinned_filtered)
         ):
             # print(f"building dist {dist_name} {i}/{len(like.distributions)}")
-            dist = ws.distributions[topdist.factors[0]]
+            unconstrained_dist = ws.distributions[topdist.factors[0]]
+            dist = topdist
 
             nll = 0
+            unll = 0
+
             print(f"datset = {data_set.name}")
             for val in nz_weighted_entries(data_set.entries, data_set.weights):
                 temp = {**parameters, data_set.axes[0].name: [val]}
+                unconstrained_contribution = (
+                    -2
+                    * model.logpdf_unsafe(unconstrained_dist.name, **temp)
+                    / len(nz_weighted_entries(data_set.entries, data_set.weights))
+                )
                 contribution = (
                     -2
                     * model.logpdf_unsafe(dist.name, **temp)
                     / len(nz_weighted_entries(data_set.entries, data_set.weights))
                 )
                 nll += contribution
+                unll += unconstrained_contribution
                 # print(f"value {val} results in nll sum == {nll}, contribution == {contribution}, dataset = {data_set.name}, distname = {dist_name}")
 
-            # pdf__ggFHH_kl1p0_mc23a_Run3LM_4
+            # pdf__ggFHH_kl1p0_mc23a_Run3LM_4 
 
             nlls.append(nll)
+            unconstrained_nlls.append(unll)
+        # 4/3: make plot of nll minimization overlayed with alex wangs values, both with min set to zero for scale
 
         nll_given_mu.append(np.sum(nlls))
+        nll_given_mu_without_constraints.append(np.sum(unconstrained_nlls))
 
-    breakpoint()
     plt.figure()
-    plt.plot(test_mus, nll_given_mu)
+    plt.scatter(test_mus, nll_given_mu_without_constraints)
     plt.xlabel("mu_HH")
     plt.ylabel("nll")
-    plt.savefig("nll_values_with_some_normalized_functions.pdf")
+    plt.savefig("nll_curve_without_constraints.pdf")
+    plt.figure()
+    plt.scatter(test_mus, nll_given_mu)
+    plt.xlabel("mu_HH")
+    plt.ylabel("nll")
+    plt.savefig("nll_curve.pdf")
+
+    # make plot of comparison graph:
+    provided_nll = json.loads(test_data)["nll"]
+    provided_nll_shifted = [v - min(provided_nll) for v in provided_nll]
+    computed_nll_shifted = [v - min(nll_given_mu_without_constraints) for v in nll_given_mu_without_constraints]
+    plt.figure()
+    plt.scatter(test_mus, provided_nll_shifted, label="provided nll", marker="o")
+    plt.scatter(test_mus, computed_nll_shifted, label="computed nll (unconstrained)", marker="x")
+    plt.xlabel("mu_HH")
+    plt.ylabel("nll")
+    plt.title("NLL Comparison")
+    plt.legend()
+    plt.savefig("nll_comparison.pdf")
+
+    # plot seperate regions of nll curves
+    # plot total nll curve over all parameter sets
+
     breakpoint()
-
-    for b in binned:
-        axis = b.axes[0]
-        plot_histogram_from_bins(
-            b.contents, axis.nbins, (axis.min, axis.max), figname=b.name
-        )
-    with PdfPages("binned_histograms.pdf") as pdf:
-        for num in plt.get_fignums():
-            fig = plt.figure(num)
-            name = fig.get_label()
-            if name:
-                fig.suptitle(name, fontsize=12, y=0.98)
-            pdf.savefig(fig, bbox_inches="tight")
-            plt.close(fig)
-
-    for u in unbinned:
-        # if "binned" in u.name:
-        build_histogram(
-            nz_weighted_entries(u.entries, u.weights),
-            bins=220,
-            range=(100, 200),
-            figname=u.name,
-        )
-    with PdfPages("unbinned_histograms.pdf") as pdf:
-        for num in plt.get_fignums():
-            fig = plt.figure(num)
-            name = fig.get_label()
-            if name:
-                fig.suptitle(name, fontsize=12, y=0.98)
-            pdf.savefig(fig, bbox_inches="tight")
-            plt.close(fig)
-
-    print(f"{'Binned Data':<45} | {'Unbinned Data'}")
-    print("-" * 80)
-    while len(binned) > len(unbinned):
-        unbinned.append("")
-    for b, u in zip(binned, unbinned):
-        print(f"{b.name:<45} | {u}")
-
-    out_pdf = "all_histograms.pdf"
-
 
 if __name__ == "__main__":
     main()

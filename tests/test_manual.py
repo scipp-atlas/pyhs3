@@ -196,7 +196,7 @@ def ws_json():
     This workspace is from Alex Wang for the diHiggs gamgam bb analysis,
     related to GitHub issue #41.
     """
-    fpath = Path.home() / ".local" / "skhepdata" / "new_WS-bbyy-non-resonant-non-param.json"
+    fpath = Path.home() / ".local" / "skhepdata" / "WS-bbyy-non-resonant-non-param-isofix-unbinnedFix.json"
     return json.loads(fpath.read_text(encoding="utf-8"))
 
 
@@ -297,21 +297,23 @@ def main():
     test_mus = json.loads(test_data)["mu_HH"]
     cached_file = "ws.pkl"
 
-    if Path(cached_file).exists():
-        print("loading model...")
-        with Path(cached_file).open("rb") as f:
-            model = pickle.load(f)
+    # if Path(cached_file).exists():
+    #     print("loading model...")
+    #     with Path(cached_file).open("rb") as f:
+    #         model = pickle.load(f)
 
-    else:
-        merged_pset = ParameterSet(
-            name="merged",
-            parameters=[
-                *ws.parameter_points[0].parameters,
-                *ws.parameter_points["unconditionalGlobs_muhat"].parameters,
-            ],
-        )
-        print("building model")
-        model = ws.model(parameter_set=merged_pset)
+    # else:
+    merged_pset = ParameterSet(
+        name="merged",
+        parameters=[
+            *ws.parameter_points[0].parameters,
+            *ws.parameter_points["unconditionalGlobs_muhat"].parameters,
+            *ws.parameter_points["unconditionalNuis_muhat"].parameters,
+            *ws.parameter_points["POI_muhat"].parameters
+        ],
+    )
+    print("building model")
+    model = ws.model(parameter_set=merged_pset)
 
     with Path(cached_file).open("wb") as f:
         pickle.dump(model, f)
@@ -332,12 +334,10 @@ def main():
     for dataset in unbinned_filtered:
         key = dataset.axes[0].name
         value = parameters[key]
-        parameters[key] = [value] if np.ndim(value) == 0 else value
+        parameters[key] = [value] if np.ndim(value) == 0 else value 
 
     run2hm1 = ws.distributions["_model_Run2HM_1"]
     sb_run2hm1 = ws.distributions[run2hm1.factors[0]]
-
-    breakpoint()
 
     # reproduce likelihood plot for run2hm1
 

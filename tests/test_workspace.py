@@ -7,13 +7,16 @@ covering branches in core.py model_post_init.
 
 from __future__ import annotations
 
+import json
+
 import pytest
+from pydantic import ValidationError
 
 from pyhs3 import Workspace
 from pyhs3.analyses import Analyses, Analysis
 from pyhs3.exceptions import WorkspaceValidationError
 from pyhs3.likelihoods import Likelihood, Likelihoods
-from pyhs3.metadata import Metadata
+from pyhs3.metadata import Metadata, PackageInfo
 
 
 class TestWorkspaceNoneCollections:
@@ -164,3 +167,83 @@ class TestWorkspaceRepr:
         # The repr should be a useful string representation
         assert isinstance(repr_str, str)
         assert len(repr_str) > 0
+
+
+class TestRootVersionHint:
+    """Tests for ROOT version validation functionality."""
+
+    def test_packageinfo_validator_old_version(self):
+        """Test that old ROOT version (6.34.04) raises ValidationError."""
+        with pytest.raises(ValidationError, match=r"ROOT version 6.34.04 is older"):
+            PackageInfo(name="ROOT", version="6.34.04")
+
+    def test_packageinfo_validator_new_version(self):
+        """Test that new ROOT version (6.38.0) succeeds."""
+        pkg = PackageInfo(name="ROOT", version="6.38.0")
+        assert pkg.name == "ROOT"
+        assert pkg.version == "6.38.0"
+
+    def test_packageinfo_validator_exactly_min_version(self):
+        """Test that exactly version 6.38 succeeds."""
+        pkg = PackageInfo(name="ROOT", version="6.38")
+        assert pkg.name == "ROOT"
+        assert pkg.version == "6.38"
+
+    def test_packageinfo_validator_non_root_package(self):
+        """Test that non-ROOT packages succeed regardless of version."""
+        pkg = PackageInfo(name="pyhf", version="0.7.6")
+        assert pkg.name == "pyhf"
+        # Even old version strings pass for non-ROOT packages
+        pkg2 = PackageInfo(name="pyhf", version="0.1.0")
+        assert pkg2.version == "0.1.0"
+
+    def test_packageinfo_validator_invalid_version(self):
+        """Test that invalid version string succeeds (can't compare)."""
+        # Invalid versions can't be compared, so they pass
+        pkg = PackageInfo(name="ROOT", version="invalid.version")
+        assert pkg.version == "invalid.version"
+
+    def test_metadata_propagates_root_validation_error(self):
+        """Test that Metadata with old ROOT in packages raises ValidationError."""
+        with pytest.raises(ValidationError, match=r"ROOT version 6.34.04 is older"):
+            Metadata(
+                hs3_version="1.0.0",
+                packages=[PackageInfo(name="ROOT", version="6.34.04")],
+            )
+
+    def test_workspace_load_validation_error_with_old_root(self, tmp_path):
+        """Test Workspace.load() with old ROOT shows ROOT version in error."""
+        invalid_workspace = {
+            "metadata": {
+                "hs3_version": "1.0.0",
+                "packages": [{"name": "ROOT", "version": "6.34.04"}],
+            },
+        }
+        workspace_path = tmp_path / "workspace.json"
+        workspace_path.write_text(json.dumps(invalid_workspace))
+
+        with pytest.raises(WorkspaceValidationError) as exc_info:
+            Workspace.load(workspace_path)
+
+        error_msg = str(exc_info.value)
+        assert "ROOT version 6.34.04 is older" in error_msg
+        assert "6.38" in error_msg
+
+    def test_workspace_load_validation_error_with_new_root(self, tmp_path):
+        """Test Workspace.load() with new ROOT and other errors doesn't mention ROOT."""
+        invalid_workspace = {
+            "metadata": {
+                "hs3_version": "1.0.0",
+                "packages": [{"name": "ROOT", "version": "6.38.0"}],
+            },
+            "analyses": [{"invalid": "field"}],  # Invalid analysis
+        }
+        workspace_path = tmp_path / "workspace.json"
+        workspace_path.write_text(json.dumps(invalid_workspace))
+
+        with pytest.raises(WorkspaceValidationError) as exc_info:
+            Workspace.load(workspace_path)
+
+        error_msg = str(exc_info.value)
+        # Error should be about the invalid analysis, not ROOT version
+        assert "ROOT version" not in error_msg or "6.38.0" in error_msg

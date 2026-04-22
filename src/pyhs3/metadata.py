@@ -7,7 +7,10 @@ package information, authorship, and publication details following the HS3 speci
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import ClassVar
+
+from packaging.version import InvalidVersion, Version
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class PackageInfo(BaseModel):
@@ -22,10 +25,29 @@ class PackageInfo(BaseModel):
         version: Version string of the package
     """
 
+    MIN_ROOT_VERSION: ClassVar[str] = "6.38"
+
     model_config = ConfigDict()
 
     name: str = Field(repr=True)
     version: str = Field(repr=False)
+
+    @model_validator(mode="after")
+    def validate_root_version(self) -> PackageInfo:
+        """Validate that ROOT version meets minimum requirement."""
+        if self.name != "ROOT":
+            return self
+        try:
+            if Version(self.version) < Version(self.MIN_ROOT_VERSION):
+                msg = (
+                    f"ROOT version {self.version} is older than the minimum"
+                    f" required version {self.MIN_ROOT_VERSION}."
+                    f" Please upgrade ROOT and regenerate the workspace."
+                )
+                raise ValueError(msg)
+        except InvalidVersion:
+            pass
+        return self
 
 
 class Metadata(BaseModel):

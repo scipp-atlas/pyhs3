@@ -209,7 +209,6 @@ class Workspace(BaseModel):
             return cls(**spec_dict)
         except ValidationError as e:
             error_summary = cls._format_validation_error(e, path, verbose)
-
             if suppress_traceback:
                 sys.tracebacklimit = 0
             raise WorkspaceValidationError(error_summary) from None

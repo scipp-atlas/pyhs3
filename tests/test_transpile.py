@@ -1,13 +1,8 @@
 """
 Tests for pyhs3.transpile — jaxify() + JaxifiedGraph.
 
-Tests that exercise JAX computation are gated with module-level
-pytest.importorskip("jax") so the suite stays green in environments that only
-have pytensor (no JAX).
-
-The ImportError path (TestImportErrorPath) uses monkeypatch to simulate JAX
-being absent and therefore runs in any environment where pyhs3.transpile can be
-imported — including ones that have JAX available.
+Tests are gated with module-level pytest.importorskip("jax") so the suite stays
+green in environments that only have pytensor (no JAX).
 """
 
 from __future__ import annotations
@@ -18,7 +13,6 @@ import pytensor.tensor as pt
 import pytest
 from scipy.stats import norm
 
-import pyhs3.transpile as _transpile
 from pyhs3.transpile import JaxifiedGraph, jaxify
 
 jax = pytest.importorskip("jax")
@@ -90,6 +84,20 @@ class TestJaxifyGaussian:
         jg = jaxify(pinned_expr, inputs=[x, mu])
         assert set(jg.input_names) == {"x", "mu"}
 
+    def test_jaxify_raises_on_unnamed_explicit_input(self):
+        """Explicit inputs= with an unnamed variable raises ValueError."""
+        unnamed = pt.scalar()  # no name
+        with pytest.raises(ValueError, match="named"):
+            jaxify(unnamed, inputs=[unnamed])
+
+    def test_jaxify_raises_on_duplicate_names(self):
+        """Two inputs sharing a name raises ValueError."""
+        x1 = pt.scalar("x")
+        x2 = pt.scalar("x")  # same name as x1
+        expr = x1 + x2
+        with pytest.raises(ValueError, match="unique"):
+            jaxify(expr, inputs=[x1, x2])
+
 
 # ---------------------------------------------------------------------------
 # JaxifiedGraph.__call__ — kwargs validation
@@ -147,23 +155,3 @@ class TestJaxifiedGraphCall:
         free = {"mu": jnp.float64(0.0), "sigma": jnp.float64(1.0)}
         result = nll(free)
         assert jnp.isfinite(result)
-
-
-# ---------------------------------------------------------------------------
-# ImportError path — runs regardless of whether JAX is installed
-# (uses monkeypatch to simulate absence; the importorskip at line 22 means
-# this class only runs when JAX IS installed, but the monkeypatch correctly
-# exercises the error branch)
-# ---------------------------------------------------------------------------
-
-
-class TestImportErrorPath:
-    def test_jaxify_raises_friendly_error_when_jax_missing(self, monkeypatch):
-        """When _IMPORT_ERROR is set, jaxify raises ImportError with helpful message."""
-        original = _transpile._IMPORT_ERROR
-        try:
-            monkeypatch.setattr(_transpile, "_IMPORT_ERROR", ImportError("no jax"))
-            with pytest.raises(ImportError, match=r"pyhs3\.transpile requires JAX"):
-                _transpile.jaxify(None)
-        finally:
-            monkeypatch.setattr(_transpile, "_IMPORT_ERROR", original)

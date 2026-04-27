@@ -148,6 +148,16 @@ def jaxify(
     fn = jax_funcify(fgraph)
 
     named_inputs: tuple[TensorVar, ...] = tuple(inputs)
-    # v.name is str (not None) because we filtered above or caller provided named inputs
-    names: tuple[str, ...] = tuple(cast(str, v.name) for v in named_inputs)
+    raw_names = tuple(v.name for v in named_inputs)
+    if any(name is None for name in raw_names):
+        msg = (
+            "All inputs must be named for kwargs-based dispatch. "
+            "Provide named TensorVariables or use call_positional()."
+        )
+        raise ValueError(msg)
+    names: tuple[str, ...] = tuple(cast(str, name) for name in raw_names)
+    if len(set(names)) != len(names):
+        duplicates = sorted(name for name in set(names) if names.count(name) > 1)
+        msg = f"Input names must be unique; duplicates found: {duplicates}"
+        raise ValueError(msg)
     return JaxifiedGraph(named_inputs, names, fn)

@@ -156,32 +156,30 @@ class UnbinnedData(Datum):
 
         return self
 
-    def weighted_entries(self, threshold: float = 1e-6) -> list[float]:
+    @property
+    def weighted_entries(self) -> np.ndarray:
         """
-        Return sorted non-negligible weighted first-coordinate values.
+        Entries array with each row multiplied by its event weight.
 
-        Computes ``entry[0] * weight`` for each event, filters out values whose
-        absolute magnitude is at or below ``threshold``, and returns the surviving
-        values sorted in ascending order.
+        Returns a numpy array of shape ``(n_events, n_axes)`` — the same
+        structure as ``entries`` — where each row ``i`` is scaled by
+        ``weights[i]``.  When no weights are present the result equals
+        ``np.array(self.entries)``.
 
-        This is the vectorised replacement for the per-event Python loop in
-        consumer scripts (see issue #115).
+        Axis values can be extracted with standard numpy indexing, e.g.
+        ``data.weighted_entries[:, 0]`` for the first observable.  Threshold
+        filtering and sorting are left to the caller::
 
-        Args:
-            threshold: Minimum absolute magnitude to include (default: 1e-6)
+            vals = data.weighted_entries[:, 0]
+            vals = np.sort(vals[np.abs(vals) > 1e-6])
 
         Returns:
-            Sorted list of weighted first-coordinate values with |val| > threshold
+            ndarray of shape (n_events, n_axes)
         """
-        weights = (
-            self.weights if self.weights is not None else [1.0] * len(self.entries)
-        )
-        result = [
-            entry[0] * w
-            for entry, w in zip(self.entries, weights, strict=True)
-            if abs(entry[0] * w) > threshold
-        ]
-        return sorted(result)
+        arr = np.asarray(self.entries, dtype=np.float64)
+        if self.weights is not None:
+            arr = arr * np.asarray(self.weights, dtype=np.float64)[:, np.newaxis]
+        return arr
 
     def to_hist(
         self, nbins: int = 50

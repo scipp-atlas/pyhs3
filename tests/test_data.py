@@ -720,64 +720,86 @@ class TestData:
 
 
 class TestUnbinnedDataWeightedEntries:
-    """Tests for UnbinnedData.weighted_entries()."""
+    """Tests for UnbinnedData.weighted_entries property."""
 
-    def _make(self, entries, weights=None):
+    def _make_1d(self, entries, weights=None):
         axes = [UnbinnedAxis(name="x", min=0.0, max=10.0)]
         return UnbinnedData(
             name="test", type="unbinned", entries=entries, axes=axes, weights=weights
         )
 
-    def test_weighted_entries_no_weights_returns_sorted_first_coord(self):
-        """Without weights, returns sorted first-coordinate values above threshold."""
-        data = self._make([[3.0], [1.0], [2.0]])
-        result = data.weighted_entries()
-        assert result == pytest.approx([1.0, 2.0, 3.0])
+    def _make_2d(self, entries, weights=None):
+        axes = [
+            UnbinnedAxis(name="x", min=0.0, max=10.0),
+            UnbinnedAxis(name="y", min=0.0, max=5.0),
+        ]
+        return UnbinnedData(
+            name="test2d", type="unbinned", entries=entries, axes=axes, weights=weights
+        )
 
-    def test_weighted_entries_applies_weights(self):
-        """Each entry's first coordinate is multiplied by its weight."""
-        data = self._make([[2.0], [4.0]], weights=[0.5, 0.25])
-        result = data.weighted_entries()
-        # 2.0 * 0.5 = 1.0, 4.0 * 0.25 = 1.0 — both survive threshold, sorted
-        assert result == pytest.approx([1.0, 1.0])
+    def test_weighted_entries_shape_matches_entries(self):
+        """Result has the same (n_events, n_axes) shape as entries."""
+        data = self._make_1d([[1.0], [2.0], [3.0]])
+        result = data.weighted_entries
+        assert result.shape == (3, 1)
 
-    def test_weighted_entries_filters_below_threshold(self):
-        """Values with |weighted val| <= threshold are excluded."""
-        data = self._make([[5.0], [1e-8], [-1e-9]], weights=[1.0, 1.0, 1.0])
-        result = data.weighted_entries(threshold=1e-6)
-        assert result == pytest.approx([5.0])
+    def test_weighted_entries_no_weights_equals_entries_array(self):
+        """Without weights, weighted_entries equals np.array(entries)."""
+        entries = [[1.0, 2.0], [3.0, 4.0]]
+        data = self._make_2d(entries)
+        np.testing.assert_array_equal(data.weighted_entries, np.array(entries))
 
-    def test_weighted_entries_negative_values_kept_if_above_threshold(self):
-        """Negative weighted entries with |val| > threshold are included."""
-        data = self._make([[3.0], [-4.0]], weights=[1.0, 1.0])
-        result = data.weighted_entries()
-        assert result == pytest.approx([-4.0, 3.0])
+    def test_weighted_entries_applies_weights_rowwise(self):
+        """Each row is scaled by its corresponding weight."""
+        entries = [[2.0, 4.0], [1.0, 3.0]]
+        weights = [0.5, 2.0]
+        data = self._make_2d(entries, weights=weights)
+        expected = np.array([[1.0, 2.0], [2.0, 6.0]])
+        np.testing.assert_array_almost_equal(data.weighted_entries, expected)
 
-    def test_weighted_entries_empty_returns_empty(self):
-        """Empty entries list returns empty result."""
+    def test_weighted_entries_preserves_all_axes(self):
+        """All axes are preserved — not squashed to the first coordinate."""
+        entries = [[1.0, 10.0], [2.0, 20.0]]
+        weights = [3.0, 0.5]
+        data = self._make_2d(entries, weights=weights)
+        result = data.weighted_entries
+        assert result.shape == (2, 2)
+        # axis 0 values
+        np.testing.assert_almost_equal(result[:, 0], [3.0, 1.0])
+        # axis 1 values
+        np.testing.assert_almost_equal(result[:, 1], [30.0, 10.0])
+
+    def test_weighted_entries_axis_indexing(self):
+        """Consumers can extract per-axis values with standard numpy indexing."""
+        entries = [[0.5, 9.9], [2.5, 1.1]]
+        data = self._make_2d(entries)
+        x_vals = data.weighted_entries[:, 0]
+        assert x_vals.tolist() == pytest.approx([0.5, 2.5])
+        y_vals = data.weighted_entries[:, 1]
+        assert y_vals.tolist() == pytest.approx([9.9, 1.1])
+
+    def test_weighted_entries_threshold_filtering_is_caller_responsibility(self):
+        """Callers apply their own threshold mask; the property does not filter."""
+        entries = [[5.0], [1e-8], [-3.0]]
+        data = self._make_1d(entries)
+        result = data.weighted_entries
+        # All three events are present; caller filters:
+        assert result.shape == (3, 1)
+        mask = np.abs(result[:, 0]) > 1e-6
+        filtered = np.sort(result[:, 0][mask])
+        np.testing.assert_almost_equal(filtered, [-3.0, 5.0])
+
+    def test_weighted_entries_empty_returns_empty_array(self):
+        """Empty entries list returns a 0-row array."""
         axes = [UnbinnedAxis(name="x", min=0.0, max=5.0)]
         data = UnbinnedData(name="empty", type="unbinned", entries=[], axes=axes)
-        assert data.weighted_entries() == []
+        result = data.weighted_entries
+        assert result.shape == (0,) or result.size == 0
 
-    def test_weighted_entries_custom_threshold(self):
-        """Custom threshold filters at the specified magnitude."""
-        data = self._make([[0.05], [1.0]], weights=[1.0, 1.0])
-        result_default = data.weighted_entries(threshold=1e-6)
-        result_strict = data.weighted_entries(threshold=0.1)
-        assert len(result_default) == 2
-        assert len(result_strict) == 1
-        assert result_strict == pytest.approx([1.0])
-
-    def test_weighted_entries_matches_nz_weighted_entries(self):
-        """Result matches the logic in tests/test_manual.py:nz_weighted_entries."""
-        entries = [[1.5], [0.0], [2.3], [1e-9]]
-        weights = [2.0, 1.0, 0.5, 1.0]
-        # Manual computation: 1.5*2.0=3.0, 0.0*1.0=0.0, 2.3*0.5=1.15, 1e-9*1.0=1e-9
-        # After |val|>1e-6 filter: 3.0, 1.15
-        # Sorted: [1.15, 3.0]
-        data = self._make(entries, weights=weights)
-        result = data.weighted_entries(threshold=1e-6)
-        assert result == pytest.approx([1.15, 3.0])
+    def test_weighted_entries_returns_float64(self):
+        """Result dtype is float64."""
+        data = self._make_1d([[1.0], [2.0]])
+        assert data.weighted_entries.dtype == np.float64
 
 
 class TestDataRepr:

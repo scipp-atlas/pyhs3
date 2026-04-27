@@ -18,35 +18,11 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import cast
 
+from pytensor.compile import mode as _ptmode
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.traversal import explicit_graph_inputs
+
 from pyhs3.typing.aliases import TensorVar
-
-# ---------------------------------------------------------------------------
-# Optional JAX imports — graceful at import time; error raised on first use.
-# ---------------------------------------------------------------------------
-
-_IMPORT_ERROR: ImportError | None
-
-try:
-    import jax  # noqa: F401
-    from pytensor.compile import mode as _ptmode
-    from pytensor.graph.fg import FunctionGraph
-    from pytensor.graph.traversal import explicit_graph_inputs
-    from pytensor.link.jax.dispatch import jax_funcify  # type: ignore[attr-defined]
-
-    _IMPORT_ERROR = None
-except ImportError as _exc:
-    _IMPORT_ERROR = _exc
-
-
-def _require_jax() -> None:
-    if _IMPORT_ERROR is not None:
-        msg = (
-            "pyhs3.transpile requires JAX. "
-            "Install with `pip install pyhs3[jax]` "
-            "(which adds `pytensor[jax]`)."
-        )
-        raise ImportError(msg) from _IMPORT_ERROR
-
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -152,7 +128,11 @@ def jaxify(
     >>> float(jg(x=0.0, mu=0.0, sigma=1.0))  # doctest: +SKIP
     0.3989422804014327
     """
-    _require_jax()
+    try:
+        from pytensor.link.jax.dispatch.basic import jax_funcify  # noqa: PLC0415
+    except ImportError as exc:
+        msg = "pyhs3.transpile requires JAX. Install with `pip install pyhs3[jax]`."
+        raise ImportError(msg) from exc
 
     if inputs is None:
         # Filter out unnamed nodes (constants, shared vars without explicit names)

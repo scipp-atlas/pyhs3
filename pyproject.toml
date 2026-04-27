@@ -153,7 +153,6 @@ disallow_incomplete_defs = true
 
 [[tool.mypy.overrides]]
 module = [
-  "pyhf.*",
   "sympy.*",  # https://github.com/sympy/sympy/pull/26158
   "jax.*",
   "pytensor.link.jax.*",

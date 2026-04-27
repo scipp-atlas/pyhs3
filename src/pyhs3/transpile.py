@@ -50,9 +50,10 @@ class JaxifiedGraph:
     def __call__(self, **kwargs: object) -> object:
         """Call by keyword argument — intended for use as a JAX pytree NLL.
 
-        Dispatches to the underlying JAX function in ``input_names`` order.
-        Missing names raise ``KeyError``; extra names are silently ignored.
-        No explicit validation is performed — this is called in the hot path.
+        ``jax_funcify`` generates a Python function whose parameter names
+        match the original PyTensor variable names, so kwargs are forwarded
+        directly with no reordering overhead.  Python itself raises
+        ``TypeError`` for missing or unexpected names.
 
         The typical usage pattern with optimistix or everwillow is::
 
@@ -70,8 +71,7 @@ class JaxifiedGraph:
         -------
         The first output of the underlying JAX function (scalar or array).
         """
-        ordered = [kwargs[n] for n in self.input_names]
-        return self.fn(*ordered)[0]
+        return self.fn(**kwargs)[0]
 
     def call_positional(self, *args: object) -> object:
         """Call with positional arguments in ``input_names`` order.

@@ -111,24 +111,23 @@ class TestJaxifiedGraphCall:
         val = jg(x=jnp.float64(0.0), mu=jnp.float64(0.0), sigma=jnp.float64(1.0))
         assert jnp.isfinite(val)
 
-    def test_call_with_extra_kwargs_silently_ignored(self):
-        """Extra kwargs beyond the graph inputs are silently ignored (no validation)."""
+    def test_call_raises_on_extra_kwarg(self):
+        """Extra kwargs beyond the graph inputs raise TypeError (Python's own error)."""
         _, _, _, pdf_expr = _gaussian_pytensor_expr()
         jg = jaxify(pdf_expr)
-        # Should not raise — extra kwarg is ignored
-        val = jg(
-            x=jnp.float64(0.0),
-            mu=jnp.float64(0.0),
-            sigma=jnp.float64(1.0),
-            extra=jnp.float64(0.0),
-        )
-        assert jnp.isfinite(val)
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
+            jg(
+                x=jnp.float64(0.0),
+                mu=jnp.float64(0.0),
+                sigma=jnp.float64(1.0),
+                extra=jnp.float64(0.0),
+            )
 
     def test_call_raises_on_missing_kwarg(self):
-        """Missing kwargs raise KeyError naturally (no slow validation check)."""
+        """Missing kwargs raise TypeError (Python's own error for missing args)."""
         _, _, _, pdf_expr = _gaussian_pytensor_expr()
         jg = jaxify(pdf_expr)
-        with pytest.raises(KeyError):
+        with pytest.raises(TypeError, match="missing"):
             jg(x=jnp.float64(0.0), mu=jnp.float64(0.0))  # sigma omitted
 
     def test_call_positional(self):

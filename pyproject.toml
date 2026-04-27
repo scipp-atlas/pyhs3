@@ -214,6 +214,7 @@ messages_control.disable = [
   "wrong-import-position",
   "invalid-name",
   "duplicate-code",
+  "import-outside-toplevel", # covered by ruff
 ]
 
 

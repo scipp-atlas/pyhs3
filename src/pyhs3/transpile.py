@@ -124,8 +124,8 @@ def jaxify(
     ...     sigma * pt.sqrt(pt.constant(2 * math.pi, dtype="float64"))
     ... )
     >>> from pyhs3.transpile import jaxify
-    >>> jg = jaxify(pdf)          # doctest: +SKIP
-    >>> float(jg(x=0.0, mu=0.0, sigma=1.0))  # doctest: +SKIP
+    >>> jg = jaxify(pdf)
+    >>> float(jg(x=0.0, mu=0.0, sigma=1.0))
     0.3989422804014327
     """
     try:

@@ -176,6 +176,8 @@ class UnbinnedData(Datum):
         Returns:
             ndarray of shape (n_events, n_axes)
         """
+        if not self.entries:
+            return np.empty((0, len(self.axes)), dtype=np.float64)
         arr = np.asarray(self.entries, dtype=np.float64)
         if self.weights is not None:
             arr = arr * np.asarray(self.weights, dtype=np.float64)[:, np.newaxis]

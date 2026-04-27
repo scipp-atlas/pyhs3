@@ -76,7 +76,7 @@ class TestCompiledFunctionFlags:
         result = model.pdf_unsafe(
             "gauss", x=np.float64(0.0), mu=np.float64(0.0), sigma=np.float64(1.0)
         )
-        assert np.isfinite(result)
+        assert np.all(np.isfinite(result))
 
     def test_compiled_function_caches_across_calls(self, simple_workspace):
         """Second pdf_unsafe call reuses the cached compiled function object."""
@@ -85,9 +85,11 @@ class TestCompiledFunctionFlags:
             "gauss", x=np.array([0.0]), mu=np.array(0.0), sigma=np.array(1.0)
         )
         fn_first = model._compiled_functions.get("gauss")
+        assert fn_first is not None
         model.pdf_unsafe(
             "gauss", x=np.array([1.0]), mu=np.array(0.0), sigma=np.array(1.0)
         )
         fn_second = model._compiled_functions.get("gauss")
+        assert fn_second is not None
         # Should be the exact same object (no recompilation)
         assert fn_first is fn_second

@@ -794,7 +794,7 @@ class TestUnbinnedDataWeightedEntries:
         axes = [UnbinnedAxis(name="x", min=0.0, max=5.0)]
         data = UnbinnedData(name="empty", type="unbinned", entries=[], axes=axes)
         result = data.weighted_entries
-        assert result.shape == (0,) or result.size == 0
+        assert result.shape == (0, len(data.axes))
 
     def test_weighted_entries_returns_float64(self):
         """Result dtype is float64."""

@@ -50,6 +50,13 @@ python = "<3.14,>=3.13"
 # [feature.py314.dependencies]
 # python = "<3.15,>=3.14"
 
+[feature.jax]
+platforms = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64"]
+
+[feature.jax.dependencies]
+jax = "*"
+jaxlib = "*"
+
 [feature.test.dependencies]
 pytest = ">=9"
 pytest-cov = ">=3"
@@ -135,12 +142,16 @@ build-check = { cmd = "twine check --strict ./dist/*", depends-on = ["build"], d
 codeflash = { cmd = "codeflash", description = "Run codeflash to identify optimizations" }
 
 [environments]
-docs = ["docs"]
-dev = ["dev"]
+docs = ["docs", "jax"]
+dev = ["dev", "jax"]
 py310 = ["test", "py310"]
 py311 = ["test", "py311"]
 py312 = ["test", "py312"]
 py313 = ["test", "py313"]
+py310-jax = ["test", "py310", "jax"]
+py311-jax = ["test", "py311", "jax"]
+py312-jax = ["test", "py312", "jax"]
+py313-jax = ["test", "py313", "jax"]
 # py314 = ["test", "py314"]
 
 [tasks]

@@ -69,13 +69,25 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.13"]
         runs-on: [ubuntu-latest, windows-latest, macos-14]
+        variant: [default]
         include:
           - python-version: "3.10"
+            variant: default
             pixi-environment: py310
           - python-version: "3.11"
+            variant: default
             pixi-environment: py311
           - python-version: "3.13"
+            variant: default
             pixi-environment: py313
+          - python-version: "3.13"
+            runs-on: ubuntu-latest
+            variant: jax
+            pixi-environment: py313-jax
+          - python-version: "3.13"
+            runs-on: macos-14
+            variant: jax
+            pixi-environment: py313-jax
         exclude:
           - runs-on: windows-latest
             python-version: "3.10"
@@ -101,7 +113,9 @@ jobs:
           junit_family=legacy --durations=20
 
       - name: Test docs
-        if: matrix.python-version == '3.13'
+        if: matrix.python-version == '3.13' && matrix.variant == 'jax'
+        env:
+          JAX_PLATFORMS: "cpu" # for jax-related tests
         run: |
           pixi run -e ${{ matrix.pixi-environment }} test-docs
           pixi run -e ${{ matrix.pixi-environment }} test-docstrings

@@ -8,6 +8,7 @@ green in environments that only have pytensor (no JAX).
 from __future__ import annotations
 
 import math
+import sys
 
 import pytensor.tensor as pt
 import pytest
@@ -139,6 +140,13 @@ class TestJaxifiedGraphCall:
         args[sigma_idx] = jnp.float64(1.0)
         val = jg.call_positional(*args)
         assert jnp.isfinite(val[0])
+
+    def test_jaxify_importerror_when_jax_dispatch_missing(self, monkeypatch):
+        """jaxify() raises ImportError with a helpful message when pytensor[jax] absent."""
+        monkeypatch.setitem(sys.modules, "pytensor.link.jax.dispatch.basic", None)
+        _, _, _, pdf_expr = _gaussian_pytensor_expr()
+        with pytest.raises(ImportError, match=r"pyhs3\.transpile requires JAX"):
+            jaxify(pdf_expr)
 
     def test_pytree_dict_usage(self):
         """Typical everwillow/optimistix pattern: nll takes a dict pytree."""

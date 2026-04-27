@@ -12,6 +12,8 @@ Top-Level
 
    Workspace
    Model
+   jaxify
+   JaxifiedGraph
 
 Modules
 -------
@@ -31,6 +33,7 @@ Modules
    generic_parse
    exceptions
    normalization
+   transpile
 
 Base Classes
 ------------

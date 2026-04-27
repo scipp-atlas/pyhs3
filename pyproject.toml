@@ -71,8 +71,11 @@ docs = [
   "matplotlib",
   "hist[plot] > 2.7.0", # keep synced with dependencies
 ]
+jax = [
+  "pytensor[jax]",  # transitively pulls jax + jaxlib
+]
 develop = [
-  "pyhs3[test,docs,dev]",
+  "pyhs3[test,docs,dev,jax]",
 ]
 
 [project.urls]
@@ -152,6 +155,8 @@ disallow_incomplete_defs = true
 module = [
   "pyhf.*",
   "sympy.*",  # https://github.com/sympy/sympy/pull/26158
+  "jax.*",
+  "pytensor.link.jax.*",
 ]
 ignore_missing_imports = true
 

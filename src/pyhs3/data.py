@@ -156,6 +156,33 @@ class UnbinnedData(Datum):
 
         return self
 
+    def weighted_entries(self, threshold: float = 1e-6) -> list[float]:
+        """
+        Return sorted non-negligible weighted first-coordinate values.
+
+        Computes ``entry[0] * weight`` for each event, filters out values whose
+        absolute magnitude is at or below ``threshold``, and returns the surviving
+        values sorted in ascending order.
+
+        This is the vectorised replacement for the per-event Python loop in
+        consumer scripts (see issue #115).
+
+        Args:
+            threshold: Minimum absolute magnitude to include (default: 1e-6)
+
+        Returns:
+            Sorted list of weighted first-coordinate values with |val| > threshold
+        """
+        weights = (
+            self.weights if self.weights is not None else [1.0] * len(self.entries)
+        )
+        result = [
+            entry[0] * w
+            for entry, w in zip(self.entries, weights, strict=True)
+            if abs(entry[0] * w) > threshold
+        ]
+        return sorted(result)
+
     def to_hist(
         self, nbins: int = 50
     ) -> hist.Hist[hist.storage.Weight | hist.storage.Double]:

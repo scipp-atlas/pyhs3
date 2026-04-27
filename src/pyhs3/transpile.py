@@ -91,7 +91,6 @@ def jaxify(
     output: TensorVar,
     *,
     inputs: Sequence[TensorVar] | None = None,
-    optimize: bool = True,
 ) -> JaxifiedGraph:
     """Convert a PyTensor expression into a JAX-callable :class:`JaxifiedGraph`.
 
@@ -103,9 +102,6 @@ def jaxify(
         Explicit list of input variables.  If ``None``, the full set of
         graph inputs (variables with no owner, i.e. symbolic parameters) is
         discovered automatically via ``explicit_graph_inputs``.
-    optimize:
-        Whether to run the JAX optimizer rewrites before funcifying.
-        Default ``True``; set to ``False`` for debugging.
 
     Returns
     -------
@@ -142,8 +138,7 @@ def jaxify(
         )
 
     fgraph = FunctionGraph(inputs=list(inputs), outputs=[output], clone=True)
-    if optimize:
-        _ptmode.JAX.optimizer.rewrite(fgraph)
+    _ptmode.JAX.optimizer.rewrite(fgraph)
     fn = jax_funcify(fgraph)
 
     named_inputs: tuple[TensorVar, ...] = tuple(inputs)

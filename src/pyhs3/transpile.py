@@ -14,6 +14,7 @@ which pulls in ``pytensor[jax]`` and, transitively, JAX itself.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import cast
@@ -137,10 +138,6 @@ def jaxify(
             [v for v in explicit_graph_inputs([output]) if v.name is not None],
         )
 
-    fgraph = FunctionGraph(inputs=list(inputs), outputs=[output], clone=True)
-    _ptmode.JAX.optimizer.rewrite(fgraph)
-    fn = jax_funcify(fgraph)
-
     named_inputs: tuple[TensorVar, ...] = tuple(inputs)
     raw_names = tuple(v.name for v in named_inputs)
     if any(name is None for name in raw_names):
@@ -150,8 +147,12 @@ def jaxify(
         )
         raise ValueError(msg)
     names: tuple[str, ...] = tuple(cast(str, name) for name in raw_names)
-    if len(set(names)) != len(names):
-        duplicates = sorted(name for name in set(names) if names.count(name) > 1)
+    duplicates = sorted(name for name, n in Counter(names).items() if n > 1)
+    if duplicates:
         msg = f"Input names must be unique; duplicates found: {duplicates}"
         raise ValueError(msg)
+
+    fgraph = FunctionGraph(inputs=list(inputs), outputs=[output], clone=True)
+    _ptmode.JAX.optimizer.rewrite(fgraph)
+    fn = jax_funcify(fgraph)
     return JaxifiedGraph(named_inputs, names, fn)

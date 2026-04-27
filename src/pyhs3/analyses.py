@@ -7,9 +7,14 @@ including analysis configurations with parameters of interest and domains.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, PrivateAttr, model_validator
+
+from pyhs3.compiled import CompiledLikelihood
+
+if TYPE_CHECKING:
+    from pyhs3.workspace import Workspace
 
 from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.domains import Domain, Domains
@@ -44,6 +49,8 @@ class Analysis(NamedModel):
 
     model_config = ConfigDict()
 
+    _workspace: Workspace | None = PrivateAttr(default=None)
+
     likelihood: Annotated[str | Likelihood, FKValidator, FKSerializer, FKSchema] = (
         Field(..., repr=False)
     )
@@ -56,6 +63,15 @@ class Analysis(NamedModel):
     ] = Field(..., repr=False)
     init: str | None = Field(default=None, repr=False)
     prior: str | None = Field(default=None, repr=False)
+
+    def compile(self) -> CompiledLikelihood:
+        """Build a :class:`~pyhs3.compiled.CompiledLikelihood` for this analysis.
+
+        Requires the analysis to have been loaded via a
+        :class:`~pyhs3.workspace.Workspace` so that the workspace backref
+        (``_workspace``) is set.
+        """
+        return CompiledLikelihood.from_analysis(self)
 
     @model_validator(mode="after")
     def validate_non_empty_domains(self) -> Analysis:

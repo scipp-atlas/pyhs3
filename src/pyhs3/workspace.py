@@ -182,6 +182,9 @@ class Workspace(BaseModel):
         else:
             errors.append(f"Analysis '{analysis.name}' references unknown domains")
 
+        # Set workspace backref so Analysis.compile() can reach distributions/functions.
+        analysis._workspace = self
+
     @classmethod
     def load(
         cls,

@@ -12,6 +12,7 @@ Top-Level
 
    Workspace
    Model
+   CompiledLikelihood
    jaxify
    JaxifiedGraph
 
@@ -33,6 +34,7 @@ Modules
    generic_parse
    exceptions
    normalization
+   compiled
    transpile
 
 Base Classes

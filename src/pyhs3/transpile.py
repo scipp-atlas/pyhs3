@@ -48,19 +48,18 @@ class JaxifiedGraph:
     fn: Callable[..., tuple]  # type: ignore[type-arg]
 
     def __call__(self, **kwargs: object) -> object:
-        """Call by keyword argument — intended for use as a JAX pytree NLL.
+        """Call by keyword argument — pure passthrough to :attr:`fn`.
 
-        ``jax_funcify`` generates a Python function whose parameter names
-        match the original PyTensor variable names, so kwargs are forwarded
-        directly with no reordering overhead.  Python itself raises
-        ``TypeError`` for missing or unexpected names.
+        ``jax_funcify`` generates a function whose parameter names match the
+        original PyTensor variable names, so kwargs are forwarded directly.
+        Python itself raises ``TypeError`` for missing or unexpected names.
 
         The typical usage pattern with optimistix or everwillow is::
 
             @jax.jit
             def nll(free_params):          # free_params is a dict pytree
                 all_params = {**free_params, **fixed_params}
-                return -2 * jnp.log(jg(**all_params))
+                return -2 * jnp.log(jg(**all_params)[0])
 
         Parameters
         ----------
@@ -69,12 +68,12 @@ class JaxifiedGraph:
 
         Returns
         -------
-        The first output of the underlying JAX function (scalar or array).
+        Whatever :attr:`fn` returns (typically a 1-tuple of JAX arrays).
         """
-        return self.fn(**kwargs)[0]
+        return self.fn(**kwargs)
 
     def call_positional(self, *args: object) -> object:
-        """Call with positional arguments in ``input_names`` order.
+        """Call with positional arguments — pure passthrough to :attr:`fn`.
 
         Parameters
         ----------
@@ -83,9 +82,9 @@ class JaxifiedGraph:
 
         Returns
         -------
-        The first output of the underlying JAX function.
+        Whatever :attr:`fn` returns (typically a 1-tuple of JAX arrays).
         """
-        return self.fn(*args)[0]
+        return self.fn(*args)
 
 
 def jaxify(
@@ -125,7 +124,7 @@ def jaxify(
     ... )
     >>> from pyhs3.transpile import jaxify
     >>> jg = jaxify(pdf)
-    >>> float(jg(x=0.0, mu=0.0, sigma=1.0))
+    >>> float(jg(x=0.0, mu=0.0, sigma=1.0)[0])
     0.3989422804014327
     """
     try:

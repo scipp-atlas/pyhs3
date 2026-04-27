@@ -67,7 +67,7 @@ class TestJaxifyGaussian:
                     x=jnp.float64(xv),
                     mu=jnp.float64(mu_val),
                     sigma=jnp.float64(sigma_val),
-                )
+                )[0]
             )
             expected = norm.pdf(xv, loc=mu_val, scale=sigma_val)
             assert abs(got - expected) < 1e-10, (
@@ -109,7 +109,7 @@ class TestJaxifiedGraphCall:
         _, _, _, pdf_expr = _gaussian_pytensor_expr()
         jg = jaxify(pdf_expr)
         val = jg(x=jnp.float64(0.0), mu=jnp.float64(0.0), sigma=jnp.float64(1.0))
-        assert jnp.isfinite(val)
+        assert jnp.isfinite(val[0])
 
     def test_call_raises_on_extra_kwarg(self):
         """Extra kwargs beyond the graph inputs raise TypeError (Python's own error)."""
@@ -138,7 +138,7 @@ class TestJaxifiedGraphCall:
         sigma_idx = jg.input_names.index("sigma")
         args[sigma_idx] = jnp.float64(1.0)
         val = jg.call_positional(*args)
-        assert jnp.isfinite(val)
+        assert jnp.isfinite(val[0])
 
     def test_pytree_dict_usage(self):
         """Typical everwillow/optimistix pattern: nll takes a dict pytree."""
@@ -149,7 +149,7 @@ class TestJaxifiedGraphCall:
         @jax.jit
         def nll(free_params: dict) -> object:
             all_params = {**free_params, "x": fixed_x}
-            return -2 * jnp.log(jg(**all_params))
+            return -2 * jnp.log(jg(**all_params)[0])
 
         free = {"mu": jnp.float64(0.0), "sigma": jnp.float64(1.0)}
         result = nll(free)

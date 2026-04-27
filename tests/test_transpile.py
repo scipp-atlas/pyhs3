@@ -1,9 +1,13 @@
 """
 Tests for pyhs3.transpile — jaxify() + JaxifiedGraph.
 
-All tests that actually execute JAX code are gated with
-pytest.importorskip("jax") so the suite stays green in environments
-that only have pytensor (no JAX).
+Tests that exercise JAX computation are gated with module-level
+pytest.importorskip("jax") so the suite stays green in environments that only
+have pytensor (no JAX).
+
+The ImportError path (TestImportErrorPath) uses monkeypatch to simulate JAX
+being absent and therefore runs in any environment where pyhs3.transpile can be
+imported — including ones that have JAX available.
 """
 
 from __future__ import annotations
@@ -88,7 +92,7 @@ class TestJaxifyGaussian:
 
 
 # ---------------------------------------------------------------------------
-# JaxifiedGraph.__call__ and call_positional
+# JaxifiedGraph.__call__ — kwargs validation
 # ---------------------------------------------------------------------------
 
 
@@ -98,6 +102,26 @@ class TestJaxifiedGraphCall:
         jg = jaxify(pdf_expr)
         val = jg(x=jnp.float64(0.0), mu=jnp.float64(0.0), sigma=jnp.float64(1.0))
         assert jnp.isfinite(val)
+
+    def test_call_with_extra_kwargs_silently_ignored(self):
+        """Extra kwargs beyond the graph inputs are silently ignored (no validation)."""
+        _, _, _, pdf_expr = _gaussian_pytensor_expr()
+        jg = jaxify(pdf_expr)
+        # Should not raise — extra kwarg is ignored
+        val = jg(
+            x=jnp.float64(0.0),
+            mu=jnp.float64(0.0),
+            sigma=jnp.float64(1.0),
+            extra=jnp.float64(0.0),
+        )
+        assert jnp.isfinite(val)
+
+    def test_call_raises_on_missing_kwarg(self):
+        """Missing kwargs raise KeyError naturally (no slow validation check)."""
+        _, _, _, pdf_expr = _gaussian_pytensor_expr()
+        jg = jaxify(pdf_expr)
+        with pytest.raises(KeyError):
+            jg(x=jnp.float64(0.0), mu=jnp.float64(0.0))  # sigma omitted
 
     def test_call_positional(self):
         _, _, _, pdf_expr = _gaussian_pytensor_expr()
@@ -109,43 +133,27 @@ class TestJaxifiedGraphCall:
         val = jg.call_positional(*args)
         assert jnp.isfinite(val)
 
-
-# ---------------------------------------------------------------------------
-# JaxifiedGraph.with_partition
-# ---------------------------------------------------------------------------
-
-
-class TestWithPartition:
-    def test_with_partition_returns_callable(self):
+    def test_pytree_dict_usage(self):
+        """Typical everwillow/optimistix pattern: nll takes a dict pytree."""
         _, _, _, pdf_expr = _gaussian_pytensor_expr()
         jg = jaxify(pdf_expr)
-        f = jg.with_partition(free=["mu", "sigma"], fixed=["x"])
-        assert callable(f)
+        fixed_x = jnp.float64(0.0)
 
-    def test_with_partition_evaluates_correctly(self):
-        """f(free_vec, fixed_vec) -> scalar matches direct call."""
-        _, _, _, pdf_expr = _gaussian_pytensor_expr()
-        jg = jaxify(pdf_expr)
+        @jax.jit
+        def nll(free_params: dict) -> object:
+            all_params = {**free_params, "x": fixed_x}
+            return -2 * jnp.log(jg(**all_params))
 
-        free_names = ["mu", "sigma"]
-        fixed_names = ["x"]
-        f = jg.with_partition(free=free_names, fixed=fixed_names)
-
-        free_vec = jnp.array([0.5, 1.2])  # mu=0.5, sigma=1.2
-        fixed_vec = jnp.array([0.0])  # x=0.0
-        got = float(f(free_vec, fixed_vec))
-        expected = norm.pdf(0.0, loc=0.5, scale=1.2)
-        assert abs(got - expected) < 1e-10
-
-    def test_with_partition_raises_on_unknown_name(self):
-        _, _, _, pdf_expr = _gaussian_pytensor_expr()
-        jg = jaxify(pdf_expr)
-        with pytest.raises((KeyError, ValueError)):
-            jg.with_partition(free=["nonexistent"], fixed=["x", "mu", "sigma"])
+        free = {"mu": jnp.float64(0.0), "sigma": jnp.float64(1.0)}
+        result = nll(free)
+        assert jnp.isfinite(result)
 
 
 # ---------------------------------------------------------------------------
-# ImportError path
+# ImportError path — runs regardless of whether JAX is installed
+# (uses monkeypatch to simulate absence; the importorskip at line 22 means
+# this class only runs when JAX IS installed, but the monkeypatch correctly
+# exercises the error branch)
 # ---------------------------------------------------------------------------
 
 

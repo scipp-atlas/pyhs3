@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import cast
 
 from pyhs3.typing.aliases import TensorVar
 
@@ -27,7 +28,6 @@ _IMPORT_ERROR: ImportError | None
 
 try:
     import jax  # noqa: F401
-    import jax.numpy as jnp
     from pytensor.compile import mode as _ptmode
     from pytensor.graph.fg import FunctionGraph
     from pytensor.graph.traversal import explicit_graph_inputs
@@ -57,9 +57,9 @@ def _require_jax() -> None:
 class JaxifiedGraph:
     """A JAX-callable wrapper around a compiled PyTensor expression.
 
-    Produced by :func:`jaxify`. Supports keyword-argument calls, positional
-    calls, and partitioning into free/fixed parameter vectors for use with
-    optimistix or ``jax.grad``.
+    Produced by :func:`jaxify`. Supports keyword-argument calls (the primary
+    interface for dict-pytree-based optimizers like optimistix or everwillow)
+    and positional calls via :meth:`call_positional`.
 
     Attributes:
         inputs: Tuple of PyTensor input variables, in evaluation order.
@@ -72,7 +72,18 @@ class JaxifiedGraph:
     fn: Callable[..., tuple]  # type: ignore[type-arg]
 
     def __call__(self, **kwargs: object) -> object:
-        """Call by keyword argument.
+        """Call by keyword argument — intended for use as a JAX pytree NLL.
+
+        Dispatches to the underlying JAX function in ``input_names`` order.
+        Missing names raise ``KeyError``; extra names are silently ignored.
+        No explicit validation is performed — this is called in the hot path.
+
+        The typical usage pattern with optimistix or everwillow is::
+
+            @jax.jit
+            def nll(free_params):          # free_params is a dict pytree
+                all_params = {**free_params, **fixed_params}
+                return -2 * jnp.log(jg(**all_params))
 
         Parameters
         ----------
@@ -99,55 +110,6 @@ class JaxifiedGraph:
         The first output of the underlying JAX function.
         """
         return self.fn(*args)[0]
-
-    def with_partition(
-        self,
-        free: Sequence[str],
-        fixed: Sequence[str],
-    ) -> Callable[[object, object], object]:
-        """Return an optimistix-ready ``f(free_vec, fixed_vec) -> scalar``.
-
-        Parameters
-        ----------
-        free:
-            Names of parameters that will be optimized (packed into a 1-D
-            vector in this order).
-        fixed:
-            Names of parameters that are held constant (packed into a 1-D
-            vector in this order).
-
-        Returns
-        -------
-        Callable
-            ``f(free_vec, fixed_vec)`` that unpacks the two vectors, reassembles
-            the full parameter dict, and evaluates the expression.
-
-        Raises
-        ------
-        KeyError
-            If any name in ``free`` or ``fixed`` is not in ``self.input_names``.
-        """
-        name_set = set(self.input_names)
-        for name in list(free) + list(fixed):
-            if name not in name_set:
-                msg = f"Parameter {name!r} not in graph inputs {sorted(name_set)}"
-                raise KeyError(msg)
-
-        free_names = tuple(free)
-        fixed_names = tuple(fixed)
-        fn = self.fn
-        input_names = self.input_names
-
-        def _f(free_vec: object, fixed_vec: object) -> object:
-            param_dict: dict[str, object] = {}
-            for i, name in enumerate(free_names):
-                param_dict[name] = free_vec[i]  # type: ignore[index]
-            for i, name in enumerate(fixed_names):
-                param_dict[name] = fixed_vec[i]  # type: ignore[index]
-            ordered = jnp.array([param_dict[n] for n in input_names])
-            return fn(*ordered)[0]
-
-        return _f
 
 
 def jaxify(
@@ -195,11 +157,10 @@ def jaxify(
     if inputs is None:
         # Filter out unnamed nodes (constants, shared vars without explicit names)
         # so that every entry in input_names is a non-None string.
-        inputs = [
-            v  # type: ignore[misc]
-            for v in explicit_graph_inputs([output])
-            if v.name is not None
-        ]
+        inputs = cast(
+            list[TensorVar],
+            [v for v in explicit_graph_inputs([output]) if v.name is not None],
+        )
 
     fgraph = FunctionGraph(inputs=list(inputs), outputs=[output], clone=True)
     if optimize:
@@ -207,5 +168,6 @@ def jaxify(
     fn = jax_funcify(fgraph)
 
     named_inputs: tuple[TensorVar, ...] = tuple(inputs)
-    names: tuple[str, ...] = tuple(v.name for v in named_inputs)  # type: ignore[misc]
+    # v.name is str (not None) because we filtered above or caller provided named inputs
+    names: tuple[str, ...] = tuple(cast(str, v.name) for v in named_inputs)
     return JaxifiedGraph(named_inputs, names, fn)

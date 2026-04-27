@@ -12,7 +12,7 @@ from typing import Any, cast
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from pyhs3.analyses import Analyses, Analysis
-from pyhs3.data import Data, DataType, PointData
+from pyhs3.data import Data, DataType, PointData, UnbinnedData
 from pyhs3.distributions import Distributions, DistributionType
 from pyhs3.domains import Domain, Domains, DomainType, ProductDomain
 from pyhs3.exceptions import WorkspaceValidationError
@@ -340,47 +340,119 @@ class Workspace(BaseModel):
 
     def model(
         self,
+        target: Analysis | Likelihood | int | str = 0,
         *,
-        domain: int | str | Domain = 0,
-        parameter_set: int | str | ParameterSet = 0,
+        domain: int | str | Domain | None = None,
+        parameter_set: int | str | ParameterSet | None = None,
         progress: bool = True,
         mode: str = "FAST_RUN",
     ) -> Model:
         """
-        Constructs a `Model` object using the provided domain and parameter set.
+        Constructs a :class:`~pyhs3.model.Model` rooted at ``target``.
+
+        When ``target`` is an :class:`~pyhs3.analyses.Analysis` or
+        :class:`~pyhs3.likelihoods.Likelihood`, the model derives its
+        domain, parameter set, and observable bounds automatically and gains
+        access to :attr:`~pyhs3.model.Model.log_prob`,
+        :attr:`~pyhs3.model.Model.data`, and
+        :attr:`~pyhs3.model.Model.nominal_params`.
+
+        When ``target`` is an ``int`` or ``str`` (legacy path), the call
+        behaves as before: ``domain`` and ``parameter_set`` select the
+        parameter context from the workspace collections.
 
         Args:
-            domain (int | str | Domain): Identifier or object specifying the domain to use.
-            parameter_set (int | str | ParameterSet): Identifier or object specifying the parameter values to use.
-            progress (bool): Whether to show progress bar during dependency graph construction. Defaults to True.
-            mode (str): PyTensor compilation mode. Defaults to "FAST_RUN".
-                       Options: "FAST_RUN" (apply all rewrites, use C implementations),
-                       "FAST_COMPILE" (few rewrites, Python implementations),
-                       "NUMBA" (compile using Numba), "JAX" (compile using JAX),
-                       "PYTORCH" (compile using PyTorch), "DebugMode" (debugging),
-                       "NanGuardMode" (NaN detection).
+            target: An :class:`~pyhs3.analyses.Analysis` or
+                :class:`~pyhs3.likelihoods.Likelihood` object, or an
+                ``int``/``str`` index into the workspace domains (legacy).
+            domain: Override the domain when ``target`` is an int/str.
+                Ignored when ``target`` is an Analysis or Likelihood.
+            parameter_set: Override the parameter set when ``target`` is an
+                int/str.  Ignored when ``target`` is an Analysis or
+                Likelihood.
+            progress: Whether to show a progress bar during graph construction.
+            mode: PyTensor compilation mode (default ``"FAST_RUN"``).
 
         Returns:
-            Model: The constructed model object.
+            :class:`~pyhs3.model.Model`: The constructed model.
         """
+        resolved_likelihood: Likelihood | None = None
 
-        selected_domain = (
-            domain
-            if isinstance(domain, Domain)
-            else self.domains[domain]
-            if self.domains
-            else ProductDomain(name="default")
-        )
-        parameterset = (
-            parameter_set
-            if isinstance(parameter_set, ParameterSet)
-            else self.parameter_points[parameter_set]
-            if self.parameter_points
-            else ParameterSet(name="default", parameters=[])
-        )
+        if isinstance(target, Analysis):
+            # Derive everything from the analysis itself.
+            analysis_domain = target.domains[0]
+            if isinstance(analysis_domain, str):
+                msg = f"Analysis '{target.name}' domains must be FK-resolved before ws.model()"
+                raise RuntimeError(msg)
+            selected_domain: Domain = analysis_domain
 
-        # Compute observables from likelihoods + data + domain
-        observables = self._compute_observables()
+            likelihood_obj = target.likelihood
+            if isinstance(likelihood_obj, str):
+                msg = f"Analysis '{target.name}' likelihood must be FK-resolved before ws.model()"
+                raise RuntimeError(msg)
+            resolved_likelihood = likelihood_obj
+
+            if target.init and self.parameter_points:
+                param_set = self.parameter_points.get(target.init)
+            else:
+                param_set = None
+            parameterset: ParameterSet = param_set or ParameterSet(
+                name="default", parameters=[]
+            )
+
+            observables = {
+                axis.name: (axis.min, axis.max)
+                for datum in resolved_likelihood.data
+                if isinstance(datum, UnbinnedData)
+                for axis in datum.axes
+            }
+
+        elif isinstance(target, Likelihood):
+            # Use workspace defaults for domain/parameter_set.
+            resolved_likelihood = target
+            _domain_arg = domain if domain is not None else 0
+            selected_domain = (
+                _domain_arg
+                if isinstance(_domain_arg, Domain)
+                else self.domains[_domain_arg]
+                if self.domains
+                else ProductDomain(name="default")
+            )
+            _ps_arg = parameter_set if parameter_set is not None else 0
+            parameterset = (
+                _ps_arg
+                if isinstance(_ps_arg, ParameterSet)
+                else self.parameter_points[_ps_arg]
+                if self.parameter_points
+                else ParameterSet(name="default", parameters=[])
+            )
+            observables = {
+                axis.name: (axis.min, axis.max)
+                for datum in resolved_likelihood.data
+                if isinstance(datum, UnbinnedData)
+                for axis in datum.axes
+            }
+
+        else:
+            # Legacy: target is int or str indexing into domains.
+            _domain_arg2 = domain if domain is not None else target
+            selected_domain = (
+                _domain_arg2
+                if isinstance(_domain_arg2, Domain)
+                else self.domains[_domain_arg2]
+                if self.domains
+                else ProductDomain(name="default")
+            )
+            _ps_arg2 = parameter_set if parameter_set is not None else 0
+            parameterset = (
+                _ps_arg2
+                if isinstance(_ps_arg2, ParameterSet)
+                else self.parameter_points[_ps_arg2]
+                if self.parameter_points
+                else ParameterSet(name="default", parameters=[])
+            )
+            # Compute observables from all likelihoods + data
+            observables = self._compute_observables()
 
         return Model(
             parameterset=parameterset or ParameterSet(name="default"),
@@ -390,4 +462,5 @@ class Workspace(BaseModel):
             progress=progress,
             mode=mode,
             observables=observables,
+            likelihood=resolved_likelihood,
         )

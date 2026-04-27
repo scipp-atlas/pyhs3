@@ -1,0 +1,288 @@
+"""
+Tests for ws.model(analysis) / ws.model(likelihood) — joint log-prob interface.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytensor
+import pytest
+from scipy.stats import truncnorm
+
+try:
+    import jax.numpy as jnp
+
+    _HAS_JAX = True
+except ImportError:
+    _HAS_JAX = False
+
+from pytensor.graph.traversal import explicit_graph_inputs
+
+from pyhs3 import Workspace, jaxify
+from pyhs3.model import Model
+
+# ---------------------------------------------------------------------------
+# Minimal two-Gaussian-channel workspace
+# ---------------------------------------------------------------------------
+
+_WS_DICT: dict = {
+    "metadata": {"hs3_version": "0.2"},
+    "distributions": [
+        {
+            "name": "gauss1",
+            "type": "gaussian_dist",
+            "x": "x_obs",
+            "mean": "mean",
+            "sigma": 1.0,
+        },
+        {
+            "name": "gauss2",
+            "type": "gaussian_dist",
+            "x": "y_obs",
+            "mean": "mean",
+            "sigma": 2.0,
+        },
+    ],
+    "domains": [
+        {
+            "name": "main",
+            "type": "product_domain",
+            "axes": [{"name": "mean", "min": -10.0, "max": 10.0}],
+        }
+    ],
+    "data": [
+        {
+            "name": "data1",
+            "type": "unbinned",
+            "axes": [{"name": "x_obs", "min": -10.0, "max": 10.0}],
+            "entries": [[1.0], [2.0], [3.0], [4.0], [5.0]],
+        },
+        {
+            "name": "data2",
+            "type": "unbinned",
+            "axes": [{"name": "y_obs", "min": -10.0, "max": 10.0}],
+            "entries": [[0.5], [1.5], [2.5], [3.5], [4.5]],
+        },
+    ],
+    "likelihoods": [
+        {"name": "L", "distributions": ["gauss1", "gauss2"], "data": ["data1", "data2"]}
+    ],
+    "analyses": [
+        {"name": "A", "likelihood": "L", "domains": ["main"], "init": "params"}
+    ],
+    "parameter_points": [
+        {"name": "params", "parameters": [{"name": "mean", "value": 2.0}]}
+    ],
+}
+
+
+def _ws() -> Workspace:
+    return Workspace(**_WS_DICT)
+
+
+def _truncnorm_logpdf(
+    x: float, loc: float, scale: float, low: float, high: float
+) -> float:
+    a = (low - loc) / scale
+    b = (high - loc) / scale
+    return float(truncnorm.logpdf(x, a, b, loc=loc, scale=scale))
+
+
+# ---------------------------------------------------------------------------
+# ws.model(analysis) construction
+# ---------------------------------------------------------------------------
+
+
+def test_model_from_analysis_returns_model():
+    ws = _ws()
+    model = ws.model(ws.analyses["A"])
+    assert isinstance(model, Model)
+
+
+def test_model_from_analysis_auto_derives_domain():
+    ws = _ws()
+    model = ws.model(ws.analyses["A"])
+    # mean should be bounded to [-10, 10] (from analysis domain)
+    assert "mean" in model.parameters
+
+
+def test_model_from_likelihood_returns_model():
+    ws = _ws()
+    model = ws.model(ws.likelihoods["L"])
+    assert isinstance(model, Model)
+
+
+def test_model_legacy_int_still_works():
+    ws = _ws()
+    model = ws.model(0)
+    assert isinstance(model, Model)
+
+
+# ---------------------------------------------------------------------------
+# data and nominal_params properties
+# ---------------------------------------------------------------------------
+
+
+def test_model_data_from_analysis():
+    ws = _ws()
+    model = ws.model(ws.analyses["A"])
+    d = model.data
+    assert "x_obs" in d
+    assert "y_obs" in d
+    np.testing.assert_array_equal(d["x_obs"], [1.0, 2.0, 3.0, 4.0, 5.0])
+    np.testing.assert_array_equal(d["y_obs"], [0.5, 1.5, 2.5, 3.5, 4.5])
+
+
+def test_model_nominal_params_from_analysis():
+    ws = _ws()
+    model = ws.model(ws.analyses["A"])
+    p = model.nominal_params
+    assert "mean" in p
+    assert p["mean"] == pytest.approx(2.0)
+
+
+def test_model_data_raises_without_likelihood():
+    ws = _ws()
+    model = ws.model(0)  # legacy, no likelihood
+    with pytest.raises(RuntimeError, match="likelihood context"):
+        _ = model.data
+
+
+# ---------------------------------------------------------------------------
+# log_prob property — structure
+# ---------------------------------------------------------------------------
+
+
+def test_log_prob_is_tensor_variable():
+    ws = _ws()
+    model = ws.model(ws.analyses["A"])
+    assert hasattr(model.log_prob, "type")
+
+
+def test_log_prob_raises_without_likelihood():
+    ws = _ws()
+    model = ws.model(0)
+    with pytest.raises(RuntimeError, match="likelihood context"):
+        _ = model.log_prob
+
+
+def test_log_prob_has_free_symbolic_inputs():
+
+    ws = _ws()
+    model = ws.model(ws.analyses["A"])
+    inputs = {v.name for v in explicit_graph_inputs([model.log_prob]) if v.name}
+    # Both observables and parameters should be free symbolic inputs
+    assert "mean" in inputs
+    assert "x_obs" in inputs
+    assert "y_obs" in inputs
+
+
+# ---------------------------------------------------------------------------
+# log_prob numerical accuracy
+# ---------------------------------------------------------------------------
+
+
+def test_log_prob_matches_truncnorm():
+    """Joint log-prob evaluated at workspace defaults matches scipy truncnorm."""
+
+    ws = _ws()
+    model = ws.model(ws.analyses["A"])
+
+    inputs_map = {
+        v.name: v for v in explicit_graph_inputs([model.log_prob]) if v.name is not None
+    }
+    fn = pytensor.function(list(inputs_map.values()), model.log_prob)
+    val = float(fn(**model.data, **model.nominal_params))
+
+    events1 = [1.0, 2.0, 3.0, 4.0, 5.0]
+    events2 = [0.5, 1.5, 2.5, 3.5, 4.5]
+    lp = sum(_truncnorm_logpdf(x, 2.0, 1.0, -10.0, 10.0) for x in events1) + sum(
+        _truncnorm_logpdf(y, 2.0, 2.0, -10.0, 10.0) for y in events2
+    )
+
+    assert abs(val - lp) < 1e-6, f"got {val}, expected {lp}"
+
+
+def test_nll_is_minus_two_log_prob():
+    """NLL = -2 * log_prob is correct."""
+
+    ws = _ws()
+    model = ws.model(ws.analyses["A"])
+    nll_expr = -2.0 * model.log_prob
+
+    inputs_map = {
+        v.name: v for v in explicit_graph_inputs([nll_expr]) if v.name is not None
+    }
+    fn = pytensor.function(list(inputs_map.values()), nll_expr)
+    nll_val = float(fn(**model.data, **model.nominal_params))
+
+    events1 = [1.0, 2.0, 3.0, 4.0, 5.0]
+    events2 = [0.5, 1.5, 2.5, 3.5, 4.5]
+    lp = sum(_truncnorm_logpdf(x, 2.0, 1.0, -10.0, 10.0) for x in events1) + sum(
+        _truncnorm_logpdf(y, 2.0, 2.0, -10.0, 10.0) for y in events2
+    )
+    expected = -2.0 * lp
+
+    assert abs(nll_val - expected) < 1e-6, f"got {nll_val}, expected {expected}"
+
+
+def test_log_prob_reusable_with_different_data():
+    """Same Model evaluates correctly with different event data (same axis bounds)."""
+
+    ws = _ws()
+    model = ws.model(ws.analyses["A"])
+
+    inputs_map = {
+        v.name: v for v in explicit_graph_inputs([model.log_prob]) if v.name is not None
+    }
+    fn = pytensor.function(list(inputs_map.values()), model.log_prob)
+
+    alt_data = {
+        "x_obs": np.array([-1.0, 0.0, 1.0]),
+        "y_obs": np.array([-0.5, 0.5, 1.5]),
+    }
+    val = float(fn(**alt_data, **model.nominal_params))
+
+    expected_lp = sum(
+        _truncnorm_logpdf(x, 2.0, 1.0, -10.0, 10.0) for x in alt_data["x_obs"]
+    ) + sum(_truncnorm_logpdf(y, 2.0, 2.0, -10.0, 10.0) for y in alt_data["y_obs"])
+    assert abs(val - expected_lp) < 1e-6
+
+
+# ---------------------------------------------------------------------------
+# JAX integration
+# ---------------------------------------------------------------------------
+
+_skip_no_jax = pytest.mark.skipif(not _HAS_JAX, reason="JAX not installed")
+
+
+@_skip_no_jax
+def test_log_prob_jaxify_evaluates():
+
+    ws = _ws()
+    model = ws.model(ws.analyses["A"])
+    jg = jaxify(model.log_prob)
+    val = jg(**{k: jnp.array(v) for k, v in model.data.items()}, mean=jnp.float64(2.0))
+    assert jnp.isfinite(val[0])
+
+
+@_skip_no_jax
+def test_nll_jaxify_matches_truncnorm():
+
+    ws = _ws()
+    model = ws.model(ws.analyses["A"])
+    nll = -2.0 * model.log_prob
+    jg = jaxify(nll)
+
+    val = float(
+        jg(**{k: jnp.array(v) for k, v in model.data.items()}, mean=jnp.float64(2.0))[0]
+    )
+
+    events1 = [1.0, 2.0, 3.0, 4.0, 5.0]
+    events2 = [0.5, 1.5, 2.5, 3.5, 4.5]
+    lp = sum(_truncnorm_logpdf(x, 2.0, 1.0, -10.0, 10.0) for x in events1) + sum(
+        _truncnorm_logpdf(y, 2.0, 2.0, -10.0, 10.0) for y in events2
+    )
+    expected = -2.0 * lp
+
+    assert abs(val - expected) < 1e-5, f"got {val}, expected {expected}"

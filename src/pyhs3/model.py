@@ -4,13 +4,17 @@ import logging
 import warnings
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
 import numpy.typing as npt
 import pytensor.tensor as pt
 from pytensor.compile.function import function
 from pytensor.graph.traversal import applys_between, explicit_graph_inputs
+
+if TYPE_CHECKING:
+    from pyhs3.likelihoods import Likelihood
+
 from rich.progress import (
     BarColumn,
     Progress,
@@ -22,6 +26,7 @@ from rich.progress import (
 )
 
 from pyhs3.context import Context
+from pyhs3.data import UnbinnedData
 from pyhs3.distributions import Distributions
 from pyhs3.domains import Domain
 from pyhs3.functions import Functions
@@ -59,6 +64,7 @@ class Model:
         progress: bool = True,
         mode: str = "FAST_RUN",
         observables: dict[str, tuple[float, float]] | None = None,
+        likelihood: Likelihood | None = None,
     ):
         """
         Represents a probabilistic model composed of parameters, domains, distributions, and functions.
@@ -103,9 +109,120 @@ class Model:
         self.mode = mode
         self._compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]] = {}
         self._compiled_inputs: dict[str, list[TensorVar]] = {}
+        self._likelihood = likelihood
 
         # Build dependency graph with proper entity identification
         self._build_dependency_graph(functions, distributions, progress)
+
+    @property
+    def data(self) -> dict[str, npt.NDArray[np.float64]]:
+        """Observed data arrays from the workspace, keyed by observable name.
+
+        Only available when the model was built via ``ws.model(analysis)`` or
+        ``ws.model(likelihood)``.  Raises ``RuntimeError`` otherwise.
+
+        Returns a dict suitable for passing directly to a compiled or JAX
+        function alongside :attr:`nominal_params`::
+
+            jg = pyhs3.jaxify(model.log_prob)
+            jg(**model.data, **model.nominal_params)
+        """
+        if self._likelihood is None:
+            msg = "data requires a likelihood context; build via ws.model(analysis)"
+            raise RuntimeError(msg)
+        result: dict[str, npt.NDArray[np.float64]] = {}
+        for datum in self._likelihood.data:
+            if not isinstance(datum, UnbinnedData):
+                continue
+            entries = np.asarray(datum.entries, dtype=np.float64)
+            for ax_idx, axis in enumerate(datum.axes):
+                result[axis.name] = entries[:, ax_idx]
+        return result
+
+    @property
+    def nominal_params(self) -> dict[str, float]:
+        """Default parameter values from the workspace parameter set.
+
+        Returns a dict suitable for passing to a compiled or JAX function
+        alongside :attr:`data`::
+
+            jg = pyhs3.jaxify(model.log_prob)
+            jg(**model.data, **model.nominal_params)
+        """
+        result: dict[str, float] = {}
+        if self.parameterset:
+            for pp in self.parameterset:
+                result[pp.name] = float(pp.value)
+        return result
+
+    @property
+    def log_prob(self) -> TensorVar:
+        """Symbolic joint log-probability expression for the full likelihood.
+
+        Returned as a PyTensor ``TensorVar`` scalar.  Observable data and
+        physics parameters are **all symbolic free inputs** — the expression
+        is suitable for JAX transpilation, gradient computation, or direct
+        PyTensor compilation.
+
+        Normalization denominators are fixed constants (axis bounds baked at
+        ``Model`` construction time).  The same ``Model`` — and the same
+        compiled/JAX function — can be evaluated against different event data
+        without rebuilding the normalization graph, as long as the axis bounds
+        are unchanged.
+
+        The workspace defaults for evaluation are available via :attr:`data`
+        and :attr:`nominal_params`.
+
+        Only available when the model was built via ``ws.model(analysis)`` or
+        ``ws.model(likelihood)``.  Raises ``RuntimeError`` otherwise.
+
+        Example::
+
+            model = ws.model(ws.analyses["CombinedPdf_combData"])
+            nll = -2 * model.log_prob
+            jg = pyhs3.jaxify(nll)
+            val = jg(**model.data, **model.nominal_params)
+        """
+        if self._likelihood is None:
+            msg = "log_prob requires a likelihood context; build via ws.model(analysis)"
+            raise RuntimeError(msg)
+
+        lp_terms: list[TensorVar] = []
+
+        for dist_obj, datum in zip(
+            self._likelihood.distributions, self._likelihood.data, strict=False
+        ):
+            if isinstance(dist_obj, str) or not isinstance(datum, UnbinnedData):
+                continue
+
+            dist_name = dist_obj.name
+            if dist_name not in self.distributions:
+                continue
+
+            # model.distributions[name] is the normalized PDF expression with
+            # observables as symbolic pt.vector free inputs.
+            log_pdf: TensorVar = pt.log(self.distributions[dist_name])
+
+            if datum.weights is not None:
+                weights = pt.constant(np.asarray(datum.weights, dtype=np.float64))
+                lp_terms.append(pt.sum(weights * log_pdf))  # type: ignore[no-untyped-call]
+            else:
+                lp_terms.append(pt.sum(log_pdf))  # type: ignore[no-untyped-call]
+
+        # Auxiliary distributions are constraint scalars — no event summing.
+        if self._likelihood.aux_distributions:
+            for aux_name in self._likelihood.aux_distributions:
+                if aux_name in self.distributions:
+                    lp_terms.append(pt.log(self.distributions[aux_name]))
+
+        if lp_terms:
+            total: TensorVar = lp_terms[0]
+            for term in lp_terms[1:]:
+                total = total + term
+        else:
+            total = pt.constant(np.float64(0.0))
+
+        return total
 
     @staticmethod
     def _ensure_array(

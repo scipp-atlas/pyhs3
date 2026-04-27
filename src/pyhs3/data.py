@@ -156,6 +156,33 @@ class UnbinnedData(Datum):
 
         return self
 
+    @property
+    def weighted_entries(self) -> np.ndarray:
+        """
+        Entries array with each row multiplied by its event weight.
+
+        Returns a numpy array of shape ``(n_events, n_axes)`` — the same
+        structure as ``entries`` — where each row ``i`` is scaled by
+        ``weights[i]``.  When no weights are present the result equals
+        ``np.array(self.entries)``.
+
+        Axis values can be extracted with standard numpy indexing, e.g.
+        ``data.weighted_entries[:, 0]`` for the first observable.  Threshold
+        filtering and sorting are left to the caller::
+
+            vals = data.weighted_entries[:, 0]
+            vals = np.sort(vals[np.abs(vals) > 1e-6])
+
+        Returns:
+            ndarray of shape (n_events, n_axes)
+        """
+        if not self.entries:
+            return np.empty((0, len(self.axes)), dtype=np.float64)
+        arr = np.asarray(self.entries, dtype=np.float64)
+        if self.weights is not None:
+            arr = arr * np.asarray(self.weights, dtype=np.float64)[:, np.newaxis]
+        return arr
+
     def to_hist(
         self, nbins: int = 50
     ) -> hist.Hist[hist.storage.Weight | hist.storage.Double]:

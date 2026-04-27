@@ -113,8 +113,7 @@ jobs:
           junit_family=legacy --durations=20
 
       - name: Test docs
-        if:
-          matrix.python-version == '3.13' && matrix.runs-on != 'windows-latest'
+        if: matrix.python-version == '3.13' && matrix.variant == "jax"
         env:
           JAX_PLATFORMS: "cpu" # for jax-related tests
         run: |

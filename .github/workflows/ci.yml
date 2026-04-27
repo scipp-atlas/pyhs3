@@ -76,6 +76,12 @@ jobs:
             pixi-environment: py311
           - python-version: "3.13"
             pixi-environment: py313
+          - python-version: "3.13"
+            runs-on: ubuntu-latest
+            pixi-environment: py313-jax
+          - python-version: "3.13"
+            runs-on: macos-14
+            pixi-environment: py313-jax
         exclude:
           - runs-on: windows-latest
             python-version: "3.10"

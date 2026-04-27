@@ -114,7 +114,7 @@ jobs:
 
       - name: Test docs
         if:
-          matrix.python-version == '3.13' && matrix.runs-on != "windows-latest"
+          matrix.python-version == '3.13' && matrix.runs-on != 'windows-latest'
         env:
           JAX_PLATFORMS: "cpu" # for jax-related tests
         run: |

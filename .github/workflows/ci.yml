@@ -102,6 +102,8 @@ jobs:
 
       - name: Test docs
         if: matrix.python-version == '3.13'
+        env:
+          JAX_PLATFORMS: "cpu" # for jax-related tests
         run: |
           pixi run -e ${{ matrix.pixi-environment }} test-docs
           pixi run -e ${{ matrix.pixi-environment }} test-docstrings

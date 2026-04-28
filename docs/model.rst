@@ -59,10 +59,10 @@ Models are created from workspaces using the ``.model()`` method. The following 
    ... }
    >>> ws = pyhs3.Workspace(**workspace_data)
    >>> # Create model with specific domain and parameter set
-   >>> model = ws.model(domain="valid_range", parameter_set="default_params")
+   >>> model = ws.model("valid_range", parameter_set="default_params")
    <BLANKLINE>
    >>> # Or use defaults (first domain and parameter set)
-   >>> model = ws.model()
+   >>> model = ws.model(0)
    <BLANKLINE>
 
 Exploring Model Structure
@@ -150,7 +150,7 @@ PyHS3 automatically discovers parameters from your distributions and functions. 
    ...     # Note: no parameter_points defined
    ... }
    >>> ws_minimal = pyhs3.Workspace(**minimal_workspace)
-   >>> model_minimal = ws_minimal.model()
+   >>> model_minimal = ws_minimal.model(0)
    <BLANKLINE>
    >>> print(f"Discovered parameters: {sorted(model_minimal.parameters)}")
    Discovered parameters: ['data', 'discovered_mu', 'discovered_sigma']

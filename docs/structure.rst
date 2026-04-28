@@ -336,8 +336,8 @@ Here's how data flows through a complete PyHS3 model:
    ...     "likelihoods": [
    ...         {
    ...             "name": "higgs_likelihood",
-   ...             "distributions": ["signal", "background"],
-   ...             "data": ["observed_mass_data", "observed_mass_data"],
+   ...             "distributions": ["signal"],
+   ...             "data": ["observed_mass_data"],
    ...         }
    ...     ],
    ...     "analyses": [
@@ -354,7 +354,7 @@ Here's how data flows through a complete PyHS3 model:
    >>> import numpy as np
    >>> ws = pyhs3.Workspace(**model_spec)
    >>> # 3. Create Model (builds computational graph)
-   >>> model = ws.model(domain="search_region", parameter_set="physics")
+   >>> model = ws.model("search_region", parameter_set="physics")
    <BLANKLINE>
    >>> # 4. Evaluate (compile and compute)
    >>> signal_pdf = model.pdf(

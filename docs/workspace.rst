@@ -288,10 +288,10 @@ The main purpose of a workspace is to create models that you can evaluate:
 .. code-block:: pycon
 
    >>> # Create a model using specific domain and parameter set
-   >>> model = ws.model(domain="physics_region", parameter_set="nominal")
+   >>> model = ws.model("physics_region", parameter_set="nominal")
    <BLANKLINE>
    >>> # Or use defaults (index 0)
-   >>> model = ws.model()
+   >>> model = ws.model(0)
    <BLANKLINE>
    >>> # Evaluate the model
    >>> import numpy as np
@@ -376,8 +376,8 @@ Here's a more realistic example of a workspace for a physics analysis using both
    ...     "likelihoods": [
    ...         {
    ...             "name": "higgs_likelihood",
-   ...             "distributions": ["signal", "background"],
-   ...             "data": ["observed_mass_spectrum", "observed_mass_spectrum"],
+   ...             "distributions": ["signal"],
+   ...             "data": ["observed_mass_spectrum"],
    ...         }
    ...     ],
    ...     "analyses": [
@@ -400,7 +400,7 @@ Here's a more realistic example of a workspace for a physics analysis using both
    ...     f"Analysis '{physics_ws.analyses[0].name}' uses likelihood '{physics_ws.analyses[0].likelihood.name}'"
    ... )
    Analysis 'higgs_discovery' uses likelihood 'higgs_likelihood'
-   >>> physics_model = physics_ws.model()
+   >>> physics_model = physics_ws.model(0)
    <BLANKLINE>
    >>> # Evaluate signal and background separately
    >>> signal_pdf = physics_model.pdf(
@@ -429,9 +429,9 @@ Likelihoods and analyses are optional but important components for statistical i
    >>> print(f"Likelihood '{likelihood.name}' connects:")
    Likelihood 'higgs_likelihood' connects:
    >>> print(f"  - Distributions: {likelihood.distributions!r}")
-     - Distributions: Distributions(['signal', 'background'])
+     - Distributions: Distributions(['signal'])
    >>> print(f"  - To data: {likelihood.data!r}")
-     - To data: Data(['observed_mass_spectrum', 'observed_mass_spectrum'])
+     - To data: Data(['observed_mass_spectrum'])
    >>> # Access analysis configuration
    >>> analysis = physics_ws.analyses["higgs_discovery"]
    >>> print(f"Analysis '{analysis.name}' configuration:")

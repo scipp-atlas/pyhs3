@@ -37,7 +37,7 @@ By default, most parameters are scalar tensors. However, parameters identified a
     ...     ],
     ... }
     >>> ws = pyhs3.Workspace(**workspace_data)
-    >>> model = ws.model()
+    >>> model = ws.model(0)
     <BLANKLINE>
     >>> # Scalar evaluation
     >>> parameters = {"x": 0.0, "mu": 0.0, "sigma": 1.0}
@@ -62,7 +62,7 @@ To enable broadcasting, you need to modify the parameter's ``kind`` before creat
     >>> with warnings.catch_warnings(record=True) as w:
     ...     warnings.simplefilter("always")
     ...     # Create new model with vector parameter
-    ...     new_model = ws.model(parameter_set=parameterset)
+    ...     new_model = ws.model(0, parameter_set=parameterset)
     ...     print(w[0].message)  # shows the warning in the docs
     ...
     <BLANKLINE>
@@ -158,7 +158,7 @@ Here's a complete working example:
     ... }
     >>> ws = pyhs3.Workspace(**workspace_data)
     >>> # Method 1: Scalar evaluation
-    >>> scalar_model = ws.model()
+    >>> scalar_model = ws.model(0)
     <BLANKLINE>
     >>> scalar_result = scalar_model.logpdf_unsafe("gaussian", x=0.0, mu=0.0, sigma=1.0)
     >>> print(f"Scalar: {scalar_result}")
@@ -168,7 +168,7 @@ Here's a complete working example:
     >>> parameterset["x"].kind = pt.vector
     >>> with warnings.catch_warnings(record=True) as w:
     ...     warnings.simplefilter("always")
-    ...     vector_model = ws.model(parameter_set=parameterset)
+    ...     vector_model = ws.model(0, parameter_set=parameterset)
     ...     print(w[0].message)  # shows the warning in the docs
     ...
     <BLANKLINE>

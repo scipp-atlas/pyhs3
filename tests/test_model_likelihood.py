@@ -289,6 +289,34 @@ def test_model_nominal_params_from_analysis():
     assert p["mean"] == pytest.approx(2.0)
 
 
+def test_model_free_params_excludes_const():
+    """free_params must omit const=True parameters; nominal_params must keep them."""
+    ws = Workspace(
+        **{
+            **_WS_DICT,
+            "parameter_points": [
+                {
+                    "name": "params",
+                    "parameters": [
+                        {"name": "mean", "value": 2.0},
+                        {"name": "fixed_scale", "value": 3.0, "const": True},
+                    ],
+                }
+            ],
+        }
+    )
+    model = ws.model(ws.analyses["A"])
+
+    # nominal_params includes const parameters
+    assert "mean" in model.nominal_params
+    assert "fixed_scale" in model.nominal_params
+
+    # free_params excludes const parameters
+    assert "mean" in model.free_params
+    assert "fixed_scale" not in model.free_params
+    assert model.free_params["mean"] == pytest.approx(2.0)
+
+
 def test_model_data_raises_without_likelihood():
     ws = _ws()
     model = ws.model(0)  # legacy, no likelihood

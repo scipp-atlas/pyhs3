@@ -4,7 +4,7 @@ import logging
 import warnings
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -120,10 +120,10 @@ class Model:
         ``ws.model(likelihood)``.  Raises ``RuntimeError`` otherwise.
 
         Returns a dict suitable for passing directly to a compiled or JAX
-        function alongside :attr:`nominal_params`::
+        function alongside :attr:`free_params`::
 
             jg = pyhs3.jaxify(model.log_prob)
-            jg(**model.data, **model.nominal_params)
+            jg(**model.data, **model.free_params)
         """
         if self._likelihood is None:
             msg = "data requires a likelihood context; build via ws.model(analysis)"
@@ -134,11 +134,12 @@ class Model:
     def nominal_params(self) -> dict[str, float]:
         """Default parameter values from the workspace parameter set.
 
-        Returns a dict suitable for passing to a compiled or JAX function
-        alongside :attr:`data`::
+        Returns all parameters, including those marked ``const=True`` (which
+        are baked as :func:`pytensor.tensor.constant` in the symbolic graph
+        and are therefore not free inputs to a jaxified expression).
 
-            jg = pyhs3.jaxify(model.log_prob)
-            jg(**model.data, **model.nominal_params)
+        Use :attr:`free_params` when passing parameters to a jaxified callable
+        to avoid supplying spurious keyword arguments.
         """
         result: dict[str, float] = {}
         for pp in self.parameterset:
@@ -146,13 +147,33 @@ class Model:
         return result
 
     @property
+    def free_params(self) -> dict[str, float]:
+        """Non-constant parameter values from the workspace parameter set.
+
+        Like :attr:`nominal_params` but excludes parameters whose
+        ``ParameterPoint.const`` flag is ``True``.  These are the parameters
+        that remain as free symbolic inputs after model construction, making
+        this dict the correct one to pass to a jaxified callable::
+
+            jg = pyhs3.jaxify(model.log_prob)
+            jg(**model.data, **model.free_params)
+        """
+        result: dict[str, float] = {}
+        for pp in self.parameterset:
+            if not pp.const:
+                result[pp.name] = float(pp.value)
+        return result
+
+    @property
     def log_prob(self) -> TensorVar:
         """Symbolic joint log-probability expression for the full likelihood.
 
         Returned as a PyTensor ``TensorVar`` scalar.  Observable data and
-        physics parameters are **all symbolic free inputs** — the expression
-        is suitable for JAX transpilation, gradient computation, or direct
-        PyTensor compilation.
+        parameters listed in :attr:`free_params` are symbolic free inputs;
+        parameters with ``const=True`` are baked as compile-time constants
+        and do not appear as free inputs.  The expression is suitable for
+        JAX transpilation, gradient computation, or direct PyTensor
+        compilation.
 
         Normalization denominators are fixed constants (axis bounds baked at
         ``Model`` construction time).  For unweighted data, the same compiled/JAX
@@ -161,7 +182,7 @@ class Model:
         to use different weights, a new ``Model`` must be built.
 
         The workspace defaults for evaluation are available via :attr:`data`
-        and :attr:`nominal_params`.
+        and :attr:`free_params`.
 
         Only available when the model was built via ``ws.model(analysis)`` or
         ``ws.model(likelihood)``.  Raises ``RuntimeError`` otherwise.
@@ -171,7 +192,7 @@ class Model:
             model = ws.model(ws.analyses["CombinedPdf_combData"])
             nll = -2 * model.log_prob
             jg = pyhs3.jaxify(nll)
-            val = jg(**model.data, **model.nominal_params)
+            val = jg(**model.data, **model.free_params)
         """
         if self._likelihood is None:
             msg = "log_prob requires a likelihood context; build via ws.model(analysis)"
@@ -235,6 +256,73 @@ class Model:
         """
         return np.asarray(value, dtype=np.float64)
 
+    def _build_parameter_node(self, node_name: str, context: Context) -> TensorVar:
+        """Build a parameter node: baked constant (const=True) or bounded free variable."""
+        param_point = self.parameterset.get(node_name) if self.parameterset else None
+        domain_bounds = (
+            self.domain.get(node_name, (None, None)) if self.domain else (None, None)
+        )
+        if param_point and param_point.const:
+            # Bake as a compile-time constant so it is invisible to
+            # explicit_graph_inputs and JAX transpilation.
+            val = np.float64(param_point.value)
+            lower, upper = domain_bounds
+            if (lower is not None and val < lower) or (
+                upper is not None and val > upper
+            ):
+                warnings.warn(
+                    f"Parameter '{node_name}' has const=True with value"
+                    f" {val} outside domain [{lower}, {upper}];"
+                    f" using the specified value as-is.",
+                    stacklevel=2,
+                )
+            return pt.constant(val, name=node_name)
+
+        # Free variable: determine default kind (vector for observables, scalar otherwise)
+        default_kind: Callable[..., TensorVar]
+        if "_observed" in node_name or node_name in context.observables:
+            default_kind = pt.vector
+        else:
+            default_kind = pt.scalar
+
+        # Allow explicit override from ParameterPoint.kind
+        if param_point and param_point.kind is not None:
+            param_kind = param_point.kind
+            if param_kind is not default_kind:
+                warnings.warn(
+                    f"Parameter '{node_name}' has kind override"
+                    f" {param_kind.__name__} (default would be"
+                    f" {default_kind.__name__})",
+                    stacklevel=2,
+                )
+        else:
+            param_kind = default_kind
+        return create_bounded_tensor(node_name, domain_bounds, param_kind)
+
+    def _build_constant_node(
+        self, node_name: str, constants_map: dict[str, TensorVar]
+    ) -> TensorVar:
+        """Build a constant node from the pre-computed constants map."""
+        return constants_map[node_name]
+
+    def _build_function_node(
+        self, node_name: str, functions: Functions, context: Context
+    ) -> TensorVar:
+        """Build a function node by evaluating its symbolic expression."""
+        return functions[node_name].expression(context)
+
+    def _build_modifier_node(
+        self, node_name: str, modifiers_map: dict[str, Any], context: Context
+    ) -> TensorVar:
+        """Build a modifier node by evaluating its symbolic expression."""
+        return cast(TensorVar, modifiers_map[node_name].expression(context))
+
+    def _build_distribution_node(
+        self, node_name: str, distributions: Distributions, context: Context
+    ) -> TensorVar:
+        """Build a distribution node by evaluating its symbolic expression."""
+        return distributions[node_name].expression(context)
+
     def _build_dependency_graph(
         self,
         functions: Functions,
@@ -248,15 +336,12 @@ class Model:
         and parameters by building a complete dependency graph first, then evaluating
         in topological order.
         """
-        # Build dependency graph using the networks module
         graph, constants_map, modifiers_map = build_dependency_graph(
             self.parameterset, functions, distributions
         )
 
-        # Get topological order (handles cycle detection internally)
         sorted_nodes = graph.topological_sort()
 
-        # Evaluate nodes in topological order with optional progress bar
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}", style="cyan"),
@@ -265,8 +350,8 @@ class Model:
             TimeElapsedColumn(),
             TimeRemainingColumn(),
             expand=True,
-            transient=True,  # Progress bar disappears when finished
-            disable=not progress,  # Disable progress bar if progress=False
+            transient=True,
+            disable=not progress,
         ) as progress_bar:
             task = progress_bar.add_task(
                 "Building expressions...", total=len(sorted_nodes)
@@ -279,85 +364,48 @@ class Model:
                 ] = node_data["type"]
                 node_name = node_data["name"]
 
-                # Truncate long names to prevent jumpiness
                 max_name_length = 60
-                display_name = node_name
-                if len(node_name) > max_name_length:
-                    display_name = node_name[: max_name_length - 3] + "..."
-
-                # Update progress description with current entity (fixed width)
+                display_name = (
+                    node_name[: max_name_length - 3] + "..."
+                    if len(node_name) > max_name_length
+                    else node_name
+                )
                 progress_bar.update(
                     task,
                     description=f"Building {node_type:<12}: {display_name:<{max_name_length}}",
                 )
 
-                # Build context with all currently available entities
-                context_data = {
-                    **self.parameters,
-                    **self.functions,
-                    **self.distributions,
-                    **self.modifiers,
-                }
                 context = Context(
-                    parameters=context_data,
+                    parameters={
+                        **self.parameters,
+                        **self.functions,
+                        **self.distributions,
+                        **self.modifiers,
+                    },
                     observables=self._observables,
                 )
 
                 if node_type == "parameter":
-                    # Create parameter tensor with domain bounds applied
-                    domain_bounds = (
-                        self.domain.get(node_name, (None, None))
-                        if self.domain
-                        else (None, None)
+                    self.parameters[node_name] = self._build_parameter_node(
+                        node_name, context
                     )
-                    param_point = (
-                        self.parameterset.get(node_name) if self.parameterset else None
-                    )
-                    # Determine default kind: vector for observables, scalar otherwise
-                    default_kind: Callable[..., TensorVar]
-                    if "_observed" in node_name or node_name in context.observables:
-                        default_kind = pt.vector
-                    else:
-                        default_kind = pt.scalar
-
-                    # Allow explicit override from ParameterPoint.kind
-                    if param_point and param_point.kind is not None:
-                        param_kind = param_point.kind
-                        if param_kind is not default_kind:
-                            warnings.warn(
-                                f"Parameter '{node_name}' has kind override"
-                                f" {param_kind.__name__} (default would be"
-                                f" {default_kind.__name__})",
-                                stacklevel=2,
-                            )
-                    else:
-                        param_kind = default_kind
-                    self.parameters[node_name] = create_bounded_tensor(
-                        node_name, domain_bounds, param_kind
-                    )
-
                 elif node_type == "constant":
-                    # Constants are pre-created by distributions - add to parameters
-                    self.parameters[node_name] = constants_map[node_name]
-
+                    self.parameters[node_name] = self._build_constant_node(
+                        node_name, constants_map
+                    )
                 elif node_type == "function":
-                    # Functions are evaluated by design
-                    self.functions[node_name] = functions[node_name].expression(context)
-
+                    self.functions[node_name] = self._build_function_node(
+                        node_name, functions, context
+                    )
                 elif node_type == "modifier":
-                    # Modifiers are evaluated and stored for later use by distributions
-                    # Use pre-built modifiers map for efficient O(1) lookup
-                    self.modifiers[node_name] = modifiers_map[node_name].expression(
-                        context
+                    self.modifiers[node_name] = self._build_modifier_node(
+                        node_name, modifiers_map, context
                     )
-
                 else:  # node_type == "distribution"
-                    # Distributions are evaluated by design
-                    self.distributions[node_name] = distributions[node_name].expression(
-                        context
+                    self.distributions[node_name] = self._build_distribution_node(
+                        node_name, distributions, context
                     )
 
-                # Advance progress
                 progress_bar.advance(task)
 
     def _get_compiled_function(

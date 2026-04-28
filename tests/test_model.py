@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import re
+import warnings
 from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
+import numpy.testing as npt
 import pytensor.tensor as pt
 import pytest
+from pytensor.graph.traversal import explicit_graph_inputs
+from pytensor.tensor.basic import TensorConstant
 
 import pyhs3 as hs3
 
@@ -1018,3 +1022,153 @@ class TestModelParameterOrdering:
         # Should raise an error when distribution doesn't exist
         with pytest.raises(KeyError):
             model.parsort("nonexistent_dist", ["x", "mu"])
+
+
+class TestConstParameters:
+    """Test that parameters with const=True are baked as pt.constant in the model."""
+
+    @pytest.fixture
+    def workspace_with_const(self):
+        return hs3.Workspace(
+            metadata={"hs3_version": "0.2"},
+            distributions=[
+                {
+                    "name": "gauss",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "mu",
+                    "sigma": "sigma",
+                }
+            ],
+            parameter_points=[
+                {
+                    "name": "defaults",
+                    "parameters": [
+                        {"name": "mu", "value": 0.0},
+                        {"name": "sigma", "value": 1.0, "const": True},
+                    ],
+                }
+            ],
+            domains=[
+                {
+                    "name": "d",
+                    "type": "product_domain",
+                    "axes": [{"name": "x", "min": -5.0, "max": 5.0}],
+                }
+            ],
+        )
+
+    def test_const_parameter_is_tensor_constant(self, workspace_with_const):
+        """const=True parameters must be baked as TensorConstant."""
+        model = workspace_with_const.model(0)
+        assert isinstance(model.parameters["sigma"], TensorConstant), (
+            "sigma has const=True but was not baked as a TensorConstant"
+        )
+
+    def test_const_parameter_value_matches(self, workspace_with_const):
+        """TensorConstant value must match the ParameterPoint value."""
+        model = workspace_with_const.model(0)
+        npt.assert_allclose(model.parameters["sigma"].data, 1.0)
+
+    def test_free_parameter_is_not_constant(self, workspace_with_const):
+        """mu has const=False (default) and must remain a free symbolic variable."""
+        model = workspace_with_const.model(0)
+        assert not isinstance(model.parameters["mu"], TensorConstant)
+
+    def test_const_parameter_absent_from_graph_inputs(self, workspace_with_const):
+        """explicit_graph_inputs must not include const parameters."""
+        model = workspace_with_const.model(0)
+        dist_expr = model.distributions["gauss"]
+        free_names = {v.name for v in explicit_graph_inputs([dist_expr])}
+        assert "sigma" not in free_names, (
+            "sigma (const=True) must not appear as a free graph input"
+        )
+        assert "mu" in free_names
+
+    def test_pdf_with_const_sigma_matches_explicit_sigma(self, workspace_with_const):
+        """Forward-pass result must match whether sigma is baked or passed explicitly."""
+        model_const = workspace_with_const.model(0)
+
+        workspace_free = hs3.Workspace(
+            metadata={"hs3_version": "0.2"},
+            distributions=[
+                {
+                    "name": "gauss",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "mu",
+                    "sigma": "sigma",
+                }
+            ],
+            parameter_points=[
+                {
+                    "name": "defaults",
+                    "parameters": [
+                        {"name": "mu", "value": 0.0},
+                        {"name": "sigma", "value": 1.0},  # free, not const
+                    ],
+                }
+            ],
+            domains=[
+                {
+                    "name": "d",
+                    "type": "product_domain",
+                    "axes": [{"name": "x", "min": -5.0, "max": 5.0}],
+                }
+            ],
+        )
+        model_free = workspace_free.model(0)
+
+        x_val, mu_val = np.array(1.5), np.array(0.5)
+
+        result_const = model_const.pdf("gauss", x=x_val, mu=mu_val)
+        result_free = model_free.pdf("gauss", x=x_val, mu=mu_val, sigma=np.array(1.0))
+
+        npt.assert_allclose(result_const, result_free)
+
+    def test_const_outside_domain_warns(self):
+        """const value outside domain emits a warning; the stored value is unchanged."""
+        ws = hs3.Workspace(
+            metadata={"hs3_version": "0.2"},
+            distributions=[
+                {
+                    "name": "gauss",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "mu",
+                    "sigma": "sigma",
+                }
+            ],
+            parameter_points=[
+                {
+                    "name": "defaults",
+                    "parameters": [
+                        {"name": "mu", "value": 0.0},
+                        # sigma=5.0 but domain cap is 2.0
+                        {"name": "sigma", "value": 5.0, "const": True},
+                    ],
+                }
+            ],
+            domains=[
+                {
+                    "name": "d",
+                    "type": "product_domain",
+                    "axes": [
+                        {"name": "x", "min": -5.0, "max": 5.0},
+                        {"name": "sigma", "min": 0.1, "max": 2.0},
+                    ],
+                }
+            ],
+        )
+        with pytest.warns(UserWarning, match="outside domain"):
+            model = ws.model(0)
+
+        # Value must NOT be clipped — use exactly what const said.
+        npt.assert_allclose(model.parameters["sigma"].data, 5.0)
+
+    def test_const_no_declared_domain_no_warning(self, workspace_with_const):
+        """const value with no declared domain must not produce any warning."""
+        # workspace_with_const has sigma=1.0; the domain only declares x, not sigma
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            workspace_with_const.model(0)  # must not raise

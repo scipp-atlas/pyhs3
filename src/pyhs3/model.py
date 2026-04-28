@@ -120,10 +120,10 @@ class Model:
         ``ws.model(likelihood)``.  Raises ``RuntimeError`` otherwise.
 
         Returns a dict suitable for passing directly to a compiled or JAX
-        function alongside :attr:`nominal_params`::
+        function alongside :attr:`free_params`::
 
             jg = pyhs3.jaxify(model.log_prob)
-            jg(**model.data, **model.nominal_params)
+            jg(**model.data, **model.free_params)
         """
         if self._likelihood is None:
             msg = "data requires a likelihood context; build via ws.model(analysis)"
@@ -134,15 +134,34 @@ class Model:
     def nominal_params(self) -> dict[str, float]:
         """Default parameter values from the workspace parameter set.
 
-        Returns a dict suitable for passing to a compiled or JAX function
-        alongside :attr:`data`::
+        Returns all parameters, including those marked ``const=True`` (which
+        are baked as :func:`pytensor.tensor.constant` in the symbolic graph
+        and are therefore not free inputs to a jaxified expression).
 
-            jg = pyhs3.jaxify(model.log_prob)
-            jg(**model.data, **model.nominal_params)
+        Use :attr:`free_params` when passing parameters to a jaxified callable
+        to avoid supplying spurious keyword arguments.
         """
         result: dict[str, float] = {}
         for pp in self.parameterset:
             result[pp.name] = float(pp.value)
+        return result
+
+    @property
+    def free_params(self) -> dict[str, float]:
+        """Non-constant parameter values from the workspace parameter set.
+
+        Like :attr:`nominal_params` but excludes parameters whose
+        ``ParameterPoint.const`` flag is ``True``.  These are the parameters
+        that remain as free symbolic inputs after model construction, making
+        this dict the correct one to pass to a jaxified callable::
+
+            jg = pyhs3.jaxify(model.log_prob)
+            jg(**model.data, **model.free_params)
+        """
+        result: dict[str, float] = {}
+        for pp in self.parameterset:
+            if not pp.const:
+                result[pp.name] = float(pp.value)
         return result
 
     @property
@@ -161,7 +180,7 @@ class Model:
         to use different weights, a new ``Model`` must be built.
 
         The workspace defaults for evaluation are available via :attr:`data`
-        and :attr:`nominal_params`.
+        and :attr:`free_params`.
 
         Only available when the model was built via ``ws.model(analysis)`` or
         ``ws.model(likelihood)``.  Raises ``RuntimeError`` otherwise.
@@ -171,7 +190,7 @@ class Model:
             model = ws.model(ws.analyses["CombinedPdf_combData"])
             nll = -2 * model.log_prob
             jg = pyhs3.jaxify(nll)
-            val = jg(**model.data, **model.nominal_params)
+            val = jg(**model.data, **model.free_params)
         """
         if self._likelihood is None:
             msg = "log_prob requires a likelihood context; build via ws.model(analysis)"

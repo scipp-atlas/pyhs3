@@ -374,7 +374,7 @@ class Workspace(BaseModel):
         - :class:`~pyhs3.analyses.Analysis` — all context (domain, parameter
           set, observables) is derived from the analysis; gains access to
           :attr:`~pyhs3.model.Model.log_prob`, :attr:`~pyhs3.model.Model.data`,
-          and :attr:`~pyhs3.model.Model.nominal_params`.
+          and :attr:`~pyhs3.model.Model.free_params`.
         - :class:`~pyhs3.likelihoods.Likelihood` — observable bounds are derived
           from the likelihood's data; ``domain`` and ``parameter_set`` fall back
           to workspace defaults (index 0) unless overridden.

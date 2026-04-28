@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import warnings
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1124,3 +1125,50 @@ class TestConstParameters:
         result_free = model_free.pdf("gauss", x=x_val, mu=mu_val, sigma=np.array(1.0))
 
         npt.assert_allclose(result_const, result_free)
+
+    def test_const_outside_domain_warns(self):
+        """const value outside domain emits a warning; the stored value is unchanged."""
+        ws = hs3.Workspace(
+            metadata={"hs3_version": "0.2"},
+            distributions=[
+                {
+                    "name": "gauss",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "mu",
+                    "sigma": "sigma",
+                }
+            ],
+            parameter_points=[
+                {
+                    "name": "defaults",
+                    "parameters": [
+                        {"name": "mu", "value": 0.0},
+                        # sigma=5.0 but domain cap is 2.0
+                        {"name": "sigma", "value": 5.0, "const": True},
+                    ],
+                }
+            ],
+            domains=[
+                {
+                    "name": "d",
+                    "type": "product_domain",
+                    "axes": [
+                        {"name": "x", "min": -5.0, "max": 5.0},
+                        {"name": "sigma", "min": 0.1, "max": 2.0},
+                    ],
+                }
+            ],
+        )
+        with pytest.warns(UserWarning, match="outside domain"):
+            model = ws.model(0)
+
+        # Value must NOT be clipped — use exactly what const said.
+        npt.assert_allclose(model.parameters["sigma"].data, 5.0)
+
+    def test_const_inside_domain_no_warning(self, workspace_with_const):
+        """const value inside domain must not produce any warning."""
+        # workspace_with_const has sigma=1.0, domain x in [-5, 5] (sigma unconstrained)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            workspace_with_const.model(0)  # must not raise

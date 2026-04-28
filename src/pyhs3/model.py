@@ -330,9 +330,23 @@ class Model:
                     if param_point and param_point.const:
                         # Bake as a compile-time constant so it is invisible to
                         # explicit_graph_inputs and JAX transpilation.
-                        self.parameters[node_name] = pt.constant(
-                            np.float64(param_point.value), name=node_name
+                        val = np.float64(param_point.value)
+                        domain_bounds = (
+                            self.domain.get(node_name, (None, None))
+                            if self.domain
+                            else (None, None)
                         )
+                        lower, upper = domain_bounds
+                        if (lower is not None and val < lower) or (
+                            upper is not None and val > upper
+                        ):
+                            warnings.warn(
+                                f"Parameter '{node_name}' has const=True with value"
+                                f" {val} outside domain [{lower}, {upper}];"
+                                f" using the specified value as-is.",
+                                stacklevel=2,
+                            )
+                        self.parameters[node_name] = pt.constant(val, name=node_name)
                     else:
                         # Create a symbolic free variable with domain bounds.
                         domain_bounds = (

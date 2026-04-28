@@ -7,7 +7,7 @@ including likelihood mappings between distributions and data.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import numpy as np
 import numpy.typing as npt
@@ -15,6 +15,9 @@ from pydantic import ConfigDict, Field, model_validator
 
 from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.data import Data, Datum
+
+if TYPE_CHECKING:
+    from pyhs3.workspace import Workspace
 from pyhs3.distributions import Distributions
 from pyhs3.distributions.core import Distribution
 from pyhs3.typing.annotations import (
@@ -55,17 +58,24 @@ class Likelihood(NamedModel):
     ] = Field(..., repr=False)
     aux_distributions: list[str] | None = Field(default=None, repr=False)
 
-    def validate_unique_axis_names(self) -> None:
+    def validate_unique_axis_names(self, workspace: Workspace | None = None) -> None:
         """Raise ValueError if any observable axis name appears more than once.
 
-        Only checks resolved (non-string) data entries; skipped for FK refs
-        that have not yet been resolved by the workspace.
+        When *workspace* is provided, unresolved string FK references in ``data``
+        are resolved via ``workspace.data`` before checking.  Without a workspace,
+        string entries are skipped.
         """
         seen: dict[str, str] = {}
         duplicates: list[str] = []
-        for datum in self.data:
-            if isinstance(datum, str):
-                continue
+        for entry in self.data:
+            if isinstance(entry, str):
+                if workspace is None or workspace.data is None:
+                    continue
+                datum = workspace.data.get(entry)
+                if datum is None:
+                    continue
+            else:
+                datum = entry
             for axis in datum.axes or []:
                 if axis.name in seen:
                     duplicates.append(

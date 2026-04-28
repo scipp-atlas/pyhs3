@@ -89,7 +89,7 @@ class Workspace(BaseModel):
         if self.likelihoods is not None:
             for likelihood in self.likelihoods:
                 try:
-                    likelihood.validate_unique_axis_names()
+                    likelihood.validate_unique_axis_names(self)
                 except ValueError as exc:
                     errors.append(str(exc))
 

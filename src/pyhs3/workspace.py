@@ -13,7 +13,7 @@ from typing import Any, cast
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from pyhs3.analyses import Analyses, Analysis
-from pyhs3.data import Data, DataType, PointData, UnbinnedData
+from pyhs3.data import Data, DataType
 from pyhs3.distributions import Distributions, DistributionType
 from pyhs3.domains import Domain, Domains, DomainType, ProductDomain
 from pyhs3.exceptions import WorkspaceValidationError
@@ -85,6 +85,14 @@ class Workspace(BaseModel):
             for likelihood in self.likelihoods:
                 self._resolve_likelihood_fields(likelihood, errors)
 
+        # Validate observable axis uniqueness after FK resolution
+        if self.likelihoods is not None:
+            for likelihood in self.likelihoods:
+                try:
+                    likelihood.validate_unique_axis_names()
+                except ValueError as exc:
+                    errors.append(str(exc))
+
         # Resolve Analysis fields
         if self.analyses is not None:
             for analysis in self.analyses:
@@ -150,10 +158,6 @@ class Workspace(BaseModel):
                 errors,
             )
             likelihood.data = Data(cast(list[DataType], resolved))
-            try:
-                likelihood.validate_unique_axis_names()
-            except ValueError as exc:
-                errors.append(str(exc))
         else:
             errors.append(f"Likelihood '{likelihood.name}' references unknown data")
 
@@ -328,29 +332,28 @@ class Workspace(BaseModel):
                     else self.data[data_item]
                 )
 
-                # PointData axes are optional; UnbinnedData/BinnedData always have them
-                if isinstance(datum, PointData) and datum.axes is None:
+                axes = getattr(datum, "axes", None)
+                if axes is None:
                     log.warning(
-                        "The likelihood '%s' references a PointData '%s' without axes. This cannot be used to normalize any distribution.",
+                        "The likelihood '%s' references data '%s' without axes. This cannot be used to normalize any distribution.",
                         likelihood.name,
                         datum.name,
                     )
                     continue
 
                 # For each axis, extract bounds
-                for axis in datum.axes or []:
+                for axis in axes:
                     observables[axis.name] = (axis.min, axis.max)
 
         return observables
 
     @staticmethod
     def _extract_observables(likelihood: Likelihood) -> dict[str, tuple[float, float]]:
-        """Return {axis_name: (min, max)} for all UnbinnedData axes in a likelihood."""
+        """Return {axis_name: (min, max)} for all data axes in a likelihood."""
         return {
             axis.name: (axis.min, axis.max)
             for datum in likelihood.data
-            if isinstance(datum, UnbinnedData)
-            for axis in datum.axes
+            for axis in getattr(datum, "axes", None) or []
         }
 
     @singledispatchmethod
@@ -427,24 +430,22 @@ class Workspace(BaseModel):
         progress: bool = True,
         mode: str = "FAST_RUN",
     ) -> Model:
-        if len(target.domains) > 1:
-            domain_names = [d if isinstance(d, str) else d.name for d in target.domains]
-            msg = (
-                f"Analysis '{target.name}' references multiple domains {domain_names}. "
-                f"ws.model() requires a single primary domain; resolve "
-                f"analysis.domains to a single entry before calling ws.model()."
-            )
-            raise RuntimeError(msg)
-
-        analysis_domain = target.domains[0]
-        if isinstance(analysis_domain, str):
-            msg = f"Analysis '{target.name}' domains must be FK-resolved before ws.model()"
-            raise RuntimeError(msg)
+        for d in target.domains:
+            if isinstance(d, str):
+                msg = f"Analysis '{target.name}' domains must be FK-resolved before ws.model()"
+                raise RuntimeError(msg)
 
         likelihood_obj = target.likelihood
         if isinstance(likelihood_obj, str):
             msg = f"Analysis '{target.name}' likelihood must be FK-resolved before ws.model()"
             raise RuntimeError(msg)
+
+        if len(target.domains) == 1:
+            analysis_domain: Domain = target.domains[0]  # type: ignore[assignment]
+        else:
+            # Merge all domain axes into one ProductDomain
+            all_axes = [ax for d in target.domains for ax in getattr(d, "axes", [])]
+            analysis_domain = ProductDomain(name=f"{target.name}_merged", axes=all_axes)  # type: ignore[arg-type]
 
         if target.init and self.parameter_points:
             param_set = self.parameter_points.get(target.init)

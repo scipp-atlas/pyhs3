@@ -12,7 +12,7 @@ from typing import Annotated
 from pydantic import ConfigDict, Field, model_validator
 
 from pyhs3.collections import NamedCollection, NamedModel
-from pyhs3.data import Data, Datum, UnbinnedData
+from pyhs3.data import Data, Datum
 from pyhs3.distributions import Distributions
 from pyhs3.distributions.core import Distribution
 from pyhs3.typing.annotations import (
@@ -64,14 +64,13 @@ class Likelihood(NamedModel):
         for datum in self.data:
             if isinstance(datum, str):
                 continue
-            if isinstance(datum, UnbinnedData):
-                for axis in datum.axes:
-                    if axis.name in seen:
-                        duplicates.append(
-                            f"'{axis.name}' in '{datum.name}' and '{seen[axis.name]}'"
-                        )
-                    else:
-                        seen[axis.name] = datum.name
+            for axis in getattr(datum, "axes", None) or []:
+                if axis.name in seen:
+                    duplicates.append(
+                        f"'{axis.name}' in '{datum.name}' and '{seen[axis.name]}'"
+                    )
+                else:
+                    seen[axis.name] = datum.name
         if duplicates:
             msg = (
                 f"Likelihood '{self.name}' has duplicate observable axis names: "

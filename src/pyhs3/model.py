@@ -26,7 +26,6 @@ from rich.progress import (
 )
 
 from pyhs3.context import Context
-from pyhs3.data import UnbinnedData
 from pyhs3.distributions import Distributions
 from pyhs3.domains import Domain
 from pyhs3.functions import Functions
@@ -132,11 +131,13 @@ class Model:
             raise RuntimeError(msg)
         result: dict[str, npt.NDArray[np.float64]] = {}
         for datum in self._likelihood.data:
-            if not isinstance(datum, UnbinnedData):
+            axes = getattr(datum, "axes", None)
+            entries = getattr(datum, "entries", None)
+            if axes is None or entries is None:
                 continue
-            entries = np.asarray(datum.entries, dtype=np.float64)
-            for ax_idx, axis in enumerate(datum.axes):
-                result[axis.name] = entries[:, ax_idx]
+            entries_arr = np.asarray(entries, dtype=np.float64)
+            for ax_idx, axis in enumerate(axes):
+                result[axis.name] = entries_arr[:, ax_idx]
         return result
 
     @property
@@ -192,7 +193,10 @@ class Model:
         for dist_obj, datum in zip(
             self._likelihood.distributions, self._likelihood.data, strict=True
         ):
-            if isinstance(dist_obj, str) or not isinstance(datum, UnbinnedData):
+            if isinstance(dist_obj, str):
+                continue
+            entries = getattr(datum, "entries", None)
+            if entries is None:
                 continue
 
             dist_name = dist_obj.name
@@ -203,9 +207,10 @@ class Model:
             # observables as symbolic pt.vector free inputs.
             log_pdf: TensorVar = pt.log(self.distributions[dist_name])
 
-            if datum.weights is not None:
-                weights = pt.constant(np.asarray(datum.weights, dtype=np.float64))
-                lp_terms.append(pt.sum(weights * log_pdf))  # type: ignore[no-untyped-call]
+            weights = getattr(datum, "weights", None)
+            if weights is not None:
+                weights_t = pt.constant(np.asarray(weights, dtype=np.float64))
+                lp_terms.append(pt.sum(weights_t * log_pdf))  # type: ignore[no-untyped-call]
             else:
                 lp_terms.append(pt.sum(log_pdf))  # type: ignore[no-untyped-call]
 
@@ -216,13 +221,8 @@ class Model:
                     lp_terms.append(pt.log(self.distributions[aux_name]))
 
         if lp_terms:
-            total: TensorVar = lp_terms[0]
-            for term in lp_terms[1:]:
-                total = total + term
-        else:
-            total = pt.constant(np.float64(0.0))
-
-        return total
+            return pt.sum(pt.stack(lp_terms))  # type: ignore[no-untyped-call,no-any-return]
+        return pt.constant(np.float64(0.0))
 
     @staticmethod
     def _ensure_array(

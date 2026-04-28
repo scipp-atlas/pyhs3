@@ -118,8 +118,8 @@ def test_model_legacy_int_still_works():
     assert isinstance(model, Model)
 
 
-def test_model_from_analysis_multi_domain_raises():
-    """ws.model(analysis) raises when analysis references more than one domain."""
+def test_model_from_analysis_multi_domain_merges():
+    """ws.model(analysis) merges multiple domains into a single ProductDomain."""
     ws_multi = Workspace(
         **{
             **_WS_DICT,
@@ -130,23 +130,24 @@ def test_model_from_analysis_multi_domain_raises():
                     "axes": [{"name": "mean", "min": -10.0, "max": 10.0}],
                 },
                 {
-                    "name": "extra",
+                    "name": "nuis",
                     "type": "product_domain",
-                    "axes": [{"name": "mean", "min": -5.0, "max": 5.0}],
+                    "axes": [{"name": "sigma_nuis", "min": -5.0, "max": 5.0}],
                 },
             ],
             "analyses": [
                 {
                     "name": "A",
                     "likelihood": "L",
-                    "domains": ["main", "extra"],
+                    "domains": ["main", "nuis"],
                     "init": "params",
                 }
             ],
         }
     )
-    with pytest.raises(RuntimeError, match="multiple domains"):
-        ws_multi.model(ws_multi.analyses["A"])
+    model = ws_multi.model(ws_multi.analyses["A"], progress=False)
+    assert "mean" in model.domain
+    assert "sigma_nuis" in model.domain
 
 
 # ---------------------------------------------------------------------------

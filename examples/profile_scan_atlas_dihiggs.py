@@ -132,32 +132,42 @@ def main() -> None:
     model = ws.model(analysis, progress=True)
 
     # ------------------------------------------------------------------ #
-    # 2. Bake observed data as pt.constant, then transpile to JAX          #
+    # 2. Bake observed data as pt.constant, deduplicate, then transpile   #
     # ------------------------------------------------------------------ #
-    # model.data returns {obs_name: event_array} for each channel.
-    # Substituting the symbolic observable pt.vector inputs with pt.constant
-    # nodes removes them from the jaxified function's inputs — data is then
-    # fixed "for free" without any runtime overhead.
+    # pyhs3's Gauss-Legendre normalization calls clone_replace 64 times
+    # (once per quadrature point), which clones every non-substituted
+    # parameter into a fresh Python object each time.  The result is 64
+    # copies of every parameter variable — all with the same name but
+    # different Python identity.  jaxify rejects duplicate input names, so
+    # we must unify them back to one canonical pt.scalar/pt.vector per name
+    # in the same pass that bakes the observable data as pt.constant.
     data_np = model.data
     nll_expr = -2.0 * model.log_prob
 
-    # Map symbolic variable name → pt.constant node.
-    sym_inputs = list(explicit_graph_inputs([nll_expr]))
-    data_substitutions: dict = {}
-    for var in sym_inputs:
+    all_inputs = [v for v in explicit_graph_inputs([nll_expr]) if v.name is not None]
+    deduped: dict = {}
+    all_subs: dict = {}
+    n_data = 0
+    for var in all_inputs:
         if var.name in data_np:
-            # TensorConstants created here are excluded from jaxify's input
-            # list (explicit_graph_inputs skips Constant nodes), so the data
-            # is embedded as a compile-time constant in the JAX function.
-            data_substitutions[var] = pt.constant(
-                np.asarray(data_np[var.name], dtype=np.float64)
-            )
+            # Bake observed events as a compile-time constant.
+            all_subs[var] = pt.constant(np.asarray(data_np[var.name], dtype=np.float64))
+            n_data += 1
+        else:
+            if var.name not in deduped:
+                deduped[var.name] = (
+                    pt.vector(var.name) if var.type.ndim > 0 else pt.scalar(var.name)
+                )
+            all_subs[var] = deduped[var.name]
 
-    nll_with_data = clone_replace(nll_expr, replace=data_substitutions)
-    print(f"  Baked {len(data_substitutions)} observable channel(s) as constants.")
+    nll_final = clone_replace(nll_expr, replace=all_subs)
+    print(
+        f"  Baked {n_data} observable input(s); "
+        f"deduplicated {len(all_inputs)} inputs → {len(deduped)} unique parameters."
+    )
 
     print("Transpiling NLL expression to JAX ...")
-    jg = jaxify(nll_with_data)
+    jg = jaxify(nll_final)
     print(f"  {len(jg.input_names)} free symbolic inputs (parameters only).")
 
     # ------------------------------------------------------------------ #

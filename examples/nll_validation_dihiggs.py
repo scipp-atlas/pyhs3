@@ -186,7 +186,8 @@ def main() -> None:
     for dist_obj, datum in zip(likelihood.distributions, unbinned, strict=False):
         dist_name = dist_obj if isinstance(dist_obj, str) else dist_obj.name
         obs_name = datum.axes[0].name
-        vals = np.asarray(datum.weighted_entries(threshold=1e-6), dtype=np.float64)
+        obs_vals = datum.weighted_entries[:, 0]
+        vals = np.sort(obs_vals[np.abs(obs_vals) > 1e-6])
         channel_data.append((dist_name, obs_name, vals))
 
     print(f"\nRunning NLL scan over {len(MU_GRID)} mu_HH values ...")

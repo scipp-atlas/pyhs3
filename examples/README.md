@@ -11,12 +11,12 @@ workspace (pyhs3 issue #41). No JAX required.
 
 ### What it demonstrates
 
-| Feature                                        | API used                                        |
-| ---------------------------------------------- | ----------------------------------------------- |
-| Build model with merged best-fit parameter set | `ws.model(parameter_set=merged_pset)`           |
-| Vectorized per-channel log-PDF evaluation      | `model.logpdf_unsafe(name, **{obs: array})`     |
-| Weighted data access                           | `UnbinnedData.weighted_entries(threshold=1e-6)` |
-| Comparison against ROOT reference values       | embedded `_REFERENCE` dict                      |
+| Feature                                        | API used                                    |
+| ---------------------------------------------- | ------------------------------------------- |
+| Build model with merged best-fit parameter set | `ws.model(parameter_set=merged_pset)`       |
+| Vectorized per-channel log-PDF evaluation      | `model.logpdf_unsafe(name, **{obs: array})` |
+| Weighted data access                           | `UnbinnedData.weighted_entries[:, 0]`       |
+| Comparison against ROOT reference values       | embedded `_REFERENCE` dict                  |
 
 ### Install
 

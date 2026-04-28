@@ -1083,3 +1083,44 @@ class TestConstParameters:
             "sigma (const=True) must not appear as a free graph input"
         )
         assert "mu" in free_names
+
+    def test_pdf_with_const_sigma_matches_explicit_sigma(self, workspace_with_const):
+        """Forward-pass result must match whether sigma is baked or passed explicitly."""
+        model_const = workspace_with_const.model(0)
+
+        workspace_free = hs3.Workspace(
+            metadata={"hs3_version": "0.2"},
+            distributions=[
+                {
+                    "name": "gauss",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "mu",
+                    "sigma": "sigma",
+                }
+            ],
+            parameter_points=[
+                {
+                    "name": "defaults",
+                    "parameters": [
+                        {"name": "mu", "value": 0.0},
+                        {"name": "sigma", "value": 1.0},  # free, not const
+                    ],
+                }
+            ],
+            domains=[
+                {
+                    "name": "d",
+                    "type": "product_domain",
+                    "axes": [{"name": "x", "min": -5.0, "max": 5.0}],
+                }
+            ],
+        )
+        model_free = workspace_free.model(0)
+
+        x_val, mu_val = np.array(1.5), np.array(0.5)
+
+        result_const = model_const.pdf("gauss", x=x_val, mu=mu_val)
+        result_free = model_free.pdf("gauss", x=x_val, mu=mu_val, sigma=np.array(1.0))
+
+        npt.assert_allclose(result_const, result_free)

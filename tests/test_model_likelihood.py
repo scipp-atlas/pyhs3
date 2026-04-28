@@ -17,9 +17,15 @@ except ImportError:
     _HAS_JAX = False
 
 from pytensor.graph.traversal import explicit_graph_inputs
+from pytensor.tensor import TensorConstant
 
 from pyhs3 import Workspace, jaxify
+from pyhs3.distributions import Distributions
+from pyhs3.domains import ProductDomain
+from pyhs3.functions import Functions
+from pyhs3.likelihoods import Likelihood
 from pyhs3.model import Model
+from pyhs3.parameter_points import ParameterSet
 
 # ---------------------------------------------------------------------------
 # Minimal two-Gaussian-channel workspace
@@ -372,3 +378,186 @@ def test_nll_jaxify_matches_truncnorm():
     expected = -2.0 * lp
 
     assert abs(val - expected) < 1e-5, f"got {val}, expected {expected}"
+
+
+# ---------------------------------------------------------------------------
+# log_prob coverage: skipped / constant-fallback / aux_distributions paths
+# ---------------------------------------------------------------------------
+
+_WS_BINNED: dict = {
+    "metadata": {"hs3_version": "0.2"},
+    "distributions": [
+        {
+            "name": "signal",
+            "type": "gaussian_dist",
+            "x": "mass",
+            "mean": "mu",
+            "sigma": 1.0,
+        }
+    ],
+    "domains": [
+        {
+            "name": "d",
+            "type": "product_domain",
+            "axes": [{"name": "mu", "min": -10.0, "max": 10.0}],
+        }
+    ],
+    "data": [
+        {
+            "name": "binned_obs",
+            "type": "binned",
+            "contents": [10, 20, 15],
+            "axes": [{"name": "mass", "edges": [110.0, 120.0, 130.0, 140.0]}],
+        }
+    ],
+    "likelihoods": [{"name": "L", "distributions": ["signal"], "data": ["binned_obs"]}],
+    "parameter_points": [{"name": "p", "parameters": [{"name": "mu", "value": 125.0}]}],
+}
+
+_WS_AUX: dict = {
+    "metadata": {"hs3_version": "0.2"},
+    "distributions": [
+        {
+            "name": "gauss1",
+            "type": "gaussian_dist",
+            "x": "x_obs",
+            "mean": "mean",
+            "sigma": 1.0,
+        },
+        {
+            "name": "constraint",
+            "type": "gaussian_dist",
+            "x": "alpha",
+            "mean": 0.0,
+            "sigma": 1.0,
+        },
+    ],
+    "domains": [
+        {
+            "name": "main",
+            "type": "product_domain",
+            "axes": [
+                {"name": "mean", "min": -10.0, "max": 10.0},
+                {"name": "alpha", "min": -5.0, "max": 5.0},
+            ],
+        }
+    ],
+    "data": [
+        {
+            "name": "data1",
+            "type": "unbinned",
+            "axes": [{"name": "x_obs", "min": -10.0, "max": 10.0}],
+            "entries": [[1.0], [2.0], [3.0]],
+        }
+    ],
+    "likelihoods": [
+        {
+            "name": "L",
+            "distributions": ["gauss1"],
+            "data": ["data1"],
+            "aux_distributions": ["constraint"],
+        }
+    ],
+    "analyses": [
+        {"name": "A", "likelihood": "L", "domains": ["main"], "init": "params"}
+    ],
+    "parameter_points": [
+        {
+            "name": "params",
+            "parameters": [
+                {"name": "mean", "value": 0.0},
+                {"name": "alpha", "value": 0.0},
+            ],
+        }
+    ],
+}
+
+
+def test_log_prob_binned_data_has_no_entries_returns_constant_zero():
+    """BinnedData has no entries; lp_terms stays empty → constant 0.0 fallback."""
+    ws = Workspace(**_WS_BINNED)
+    model = ws.model(ws.likelihoods["L"], progress=False)
+    lp = model.log_prob
+    # All data entries were BinnedData (no entries attribute) → skipped.
+    # lp_terms is empty → pt.constant(0.0) is returned.
+    assert isinstance(lp, TensorConstant)
+    fn = pytensor.function([], lp)
+    assert float(fn()) == pytest.approx(0.0)
+
+
+def test_log_prob_string_datum_skipped_returns_constant_zero():
+    """Likelihood with unresolved string datum refs skips all pairs → constant 0.0."""
+    likelihood = Likelihood(name="L", distributions=["gauss1"], data=["data1"])
+    model = Model(
+        parameterset=ParameterSet(name="default", parameters=[]),
+        distributions=Distributions([]),
+        domain=ProductDomain(name="default", axes=[]),
+        functions=Functions([]),
+        progress=False,
+        mode="FAST_COMPILE",
+        likelihood=likelihood,
+    )
+    lp = model.log_prob
+    assert isinstance(lp, TensorConstant)
+    fn = pytensor.function([], lp)
+    assert float(fn()) == pytest.approx(0.0)
+
+
+def test_log_prob_aux_distributions_contributes_to_log_prob():
+    """aux_distributions present → those distribution values enter log_prob."""
+    ws = Workspace(**_WS_AUX)
+    model = ws.model(ws.analyses["A"], progress=False)
+    lp_without_aux = model.log_prob  # would be different without "constraint"
+
+    # Build a workspace identical except aux_distributions removed.
+    ws_no_aux = Workspace(
+        **{
+            **_WS_AUX,
+            "likelihoods": [
+                {"name": "L", "distributions": ["gauss1"], "data": ["data1"]}
+            ],
+        }
+    )
+    model_no_aux = ws_no_aux.model(ws_no_aux.analyses["A"], progress=False)
+    lp_without_aux_expr = model_no_aux.log_prob
+
+    inputs_with = {
+        v.name: v for v in explicit_graph_inputs([lp_without_aux]) if v.name is not None
+    }
+    inputs_without = {
+        v.name: v
+        for v in explicit_graph_inputs([lp_without_aux_expr])
+        if v.name is not None
+    }
+    fn_with = pytensor.function(list(inputs_with.values()), lp_without_aux)
+    fn_without = pytensor.function(list(inputs_without.values()), lp_without_aux_expr)
+
+    common = {"x_obs": np.array([1.0, 2.0, 3.0]), "mean": np.float64(0.0)}
+    val_with = float(fn_with(**common, alpha=np.float64(0.0)))
+    val_without = float(fn_without(**common))
+
+    # With the constraint, log_prob gains an extra log(N(0|0,1)) term.
+    assert val_with != pytest.approx(val_without)
+    assert val_with < val_without  # constraint N(0|0,1) < 1, so log < 0
+
+
+def test_log_prob_aux_unknown_distribution_is_silently_skipped():
+    """aux_distributions names not in model.distributions are skipped without error."""
+    ws = Workspace(
+        **{
+            **_WS_AUX,
+            "likelihoods": [
+                {
+                    "name": "L",
+                    "distributions": ["gauss1"],
+                    "data": ["data1"],
+                    # "nonexistent" is not a distribution in the workspace.
+                    "aux_distributions": ["constraint", "nonexistent"],
+                }
+            ],
+        }
+    )
+    model = ws.model(ws.analyses["A"], progress=False)
+    # Should not raise; "nonexistent" is simply skipped.
+    lp = model.log_prob
+    assert hasattr(lp, "type")

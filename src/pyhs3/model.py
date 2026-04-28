@@ -141,9 +141,8 @@ class Model:
             jg(**model.data, **model.nominal_params)
         """
         result: dict[str, float] = {}
-        if self.parameterset:
-            for pp in self.parameterset:
-                result[pp.name] = float(pp.value)
+        for pp in self.parameterset:
+            result[pp.name] = float(pp.value)
         return result
 
     @property
@@ -183,15 +182,13 @@ class Model:
         for dist_obj, datum in zip(
             self._likelihood.distributions, self._likelihood.data, strict=True
         ):
-            if isinstance(dist_obj, str) or isinstance(datum, str):
+            if isinstance(datum, str):
                 continue
             entries = getattr(datum, "entries", None)
             if entries is None:
                 continue
 
-            dist_name = dist_obj.name
-            if dist_name not in self.distributions:
-                continue
+            dist_name = dist_obj if isinstance(dist_obj, str) else dist_obj.name
 
             # model.distributions[name] is the normalized PDF expression with
             # observables as symbolic pt.vector free inputs.

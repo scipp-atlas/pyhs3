@@ -108,7 +108,7 @@ This is how you use the ``pyhs3`` Python API to build a statistical model direct
    ...     parameter_points=[param_points],
    ...     domains=[domain],
    ... )
-   >>> model = ws.model()
+   >>> model = ws.model(0)
    <BLANKLINE>
    >>> print(model)
    Model(
@@ -174,7 +174,7 @@ This is the same model built using HS3 JSON-like dictionary format:
    ...     ],
    ... }
    >>> ws = pyhs3.Workspace(**workspace_data)
-   >>> model = ws.model()
+   >>> model = ws.model(0)
    <BLANKLINE>
    >>> print(model)
    Model(
@@ -200,7 +200,7 @@ This is the same model built using HS3 JSON-like dictionary format:
    >>>
    >>> # Can recreate workspace from serialized dictionary
    >>> ws_roundtrip = pyhs3.Workspace(**serialized_dict)
-   >>> model_roundtrip = ws_roundtrip.model()
+   >>> model_roundtrip = ws_roundtrip.model(0)
    <BLANKLINE>
    >>> print("Round-trip model:", model_roundtrip.parameterset.name)
    Round-trip model: default_values

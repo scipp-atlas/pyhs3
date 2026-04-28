@@ -243,7 +243,7 @@ class TestWorkspaceNormalization:
         )
 
         # Create model
-        model = workspace.model(progress=False)
+        model = workspace.model(0, progress=False)
 
         # Get the compiled distribution
         dist_expr = model.distributions["test_dist"]
@@ -294,7 +294,7 @@ class TestWorkspaceNormalization:
         # Create model (suppress warning for kind override)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
-            model = workspace.model(progress=False)
+            model = workspace.model(0, progress=False)
 
         # Get the compiled distribution
         dist_expr = model.distributions["test_dist"]
@@ -354,7 +354,7 @@ class TestWorkspaceNormalization:
         )
 
         # Create model
-        model = workspace.model(progress=False)
+        model = workspace.model(0, progress=False)
 
         # Get the compiled distribution
         dist_expr = model.distributions["gauss_dist"]

@@ -859,7 +859,7 @@ def test_simplemodel_uncorrelated_pyhf(pars, datadir):
             datadir.joinpath("simplemodel_uncorrelated-background_hs3.json").read_text()
         )
     )
-    model_pyhs3 = ws_pyhs3.model()
+    model_pyhs3 = ws_pyhs3.model(0)
 
     # Get observed data
     obs_data = None
@@ -952,7 +952,7 @@ def test_simplemodel_correlated_pyhf(pars, datadir):
             datadir.joinpath("simplemodel_correlated-background_hs3.json").read_text()
         )
     )
-    model_pyhs3 = ws_pyhs3.model()
+    model_pyhs3 = ws_pyhs3.model(0)
 
     # Get observed data
     obs_data = None

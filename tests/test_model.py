@@ -56,7 +56,7 @@ class TestModelModes:
     @pytest.mark.parametrize("mode", ["FAST_RUN", "FAST_COMPILE"])
     def test_model_compilation_modes(self, simple_workspace, mode):
         """Test that models work correctly with different compilation modes."""
-        model = simple_workspace.model(mode=mode)
+        model = simple_workspace.model(0, mode=mode)
 
         # Verify the mode is set correctly
         assert model.mode == mode
@@ -72,8 +72,8 @@ class TestModelModes:
 
     def test_mode_compilation_differences(self, simple_workspace):
         """Test that both modes produce equivalent results."""
-        model_fast_run = simple_workspace.model(mode="FAST_RUN")
-        model_fast_compile = simple_workspace.model(mode="FAST_COMPILE")
+        model_fast_run = simple_workspace.model(0, mode="FAST_RUN")
+        model_fast_compile = simple_workspace.model(0, mode="FAST_COMPILE")
 
         # Both should produce the same result for the same inputs
         result_fast_run = model_fast_run.pdf(
@@ -92,7 +92,7 @@ class TestModelRepr:
 
     def test_repr_basic_structure(self, simple_workspace):
         """Test that __repr__ returns expected format."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
         repr_str = repr(model)
 
         # Should start with "Model(" and end with ")"
@@ -109,7 +109,7 @@ class TestModelRepr:
 
     def test_repr_shows_correct_counts(self, simple_workspace):
         """Test that __repr__ shows correct entity counts."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
         repr_str = repr(model)
 
         # Should show 3 parameters (x, mu, sigma)
@@ -123,7 +123,7 @@ class TestModelRepr:
 
     def test_repr_shows_entity_names(self, simple_workspace):
         """Test that __repr__ includes entity names."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
         repr_str = repr(model)
 
         # Should contain parameter names
@@ -136,7 +136,7 @@ class TestModelRepr:
 
     def test_repr_with_custom_mode(self, simple_workspace):
         """Test __repr__ with different compilation mode."""
-        model = simple_workspace.model(mode="FAST_COMPILE")
+        model = simple_workspace.model(0, mode="FAST_COMPILE")
         repr_str = repr(model)
 
         assert "mode: FAST_COMPILE" in repr_str
@@ -147,7 +147,7 @@ class TestModelGraphSummary:
 
     def test_graph_summary_basic_structure(self, simple_workspace):
         """Test that graph_summary returns expected format."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
         summary = model.graph_summary("gauss")
 
         # Should start with distribution name
@@ -168,7 +168,7 @@ class TestModelGraphSummary:
 
     def test_graph_summary_input_variables(self, simple_workspace):
         """Test that graph_summary shows input variable count."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
         summary = model.graph_summary("gauss")
 
         # Should show some input variables (exact number depends on implementation)
@@ -181,8 +181,8 @@ class TestModelGraphSummary:
 
     def test_graph_summary_compilation_info(self, simple_workspace):
         """Test that graph_summary shows compilation information."""
-        model_fast_run = simple_workspace.model(mode="FAST_RUN")
-        model_fast_compile = simple_workspace.model(mode="FAST_COMPILE")
+        model_fast_run = simple_workspace.model(0, mode="FAST_RUN")
+        model_fast_compile = simple_workspace.model(0, mode="FAST_COMPILE")
 
         # FAST_RUN should not show as compiled initially (until function is called)
         summary_fast_run = model_fast_run.graph_summary("gauss")
@@ -195,7 +195,7 @@ class TestModelGraphSummary:
 
     def test_graph_summary_after_compilation(self, simple_workspace):
         """Test graph_summary shows compilation status after function is called."""
-        model = simple_workspace.model(mode="FAST_RUN")
+        model = simple_workspace.model(0, mode="FAST_RUN")
 
         # Before calling pdf, should not be compiled
         summary_before = model.graph_summary("gauss")
@@ -210,14 +210,14 @@ class TestModelGraphSummary:
 
     def test_graph_summary_nonexistent_distribution(self, simple_workspace):
         """Test that graph_summary raises error for nonexistent distribution."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         with pytest.raises(ValueError, match="Distribution 'nonexistent' not found"):
             model.graph_summary("nonexistent")
 
     def test_graph_summary_operation_types(self, simple_workspace):
         """Test that graph_summary includes operation type information."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
         summary = model.graph_summary("gauss")
 
         # Should contain operation types in a dict-like format
@@ -232,7 +232,7 @@ class TestModelGraphVisualization:
     @pytest.mark.pydot
     def test_visualize_graph_basic_functionality(self, simple_workspace, tmp_path):
         """Test that visualize_graph creates output file."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         # Test with default parameters (svg format) in tmp_path
         output_file = model.visualize_graph("gauss", path=tmp_path)
@@ -250,7 +250,7 @@ class TestModelGraphVisualization:
     @pytest.mark.parametrize("fmt", ["svg", "png", "pdf"])
     def test_visualize_graph_different_formats(self, simple_workspace, tmp_path, fmt):
         """Test visualize_graph with different output formats."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         output_file = model.visualize_graph("gauss", fmt=fmt, path=tmp_path)
 
@@ -265,7 +265,7 @@ class TestModelGraphVisualization:
     @pytest.mark.pydot
     def test_visualize_graph_custom_output_file(self, simple_workspace, tmp_path):
         """Test visualize_graph with custom output filename."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         custom_file = tmp_path / "my_custom_graph.svg"
         output_file = model.visualize_graph("gauss", outfile=str(custom_file))
@@ -279,7 +279,7 @@ class TestModelGraphVisualization:
     @pytest.mark.pydot
     def test_visualize_graph_nonexistent_distribution(self, simple_workspace):
         """Test that visualize_graph raises error for nonexistent distribution."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         with pytest.raises(ValueError, match="Distribution 'nonexistent' not found"):
             model.visualize_graph("nonexistent")
@@ -287,7 +287,7 @@ class TestModelGraphVisualization:
     @pytest.mark.pydot
     def test_visualize_graph_no_path_parameter(self, simple_workspace):
         """Test visualize_graph without path parameter (uses current directory)."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         # Call without path parameter - should use current working directory
         output_file = model.visualize_graph("gauss")
@@ -302,7 +302,7 @@ class TestModelGraphVisualization:
 
     def test_visualize_graph_import_error_handling(self, simple_workspace, monkeypatch):
         """Test that visualize_graph handles ImportError appropriately."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         # Mock the import to raise ImportError
         def mock_import(*_args, **_kwargs):
@@ -350,7 +350,7 @@ class TestModelWithoutParameterPoints:
     def test_model_creation_without_parameter_points(self, workspace_no_params):
         """Test that a model can be created successfully without parameter_points."""
         # This should not raise an error
-        model = workspace_no_params.model()
+        model = workspace_no_params.model(0)
 
         # Verify model was created successfully
         assert model is not None
@@ -367,7 +367,7 @@ class TestModelWithoutParameterPoints:
 
     def test_parameters_use_domain_bounds(self, workspace_no_params):
         """Test that discovered parameters use domain bounds when available."""
-        model = workspace_no_params.model()
+        model = workspace_no_params.model(0)
 
         # We can't directly inspect bounds, but we can verify the parameters exist
         # and that the model can evaluate successfully
@@ -380,7 +380,7 @@ class TestModelWithoutParameterPoints:
 
     def test_parameters_default_to_scalar_kind(self, workspace_no_params):
         """Test that discovered parameters default to scalar kind when no parameterset provided."""
-        model = workspace_no_params.model()
+        model = workspace_no_params.model(0)
 
         # All discovered parameters should be scalars (pt.scalar)
         # We can verify this by checking they accept scalar values in pdf evaluation
@@ -430,7 +430,7 @@ class TestModelWithoutParameterPoints:
             ],
         }
         workspace = hs3.Workspace(**workspace_data)
-        model = workspace.model()
+        model = workspace.model(0)
 
         # obs_x should be a vector because it's an observable
         assert model.parameters["obs_x"].type.ndim == 1
@@ -483,7 +483,7 @@ class TestModelWithoutParameterPoints:
             ),
             pytest.warns(UserWarning, match=r"Parameter 'obs_x' has kind override"),
         ):
-            model = workspace.model()
+            model = workspace.model(0)
 
         # obs_x should be scalar (override respected)
         assert model.parameters["obs_x"].type.ndim == 0
@@ -527,7 +527,7 @@ class TestModelWithoutParameterPoints:
 
         # Override the kind programmatically
         workspace.parameter_points[0]["obs_x"].kind = pt.vector
-        model = workspace.model()
+        model = workspace.model(0)
         assert model.parameters["obs_x"].type.ndim == 1
 
     def test_non_observable_parameter_stays_scalar(self):
@@ -554,14 +554,14 @@ class TestModelWithoutParameterPoints:
             ],
         }
         workspace = hs3.Workspace(**workspace_data)
-        model = workspace.model()
+        model = workspace.model(0)
 
         # mu should be scalar (not an observable)
         assert model.parameters["mu"].type.ndim == 0
 
     def test_repr_shows_discovered_parameters(self, workspace_no_params):
         """Test that __repr__ correctly shows discovered parameters."""
-        model = workspace_no_params.model()
+        model = workspace_no_params.model(0)
         repr_str = repr(model)
 
         # Should show 3 discovered parameters
@@ -610,7 +610,7 @@ class TestModelWithoutParameterPoints:
         workspace = hs3.Workspace(**workspace_data)
 
         # Should successfully create model with mixed parameter sources
-        model = workspace.model()
+        model = workspace.model(0)
 
         # All parameters should be available
         assert "x" in model.parameters
@@ -771,7 +771,7 @@ class TestWorkspaceWithLikelihoodsAndAnalyses:
         workspace = workspace_with_likelihoods_analyses
 
         # Should successfully create model
-        model = workspace.model()
+        model = workspace.model(0)
 
         # Should have distributions
         assert "signal_dist" in model.distributions
@@ -818,7 +818,7 @@ class TestWorkspaceWithLikelihoodsAndAnalyses:
         assert "combined_analysis" in loaded_workspace.analyses
 
         # Verify model creation still works
-        model = loaded_workspace.model()
+        model = loaded_workspace.model(0)
         assert "signal_dist" in model.distributions
         assert "background_dist" in model.distributions
 
@@ -828,7 +828,7 @@ class TestModelParameterOrdering:
 
     def test_pars_returns_parameter_list(self, simple_workspace):
         """Test that pars() returns a list of parameter names."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
         param_list = model.pars("gauss")
 
         # Should return a list
@@ -842,7 +842,7 @@ class TestModelParameterOrdering:
 
     def test_pars_includes_all_distribution_parameters(self, simple_workspace):
         """Test that pars() includes all parameters used by the distribution."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
         param_list = model.pars("gauss")
 
         # Should include the Gaussian parameters
@@ -852,7 +852,7 @@ class TestModelParameterOrdering:
 
     def test_pars_returns_consistent_order(self, simple_workspace):
         """Test that pars() returns the same order on multiple calls."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         # Call pars() multiple times
         param_list_1 = model.pars("gauss")
@@ -865,7 +865,7 @@ class TestModelParameterOrdering:
 
     def test_pars_triggers_compilation(self, simple_workspace):
         """Test that pars() triggers compilation if not already compiled."""
-        model = simple_workspace.model(mode="FAST_RUN")
+        model = simple_workspace.model(0, mode="FAST_RUN")
 
         # Before calling pars, distribution should not be compiled
         assert "gauss" not in model._compiled_functions
@@ -883,7 +883,7 @@ class TestModelParameterOrdering:
 
     def test_pars_order_matches_pdf_inputs(self, simple_workspace):
         """Test that pars() order matches what pdf() expects."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
         param_list = model.pars("gauss")
 
         # Create parameter dictionary in the order returned by pars()
@@ -896,7 +896,7 @@ class TestModelParameterOrdering:
 
     def test_parsort_returns_index_list(self, simple_workspace):
         """Test that parsort() returns a list of indices."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
         param_names = ["mu", "x", "sigma"]
 
         indices = model.parsort("gauss", param_names)
@@ -912,7 +912,7 @@ class TestModelParameterOrdering:
 
     def test_parsort_returns_valid_indices(self, simple_workspace):
         """Test that parsort() returns valid indices into the input list."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
         param_names = ["sigma", "mu", "x"]
 
         indices = model.parsort("gauss", param_names)
@@ -925,7 +925,7 @@ class TestModelParameterOrdering:
 
     def test_parsort_reorders_to_match_pars(self, simple_workspace):
         """Test that parsort() indices reorder params to match pars()."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         # Get the expected order from pars()
         expected_order = model.pars("gauss")
@@ -957,7 +957,7 @@ class TestModelParameterOrdering:
 
     def test_parsort_example_from_docstring(self, simple_workspace):
         """Test the example from the parsort() docstring."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         # Get expected parameter order
         pars_order = model.pars("gauss")
@@ -977,7 +977,7 @@ class TestModelParameterOrdering:
 
     def test_pars_and_parsort_work_together(self, simple_workspace):
         """Test that pars() and parsort() work together correctly."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         # Get the canonical parameter order
         expected_order = model.pars("gauss")
@@ -1005,7 +1005,7 @@ class TestModelParameterOrdering:
 
     def test_pars_nonexistent_distribution_raises_error(self, simple_workspace):
         """Test that pars() raises error for nonexistent distribution."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         # Should raise an error when distribution doesn't exist
         with pytest.raises(KeyError):
@@ -1013,7 +1013,7 @@ class TestModelParameterOrdering:
 
     def test_parsort_nonexistent_distribution_raises_error(self, simple_workspace):
         """Test that parsort() raises error for nonexistent distribution."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         # Should raise an error when distribution doesn't exist
         with pytest.raises(KeyError):

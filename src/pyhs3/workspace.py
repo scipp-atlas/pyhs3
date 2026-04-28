@@ -6,13 +6,14 @@ import os
 import sys
 from collections import Counter
 from collections.abc import Iterable
+from functools import singledispatchmethod
 from pathlib import Path
 from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from pyhs3.analyses import Analyses, Analysis
-from pyhs3.data import Data, DataType, PointData
+from pyhs3.data import Data, DataType
 from pyhs3.distributions import Distributions, DistributionType
 from pyhs3.domains import Domain, Domains, DomainType, ProductDomain
 from pyhs3.exceptions import WorkspaceValidationError
@@ -83,6 +84,14 @@ class Workspace(BaseModel):
         if self.likelihoods is not None:
             for likelihood in self.likelihoods:
                 self._resolve_likelihood_fields(likelihood, errors)
+
+        # Validate observable axis uniqueness after FK resolution
+        if self.likelihoods is not None:
+            for likelihood in self.likelihoods:
+                try:
+                    likelihood.validate_unique_axis_names(self)
+                except ValueError as exc:
+                    errors.append(str(exc))
 
         # Resolve Analysis fields
         if self.analyses is not None:
@@ -323,65 +332,85 @@ class Workspace(BaseModel):
                     else self.data[data_item]
                 )
 
-                # PointData axes are optional; UnbinnedData/BinnedData always have them
-                if isinstance(datum, PointData) and datum.axes is None:
+                if datum.axes is None:
                     log.warning(
-                        "The likelihood '%s' references a PointData '%s' without axes. This cannot be used to normalize any distribution.",
+                        "The likelihood '%s' references data '%s' without axes. This cannot be used to normalize any distribution.",
                         likelihood.name,
                         datum.name,
                     )
                     continue
 
                 # For each axis, extract bounds
-                for axis in datum.axes or []:
+                for axis in datum.axes:
                     observables[axis.name] = (axis.min, axis.max)
 
         return observables
 
+    @staticmethod
+    def _extract_observables(likelihood: Likelihood) -> dict[str, tuple[float, float]]:
+        """Return {axis_name: (min, max)} for all data axes in a likelihood."""
+        return {
+            axis.name: (axis.min, axis.max)
+            for datum in likelihood.data
+            if not isinstance(datum, str)
+            for axis in datum.axes or []
+        }
+
+    @singledispatchmethod
     def model(
         self,
+        target: int | str,
         *,
-        domain: int | str | Domain = 0,
-        parameter_set: int | str | ParameterSet = 0,
+        domain: int | str | Domain | None = None,
+        parameter_set: int | str | ParameterSet | None = None,
         progress: bool = True,
         mode: str = "FAST_RUN",
     ) -> Model:
         """
-        Constructs a `Model` object using the provided domain and parameter set.
+        Constructs a :class:`~pyhs3.model.Model` rooted at ``target``.
+
+        Dispatch is based on the type of ``target``:
+
+        - :class:`~pyhs3.analyses.Analysis` — all context (domain, parameter
+          set, observables) is derived from the analysis; gains access to
+          :attr:`~pyhs3.model.Model.log_prob`, :attr:`~pyhs3.model.Model.data`,
+          and :attr:`~pyhs3.model.Model.nominal_params`.
+        - :class:`~pyhs3.likelihoods.Likelihood` — observable bounds are derived
+          from the likelihood's data; ``domain`` and ``parameter_set`` fall back
+          to workspace defaults (index 0) unless overridden.
+        - ``int`` / ``str`` — ``target`` indexes into workspace domains (legacy);
+          ``domain`` and ``parameter_set`` select the parameter context.
 
         Args:
-            domain (int | str | Domain): Identifier or object specifying the domain to use.
-            parameter_set (int | str | ParameterSet): Identifier or object specifying the parameter values to use.
-            progress (bool): Whether to show progress bar during dependency graph construction. Defaults to True.
-            mode (str): PyTensor compilation mode. Defaults to "FAST_RUN".
-                       Options: "FAST_RUN" (apply all rewrites, use C implementations),
-                       "FAST_COMPILE" (few rewrites, Python implementations),
-                       "NUMBA" (compile using Numba), "JAX" (compile using JAX),
-                       "PYTORCH" (compile using PyTorch), "DebugMode" (debugging),
-                       "NanGuardMode" (NaN detection).
+            target: Dispatch key.  Pass an
+                :class:`~pyhs3.analyses.Analysis` or
+                :class:`~pyhs3.likelihoods.Likelihood` for the modern paths,
+                or an ``int``/``str`` domain index for the legacy path.
+            domain: Override domain (legacy and Likelihood paths only).
+            parameter_set: Override parameter set (legacy and Likelihood paths only).
+            progress: Whether to show a progress bar during graph construction.
+            mode: PyTensor compilation mode (default ``"FAST_RUN"``).
 
         Returns:
-            Model: The constructed model object.
+            :class:`~pyhs3.model.Model`: The constructed model.
         """
-
+        # Legacy: target is int or str indexing into domains.
+        _domain_arg = domain if domain is not None else target
         selected_domain = (
-            domain
-            if isinstance(domain, Domain)
-            else self.domains[domain]
+            _domain_arg
+            if isinstance(_domain_arg, Domain)
+            else self.domains[_domain_arg]
             if self.domains
             else ProductDomain(name="default")
         )
+        _ps_arg = parameter_set if parameter_set is not None else 0
         parameterset = (
-            parameter_set
-            if isinstance(parameter_set, ParameterSet)
-            else self.parameter_points[parameter_set]
+            _ps_arg
+            if isinstance(_ps_arg, ParameterSet)
+            else self.parameter_points[_ps_arg]
             if self.parameter_points
             else ParameterSet(name="default", parameters=[])
         )
-
-        # Compute observables from likelihoods + data + domain
-        observables = self._compute_observables()
-
         return Model(
             parameterset=parameterset or ParameterSet(name="default"),
             distributions=self.distributions or Distributions(),
@@ -389,5 +418,84 @@ class Workspace(BaseModel):
             functions=self.functions or Functions(),
             progress=progress,
             mode=mode,
-            observables=observables,
+            observables=self._compute_observables(),
+            likelihood=None,
+        )
+
+    @model.register
+    def _(
+        self,
+        target: Analysis,
+        *,
+        progress: bool = True,
+        mode: str = "FAST_RUN",
+    ) -> Model:
+        # _resolve_foreign_keys guarantees both are resolved objects by construction.
+        likelihood_obj = cast(Likelihood, target.likelihood)
+        domains = cast(Domains, target.domains)
+
+        if len(domains) == 1:
+            analysis_domain: Domain = domains[0]
+        else:
+            # Merge all domain axes into one ProductDomain
+            all_axes = [ax for d in domains for ax in getattr(d, "axes", [])]
+            analysis_domain = ProductDomain(name=f"{target.name}_merged", axes=all_axes)  # type: ignore[arg-type]
+
+        if target.init:
+            if self.parameter_points is None:
+                msg = f"Analysis '{target.name}' requires parameter set '{target.init}' but workspace has no parameter_points"
+                raise ValueError(msg)
+            param_set = self.parameter_points.get(target.init)
+            if param_set is None:
+                msg = f"Analysis '{target.name}' references unknown parameter set '{target.init}'"
+                raise ValueError(msg)
+        else:
+            param_set = None
+
+        return Model(
+            parameterset=param_set or ParameterSet(name="default", parameters=[]),
+            distributions=self.distributions or Distributions(),
+            domain=analysis_domain,
+            functions=self.functions or Functions(),
+            progress=progress,
+            mode=mode,
+            observables=self._extract_observables(likelihood_obj),
+            likelihood=likelihood_obj,
+        )
+
+    @model.register
+    def _(
+        self,
+        target: Likelihood,
+        *,
+        domain: int | str | Domain | None = None,
+        parameter_set: int | str | ParameterSet | None = None,
+        progress: bool = True,
+        mode: str = "FAST_RUN",
+    ) -> Model:
+        _domain_arg = domain if domain is not None else 0
+        selected_domain = (
+            _domain_arg
+            if isinstance(_domain_arg, Domain)
+            else self.domains[_domain_arg]
+            if self.domains
+            else ProductDomain(name="default")
+        )
+        _ps_arg = parameter_set if parameter_set is not None else 0
+        parameterset = (
+            _ps_arg
+            if isinstance(_ps_arg, ParameterSet)
+            else self.parameter_points[_ps_arg]
+            if self.parameter_points
+            else ParameterSet(name="default", parameters=[])
+        )
+        return Model(
+            parameterset=parameterset or ParameterSet(name="default"),
+            distributions=self.distributions or Distributions(),
+            domain=selected_domain or Domain(name="default", type="unknown"),
+            functions=self.functions or Functions(),
+            progress=progress,
+            mode=mode,
+            observables=self._extract_observables(target),
+            likelihood=target,
         )

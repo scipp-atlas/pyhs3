@@ -85,7 +85,7 @@ def test_cross_distribution_parameter_sharing():
 
     # Create workspace and model
     ws_pyhs3 = pyhs3.Workspace(**test_workspace_data)
-    model = ws_pyhs3.model()
+    model = ws_pyhs3.model(0)
 
     # Verify model was created successfully (no circular dependencies)
     assert len(model.parameters) == 7
@@ -184,7 +184,7 @@ def test_histfactory_modifier_unique_naming():
 
     # Should build successfully without circular dependencies
     ws_pyhs3 = pyhs3.Workspace(**test_workspace_data)
-    model = ws_pyhs3.model()
+    model = ws_pyhs3.model(0)
 
     # Verify no circular dependencies by successful model creation
     assert len(model.parameters) == 3  # should be Lumi, mu, data

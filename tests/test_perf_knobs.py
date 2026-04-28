@@ -60,7 +60,7 @@ class TestCompiledFunctionFlags:
         reducing FAST_RUN overhead from ~11x to ~2x vs ROOT. This test
         prevents accidental regression to trust_input=False.
         """
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
         # Force compilation by calling pdf once
         model.pdf_unsafe(
             "gauss", x=np.array([0.0]), mu=np.array(0.0), sigma=np.array(1.0)
@@ -72,7 +72,7 @@ class TestCompiledFunctionFlags:
 
     def test_compiled_function_accepts_numpy_array_inputs(self, simple_workspace):
         """pdf_unsafe returns finite values when given numpy array inputs."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
         result = model.pdf_unsafe(
             "gauss", x=np.float64(0.0), mu=np.float64(0.0), sigma=np.float64(1.0)
         )
@@ -80,7 +80,7 @@ class TestCompiledFunctionFlags:
 
     def test_compiled_function_caches_across_calls(self, simple_workspace):
         """Second pdf_unsafe call reuses the cached compiled function object."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
         model.pdf_unsafe(
             "gauss", x=np.array([0.0]), mu=np.array(0.0), sigma=np.array(1.0)
         )

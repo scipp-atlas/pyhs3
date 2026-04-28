@@ -474,3 +474,133 @@ class TestWorkspaceReferentialIntegrity:
         error_msg = str(exc_info.value)
         assert "unknown_likelihood" in error_msg or "unknown_domain" in error_msg
         assert "unknown_dist" in error_msg or "unknown_data" in error_msg
+
+    def test_validate_unique_axis_names_resolves_string_refs(self):
+        """validate_unique_axis_names(workspace) catches duplicates via FK lookup."""
+        # Workspace where d1 and d2 each have axis "x_obs" but only d1 is in the
+        # likelihood, so workspace construction succeeds.
+        ws = Workspace(
+            metadata={"hs3_version": "0.2"},
+            distributions=[
+                {
+                    "name": "g1",
+                    "type": "gaussian_dist",
+                    "x": "x_obs",
+                    "mean": "mu",
+                    "sigma": 1.0,
+                },
+            ],
+            domains=[
+                {
+                    "name": "main",
+                    "type": "product_domain",
+                    "axes": [{"name": "mu", "min": -5.0, "max": 5.0}],
+                }
+            ],
+            data=[
+                {
+                    "name": "d1",
+                    "type": "unbinned",
+                    "axes": [{"name": "x_obs", "min": -10.0, "max": 10.0}],
+                    "entries": [[1.0]],
+                },
+                {
+                    "name": "d2",
+                    "type": "unbinned",
+                    "axes": [{"name": "x_obs", "min": -10.0, "max": 10.0}],
+                    "entries": [[2.0]],
+                },
+            ],
+            likelihoods=[{"name": "L", "distributions": ["g1"], "data": ["d1"]}],
+            analyses=[{"name": "A", "likelihood": "L", "domains": ["main"]}],
+        )
+        # Likelihood with unresolved string refs to both d1 and d2
+        lk = Likelihood(name="test", distributions=["g1", "g1"], data=["d1", "d2"])
+        with pytest.raises(ValueError, match="duplicate observable axis names"):
+            lk.validate_unique_axis_names(ws)
+
+    def test_validate_unique_axis_names_skips_unresolvable_string_ref(self):
+        """String datum ref not found in workspace.data is silently skipped."""
+        ws = Workspace(
+            metadata={"hs3_version": "0.2"},
+            distributions=[
+                {
+                    "name": "g1",
+                    "type": "gaussian_dist",
+                    "x": "x_obs",
+                    "mean": "mu",
+                    "sigma": 1.0,
+                },
+            ],
+            domains=[
+                {
+                    "name": "main",
+                    "type": "product_domain",
+                    "axes": [{"name": "mu", "min": -5.0, "max": 5.0}],
+                }
+            ],
+            data=[
+                {
+                    "name": "d1",
+                    "type": "unbinned",
+                    "axes": [{"name": "x_obs", "min": -10.0, "max": 10.0}],
+                    "entries": [[1.0]],
+                },
+            ],
+            likelihoods=[{"name": "L", "distributions": ["g1"], "data": ["d1"]}],
+            analyses=[{"name": "A", "likelihood": "L", "domains": ["main"]}],
+        )
+        # "nonexistent" is not in workspace.data → datum is None → silently skipped
+        lk = Likelihood(name="test", distributions=["g1"], data=["nonexistent"])
+        lk.validate_unique_axis_names(ws)  # must not raise
+
+    def test_likelihood_duplicate_axis_names_raises(self):
+        """Workspace raises when two data entries share an observable axis name."""
+        ws_dict = {
+            "metadata": {"hs3_version": "0.2"},
+            "distributions": [
+                {
+                    "name": "g1",
+                    "type": "gaussian_dist",
+                    "x": "x_obs",
+                    "mean": "mu",
+                    "sigma": 1.0,
+                },
+                {
+                    "name": "g2",
+                    "type": "gaussian_dist",
+                    "x": "x_obs",
+                    "mean": "mu",
+                    "sigma": 2.0,
+                },
+            ],
+            "domains": [
+                {
+                    "name": "main",
+                    "type": "product_domain",
+                    "axes": [{"name": "mu", "min": -5.0, "max": 5.0}],
+                }
+            ],
+            "data": [
+                {
+                    "name": "d1",
+                    "type": "unbinned",
+                    "axes": [{"name": "x_obs", "min": -10.0, "max": 10.0}],
+                    "entries": [[1.0]],
+                },
+                {
+                    "name": "d2",
+                    "type": "unbinned",
+                    "axes": [{"name": "x_obs", "min": -10.0, "max": 10.0}],
+                    "entries": [[2.0]],
+                },
+            ],
+            "likelihoods": [
+                {"name": "L", "distributions": ["g1", "g2"], "data": ["d1", "d2"]}
+            ],
+            "analyses": [{"name": "A", "likelihood": "L", "domains": ["main"]}],
+        }
+        with pytest.raises(
+            WorkspaceValidationError, match="duplicate observable axis names"
+        ):
+            Workspace(**ws_dict)

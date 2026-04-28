@@ -47,7 +47,7 @@ class TestPdfUnsafe:
 
     def test_pdf_unsafe_with_floats(self, simple_workspace):
         """Test that pdf_unsafe accepts plain float arguments."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         # Should accept plain floats
         result = model.pdf_unsafe("gauss", x=0.0, mu=0.0, sigma=1.0)
@@ -60,7 +60,7 @@ class TestPdfUnsafe:
         # Note: For scalar parameters, lists would cause dimension mismatch
         # This test validates that the conversion works, but actual usage
         # should match parameter dimensions
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         # For scalar parameters, should use scalars not lists
         result = model.pdf_unsafe("gauss", x=1.5, mu=0.0, sigma=1.0)
@@ -71,7 +71,7 @@ class TestPdfUnsafe:
 
     def test_pdf_unsafe_with_numpy_arrays(self, simple_workspace):
         """Test that pdf_unsafe accepts numpy array arguments."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         # Should accept numpy arrays
         result = model.pdf_unsafe(
@@ -86,7 +86,7 @@ class TestPdfUnsafe:
 
     def test_pdf_unsafe_with_mixed_types(self, simple_workspace):
         """Test that pdf_unsafe accepts mixed argument types."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         # Should accept mixed types (all matching scalar dimension)
         result = model.pdf_unsafe(
@@ -106,7 +106,7 @@ class TestLogpdfUnsafe:
 
     def test_logpdf_unsafe_with_floats(self, simple_workspace):
         """Test that logpdf_unsafe accepts plain float arguments."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         # Should accept plain floats
         result = model.logpdf_unsafe("gauss", x=0.0, mu=0.0, sigma=1.0)
@@ -117,7 +117,7 @@ class TestLogpdfUnsafe:
 
     def test_logpdf_unsafe_with_lists(self, simple_workspace):
         """Test that logpdf_unsafe accepts mixed types for scalar parameters."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         # For scalar parameters, should use scalars
         result = model.logpdf_unsafe("gauss", x=1.5, mu=0.0, sigma=1.0)
@@ -127,7 +127,7 @@ class TestLogpdfUnsafe:
 
     def test_logpdf_unsafe_with_numpy_arrays(self, simple_workspace):
         """Test that logpdf_unsafe accepts numpy array arguments."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         # Should accept numpy arrays
         result = model.logpdf_unsafe(
@@ -143,7 +143,7 @@ class TestLogpdfUnsafe:
 
     def test_logpdf_unsafe_matches_log_of_pdf_unsafe(self, simple_workspace):
         """Test that logpdf_unsafe returns log of pdf_unsafe."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         params = {"x": 1.5, "mu": 0.5, "sigma": 1.2}
 
@@ -159,7 +159,7 @@ class TestStrictPdfValidation:
 
     def test_pdf_accepts_numpy_arrays(self, simple_workspace):
         """Test that pdf() accepts numpy array arguments."""
-        model = simple_workspace.model()
+        model = simple_workspace.model(0)
 
         # Should accept numpy arrays
         result = model.pdf(

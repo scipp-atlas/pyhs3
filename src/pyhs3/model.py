@@ -190,7 +190,7 @@ class Model:
         lp_terms: list[TensorVar] = []
 
         for dist_obj, datum in zip(
-            self._likelihood.distributions, self._likelihood.data, strict=False
+            self._likelihood.distributions, self._likelihood.data, strict=True
         ):
             if isinstance(dist_obj, str) or not isinstance(datum, UnbinnedData):
                 continue

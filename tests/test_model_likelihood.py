@@ -118,6 +118,37 @@ def test_model_legacy_int_still_works():
     assert isinstance(model, Model)
 
 
+def test_model_from_analysis_multi_domain_raises():
+    """ws.model(analysis) raises when analysis references more than one domain."""
+    ws_multi = Workspace(
+        **{
+            **_WS_DICT,
+            "domains": [
+                {
+                    "name": "main",
+                    "type": "product_domain",
+                    "axes": [{"name": "mean", "min": -10.0, "max": 10.0}],
+                },
+                {
+                    "name": "extra",
+                    "type": "product_domain",
+                    "axes": [{"name": "mean", "min": -5.0, "max": 5.0}],
+                },
+            ],
+            "analyses": [
+                {
+                    "name": "A",
+                    "likelihood": "L",
+                    "domains": ["main", "extra"],
+                    "init": "params",
+                }
+            ],
+        }
+    )
+    with pytest.raises(RuntimeError, match="multiple domains"):
+        ws_multi.model(ws_multi.analyses["A"])
+
+
 # ---------------------------------------------------------------------------
 # data and nominal_params properties
 # ---------------------------------------------------------------------------

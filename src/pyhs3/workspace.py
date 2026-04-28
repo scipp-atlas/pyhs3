@@ -6,6 +6,7 @@ import os
 import sys
 from collections import Counter
 from collections.abc import Iterable
+from functools import singledispatchmethod
 from pathlib import Path
 from typing import Any, cast
 
@@ -149,6 +150,10 @@ class Workspace(BaseModel):
                 errors,
             )
             likelihood.data = Data(cast(list[DataType], resolved))
+            try:
+                likelihood.validate_unique_axis_names()
+            except ValueError as exc:
+                errors.append(str(exc))
         else:
             errors.append(f"Likelihood '{likelihood.name}' references unknown data")
 
@@ -338,6 +343,136 @@ class Workspace(BaseModel):
 
         return observables
 
+    @staticmethod
+    def _extract_observables(likelihood: Likelihood) -> dict[str, tuple[float, float]]:
+        """Return {axis_name: (min, max)} for all UnbinnedData axes in a likelihood."""
+        return {
+            axis.name: (axis.min, axis.max)
+            for datum in likelihood.data
+            if isinstance(datum, UnbinnedData)
+            for axis in datum.axes
+        }
+
+    @singledispatchmethod
+    def _model_dispatch(
+        self,
+        target: int | str,
+        *,
+        domain: int | str | Domain | None,
+        parameter_set: int | str | ParameterSet | None,
+        progress: bool,
+        mode: str,
+    ) -> Model:
+        # Legacy: target is int or str indexing into domains.
+        _domain_arg = domain if domain is not None else target
+        selected_domain = (
+            _domain_arg
+            if isinstance(_domain_arg, Domain)
+            else self.domains[_domain_arg]
+            if self.domains
+            else ProductDomain(name="default")
+        )
+        _ps_arg = parameter_set if parameter_set is not None else 0
+        parameterset = (
+            _ps_arg
+            if isinstance(_ps_arg, ParameterSet)
+            else self.parameter_points[_ps_arg]
+            if self.parameter_points
+            else ParameterSet(name="default", parameters=[])
+        )
+        return Model(
+            parameterset=parameterset or ParameterSet(name="default"),
+            distributions=self.distributions or Distributions(),
+            domain=selected_domain or Domain(name="default", type="unknown"),
+            functions=self.functions or Functions(),
+            progress=progress,
+            mode=mode,
+            observables=self._compute_observables(),
+            likelihood=None,
+        )
+
+    @_model_dispatch.register(Analysis)
+    def _(
+        self,
+        target: Analysis,
+        *,
+        domain: int | str | Domain | None,  # noqa: ARG002 — baked into Analysis
+        parameter_set: int | str | ParameterSet | None,  # noqa: ARG002 — baked into Analysis
+        progress: bool,
+        mode: str,
+    ) -> Model:
+        if len(target.domains) > 1:
+            domain_names = [d if isinstance(d, str) else d.name for d in target.domains]
+            msg = (
+                f"Analysis '{target.name}' references multiple domains {domain_names}. "
+                f"ws.model() requires a single primary domain; resolve "
+                f"analysis.domains to a single entry before calling ws.model()."
+            )
+            raise RuntimeError(msg)
+
+        analysis_domain = target.domains[0]
+        if isinstance(analysis_domain, str):
+            msg = f"Analysis '{target.name}' domains must be FK-resolved before ws.model()"
+            raise RuntimeError(msg)
+
+        likelihood_obj = target.likelihood
+        if isinstance(likelihood_obj, str):
+            msg = f"Analysis '{target.name}' likelihood must be FK-resolved before ws.model()"
+            raise RuntimeError(msg)
+
+        if target.init and self.parameter_points:
+            param_set = self.parameter_points.get(target.init)
+        else:
+            param_set = None
+
+        return Model(
+            parameterset=param_set or ParameterSet(name="default", parameters=[]),
+            distributions=self.distributions or Distributions(),
+            domain=analysis_domain,
+            functions=self.functions or Functions(),
+            progress=progress,
+            mode=mode,
+            observables=self._extract_observables(likelihood_obj),
+            likelihood=likelihood_obj,
+        )
+
+    @_model_dispatch.register(Likelihood)
+    def _(
+        self,
+        target: Likelihood,
+        *,
+        domain: int | str | Domain | None,
+        parameter_set: int | str | ParameterSet | None,
+        progress: bool,
+        mode: str,
+    ) -> Model:
+        _domain_arg = domain if domain is not None else 0
+        selected_domain = (
+            _domain_arg
+            if isinstance(_domain_arg, Domain)
+            else self.domains[_domain_arg]
+            if self.domains
+            else ProductDomain(name="default")
+        )
+        _ps_arg = parameter_set if parameter_set is not None else 0
+        parameterset = (
+            _ps_arg
+            if isinstance(_ps_arg, ParameterSet)
+            else self.parameter_points[_ps_arg]
+            if self.parameter_points
+            else ParameterSet(name="default", parameters=[])
+        )
+        return Model(
+            parameterset=parameterset or ParameterSet(name="default"),
+            distributions=self.distributions or Distributions(),
+            domain=selected_domain or Domain(name="default", type="unknown"),
+            functions=self.functions or Functions(),
+            progress=progress,
+            mode=mode,
+            observables=self._extract_observables(target),
+            likelihood=target,
+        )
+
     def model(
         self,
         target: Analysis | Likelihood | int | str = 0,
@@ -350,117 +485,37 @@ class Workspace(BaseModel):
         """
         Constructs a :class:`~pyhs3.model.Model` rooted at ``target``.
 
-        When ``target`` is an :class:`~pyhs3.analyses.Analysis` or
-        :class:`~pyhs3.likelihoods.Likelihood`, the model derives its
-        domain, parameter set, and observable bounds automatically and gains
-        access to :attr:`~pyhs3.model.Model.log_prob`,
-        :attr:`~pyhs3.model.Model.data`, and
-        :attr:`~pyhs3.model.Model.nominal_params`.
+        Dispatch is based on the type of ``target``:
 
-        When ``target`` is an ``int`` or ``str`` (legacy path), the call
-        behaves as before: ``domain`` and ``parameter_set`` select the
-        parameter context from the workspace collections.
+        - :class:`~pyhs3.analyses.Analysis` — all context (domain, parameter
+          set, observables) is derived from the analysis; gains access to
+          :attr:`~pyhs3.model.Model.log_prob`, :attr:`~pyhs3.model.Model.data`,
+          and :attr:`~pyhs3.model.Model.nominal_params`.  ``domain`` and
+          ``parameter_set`` are accepted but unused (they are baked into the
+          analysis).
+        - :class:`~pyhs3.likelihoods.Likelihood` — observable bounds are derived
+          from the likelihood's data; ``domain`` and ``parameter_set`` fall back
+          to workspace defaults (index 0) unless overridden.
+        - ``int`` / ``str`` (legacy) — ``target`` indexes into workspace domains;
+          ``domain`` and ``parameter_set`` select the parameter context.
 
         Args:
-            target: An :class:`~pyhs3.analyses.Analysis` or
-                :class:`~pyhs3.likelihoods.Likelihood` object, or an
-                ``int``/``str`` index into the workspace domains (legacy).
-            domain: Override the domain when ``target`` is an int/str.
-                Ignored when ``target`` is an Analysis or Likelihood.
-            parameter_set: Override the parameter set when ``target`` is an
-                int/str.  Ignored when ``target`` is an Analysis or
-                Likelihood.
+            target: Dispatch key.  Pass an
+                :class:`~pyhs3.analyses.Analysis` or
+                :class:`~pyhs3.likelihoods.Likelihood` for the modern paths,
+                or an ``int``/``str`` domain index for the legacy path.
+            domain: Override domain (legacy and Likelihood paths only).
+            parameter_set: Override parameter set (legacy and Likelihood paths only).
             progress: Whether to show a progress bar during graph construction.
             mode: PyTensor compilation mode (default ``"FAST_RUN"``).
 
         Returns:
             :class:`~pyhs3.model.Model`: The constructed model.
         """
-        resolved_likelihood: Likelihood | None = None
-
-        if isinstance(target, Analysis):
-            # Derive everything from the analysis itself.
-            analysis_domain = target.domains[0]
-            if isinstance(analysis_domain, str):
-                msg = f"Analysis '{target.name}' domains must be FK-resolved before ws.model()"
-                raise RuntimeError(msg)
-            selected_domain: Domain = analysis_domain
-
-            likelihood_obj = target.likelihood
-            if isinstance(likelihood_obj, str):
-                msg = f"Analysis '{target.name}' likelihood must be FK-resolved before ws.model()"
-                raise RuntimeError(msg)
-            resolved_likelihood = likelihood_obj
-
-            if target.init and self.parameter_points:
-                param_set = self.parameter_points.get(target.init)
-            else:
-                param_set = None
-            parameterset: ParameterSet = param_set or ParameterSet(
-                name="default", parameters=[]
-            )
-
-            observables = {
-                axis.name: (axis.min, axis.max)
-                for datum in resolved_likelihood.data
-                if isinstance(datum, UnbinnedData)
-                for axis in datum.axes
-            }
-
-        elif isinstance(target, Likelihood):
-            # Use workspace defaults for domain/parameter_set.
-            resolved_likelihood = target
-            _domain_arg = domain if domain is not None else 0
-            selected_domain = (
-                _domain_arg
-                if isinstance(_domain_arg, Domain)
-                else self.domains[_domain_arg]
-                if self.domains
-                else ProductDomain(name="default")
-            )
-            _ps_arg = parameter_set if parameter_set is not None else 0
-            parameterset = (
-                _ps_arg
-                if isinstance(_ps_arg, ParameterSet)
-                else self.parameter_points[_ps_arg]
-                if self.parameter_points
-                else ParameterSet(name="default", parameters=[])
-            )
-            observables = {
-                axis.name: (axis.min, axis.max)
-                for datum in resolved_likelihood.data
-                if isinstance(datum, UnbinnedData)
-                for axis in datum.axes
-            }
-
-        else:
-            # Legacy: target is int or str indexing into domains.
-            _domain_arg2 = domain if domain is not None else target
-            selected_domain = (
-                _domain_arg2
-                if isinstance(_domain_arg2, Domain)
-                else self.domains[_domain_arg2]
-                if self.domains
-                else ProductDomain(name="default")
-            )
-            _ps_arg2 = parameter_set if parameter_set is not None else 0
-            parameterset = (
-                _ps_arg2
-                if isinstance(_ps_arg2, ParameterSet)
-                else self.parameter_points[_ps_arg2]
-                if self.parameter_points
-                else ParameterSet(name="default", parameters=[])
-            )
-            # Compute observables from all likelihoods + data
-            observables = self._compute_observables()
-
-        return Model(
-            parameterset=parameterset or ParameterSet(name="default"),
-            distributions=self.distributions or Distributions(),
-            domain=selected_domain or Domain(name="default", type="unknown"),
-            functions=self.functions or Functions(),
+        return self._model_dispatch(
+            target,
+            domain=domain,
+            parameter_set=parameter_set,
             progress=progress,
             mode=mode,
-            observables=observables,
-            likelihood=resolved_likelihood,
         )

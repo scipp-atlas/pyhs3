@@ -22,7 +22,6 @@ from pytensor.graph.traversal import explicit_graph_inputs
 from skhep_testdata import data_path as skhep_testdata_path
 
 import pyhs3
-from pyhs3.parameter_points import ParameterSet
 
 # ROOT reference NLL values from issue #41 (Allex Wang / ATLAS bbyy).
 # Index 0 is the unconditional best-fit; indices 1-31 are the mu_HH scan.
@@ -104,9 +103,9 @@ REF_NLL = _REFERENCE["nll"][1:]
 _MODEL_CACHE = Path("ws.pkl")
 
 
-def _build_merged_pset(ws: pyhs3.Workspace) -> ParameterSet:
-    """Merge best-fit nuisance + POI values on top of the default parameter values."""
-    seen: dict[str, object] = {}
+def _collect_params(ws: pyhs3.Workspace) -> dict[str, float]:
+    """Collect parameter values; best-fit sets override nominal (last write wins)."""
+    params: dict[str, float] = {}
     for pset_name in [
         "default_values",
         "nominalGlobs",
@@ -116,8 +115,8 @@ def _build_merged_pset(ws: pyhs3.Workspace) -> ParameterSet:
         "POI_muhat",
     ]:
         for p in ws.parameter_points[pset_name]:
-            seen[p.name] = p
-    return ParameterSet(name="merged", parameters=list(seen.values()))
+            params[p.name] = float(p.value)
+    return params
 
 
 def plot_dist(
@@ -162,15 +161,14 @@ def main() -> None:
         with _MODEL_CACHE.open("rb") as f:
             model = pickle.load(f)
     else:
-        merged_pset = _build_merged_pset(ws)
         print("Building symbolic model (this takes ~1 min) ...")
-        model = ws.model(parameter_set=merged_pset, progress=True)
+        model = ws.model(analysis, progress=True)
         with _MODEL_CACHE.open("wb") as f:
             pickle.dump(model, f)
         print(f"  Model cached to {_MODEL_CACHE}")
 
-    # Initial parameter values from model's (merged) parameter set.
-    parameters: dict[str, float] = {p.name: float(p.value) for p in model.parameterset}
+    # Parameter values: collect from workspace sets (best-fit overrides nominal).
+    parameters = _collect_params(ws)
 
     # Only keep unbinned data sets that are not the "binned-resampled" copies.
     unbinned = [

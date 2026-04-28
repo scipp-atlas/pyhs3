@@ -11,10 +11,6 @@ import numpy.typing as npt
 import pytensor.tensor as pt
 from pytensor.compile.function import function
 from pytensor.graph.traversal import applys_between, explicit_graph_inputs
-
-if TYPE_CHECKING:
-    from pyhs3.likelihoods import Likelihood
-
 from rich.progress import (
     BarColumn,
     Progress,
@@ -32,6 +28,9 @@ from pyhs3.functions import Functions
 from pyhs3.networks import build_dependency_graph
 from pyhs3.parameter_points import ParameterSet
 from pyhs3.typing.aliases import DomainBounds, TensorVar
+
+if TYPE_CHECKING:
+    from pyhs3.likelihoods import Likelihood
 
 log = logging.getLogger(__name__)
 

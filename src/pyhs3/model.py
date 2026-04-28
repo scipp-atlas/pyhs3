@@ -169,9 +169,11 @@ class Model:
         """Symbolic joint log-probability expression for the full likelihood.
 
         Returned as a PyTensor ``TensorVar`` scalar.  Observable data and
-        physics parameters are **all symbolic free inputs** — the expression
-        is suitable for JAX transpilation, gradient computation, or direct
-        PyTensor compilation.
+        parameters listed in :attr:`free_params` are symbolic free inputs;
+        parameters with ``const=True`` are baked as compile-time constants
+        and do not appear as free inputs.  The expression is suitable for
+        JAX transpilation, gradient computation, or direct PyTensor
+        compilation.
 
         Normalization denominators are fixed constants (axis bounds baked at
         ``Model`` construction time).  For unweighted data, the same compiled/JAX

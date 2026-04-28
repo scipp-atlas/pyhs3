@@ -1166,9 +1166,9 @@ class TestConstParameters:
         # Value must NOT be clipped — use exactly what const said.
         npt.assert_allclose(model.parameters["sigma"].data, 5.0)
 
-    def test_const_inside_domain_no_warning(self, workspace_with_const):
-        """const value inside domain must not produce any warning."""
-        # workspace_with_const has sigma=1.0, domain x in [-5, 5] (sigma unconstrained)
+    def test_const_no_declared_domain_no_warning(self, workspace_with_const):
+        """const value with no declared domain must not produce any warning."""
+        # workspace_with_const has sigma=1.0; the domain only declares x, not sigma
         with warnings.catch_warnings():
             warnings.simplefilter("error", UserWarning)
             workspace_with_const.model(0)  # must not raise

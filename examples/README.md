@@ -4,6 +4,38 @@
 > branch and is **not** part of any release. It is a living sandbox — commits
 > accumulate here; no PR to `main` is ever opened from this branch.
 
+## `nll_validation_dihiggs.py`
+
+A vectorized NLL validation against the ROOT reference for the ATLAS bbyy
+workspace (pyhs3 issue #41). No JAX required.
+
+### What it demonstrates
+
+| Feature                                        | API used                                        |
+| ---------------------------------------------- | ----------------------------------------------- |
+| Build model with merged best-fit parameter set | `ws.model(parameter_set=merged_pset)`           |
+| Vectorized per-channel log-PDF evaluation      | `model.logpdf_unsafe(name, **{obs: array})`     |
+| Weighted data access                           | `UnbinnedData.weighted_entries(threshold=1e-6)` |
+| Comparison against ROOT reference values       | embedded `_REFERENCE` dict                      |
+
+### Install
+
+```bash
+pip install "pyhs3" matplotlib skhep-testdata
+```
+
+### Run
+
+```bash
+python examples/nll_validation_dihiggs.py
+```
+
+The script computes one `logpdf_unsafe` call per channel per mu value (instead
+of a per-event Python loop), writes `nll_validation.pdf` and
+`nll_validation.json`.
+
+---
+
 ## `profile_scan_atlas_dihiggs.py`
 
 A profile-likelihood scan over the diHiggs signal-strength parameter `mu_HH` for

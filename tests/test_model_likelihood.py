@@ -118,6 +118,25 @@ def test_model_legacy_int_still_works():
     assert isinstance(model, Model)
 
 
+def test_model_from_analysis_unknown_init_raises():
+    """ws.model(analysis) raises when analysis.init references a non-existent parameter set."""
+    ws_bad = Workspace(
+        **{
+            **_WS_DICT,
+            "analyses": [
+                {
+                    "name": "A",
+                    "likelihood": "L",
+                    "domains": ["main"],
+                    "init": "nonexistent_params",
+                }
+            ],
+        }
+    )
+    with pytest.raises(ValueError, match="nonexistent_params"):
+        ws_bad.model(ws_bad.analyses["A"], progress=False)
+
+
 def test_model_from_analysis_multi_domain_merges():
     """ws.model(analysis) merges multiple domains into a single ProductDomain."""
     ws_multi = Workspace(

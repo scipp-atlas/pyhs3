@@ -64,7 +64,7 @@ class Likelihood(NamedModel):
         for datum in self.data:
             if isinstance(datum, str):
                 continue
-            for axis in getattr(datum, "axes", None) or []:
+            for axis in datum.axes or []:
                 if axis.name in seen:
                     duplicates.append(
                         f"'{axis.name}' in '{datum.name}' and '{seen[axis.name]}'"

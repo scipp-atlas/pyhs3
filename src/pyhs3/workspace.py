@@ -332,8 +332,7 @@ class Workspace(BaseModel):
                     else self.data[data_item]
                 )
 
-                axes = getattr(datum, "axes", None)
-                if axes is None:
+                if datum.axes is None:
                     log.warning(
                         "The likelihood '%s' references data '%s' without axes. This cannot be used to normalize any distribution.",
                         likelihood.name,
@@ -342,7 +341,7 @@ class Workspace(BaseModel):
                     continue
 
                 # For each axis, extract bounds
-                for axis in axes:
+                for axis in datum.axes:
                     observables[axis.name] = (axis.min, axis.max)
 
         return observables
@@ -353,7 +352,8 @@ class Workspace(BaseModel):
         return {
             axis.name: (axis.min, axis.max)
             for datum in likelihood.data
-            for axis in getattr(datum, "axes", None) or []
+            if not isinstance(datum, str)
+            for axis in datum.axes or []
         }
 
     @singledispatchmethod
@@ -447,8 +447,14 @@ class Workspace(BaseModel):
             all_axes = [ax for d in target.domains for ax in getattr(d, "axes", [])]
             analysis_domain = ProductDomain(name=f"{target.name}_merged", axes=all_axes)  # type: ignore[arg-type]
 
-        if target.init and self.parameter_points:
+        if target.init:
+            if self.parameter_points is None:
+                msg = f"Analysis '{target.name}' requires parameter set '{target.init}' but workspace has no parameter_points"
+                raise ValueError(msg)
             param_set = self.parameter_points.get(target.init)
+            if param_set is None:
+                msg = f"Analysis '{target.name}' references unknown parameter set '{target.init}'"
+                raise ValueError(msg)
         else:
             param_set = None
 

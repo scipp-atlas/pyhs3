@@ -130,12 +130,15 @@ class Model:
             raise RuntimeError(msg)
         result: dict[str, npt.NDArray[np.float64]] = {}
         for datum in self._likelihood.data:
-            axes = getattr(datum, "axes", None)
+            if isinstance(datum, str):
+                continue
+            if datum.axes is None:
+                continue
             entries = getattr(datum, "entries", None)
-            if axes is None or entries is None:
+            if entries is None:
                 continue
             entries_arr = np.asarray(entries, dtype=np.float64)
-            for ax_idx, axis in enumerate(axes):
+            for ax_idx, axis in enumerate(datum.axes):
                 result[axis.name] = entries_arr[:, ax_idx]
         return result
 

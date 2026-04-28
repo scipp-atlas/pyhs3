@@ -128,19 +128,7 @@ class Model:
         if self._likelihood is None:
             msg = "data requires a likelihood context; build via ws.model(analysis)"
             raise RuntimeError(msg)
-        result: dict[str, npt.NDArray[np.float64]] = {}
-        for datum in self._likelihood.data:
-            if isinstance(datum, str):
-                continue
-            if datum.axes is None:
-                continue
-            entries = getattr(datum, "entries", None)
-            if entries is None:
-                continue
-            entries_arr = np.asarray(entries, dtype=np.float64)
-            for ax_idx, axis in enumerate(datum.axes):
-                result[axis.name] = entries_arr[:, ax_idx]
-        return result
+        return self._likelihood.data_arrays()
 
     @property
     def nominal_params(self) -> dict[str, float]:
@@ -195,7 +183,7 @@ class Model:
         for dist_obj, datum in zip(
             self._likelihood.distributions, self._likelihood.data, strict=True
         ):
-            if isinstance(dist_obj, str):
+            if isinstance(dist_obj, str) or isinstance(datum, str):
                 continue
             entries = getattr(datum, "entries", None)
             if entries is None:
@@ -211,6 +199,12 @@ class Model:
 
             weights = getattr(datum, "weights", None)
             if weights is not None:
+                warnings.warn(
+                    f"'{datum.name}' has per-event weights; weights are baked as "
+                    f"pt.constant and cannot be changed without rebuilding the model.",
+                    UserWarning,
+                    stacklevel=2,
+                )
                 weights_t = pt.constant(np.asarray(weights, dtype=np.float64))
                 lp_terms.append(pt.sum(weights_t * log_pdf))  # type: ignore[no-untyped-call]
             else:

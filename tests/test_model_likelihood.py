@@ -174,6 +174,41 @@ def test_model_from_analysis_multi_domain_merges():
 # ---------------------------------------------------------------------------
 
 
+def test_likelihood_data_arrays_returns_numpy_dict():
+    ws = _ws()
+    d = ws.likelihoods["L"].data_arrays()
+    assert "x_obs" in d
+    assert "y_obs" in d
+    np.testing.assert_array_equal(d["x_obs"], [1.0, 2.0, 3.0, 4.0, 5.0])
+    np.testing.assert_array_equal(d["y_obs"], [0.5, 1.5, 2.5, 3.5, 4.5])
+
+
+def test_log_prob_warns_for_weighted_data():
+    ws_w = Workspace(
+        **{
+            **_WS_DICT,
+            "data": [
+                {
+                    "name": "data1",
+                    "type": "unbinned",
+                    "axes": [{"name": "x_obs", "min": -10.0, "max": 10.0}],
+                    "entries": [[1.0], [2.0], [3.0], [4.0], [5.0]],
+                    "weights": [1.0, 1.0, 1.0, 1.0, 0.0],
+                },
+                {
+                    "name": "data2",
+                    "type": "unbinned",
+                    "axes": [{"name": "y_obs", "min": -10.0, "max": 10.0}],
+                    "entries": [[0.5], [1.5], [2.5], [3.5], [4.5]],
+                },
+            ],
+        }
+    )
+    model = ws_w.model(ws_w.analyses["A"], progress=False)
+    with pytest.warns(UserWarning, match="weights"):
+        _ = model.log_prob
+
+
 def test_model_data_from_analysis():
     ws = _ws()
     model = ws.model(ws.analyses["A"])

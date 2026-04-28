@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Annotated
 
+import numpy as np
+import numpy.typing as npt
 from pydantic import ConfigDict, Field, model_validator
 
 from pyhs3.collections import NamedCollection, NamedModel
@@ -77,6 +79,31 @@ class Likelihood(NamedModel):
                 + ", ".join(duplicates)
             )
             raise ValueError(msg)
+
+    def data_arrays(self) -> dict[str, npt.NDArray[np.float64]]:
+        """Observable data as numpy arrays keyed by axis name.
+
+        Returns a dict mapping each observable axis name to a 1-D float64 array
+        of event values.  Only data entries with both ``axes`` and ``entries``
+        are included (i.e. :class:`~pyhs3.data.UnbinnedData`).
+
+        Suitable for passing directly to compiled or JAX functions::
+
+            fn(**likelihood.data_arrays(), **params)
+        """
+        result: dict[str, npt.NDArray[np.float64]] = {}
+        for datum in self.data:
+            if isinstance(datum, str):
+                continue
+            if datum.axes is None:
+                continue
+            entries = getattr(datum, "entries", None)
+            if entries is None:
+                continue
+            entries_arr = np.asarray(entries, dtype=np.float64)
+            for ax_idx, axis in enumerate(datum.axes):
+                result[axis.name] = entries_arr[:, ax_idx]
+        return result
 
     @model_validator(mode="after")
     def validate_distributions_data_pairing(self) -> Likelihood:

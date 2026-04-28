@@ -10,6 +10,7 @@ Run:     python examples/profile_scan_atlas_dihiggs.py
 
 from __future__ import annotations
 
+import pickle
 import time
 from pathlib import Path
 
@@ -101,6 +102,8 @@ _REFERENCE_NLL = [
 MU_GRID = _REFERENCE_MU_HH[1:]
 REF_NLL = _REFERENCE_NLL[1:]
 
+_MODEL_CACHE = Path("ws.pkl")
+
 
 def _collect_init_values(ws: pyhs3.Workspace) -> dict[str, float]:
     """Collect initial parameter values, preferring unconditional-fit results."""
@@ -128,56 +131,73 @@ def main() -> None:
     ws = pyhs3.Workspace.load(ws_path)
     analysis = ws.analyses["CombinedPdf_combData"]
 
-    print("Building symbolic model (may take a minute) ...")
-    model = ws.model(analysis, progress=True)
+    if _MODEL_CACHE.exists():
+        print(f"Loading cached model from {_MODEL_CACHE} ...")
+        with _MODEL_CACHE.open("rb") as f:
+            model = pickle.load(f)
+    else:
+        print("Building symbolic model (may take a minute) ...")
+        model = ws.model(analysis, progress=True)
+        with _MODEL_CACHE.open("wb") as f:
+            pickle.dump(model, f)
+        print(f"  Model cached to {_MODEL_CACHE}")
 
     # ------------------------------------------------------------------ #
-    # 2. Bake observed data as pt.constant, deduplicate, then transpile   #
+    # 2. Reduce the expression to ~170 free inputs before transpiling      #
     # ------------------------------------------------------------------ #
-    # pyhs3's Gauss-Legendre normalization calls clone_replace 64 times
-    # (once per quadrature point), which clones every non-substituted
-    # parameter into a fresh Python object each time.  The result is 64
-    # copies of every parameter variable — all with the same name but
-    # different Python identity.  jaxify rejects duplicate input names, so
-    # we must unify them back to one canonical pt.scalar/pt.vector per name
-    # in the same pass that bakes the observable data as pt.constant.
+    # The workspace has ~28 700 named symbolic inputs total.  Only 169 of
+    # them are genuine floating nuisance parameters (nominalNuis); the rest
+    # are per-bin yield parameters, global observables, or other quantities
+    # that are fixed during the profile scan.  Baking the fixed ones as
+    # pt.constant here (at their best-fit values) keeps the JAX function
+    # small enough for BFGS to be practical.
     data_np = model.data
     nll_expr = -2.0 * model.log_prob
 
+    # Parameters that truly float in the profile scan.
+    nuisance_param_names = {p.name for p in ws.parameter_points["nominalNuis"]}
+    free_names = nuisance_param_names | {"mu_HH"}
+
+    # Best-fit or nominal values used to bake the fixed parameters.
+    init_vals = _collect_init_values(ws)
+
     all_inputs = [v for v in explicit_graph_inputs([nll_expr]) if v.name is not None]
-    deduped: dict = {}
     all_subs: dict = {}
-    n_data = 0
+    free_vars: dict[str, pt.TensorVariable] = {}
+
     for var in all_inputs:
         if var.name in data_np:
-            # Bake observed events as a compile-time constant.
+            # Observable data: bake as a compile-time constant.
             all_subs[var] = pt.constant(np.asarray(data_np[var.name], dtype=np.float64))
-            n_data += 1
+        elif var.name in free_names:
+            # Keep as a free symbolic variable; deduplicate to one canonical
+            # instance per name in case normalization cloning created copies.
+            if var.name not in free_vars:
+                free_vars[var.name] = pt.scalar(var.name)
+            all_subs[var] = free_vars[var.name]
         else:
-            if var.name not in deduped:
-                deduped[var.name] = (
-                    pt.vector(var.name) if var.type.ndim > 0 else pt.scalar(var.name)
-                )
-            all_subs[var] = deduped[var.name]
+            # Fixed parameter (per-bin yield, global observable, etc.):
+            # bake at best-fit / nominal value.
+            all_subs[var] = pt.constant(np.float64(init_vals.get(var.name, 0.0)))
 
-    nll_final = clone_replace(nll_expr, replace=all_subs)
+    nll_fixed = clone_replace(nll_expr, replace=all_subs)
+    n_free = len(free_vars)
+    n_fixed = len(all_inputs) - len(data_np) - n_free
     print(
-        f"  Baked {n_data} observable input(s); "
-        f"deduplicated {len(all_inputs)} inputs → {len(deduped)} unique parameters."
+        f"  Baked {len(data_np)} observable channel(s) and "
+        f"{n_fixed} fixed parameter(s); "
+        f"{n_free} free parameter(s) remain."
     )
 
     print("Transpiling NLL expression to JAX ...")
-    jg = jaxify(nll_final)
+    jg = jaxify(nll_fixed)
     print(f"  {len(jg.input_names)} free symbolic inputs (parameters only).")
 
     # ------------------------------------------------------------------ #
     # 3. Set up optimistix-compatible profile NLL                          #
     # ------------------------------------------------------------------ #
-    # Parameters that remain after data substitution: mu_HH + nuisance.
+    # Parameters that remain after baking: mu_HH + nuisance.
     nuisance_names = sorted(set(jg.input_names) - {"mu_HH"})
-    init_vals = _collect_init_values(ws)
-
-    # Initial nuisance parameter vector (flat JAX array, for BFGS).
     nuisance_y0 = jnp.array([init_vals.get(n, 0.0) for n in nuisance_names])
 
     # Map nuisance name → index in free_values array (static at trace time).

@@ -304,37 +304,45 @@ class Model:
                 )
 
                 if node_type == "parameter":
-                    # Create parameter tensor with domain bounds applied
-                    domain_bounds = (
-                        self.domain.get(node_name, (None, None))
-                        if self.domain
-                        else (None, None)
-                    )
                     param_point = (
                         self.parameterset.get(node_name) if self.parameterset else None
                     )
-                    # Determine default kind: vector for observables, scalar otherwise
-                    default_kind: Callable[..., TensorVar]
-                    if "_observed" in node_name or node_name in context.observables:
-                        default_kind = pt.vector
-                    else:
-                        default_kind = pt.scalar
 
-                    # Allow explicit override from ParameterPoint.kind
-                    if param_point and param_point.kind is not None:
-                        param_kind = param_point.kind
-                        if param_kind is not default_kind:
-                            warnings.warn(
-                                f"Parameter '{node_name}' has kind override"
-                                f" {param_kind.__name__} (default would be"
-                                f" {default_kind.__name__})",
-                                stacklevel=2,
-                            )
+                    if param_point and param_point.const:
+                        # Bake as a compile-time constant so it is invisible to
+                        # explicit_graph_inputs and JAX transpilation.
+                        self.parameters[node_name] = pt.constant(
+                            np.float64(param_point.value)
+                        )
                     else:
-                        param_kind = default_kind
-                    self.parameters[node_name] = create_bounded_tensor(
-                        node_name, domain_bounds, param_kind
-                    )
+                        # Create a symbolic free variable with domain bounds.
+                        domain_bounds = (
+                            self.domain.get(node_name, (None, None))
+                            if self.domain
+                            else (None, None)
+                        )
+                        # Determine default kind: vector for observables, scalar otherwise
+                        default_kind: Callable[..., TensorVar]
+                        if "_observed" in node_name or node_name in context.observables:
+                            default_kind = pt.vector
+                        else:
+                            default_kind = pt.scalar
+
+                        # Allow explicit override from ParameterPoint.kind
+                        if param_point and param_point.kind is not None:
+                            param_kind = param_point.kind
+                            if param_kind is not default_kind:
+                                warnings.warn(
+                                    f"Parameter '{node_name}' has kind override"
+                                    f" {param_kind.__name__} (default would be"
+                                    f" {default_kind.__name__})",
+                                    stacklevel=2,
+                                )
+                        else:
+                            param_kind = default_kind
+                        self.parameters[node_name] = create_bounded_tensor(
+                            node_name, domain_bounds, param_kind
+                        )
 
                 elif node_type == "constant":
                     # Constants are pre-created by distributions - add to parameters

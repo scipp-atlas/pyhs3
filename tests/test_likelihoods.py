@@ -519,6 +519,41 @@ class TestWorkspaceReferentialIntegrity:
         with pytest.raises(ValueError, match="duplicate observable axis names"):
             lk.validate_unique_axis_names(ws)
 
+    def test_validate_unique_axis_names_skips_unresolvable_string_ref(self):
+        """String datum ref not found in workspace.data is silently skipped."""
+        ws = Workspace(
+            metadata={"hs3_version": "0.2"},
+            distributions=[
+                {
+                    "name": "g1",
+                    "type": "gaussian_dist",
+                    "x": "x_obs",
+                    "mean": "mu",
+                    "sigma": 1.0,
+                },
+            ],
+            domains=[
+                {
+                    "name": "main",
+                    "type": "product_domain",
+                    "axes": [{"name": "mu", "min": -5.0, "max": 5.0}],
+                }
+            ],
+            data=[
+                {
+                    "name": "d1",
+                    "type": "unbinned",
+                    "axes": [{"name": "x_obs", "min": -10.0, "max": 10.0}],
+                    "entries": [[1.0]],
+                },
+            ],
+            likelihoods=[{"name": "L", "distributions": ["g1"], "data": ["d1"]}],
+            analyses=[{"name": "A", "likelihood": "L", "domains": ["main"]}],
+        )
+        # "nonexistent" is not in workspace.data → datum is None → silently skipped
+        lk = Likelihood(name="test", distributions=["g1"], data=["nonexistent"])
+        lk.validate_unique_axis_names(ws)  # must not raise
+
     def test_likelihood_duplicate_axis_names_raises(self):
         """Workspace raises when two data entries share an observable axis name."""
         ws_dict = {

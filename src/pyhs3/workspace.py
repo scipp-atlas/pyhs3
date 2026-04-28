@@ -430,21 +430,15 @@ class Workspace(BaseModel):
         progress: bool = True,
         mode: str = "FAST_RUN",
     ) -> Model:
-        for d in target.domains:
-            if isinstance(d, str):
-                msg = f"Analysis '{target.name}' domains must be FK-resolved before ws.model()"
-                raise RuntimeError(msg)
+        # _resolve_foreign_keys guarantees both are resolved objects by construction.
+        likelihood_obj = cast(Likelihood, target.likelihood)
+        domains = cast(Domains, target.domains)
 
-        likelihood_obj = target.likelihood
-        if isinstance(likelihood_obj, str):
-            msg = f"Analysis '{target.name}' likelihood must be FK-resolved before ws.model()"
-            raise RuntimeError(msg)
-
-        if len(target.domains) == 1:
-            analysis_domain: Domain = target.domains[0]  # type: ignore[assignment]
+        if len(domains) == 1:
+            analysis_domain: Domain = domains[0]
         else:
             # Merge all domain axes into one ProductDomain
-            all_axes = [ax for d in target.domains for ax in getattr(d, "axes", [])]
+            all_axes = [ax for d in domains for ax in getattr(d, "axes", [])]
             analysis_domain = ProductDomain(name=f"{target.name}_merged", axes=all_axes)  # type: ignore[arg-type]
 
         if target.init:

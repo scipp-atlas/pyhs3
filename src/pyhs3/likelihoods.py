@@ -7,7 +7,7 @@ including likelihood mappings between distributions and data.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -102,9 +102,8 @@ class Likelihood(NamedModel):
             fn(**likelihood.data_arrays(), **params)
         """
         result: dict[str, npt.NDArray[np.float64]] = {}
-        for datum in self.data:
-            if isinstance(datum, str):
-                continue
+        # self.data is guaranteed FK-resolved (no string entries after workspace construction).
+        for datum in cast(Data, self.data):
             if datum.axes is None:
                 continue
             entries = getattr(datum, "entries", None)

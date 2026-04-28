@@ -124,6 +124,38 @@ def test_model_legacy_int_still_works():
     assert isinstance(model, Model)
 
 
+def test_model_from_analysis_no_init_uses_empty_parameterset():
+    """ws.model(analysis) with no init uses an empty default ParameterSet."""
+    ws = Workspace(
+        **{
+            **_WS_DICT,
+            "analyses": [
+                # no "init" key → analysis.init is None → param_set = None branch
+                {"name": "A", "likelihood": "L", "domains": ["main"]}
+            ],
+        }
+    )
+    model = ws.model(ws.analyses["A"], progress=False)
+    assert isinstance(model, Model)
+    assert model.parameterset.name == "default"
+
+
+def test_model_from_analysis_no_parameter_points_raises():
+    """ws.model(analysis) raises when workspace has no parameter_points but analysis has init."""
+    ws = Workspace(
+        **{
+            **_WS_DICT,
+            # Explicitly pass parameter_points=None so the workspace has none
+            "parameter_points": None,
+            "analyses": [
+                {"name": "A", "likelihood": "L", "domains": ["main"], "init": "params"}
+            ],
+        }
+    )
+    with pytest.raises(ValueError, match="no parameter_points"):
+        ws.model(ws.analyses["A"], progress=False)
+
+
 def test_model_from_analysis_unknown_init_raises():
     """ws.model(analysis) raises when analysis.init references a non-existent parameter set."""
     ws_bad = Workspace(
@@ -187,6 +219,30 @@ def test_likelihood_data_arrays_returns_numpy_dict():
     assert "y_obs" in d
     np.testing.assert_array_equal(d["x_obs"], [1.0, 2.0, 3.0, 4.0, 5.0])
     np.testing.assert_array_equal(d["y_obs"], [0.5, 1.5, 2.5, 3.5, 4.5])
+
+
+def test_likelihood_data_arrays_skips_binned_data():
+    """BinnedData has no entries field → skipped by data_arrays()."""
+    ws = Workspace(**_WS_BINNED)
+    d = ws.likelihoods["L"].data_arrays()
+    assert d == {}
+
+
+def test_likelihood_data_arrays_skips_point_data():
+    """PointData has axes=None by default → skipped by data_arrays()."""
+    ws = Workspace(
+        **{
+            **_WS_DICT,
+            "data": [
+                {"name": "data1", "type": "point", "value": 1.0},
+                _WS_DICT["data"][1],
+            ],
+        }
+    )
+    d = ws.likelihoods["L"].data_arrays()
+    # data1 is PointData with axes=None → skipped; data2 (UnbinnedData) is included
+    assert "x_obs" not in d
+    assert "y_obs" in d
 
 
 def test_log_prob_warns_for_weighted_data():

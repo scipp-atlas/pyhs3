@@ -331,7 +331,7 @@ class Model:
                         # Bake as a compile-time constant so it is invisible to
                         # explicit_graph_inputs and JAX transpilation.
                         self.parameters[node_name] = pt.constant(
-                            np.float64(param_point.value)
+                            np.float64(param_point.value), name=node_name
                         )
                     else:
                         # Create a symbolic free variable with domain bounds.

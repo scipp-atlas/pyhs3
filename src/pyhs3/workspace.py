@@ -354,15 +354,43 @@ class Workspace(BaseModel):
         }
 
     @singledispatchmethod
-    def _model_dispatch(
+    def model(
         self,
         target: int | str,
         *,
-        domain: int | str | Domain | None,
-        parameter_set: int | str | ParameterSet | None,
-        progress: bool,
-        mode: str,
+        domain: int | str | Domain | None = None,
+        parameter_set: int | str | ParameterSet | None = None,
+        progress: bool = True,
+        mode: str = "FAST_RUN",
     ) -> Model:
+        """
+        Constructs a :class:`~pyhs3.model.Model` rooted at ``target``.
+
+        Dispatch is based on the type of ``target``:
+
+        - :class:`~pyhs3.analyses.Analysis` — all context (domain, parameter
+          set, observables) is derived from the analysis; gains access to
+          :attr:`~pyhs3.model.Model.log_prob`, :attr:`~pyhs3.model.Model.data`,
+          and :attr:`~pyhs3.model.Model.nominal_params`.
+        - :class:`~pyhs3.likelihoods.Likelihood` — observable bounds are derived
+          from the likelihood's data; ``domain`` and ``parameter_set`` fall back
+          to workspace defaults (index 0) unless overridden.
+        - ``int`` / ``str`` — ``target`` indexes into workspace domains (legacy);
+          ``domain`` and ``parameter_set`` select the parameter context.
+
+        Args:
+            target: Dispatch key.  Pass an
+                :class:`~pyhs3.analyses.Analysis` or
+                :class:`~pyhs3.likelihoods.Likelihood` for the modern paths,
+                or an ``int``/``str`` domain index for the legacy path.
+            domain: Override domain (legacy and Likelihood paths only).
+            parameter_set: Override parameter set (legacy and Likelihood paths only).
+            progress: Whether to show a progress bar during graph construction.
+            mode: PyTensor compilation mode (default ``"FAST_RUN"``).
+
+        Returns:
+            :class:`~pyhs3.model.Model`: The constructed model.
+        """
         # Legacy: target is int or str indexing into domains.
         _domain_arg = domain if domain is not None else target
         selected_domain = (
@@ -391,15 +419,13 @@ class Workspace(BaseModel):
             likelihood=None,
         )
 
-    @_model_dispatch.register(Analysis)
+    @model.register
     def _(
         self,
         target: Analysis,
         *,
-        domain: int | str | Domain | None,  # noqa: ARG002 — baked into Analysis
-        parameter_set: int | str | ParameterSet | None,  # noqa: ARG002 — baked into Analysis
-        progress: bool,
-        mode: str,
+        progress: bool = True,
+        mode: str = "FAST_RUN",
     ) -> Model:
         if len(target.domains) > 1:
             domain_names = [d if isinstance(d, str) else d.name for d in target.domains]
@@ -436,15 +462,15 @@ class Workspace(BaseModel):
             likelihood=likelihood_obj,
         )
 
-    @_model_dispatch.register(Likelihood)
+    @model.register
     def _(
         self,
         target: Likelihood,
         *,
-        domain: int | str | Domain | None,
-        parameter_set: int | str | ParameterSet | None,
-        progress: bool,
-        mode: str,
+        domain: int | str | Domain | None = None,
+        parameter_set: int | str | ParameterSet | None = None,
+        progress: bool = True,
+        mode: str = "FAST_RUN",
     ) -> Model:
         _domain_arg = domain if domain is not None else 0
         selected_domain = (
@@ -471,51 +497,4 @@ class Workspace(BaseModel):
             mode=mode,
             observables=self._extract_observables(target),
             likelihood=target,
-        )
-
-    def model(
-        self,
-        target: Analysis | Likelihood | int | str = 0,
-        *,
-        domain: int | str | Domain | None = None,
-        parameter_set: int | str | ParameterSet | None = None,
-        progress: bool = True,
-        mode: str = "FAST_RUN",
-    ) -> Model:
-        """
-        Constructs a :class:`~pyhs3.model.Model` rooted at ``target``.
-
-        Dispatch is based on the type of ``target``:
-
-        - :class:`~pyhs3.analyses.Analysis` — all context (domain, parameter
-          set, observables) is derived from the analysis; gains access to
-          :attr:`~pyhs3.model.Model.log_prob`, :attr:`~pyhs3.model.Model.data`,
-          and :attr:`~pyhs3.model.Model.nominal_params`.  ``domain`` and
-          ``parameter_set`` are accepted but unused (they are baked into the
-          analysis).
-        - :class:`~pyhs3.likelihoods.Likelihood` — observable bounds are derived
-          from the likelihood's data; ``domain`` and ``parameter_set`` fall back
-          to workspace defaults (index 0) unless overridden.
-        - ``int`` / ``str`` (legacy) — ``target`` indexes into workspace domains;
-          ``domain`` and ``parameter_set`` select the parameter context.
-
-        Args:
-            target: Dispatch key.  Pass an
-                :class:`~pyhs3.analyses.Analysis` or
-                :class:`~pyhs3.likelihoods.Likelihood` for the modern paths,
-                or an ``int``/``str`` domain index for the legacy path.
-            domain: Override domain (legacy and Likelihood paths only).
-            parameter_set: Override parameter set (legacy and Likelihood paths only).
-            progress: Whether to show a progress bar during graph construction.
-            mode: PyTensor compilation mode (default ``"FAST_RUN"``).
-
-        Returns:
-            :class:`~pyhs3.model.Model`: The constructed model.
-        """
-        return self._model_dispatch(
-            target,
-            domain=domain,
-            parameter_set=parameter_set,
-            progress=progress,
-            mode=mode,
         )

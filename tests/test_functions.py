@@ -250,7 +250,7 @@ class TestSumFunction:
         }
 
         ws = Workspace(**test_data)
-        model = ws.model(domain="test_domain", parameter_set="test_params")
+        model = ws.model(0, domain="test_domain", parameter_set="test_params")
 
         # Verify the function was created
         assert "total_sum" in model.functions
@@ -1008,7 +1008,7 @@ class TestProcessNormalizationFunction:
         }
 
         ws = Workspace(**test_data)
-        model = ws.model(domain="test_domain", parameter_set="test_params")
+        model = ws.model(0, domain="test_domain", parameter_set="test_params")
 
         # Verify the function was created
         assert "process_norm" in model.functions
@@ -1279,7 +1279,7 @@ class TestFunctionIntegration:
 
         # This should not raise an error
         ws = Workspace(**test_data)
-        model = ws.model(domain="test_domain", parameter_set="test_params")
+        model = ws.model(0, domain="test_domain", parameter_set="test_params")
 
         # Verify both functions exist in the model
         assert "func1" in model.functions

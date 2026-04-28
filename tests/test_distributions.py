@@ -562,7 +562,7 @@ class TestPoissonDist:
         }
 
         ws = Workspace(**test_data)
-        model = ws.model(domain="test_domain", parameter_set="test_params")
+        model = ws.model(0, domain="test_domain", parameter_set="test_params")
 
         # Verify the distribution was created
         assert "count_dist" in model.distributions
@@ -712,7 +712,7 @@ class TestNumericParameters:
 
         # This should not raise "Unknown entity referenced: '1.0'" error
         ws = Workspace(**test_data)
-        model = ws.model(domain="test_domain", parameter_set="test_params")
+        model = ws.model(0, domain="test_domain", parameter_set="test_params")
 
         # Verify the model was created successfully
         assert "mu" in model.parameters
@@ -757,7 +757,7 @@ class TestDependencyGraphErrors:
 
         # This should raise ValueError about circular dependency
         with pytest.raises(ValueError, match="Circular dependency detected in graph"):
-            ws.model(domain="test_domain", parameter_set="test_params")
+            ws.model(0, domain="test_domain", parameter_set="test_params")
 
     def test_bounded_scalar_applied_to_parameters(self):
         """Test that parameters get bounded scalar applied when domains exist."""
@@ -793,7 +793,7 @@ class TestDependencyGraphErrors:
         }
 
         ws = Workspace(**test_data)
-        model = ws.model(domain="test_domain", parameter_set="test_params")
+        model = ws.model(0, domain="test_domain", parameter_set="test_params")
 
         # Verify the parameter is bounded
         assert "mu" in model.parameters
@@ -1005,7 +1005,7 @@ class TestCrossDependencies:
         }
 
         ws = Workspace(**test_data)
-        model = ws.model(domain="test_domain", parameter_set="test_params")
+        model = ws.model(0, domain="test_domain", parameter_set="test_params")
 
         # Verify both function and distribution were created
         assert "computed_mean" in model.functions
@@ -1045,7 +1045,7 @@ class TestCrossDependencies:
         }
 
         ws = Workspace(**test_data)
-        model = ws.model(domain="test_domain", parameter_set="test_params")
+        model = ws.model(0, domain="test_domain", parameter_set="test_params")
 
         # Verify both distribution and function were created
         assert "base_dist" in model.distributions
@@ -1097,7 +1097,7 @@ class TestCrossDependencies:
         }
 
         ws = Workspace(**test_data)
-        model = ws.model(domain="test_domain", parameter_set="test_params")
+        model = ws.model(0, domain="test_domain", parameter_set="test_params")
 
         # Verify all entities were created
         assert "func1" in model.functions
@@ -1202,7 +1202,7 @@ class TestUniformDist:
         }
 
         ws = Workspace(**test_data)
-        model = ws.model(domain="test_domain", parameter_set="test_params")
+        model = ws.model(0, domain="test_domain", parameter_set="test_params")
 
         # Verify the distribution was created
         assert "uniform_dist" in model.distributions
@@ -1383,7 +1383,7 @@ class TestExponentialDist:
         }
 
         ws = Workspace(**test_data)
-        model = ws.model(domain="test_domain", parameter_set="test_params")
+        model = ws.model(0, domain="test_domain", parameter_set="test_params")
 
         # Verify the distribution was created
         assert "exp_decay" in model.distributions
@@ -1607,7 +1607,7 @@ class TestLogNormalDist:
         }
 
         ws = Workspace(**test_data)
-        model = ws.model(domain="test_domain", parameter_set="test_params")
+        model = ws.model(0, domain="test_domain", parameter_set="test_params")
 
         # Verify the distribution was created
         assert "lognorm_dist" in model.distributions
@@ -1755,7 +1755,7 @@ class TestPolynomialDist:
         }
 
         ws = Workspace(**test_data)
-        model = ws.model(domain="test_domain", parameter_set="test_params")
+        model = ws.model(0, domain="test_domain", parameter_set="test_params")
 
         # Verify the distribution was created
         assert "poly_bkg" in model.distributions
@@ -1918,7 +1918,7 @@ class TestArgusDist:
         }
 
         ws = Workspace(**test_data)
-        model = ws.model(domain="test_domain", parameter_set="test_params")
+        model = ws.model(0, domain="test_domain", parameter_set="test_params")
 
         # Verify the distribution was created
         assert "argus_bkg" in model.distributions

@@ -54,6 +54,7 @@ def test_rf501_simultaneouspdf(datadir):
     )
 
     model = workspace.model(
+        0,
         parameter_set=workspace.parameter_points["default_values"],
         domain=workspace.domains["default_domain"],
     )
@@ -86,6 +87,7 @@ def test_rf501_manual(datadir):
     )
 
     model = workspace.model(
+        0,
         parameter_set=workspace.parameter_points["default_values"],
         domain=workspace.domains["default_domain"],
     )
@@ -194,6 +196,7 @@ def test_combine_long_exercise_logpdf_evaluation(datadir):
     )
 
     model = workspace.model(
+        0,
         parameter_set=workspace.parameter_points["default_values"],
         domain=workspace.domains["default_domain"],
     )

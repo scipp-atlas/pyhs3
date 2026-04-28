@@ -156,10 +156,10 @@ class Model:
         PyTensor compilation.
 
         Normalization denominators are fixed constants (axis bounds baked at
-        ``Model`` construction time).  The same ``Model`` — and the same
-        compiled/JAX function — can be evaluated against different event data
-        without rebuilding the normalization graph, as long as the axis bounds
-        are unchanged.
+        ``Model`` construction time).  For unweighted data, the same compiled/JAX
+        function can be evaluated against different event arrays.  **Weighted**
+        ``UnbinnedData`` entries bake the weights as constants at construction time;
+        to use different weights, a new ``Model`` must be built.
 
         The workspace defaults for evaluation are available via :attr:`data`
         and :attr:`nominal_params`.

@@ -79,13 +79,16 @@ def gauss_legendre_integral(
     half_width = (upper - lower) / 2.0
     midpoint = (upper + lower) / 2.0
 
-    # evaluation points
+    # evaluation points: (64,) for 1-D variables, (64, 1) for 2-D observables (N, 1)
     x_points = half_width * _GL_NODES_T + midpoint
+    if variable.ndim == 2:
+        x_points = x_points[:, None]
 
-    # directly replace the variable with the vector of points
+    # directly replace the variable with the quadrature points
     f_vals = clone_replace(expression, replace=[(variable, x_points)])
 
-    # weighted sum
-    integral = half_width * pt.sum(_GL_WEIGHTS_T * f_vals)  # type: ignore[no-untyped-call]
+    # weighted sum along the quadrature axis
+    # pt.dot: (64,)·(64,) → scalar; (64,)·(64,1) → (1,) → squeeze → scalar
+    integral = half_width * pt.squeeze(pt.dot(_GL_WEIGHTS_T, f_vals))  # type: ignore[no-untyped-call]
 
     return cast(TensorVar, integral)

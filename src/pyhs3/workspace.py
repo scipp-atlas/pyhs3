@@ -395,19 +395,17 @@ class Workspace(BaseModel):
             :class:`~pyhs3.model.Model`: The constructed model.
         """
         # Legacy: target is int or str indexing into domains.
-        _domain_arg = domain if domain is not None else target
         selected_domain = (
-            _domain_arg
-            if isinstance(_domain_arg, Domain)
-            else self.domains[_domain_arg]
+            domain
+            if isinstance(domain, Domain)
+            else self.domains[domain or target]
             if self.domains
             else ProductDomain(name="default")
         )
-        _ps_arg = parameter_set if parameter_set is not None else 0
         parameterset = (
-            _ps_arg
-            if isinstance(_ps_arg, ParameterSet)
-            else self.parameter_points[_ps_arg]
+            parameter_set
+            if isinstance(parameter_set, ParameterSet)
+            else self.parameter_points[parameter_set or 0]
             if self.parameter_points
             else ParameterSet(name="default", parameters=[])
         )
@@ -427,6 +425,7 @@ class Workspace(BaseModel):
         self,
         target: Analysis,
         *,
+        parameter_set: int | str | ParameterSet | None = None,
         progress: bool = True,
         mode: str = "FAST_RUN",
     ) -> Model:
@@ -452,8 +451,16 @@ class Workspace(BaseModel):
         else:
             param_set = None
 
+        parameterset = (
+            parameter_set
+            if isinstance(parameter_set, ParameterSet)
+            else self.parameter_points[parameter_set or 0]
+            if self.parameter_points
+            else ParameterSet(name="default", parameters=[])
+        )
+
         return Model(
-            parameterset=param_set or ParameterSet(name="default", parameters=[]),
+            parameterset=param_set or parameterset,
             distributions=self.distributions or Distributions(),
             domain=analysis_domain,
             functions=self.functions or Functions(),
@@ -473,19 +480,17 @@ class Workspace(BaseModel):
         progress: bool = True,
         mode: str = "FAST_RUN",
     ) -> Model:
-        _domain_arg = domain if domain is not None else 0
         selected_domain = (
-            _domain_arg
-            if isinstance(_domain_arg, Domain)
-            else self.domains[_domain_arg]
+            domain
+            if isinstance(domain, Domain)
+            else self.domains[domain or 0]
             if self.domains
             else ProductDomain(name="default")
         )
-        _ps_arg = parameter_set if parameter_set is not None else 0
         parameterset = (
-            _ps_arg
-            if isinstance(_ps_arg, ParameterSet)
-            else self.parameter_points[_ps_arg]
+            parameter_set
+            if isinstance(parameter_set, ParameterSet)
+            else self.parameter_points[parameter_set or 0]
             if self.parameter_points
             else ParameterSet(name="default", parameters=[])
         )

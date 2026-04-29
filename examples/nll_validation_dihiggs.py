@@ -18,7 +18,6 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-from pytensor.graph.traversal import explicit_graph_inputs
 from skhep_testdata import data_path as skhep_testdata_path
 
 import pyhs3
@@ -103,22 +102,6 @@ REF_NLL = _REFERENCE["nll"][1:]
 _MODEL_CACHE = Path("ws.pkl")
 
 
-def _collect_params(ws: pyhs3.Workspace) -> dict[str, float]:
-    """Collect parameter values; best-fit sets override nominal (last write wins)."""
-    params: dict[str, float] = {}
-    for pset_name in [
-        "default_values",
-        "nominalGlobs",
-        "nominalNuis",
-        "unconditionalGlobs_muhat",
-        "unconditionalNuis_muhat",
-        "POI_muhat",
-    ]:
-        for p in ws.parameter_points[pset_name]:
-            params[p.name] = float(p.value)
-    return params
-
-
 def plot_dist(
     model: pyhs3.Model,
     parameters: dict,
@@ -153,6 +136,22 @@ def main() -> None:
     analysis = ws.analyses["CombinedPdf_combData"]
     likelihood = analysis.likelihood
 
+    pset_names = [
+        "default_values",
+        "nominalGlobs",
+        "nominalNuis",
+        "unconditionalGlobs_muhat",
+        "unconditionalNuis_muhat",
+        "POI_muhat",
+    ]
+
+    param_set = pyhs3.parameter_points.ParameterSet(
+        name="collected",
+        parameters=[
+            pp for pset_name in pset_names for pp in ws.parameter_points[pset_name]
+        ],
+    )
+
     # ------------------------------------------------------------------ #
     # Build or load model                                                  #
     # ------------------------------------------------------------------ #
@@ -162,13 +161,10 @@ def main() -> None:
             model = pickle.load(f)
     else:
         print("Building symbolic model (this takes ~1 min) ...")
-        model = ws.model(analysis, progress=True)
+        model = ws.model(analysis, parameter_set=param_set, progress=True)
         with _MODEL_CACHE.open("wb") as f:
             pickle.dump(model, f)
         print(f"  Model cached to {_MODEL_CACHE}")
-
-    # Parameter values: collect from workspace sets (best-fit overrides nominal).
-    parameters = _collect_params(ws)
 
     # Only keep unbinned data sets that are not the "binned-resampled" copies.
     unbinned = [
@@ -189,30 +185,22 @@ def main() -> None:
         vals = np.sort(obs_vals[np.abs(obs_vals) > 1e-6])
         channel_data.append((dist_name, obs_name, vals))
 
-    # Some workspace parameters are referenced by distributions but absent
-    # from every named parameter set (e.g. auxiliary RNDM__ observables).
-    # Supply 0.0 as a safe default so _reorder_params never hits a KeyError.
-    all_dist_exprs = [model.distributions[dn] for dn, _, _ in channel_data]
-    all_needed = {
-        v.name for v in explicit_graph_inputs(all_dist_exprs) if v.name is not None
-    }
-    missing = all_needed - set(parameters)
-    if missing:
-        print(
-            f"  Defaulting {len(missing)} undeclared parameter(s) to 0.0 (e.g. {sorted(missing)[0]})"
-        )
-        parameters.update(dict.fromkeys(missing, 0.0))
-
     print(f"\nRunning NLL scan over {len(MU_GRID)} mu_HH values ...")
     nll_given_mu: list[float] = []
     t0 = time.perf_counter()
+
+    parameters = {
+        param_name: param.value for param_name, param in param_set.points.items()
+    }
 
     for i, mu in enumerate(MU_GRID, 1):
         parameters["mu_HH"] = mu
         total_nll = 0.0
         for dist_name, obs_name, vals in channel_data:
             # One compiled-function call per channel — no per-event Python loop.
-            log_pdfs = model.logpdf_unsafe(dist_name, **{**parameters, obs_name: vals})
+            log_pdfs = model.logpdf_unsafe(
+                dist_name, **{**model.free_params, obs_name: vals, "mu_HH": mu}
+            )
             total_nll += -2.0 * float(np.sum(log_pdfs)) / len(vals)
         nll_given_mu.append(total_nll)
         print(f"  ({i:2d}/{len(MU_GRID)}) mu_HH={mu:+.2f}  NLL={total_nll:.4f}")

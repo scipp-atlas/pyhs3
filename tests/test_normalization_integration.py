@@ -6,6 +6,7 @@ import warnings
 
 import numpy as np
 import pytensor.tensor as pt
+import pytest
 from pytensor.compile.function import function
 from pytensor.graph.traversal import explicit_graph_inputs
 
@@ -67,10 +68,15 @@ class TestModelNormalization:
         # Should integrate to 1.0
         assert np.isclose(integral, 1.0, atol=1e-6)
 
+    @pytest.mark.xfail(
+        raises=NotImplementedError,
+        reason="N-D normalization not yet implemented (https://github.com/scipp-atlas/pyhs3/issues/214)",
+        strict=True,
+    )
     def test_model_with_two_observables(self):
-        """Model with two observables normalizes distribution correctly."""
-        # Create a simple GenericDist
-        generic_dist = GenericDist(name="test_dist", expression="exp(c*x*y)")
+        """Model with two observables normalizes joint distribution to 1.0."""
+        # exp(c*x)*exp(c*y) is separable and normalizable over any bounded rectangle
+        generic_dist = GenericDist(name="test_dist", expression="exp(c*x)*exp(c*y)")
 
         # Create Model with observables
         parameterset = ParameterSet(
@@ -103,15 +109,18 @@ class TestModelNormalization:
         c_var = model.parameters["c"]
         f = function([x_var, y_var, c_var], dist_expr)
 
-        # Pass plain 1-D arrays
-        xs = np.linspace(0, 10, 10000)
-        ys = np.linspace(-5.0, 5.0, 10000)
-        vals = f(xs, ys, -0.5).squeeze()
-        integral = np.trapezoid(vals, xs)
+        # Evaluate on a full 2-D grid to verify joint normalization.
+        # The pytensor function expects 1-D vectors, so flatten the grid,
+        # evaluate, then reshape back to (ny, nx) for 2-D integration.
+        xs = np.linspace(0, 10, 500)
+        ys = np.linspace(-5.0, 5.0, 500)
+        X, Y = np.meshgrid(xs, ys)  # shapes (ny, nx)
+        vals = f(X.ravel(), Y.ravel(), -0.5).reshape(X.shape)
+        # Integrate over both axes: first over xs (axis=1), then over ys
+        integral = np.trapezoid(np.trapezoid(vals, xs, axis=1), ys)
 
-        # Should integrate to 0.1 (integral over x gives 1.0, then over y gives
-        # 1/(5-(-5)) = 0.1 for the joint normalization over [0,10] x [-5,5])
-        assert np.isclose(integral, 0.1, atol=1e-6)
+        # A properly normalized joint distribution integrates to 1.0 over its full domain
+        assert np.isclose(integral, 1.0, atol=1e-3)
 
     def test_model_without_observables(self):
         """Model without observables doesn't normalize."""

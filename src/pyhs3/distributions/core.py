@@ -148,15 +148,22 @@ class Distribution(Evaluable, ABC):
             if integral is not None:
                 return cast(TensorVar, raw / integral)
 
-        # N-dimensional integral via nested Gauss-Legendre quadrature.
+        if len(matching) > 1:
+            obs_names = [name for name, _, _ in matching]
+            msg = (
+                f"Multi-dimensional normalization is not yet supported "
+                f"(observables: {obs_names}). "
+                f"See https://github.com/scipp-atlas/pyhs3/issues/214"
+            )
+            raise NotImplementedError(msg)
+
+        # Single observable: fall back to Gauss-Legendre quadrature.
         # Pass the leaf (not the view) so graph_replace substitutes through
         # every ExpandDims(leaf) view inside the integrand.
-        integral_expr = raw
-        for obs_name, lower, upper in matching:
-            obs_leaf = context.parameters[obs_name]
-            integral_expr = gauss_legendre_integral(
-                integral_expr, obs_leaf, lower, upper
-            )
+        obs_name, lower, upper = matching[0]
+        integral_expr = gauss_legendre_integral(
+            raw, context.parameters[obs_name], lower, upper
+        )
         return cast(TensorVar, raw / integral_expr)
 
     def _expression(self, context: Context) -> TensorVar:

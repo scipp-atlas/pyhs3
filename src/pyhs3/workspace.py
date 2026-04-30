@@ -461,6 +461,9 @@ class Workspace(BaseModel):
             parameterset = parameter_set
         elif parameter_set is not None and self.parameter_points:
             parameterset = self.parameter_points[parameter_set]
+        elif parameter_set is not None:
+            msg = f"parameter_set={parameter_set!r} was requested but no parameter_points are available in this workspace"
+            raise ValueError(msg)
         else:
             parameterset = param_set or ParameterSet(name="default", parameters=[])
 
@@ -524,6 +527,9 @@ class Workspace(BaseModel):
         if self.analyses:
             analysis = self.analyses.get(target)
             if analysis is not None:
+                if domain is not None:
+                    msg = "domain override not supported when target resolves to an analysis"
+                    raise ValueError(msg)
                 return self.model(
                     analysis,
                     parameter_set=parameter_set,

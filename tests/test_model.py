@@ -1393,6 +1393,25 @@ class TestWorkspaceModelDispatch:
         model = ws.model("first_domain", progress=False)
         assert model is not None
 
+    def test_str_legacy_parameterset_instance_override(self, ws):
+        """parameter_set=ParameterSet(...) is used directly on the str-legacy path."""
+        custom = ParameterSet(
+            name="custom",
+            parameters=[
+                ParameterPoint(name="mu", value=77.0),
+                ParameterPoint(name="sigma", value=5.0),
+            ],
+        )
+        model = ws.model("first_domain", parameter_set=custom, progress=False)
+        assert model.parameterset.name == "custom"
+        assert model.parameterset.get("mu").value == pytest.approx(77.0)
+
+    def test_str_legacy_parameterset_string_lookup(self, ws):
+        """parameter_set='alt' looks up the named set in workspace.parameter_points on str-legacy path."""
+        model = ws.model("first_domain", parameter_set="alt", progress=False)
+        assert model.parameterset.name == "alt"
+        assert model.parameterset.get("mu").value == pytest.approx(1.0)
+
     # ------------------------------------------------------------------ #
     # Likelihood target — parameter_set branches                          #
     # ------------------------------------------------------------------ #

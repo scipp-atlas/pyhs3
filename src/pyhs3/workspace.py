@@ -515,7 +515,7 @@ class Workspace(BaseModel):
                 else ParameterSet(name="default", parameters=[])
             )
         return Model(
-            parameterset=parameterset or ParameterSet(name="default"),
+            parameterset=parameterset,
             distributions=self.distributions or Distributions(),
             domain=selected_domain or Domain(name="default", type="unknown"),
             functions=self.functions or Functions(),
@@ -580,7 +580,7 @@ class Workspace(BaseModel):
                 else ParameterSet(name="default", parameters=[])
             )
         return Model(
-            parameterset=parameterset or ParameterSet(name="default"),
+            parameterset=parameterset,
             distributions=self.distributions or Distributions(),
             domain=selected_domain or Domain(name="default", type="unknown"),
             functions=self.functions or Functions(),

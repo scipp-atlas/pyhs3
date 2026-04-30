@@ -12,7 +12,7 @@ from typing import cast
 
 import pytensor.tensor as pt
 from pydantic import PrivateAttr
-from pytensor.graph.replace import clone_replace
+from pytensor.graph.replace import graph_replace
 
 from pyhs3.base import Evaluable
 from pyhs3.context import Context
@@ -100,11 +100,13 @@ class Distribution(Evaluable, ABC):
         expr = self.normalization_expression(context, obs_name)  # pylint: disable=assignment-from-none
         if expr is None:
             return None
-        observable = context[obs_name]
-        upper_t = pt.as_tensor_variable([upper], dtype=observable.dtype)
-        lower_t = pt.as_tensor_variable([lower], dtype=observable.dtype)
-        upper_val = cast(TensorVar, clone_replace(expr, [(observable, upper_t)]))
-        lower_val = cast(TensorVar, clone_replace(expr, [(observable, lower_t)]))
+        # Use the leaf (not the view) as the substitution target so graph_replace
+        # propagates through every ExpandDims(leaf) view in the expression.
+        leaf = context.parameters[obs_name]
+        upper_t = pt.as_tensor_variable([upper], dtype=leaf.dtype)
+        lower_t = pt.as_tensor_variable([lower], dtype=leaf.dtype)
+        upper_val = cast(TensorVar, graph_replace(expr, [(leaf, upper_t)]))
+        lower_val = cast(TensorVar, graph_replace(expr, [(leaf, lower_t)]))
         return cast(TensorVar, upper_val - lower_val)
 
     def _apply_normalization(
@@ -146,13 +148,22 @@ class Distribution(Evaluable, ABC):
             if integral is not None:
                 return cast(TensorVar, raw / integral)
 
-        # N-dimensional integral via nested Gauss-Legendre quadrature
-        integral_expr = raw
-        for obs_name, lower, upper in matching:
-            obs_var = context[obs_name]
-            integral_expr = gauss_legendre_integral(
-                integral_expr, obs_var, lower, upper
+        if len(matching) > 1:
+            obs_names = [name for name, _, _ in matching]
+            msg = (
+                f"Multi-dimensional normalization is not yet supported "
+                f"(observables: {obs_names}). "
+                f"See https://github.com/scipp-atlas/pyhs3/issues/214"
             )
+            raise NotImplementedError(msg)
+
+        # Single observable: fall back to Gauss-Legendre quadrature.
+        # Pass the leaf (not the view) so graph_replace substitutes through
+        # every ExpandDims(leaf) view inside the integrand.
+        obs_name, lower, upper = matching[0]
+        integral_expr = gauss_legendre_integral(
+            raw, context.parameters[obs_name], lower, upper
+        )
         return cast(TensorVar, raw / integral_expr)
 
     def _expression(self, context: Context) -> TensorVar:

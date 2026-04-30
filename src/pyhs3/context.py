@@ -26,14 +26,20 @@ class Context:
         parameters: Mapping[str, TensorVar],
         auxiliaries: Mapping[str, TensorVar] | None = None,
         observables: Mapping[str, tuple[TensorVar, TensorVar]] | None = None,
+        views: Mapping[str, TensorVar] | None = None,
     ) -> None:
         """
         Initialize context with parameter data.
 
         Args:
-            parameters: Dictionary of user-provided parameters
+            parameters: Dictionary of user-provided parameters (1-D leaves for vectors)
             auxiliaries: Dictionary of model-computed auxiliary values
             observables: Dictionary mapping observable names to (lower, upper) bound tuples
+            views: ExpandDims views for broadcasting — observable leaves are (N, 1),
+                   non-observable vector overrides are (1, N).  When present, looking up
+                   an observable name via ``context[name]`` returns the view so that
+                   distribution expressions get the right broadcast shape.
+                   ``context.parameters[name]`` always returns the raw leaf.
 
         Raises:
             ValueError: If there's any overlap between parameter and auxiliary names
@@ -41,6 +47,7 @@ class Context:
         self._parameters = dict(parameters)
         self._auxiliaries = dict(auxiliaries) if auxiliaries else {}
         self._observables = dict(observables) if observables else {}
+        self._views = dict(views) if views else {}
 
         # Validate no key duplication between parameters and auxiliaries
         parameter_keys = set(self._parameters.keys())
@@ -55,17 +62,21 @@ class Context:
         """
         Get parameter value from context.
 
-        Checks parameters first, then auxiliaries.
+        Returns the ExpandDims view if one is registered for ``key`` (so that
+        distribution expressions receive the correct broadcast shape), otherwise
+        falls through to parameters then auxiliaries.
 
         Args:
             key: Parameter name (str)
 
         Returns:
-            TensorVar: The parameter value
+            TensorVar: The view (if registered), or the raw parameter/auxiliary value
 
         Raises:
-            KeyError: If parameter is not found in either parameters or auxiliaries
+            KeyError: If parameter is not found in views, parameters, or auxiliaries
         """
+        if key in self._views:
+            return self._views[key]
         if key in self._parameters:
             return self._parameters[key]
         if key in self._auxiliaries:
@@ -116,4 +127,5 @@ class Context:
             parameters=self._parameters.copy(),
             auxiliaries=self._auxiliaries.copy(),
             observables=self._observables.copy(),
+            views=self._views.copy(),
         )

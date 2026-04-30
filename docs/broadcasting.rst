@@ -76,7 +76,7 @@ Now you can pass vector values for the ``x`` parameter:
     >>> parameters = {"x": [0.0, 1.0, 2.0], "mu": 0.0, "sigma": 1.0}
     >>> results = new_model.logpdf_unsafe("model", **parameters)
     >>> print(f"Vector results: {results}")
-    Vector results: [-0.91893853 -1.41893853 -2.91893853]
+    Vector results: [[-0.91893853 -1.41893853 -2.91893853]]
 
 Understanding the Model Structure
 ---------------------------------
@@ -115,10 +115,10 @@ When you pass vector values to a scalar parameter model, it will only use the fi
     >>> result = model.pdf_unsafe("model", **parameters)
     >>> print(f"Result with scalar model: {result}")
     Result with scalar model: 0.3989422804014327
-    >>> # Compare with vector model - processes all elements
+    >>> # Compare with vector model - shape (1, N): override vectors sit on axis 1
     >>> result_vector = new_model.pdf_unsafe("model", **parameters)
     >>> print(f"Result with vector model: {result_vector}")
-    Result with vector model: [0.39894228 0.24197072 0.05399097]
+    Result with vector model: [[0.39894228 0.24197072 0.05399097]]
 
 Complete Example
 ----------------
@@ -179,16 +179,36 @@ Here's a complete working example:
     ...     "gaussian", x=x_values.tolist(), mu=0.0, sigma=1.0
     ... )
     >>> print(f"Vector: {vector_results}")
-    Vector: [-2.91893853 -1.41893853 -0.91893853 -1.41893853 -2.91893853]
+    Vector: [[-2.91893853 -1.41893853 -0.91893853 -1.41893853 -2.91893853]]
+
+Axis Convention
+---------------
+
+PyHS3 assigns each vector parameter a fixed axis so that broadcasting is
+unambiguous:
+
+- **Observables** (``pt.vector``, axis 0): shape ``(N, 1)`` — the event
+  dimension sits on the first axis.  Summing ``log_pdf`` over ``axis=0``
+  yields the per-parameter-point log-probability.
+- **Override vectors** (``pt.vector`` via ``kind`` override, axis 1): shape
+  ``(1, M)`` — the scan dimension sits on the second axis.  Combined with an
+  observable ``(N, 1)``, the pdf evaluates as ``(N, M)`` and summing over
+  ``axis=0`` yields an ``(M,)`` NLL for each of the ``M`` parameter points.
+- **Scalars** (``pt.scalar``): no reshape, broadcast trivially.
+- **Constants** (``pt.constant``): baked at graph construction time, invisible
+  to ``explicit_graph_inputs`` and JAX transpilation.
+
+As a consequence, ``model.log_prob`` has shape ``(M,)`` (or ``(1,)`` when all
+free parameters are scalars) rather than a plain scalar.
 
 Current Behavior
--------------------
+----------------
 
 - Parameters identified as observables (via likelihood data axes) are automatically
-  created as 1D vectors (``pt.vector``). This enables batched evaluation and
-  numerical integration over the observable domain.
+  created as 1D vectors (``pt.vector``) placed on axis 0.  This enables batched
+  evaluation and numerical integration over the observable domain.
 - Non-observable parameters default to scalars (``pt.scalar``).
 - Users can override the default ``kind`` on a ``ParameterPoint`` before model
-  creation. A warning is emitted when the override differs from the automatically
-  determined default.
+  creation to enable parameter-scan broadcasting (axis 1).  A warning is emitted
+  when the override differs from the automatically determined default.
 - The ``kind`` must be set before creating the model.

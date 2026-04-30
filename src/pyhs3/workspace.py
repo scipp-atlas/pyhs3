@@ -359,7 +359,7 @@ class Workspace(BaseModel):
     @singledispatchmethod
     def model(
         self,
-        target: int | str,
+        target: int,
         *,
         domain: int | str | Domain | None = None,
         parameter_set: int | str | ParameterSet | None = None,
@@ -378,14 +378,17 @@ class Workspace(BaseModel):
         - :class:`~pyhs3.likelihoods.Likelihood` — observable bounds are derived
           from the likelihood's data; ``domain`` and ``parameter_set`` fall back
           to workspace defaults (index 0) unless overridden.
-        - ``int`` / ``str`` — ``target`` indexes into workspace domains (legacy);
-          ``domain`` and ``parameter_set`` select the parameter context.
+        - ``str`` — searches analyses then likelihoods by name; delegates to the
+          appropriate registered path.  Falls back to legacy domain indexing if
+          the name is not found in either.
+        - ``int`` — legacy path: ``target`` indexes into workspace domains.
 
         Args:
             target: Dispatch key.  Pass an
                 :class:`~pyhs3.analyses.Analysis` or
                 :class:`~pyhs3.likelihoods.Likelihood` for the modern paths,
-                or an ``int``/``str`` domain index for the legacy path.
+                a name string to search analyses/likelihoods, or an ``int``
+                domain index for the legacy path.
             domain: Override domain (legacy and Likelihood paths only).
             parameter_set: Override parameter set (legacy and Likelihood paths only).
             progress: Whether to show a progress bar during graph construction.
@@ -394,25 +397,29 @@ class Workspace(BaseModel):
         Returns:
             :class:`~pyhs3.model.Model`: The constructed model.
         """
-        # Legacy: target is int or str indexing into domains.
-        _domain_arg = domain if domain is not None else target
+        # Legacy int path: target indexes into workspace domains.
         selected_domain = (
-            _domain_arg
-            if isinstance(_domain_arg, Domain)
-            else self.domains[_domain_arg]
+            domain
+            if isinstance(domain, Domain)
+            else self.domains[target if domain is None else domain]
             if self.domains
             else ProductDomain(name="default")
         )
-        _ps_arg = parameter_set if parameter_set is not None else 0
-        parameterset = (
-            _ps_arg
-            if isinstance(_ps_arg, ParameterSet)
-            else self.parameter_points[_ps_arg]
-            if self.parameter_points
-            else ParameterSet(name="default", parameters=[])
-        )
+        if isinstance(parameter_set, ParameterSet):
+            parameterset = parameter_set
+        elif parameter_set is not None and self.parameter_points:
+            parameterset = self.parameter_points[parameter_set]
+        elif parameter_set is not None:
+            msg = f"parameter_set={parameter_set!r} was requested but no parameter_points are available in this workspace"
+            raise ValueError(msg)
+        else:
+            parameterset = (
+                self.parameter_points[0]
+                if self.parameter_points
+                else ParameterSet(name="default", parameters=[])
+            )
         return Model(
-            parameterset=parameterset or ParameterSet(name="default"),
+            parameterset=parameterset,
             distributions=self.distributions or Distributions(),
             domain=selected_domain or Domain(name="default", type="unknown"),
             functions=self.functions or Functions(),
@@ -427,6 +434,7 @@ class Workspace(BaseModel):
         self,
         target: Analysis,
         *,
+        parameter_set: int | str | ParameterSet | None = None,
         progress: bool = True,
         mode: str = "FAST_RUN",
     ) -> Model:
@@ -452,8 +460,21 @@ class Workspace(BaseModel):
         else:
             param_set = None
 
+        # Explicit override takes priority; otherwise use analysis.init param_set or empty default.
+        # Do NOT fall back to parameter_points[0] when neither init nor override was given —
+        # that would silently impose workspace defaults that the caller did not request.
+        if isinstance(parameter_set, ParameterSet):
+            parameterset = parameter_set
+        elif parameter_set is not None and self.parameter_points:
+            parameterset = self.parameter_points[parameter_set]
+        elif parameter_set is not None:
+            msg = f"parameter_set={parameter_set!r} was requested but no parameter_points are available in this workspace"
+            raise ValueError(msg)
+        else:
+            parameterset = param_set or ParameterSet(name="default", parameters=[])
+
         return Model(
-            parameterset=param_set or ParameterSet(name="default", parameters=[]),
+            parameterset=parameterset,
             distributions=self.distributions or Distributions(),
             domain=analysis_domain,
             functions=self.functions or Functions(),
@@ -473,24 +494,28 @@ class Workspace(BaseModel):
         progress: bool = True,
         mode: str = "FAST_RUN",
     ) -> Model:
-        _domain_arg = domain if domain is not None else 0
         selected_domain = (
-            _domain_arg
-            if isinstance(_domain_arg, Domain)
-            else self.domains[_domain_arg]
+            domain
+            if isinstance(domain, Domain)
+            else self.domains[0 if domain is None else domain]
             if self.domains
             else ProductDomain(name="default")
         )
-        _ps_arg = parameter_set if parameter_set is not None else 0
-        parameterset = (
-            _ps_arg
-            if isinstance(_ps_arg, ParameterSet)
-            else self.parameter_points[_ps_arg]
-            if self.parameter_points
-            else ParameterSet(name="default", parameters=[])
-        )
+        if isinstance(parameter_set, ParameterSet):
+            parameterset = parameter_set
+        elif parameter_set is not None and self.parameter_points:
+            parameterset = self.parameter_points[parameter_set]
+        elif parameter_set is not None:
+            msg = f"parameter_set={parameter_set!r} was requested but no parameter_points are available in this workspace"
+            raise ValueError(msg)
+        else:
+            parameterset = (
+                self.parameter_points[0]
+                if self.parameter_points
+                else ParameterSet(name="default", parameters=[])
+            )
         return Model(
-            parameterset=parameterset or ParameterSet(name="default"),
+            parameterset=parameterset,
             distributions=self.distributions or Distributions(),
             domain=selected_domain or Domain(name="default", type="unknown"),
             functions=self.functions or Functions(),
@@ -498,4 +523,69 @@ class Workspace(BaseModel):
             mode=mode,
             observables=self._extract_observables(target),
             likelihood=target,
+        )
+
+    @model.register
+    def _(
+        self,
+        target: str,
+        *,
+        domain: int | str | Domain | None = None,
+        parameter_set: int | str | ParameterSet | None = None,
+        progress: bool = True,
+        mode: str = "FAST_RUN",
+    ) -> Model:
+        # Search analyses first, then likelihoods; fall back to legacy domain indexing.
+        if self.analyses:
+            analysis = self.analyses.get(target)
+            if analysis is not None:
+                if domain is not None:
+                    msg = "domain override not supported when target resolves to an analysis"
+                    raise ValueError(msg)
+                return self.model(
+                    analysis,
+                    parameter_set=parameter_set,
+                    progress=progress,
+                    mode=mode,
+                )
+        if self.likelihoods:
+            likelihood = self.likelihoods.get(target)
+            if likelihood is not None:
+                return self.model(
+                    likelihood,
+                    domain=domain,
+                    parameter_set=parameter_set,
+                    progress=progress,
+                    mode=mode,
+                )
+        # Legacy fallback: treat target as a domain name.
+        selected_domain = (
+            domain
+            if isinstance(domain, Domain)
+            else self.domains[target if domain is None else domain]
+            if self.domains
+            else ProductDomain(name="default")
+        )
+        if isinstance(parameter_set, ParameterSet):
+            parameterset = parameter_set
+        elif parameter_set is not None and self.parameter_points:
+            parameterset = self.parameter_points[parameter_set]
+        elif parameter_set is not None:
+            msg = f"parameter_set={parameter_set!r} was requested but no parameter_points are available in this workspace"
+            raise ValueError(msg)
+        else:
+            parameterset = (
+                self.parameter_points[0]
+                if self.parameter_points
+                else ParameterSet(name="default", parameters=[])
+            )
+        return Model(
+            parameterset=parameterset,
+            distributions=self.distributions or Distributions(),
+            domain=selected_domain or Domain(name="default", type="unknown"),
+            functions=self.functions or Functions(),
+            progress=progress,
+            mode=mode,
+            observables=self._compute_observables(),
+            likelihood=None,
         )

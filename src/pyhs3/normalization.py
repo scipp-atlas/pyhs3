@@ -10,7 +10,7 @@ from typing import cast
 
 import numpy as np
 import pytensor.tensor as pt
-from pytensor.graph.replace import clone_replace
+from pytensor.graph.replace import graph_replace
 
 from pyhs3.typing.aliases import TensorVar
 
@@ -23,7 +23,7 @@ _GL_WEIGHTS_T = pt.constant(_GL_WEIGHTS)
 
 def gauss_legendre_integral(
     expression: TensorVar,
-    variable: TensorVar,  # note: variable is expected to be a 1D vector (not a scalar)
+    variable: TensorVar,  # note: variable must be the 1-D leaf tensor, not an ExpandDims view
     lower: TensorVar,
     upper: TensorVar,
 ) -> TensorVar:
@@ -69,7 +69,9 @@ def gauss_legendre_integral(
 
     Args:
         expression: The PyTensor expression to integrate
-        variable: The PyTensor variable to integrate over
+        variable: The 1-D leaf tensor to integrate over (not an ExpandDims view).
+            Passing the leaf means graph_replace propagates the substitution through
+            any ExpandDims(variable) views present in the expression.
         lower: Lower bound :math:`a` (PyTensor expression)
         upper: Upper bound :math:`b` (PyTensor expression)
 
@@ -79,13 +81,18 @@ def gauss_legendre_integral(
     half_width = (upper - lower) / 2.0
     midpoint = (upper + lower) / 2.0
 
-    # evaluation points
+    # Quadrature nodes mapped to [lower, upper]: shape (64,)
     x_points = half_width * _GL_NODES_T + midpoint
 
-    # directly replace the variable with the vector of points
-    f_vals = clone_replace(expression, replace=[(variable, x_points)])
-
-    # weighted sum
-    integral = half_width * pt.sum(_GL_WEIGHTS_T * f_vals)  # type: ignore[no-untyped-call]
+    # Substitute the leaf with the (64,) quadrature points.  Any ExpandDims(variable)
+    # views inside expression inherit the substitution and become (64, 1), so f_vals
+    # may be (64,) or (64, ...).  Use strict=False so that constant integrands
+    # (not depending on variable at all) are returned unchanged rather than raising.
+    f_vals = cast(
+        TensorVar,
+        graph_replace(expression, replace=[(variable, x_points)], strict=False),
+    )
+    weights = _GL_WEIGHTS_T.reshape((-1,) + (1,) * (f_vals.ndim - 1))  # type: ignore[no-untyped-call]
+    integral = half_width * pt.sum(weights * f_vals, axis=0)  # type: ignore[no-untyped-call]
 
     return cast(TensorVar, integral)

@@ -108,6 +108,10 @@ class Model:
         self._compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]] = {}
         self._compiled_inputs: dict[str, list[TensorVar]] = {}
         self._likelihood = likelihood
+        # Views used internally for broadcasting: leaf[:, None] for observables,
+        # leaf[None, :] for non-observable vector overrides.  Distributions see
+        # these via Context; model.parameters[name] always holds the leaf.
+        self._views: dict[str, TensorVar] = {}
 
         # Build dependency graph with proper entity identification
         self._build_dependency_graph(functions, distributions, progress)
@@ -168,12 +172,14 @@ class Model:
     def log_prob(self) -> TensorVar:
         """Symbolic joint log-probability expression for the full likelihood.
 
-        Returned as a PyTensor ``TensorVar`` scalar.  Observable data and
-        parameters listed in :attr:`free_params` are symbolic free inputs;
-        parameters with ``const=True`` are baked as compile-time constants
-        and do not appear as free inputs.  The expression is suitable for
-        JAX transpilation, gradient computation, or direct PyTensor
-        compilation.
+        Returned as a 1-D PyTensor ``TensorVar`` of shape ``(M,)``, where
+        ``M`` is the parameter batch size.  For all-scalar (non-vectorised)
+        parameters ``M = 1``; for a profile scan over ``M`` points the shape
+        is ``(M,)``.  Observable data and parameters listed in
+        :attr:`free_params` are symbolic free inputs; parameters with
+        ``const=True`` are baked as compile-time constants and do not appear
+        as free inputs.  The expression is suitable for JAX transpilation,
+        gradient computation, or direct PyTensor compilation.
 
         Normalization denominators are fixed constants (axis bounds baked at
         ``Model`` construction time).  For unweighted data, the same compiled/JAX
@@ -198,7 +204,9 @@ class Model:
             msg = "log_prob requires a likelihood context; build via ws.model(analysis)"
             raise RuntimeError(msg)
 
-        lp_terms: list[TensorVar] = []
+        # Accumulate with + so shapes broadcast correctly across the parameter axis.
+        # Summing over axis 0 (events) yields shape (M,) — the parameter batch size.
+        lp: TensorVar = pt.constant(np.float64(0.0))
 
         for dist_obj, datum in zip(
             self._likelihood.distributions, self._likelihood.data, strict=True
@@ -223,20 +231,20 @@ class Model:
                     UserWarning,
                     stacklevel=2,
                 )
-                weights_t = pt.constant(np.asarray(weights, dtype=np.float64))
-                lp_terms.append(pt.sum(weights_t * log_pdf))  # type: ignore[no-untyped-call]
+                # (N,) → (N, 1) so it broadcasts correctly against (N, M) log_pdf
+                weights_t = pt.constant(np.asarray(weights, dtype=np.float64))[:, None]
+                lp = lp + pt.sum(weights_t * log_pdf, axis=0)  # type: ignore[no-untyped-call]
             else:
-                lp_terms.append(pt.sum(log_pdf))  # type: ignore[no-untyped-call]
+                lp = lp + pt.sum(log_pdf, axis=0)  # type: ignore[no-untyped-call]
 
-        # Auxiliary distributions are constraint scalars — no event summing.
+        # Auxiliary distributions (constraint terms) are scalars; they broadcast
+        # onto the parameter-scan axis when non-scalar params are present.
         if self._likelihood.aux_distributions:
             for aux_name in self._likelihood.aux_distributions:
                 if aux_name in self.distributions:
-                    lp_terms.append(pt.log(self.distributions[aux_name]))
+                    lp = lp + pt.log(self.distributions[aux_name])
 
-        if lp_terms:
-            return pt.sum(pt.stack(lp_terms))  # type: ignore[no-untyped-call,no-any-return]
-        return pt.constant(np.float64(0.0))
+        return lp
 
     @staticmethod
     def _ensure_array(
@@ -278,12 +286,12 @@ class Model:
                 )
             return pt.constant(val, name=node_name)
 
+        is_observable = "_observed" in node_name or node_name in context.observables
+
         # Free variable: determine default kind (vector for observables, scalar otherwise)
-        default_kind: Callable[..., TensorVar]
-        if "_observed" in node_name or node_name in context.observables:
-            default_kind = pt.vector
-        else:
-            default_kind = pt.scalar
+        default_kind: Callable[..., TensorVar] = (
+            pt.vector if is_observable else pt.scalar
+        )
 
         # Allow explicit override from ParameterPoint.kind
         if param_point and param_point.kind is not None:
@@ -297,7 +305,20 @@ class Model:
                 )
         else:
             param_kind = default_kind
-        return create_bounded_tensor(node_name, domain_bounds, param_kind)
+
+        tensor = create_bounded_tensor(node_name, domain_bounds, param_kind)
+
+        # For vector parameters, cache the ExpandDims view used internally for
+        # broadcasting, but return the leaf so model.parameters[name] is 1-D:
+        #   observables → leaf[:, None] cached as (N, 1) view
+        #   non-observable overrides → leaf[None, :] cached as (1, N) view
+        # Scalars have no axes and broadcast trivially — no reshaping needed.
+        if param_kind is pt.vector:
+            view: TensorVar = tensor[:, None] if is_observable else tensor[None, :]
+            view.name = node_name  # propagate name through shape op for readability
+            self._views[node_name] = view
+
+        return tensor
 
     def _build_constant_node(
         self, node_name: str, constants_map: dict[str, TensorVar]
@@ -383,6 +404,7 @@ class Model:
                         **self.modifiers,
                     },
                     observables=self._observables,
+                    views=self._views,
                 )
 
                 if node_type == "parameter":

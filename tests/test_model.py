@@ -1394,6 +1394,31 @@ class TestWorkspaceModelDispatch:
         assert model is not None
 
     # ------------------------------------------------------------------ #
+    # Likelihood target — parameter_set branches                          #
+    # ------------------------------------------------------------------ #
+
+    def test_likelihood_parameterset_instance_override(self, ws):
+        """parameter_set=ParameterSet(...) is used directly on the Likelihood path."""
+        custom = ParameterSet(
+            name="custom",
+            parameters=[
+                ParameterPoint(name="mu", value=42.0),
+                ParameterPoint(name="sigma", value=3.0),
+            ],
+        )
+        lh = ws.likelihoods["sig_likelihood"]
+        model = ws.model(lh, parameter_set=custom, progress=False)
+        assert model.parameterset.name == "custom"
+        assert model.parameterset.get("mu").value == pytest.approx(42.0)
+
+    def test_likelihood_parameterset_string_lookup(self, ws):
+        """parameter_set='alt' looks up the named set in workspace.parameter_points on Likelihood path."""
+        lh = ws.likelihoods["sig_likelihood"]
+        model = ws.model(lh, parameter_set="alt", progress=False)
+        assert model.parameterset.name == "alt"
+        assert model.parameterset.get("mu").value == pytest.approx(1.0)
+
+    # ------------------------------------------------------------------ #
     # parameterset fallback — ValueError when not resolvable             #
     # (int/Likelihood/str-legacy paths)                                  #
     # ------------------------------------------------------------------ #

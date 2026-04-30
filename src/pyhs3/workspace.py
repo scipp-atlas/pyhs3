@@ -401,17 +401,23 @@ class Workspace(BaseModel):
         selected_domain = (
             domain
             if isinstance(domain, Domain)
-            else self.domains[domain or target]
+            else self.domains[target if domain is None else domain]
             if self.domains
             else ProductDomain(name="default")
         )
-        parameterset = (
-            parameter_set
-            if isinstance(parameter_set, ParameterSet)
-            else self.parameter_points[parameter_set or 0]
-            if self.parameter_points
-            else ParameterSet(name="default", parameters=[])
-        )
+        if isinstance(parameter_set, ParameterSet):
+            parameterset = parameter_set
+        elif parameter_set is not None and self.parameter_points:
+            parameterset = self.parameter_points[parameter_set]
+        elif parameter_set is not None:
+            msg = f"parameter_set={parameter_set!r} was requested but no parameter_points are available in this workspace"
+            raise ValueError(msg)
+        else:
+            parameterset = (
+                self.parameter_points[0]
+                if self.parameter_points
+                else ParameterSet(name="default", parameters=[])
+            )
         return Model(
             parameterset=parameterset or ParameterSet(name="default"),
             distributions=self.distributions or Distributions(),
@@ -491,17 +497,23 @@ class Workspace(BaseModel):
         selected_domain = (
             domain
             if isinstance(domain, Domain)
-            else self.domains[domain or 0]
+            else self.domains[0 if domain is None else domain]
             if self.domains
             else ProductDomain(name="default")
         )
-        parameterset = (
-            parameter_set
-            if isinstance(parameter_set, ParameterSet)
-            else self.parameter_points[parameter_set or 0]
-            if self.parameter_points
-            else ParameterSet(name="default", parameters=[])
-        )
+        if isinstance(parameter_set, ParameterSet):
+            parameterset = parameter_set
+        elif parameter_set is not None and self.parameter_points:
+            parameterset = self.parameter_points[parameter_set]
+        elif parameter_set is not None:
+            msg = f"parameter_set={parameter_set!r} was requested but no parameter_points are available in this workspace"
+            raise ValueError(msg)
+        else:
+            parameterset = (
+                self.parameter_points[0]
+                if self.parameter_points
+                else ParameterSet(name="default", parameters=[])
+            )
         return Model(
             parameterset=parameterset or ParameterSet(name="default"),
             distributions=self.distributions or Distributions(),
@@ -550,17 +562,23 @@ class Workspace(BaseModel):
         selected_domain = (
             domain
             if isinstance(domain, Domain)
-            else self.domains[domain or target]
+            else self.domains[target if domain is None else domain]
             if self.domains
             else ProductDomain(name="default")
         )
-        parameterset = (
-            parameter_set
-            if isinstance(parameter_set, ParameterSet)
-            else self.parameter_points[parameter_set or 0]
-            if self.parameter_points
-            else ParameterSet(name="default", parameters=[])
-        )
+        if isinstance(parameter_set, ParameterSet):
+            parameterset = parameter_set
+        elif parameter_set is not None and self.parameter_points:
+            parameterset = self.parameter_points[parameter_set]
+        elif parameter_set is not None:
+            msg = f"parameter_set={parameter_set!r} was requested but no parameter_points are available in this workspace"
+            raise ValueError(msg)
+        else:
+            parameterset = (
+                self.parameter_points[0]
+                if self.parameter_points
+                else ParameterSet(name="default", parameters=[])
+            )
         return Model(
             parameterset=parameterset or ParameterSet(name="default"),
             distributions=self.distributions or Distributions(),

@@ -13,6 +13,8 @@ from pytensor.graph.traversal import explicit_graph_inputs
 from pytensor.tensor.basic import TensorConstant
 
 import pyhs3 as hs3
+from pyhs3.domains import ProductDomain
+from pyhs3.parameter_points import ParameterPoint, ParameterSet
 
 
 @pytest.fixture
@@ -1173,3 +1175,317 @@ class TestConstParameters:
         with warnings.catch_warnings():
             warnings.simplefilter("error", UserWarning)
             workspace_with_const.model(0)  # must not raise
+
+
+class TestWorkspaceModelDispatch:
+    """Tests for workspace.model() dispatch across all target types and branches."""
+
+    @pytest.fixture
+    def ws(self):
+        """Workspace with one analysis, one likelihood, one param set, two domains."""
+        return hs3.Workspace(
+            metadata={"hs3_version": "0.2"},
+            distributions=[
+                {
+                    "name": "sig",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "mu",
+                    "sigma": "sigma",
+                }
+            ],
+            parameter_points=[
+                {
+                    "name": "nominal",
+                    "parameters": [
+                        {"name": "x", "value": 0.0},
+                        {"name": "mu", "value": 0.0},
+                        {"name": "sigma", "value": 1.0},
+                    ],
+                },
+                {
+                    "name": "alt",
+                    "parameters": [
+                        {"name": "x", "value": 1.0},
+                        {"name": "mu", "value": 1.0},
+                        {"name": "sigma", "value": 2.0},
+                    ],
+                },
+            ],
+            domains=[
+                {
+                    "name": "first_domain",
+                    "type": "product_domain",
+                    "axes": [{"name": "x", "min": -5.0, "max": 5.0}],
+                },
+                {
+                    "name": "second_domain",
+                    "type": "product_domain",
+                    "axes": [{"name": "x", "min": 0.0, "max": 10.0}],
+                },
+            ],
+            data=[{"name": "obs", "type": "point", "value": 0.5}],
+            likelihoods=[
+                {
+                    "name": "sig_likelihood",
+                    "distributions": ["sig"],
+                    "data": ["obs"],
+                }
+            ],
+            analyses=[
+                {
+                    "name": "sig_analysis",
+                    "likelihood": "sig_likelihood",
+                    "parameters_of_interest": ["mu"],
+                    "domains": ["first_domain"],
+                    "init": "nominal",
+                }
+            ],
+        )
+
+    # ------------------------------------------------------------------ #
+    # Analysis target — parameter_set branches                            #
+    # ------------------------------------------------------------------ #
+
+    def test_analysis_parameterset_instance_override(self, ws):
+        """parameter_set=ParameterSet(...) is used directly, ignoring analysis.init."""
+        custom = ParameterSet(
+            name="custom",
+            parameters=[
+                ParameterPoint(name="mu", value=99.0),
+                ParameterPoint(name="sigma", value=0.5),
+            ],
+        )
+        analysis = ws.analyses["sig_analysis"]
+        model = ws.model(analysis, parameter_set=custom, progress=False)
+        assert model.parameterset.name == "custom"
+        assert model.parameterset.get("mu").value == pytest.approx(99.0)
+
+    def test_analysis_parameterset_string_lookup(self, ws):
+        """parameter_set='alt' looks up the named set in workspace.parameter_points."""
+        analysis = ws.analyses["sig_analysis"]
+        model = ws.model(analysis, parameter_set="alt", progress=False)
+        assert model.parameterset.name == "alt"
+        assert model.parameterset.get("mu").value == pytest.approx(1.0)
+
+    def test_analysis_parameterset_int_lookup(self, ws):
+        """parameter_set=1 looks up by index in workspace.parameter_points."""
+        analysis = ws.analyses["sig_analysis"]
+        model = ws.model(analysis, parameter_set=1, progress=False)
+        # index 1 → 'alt' → mu=1.0
+        assert model.parameterset.name == "alt"
+        assert model.parameterset.get("mu").value == pytest.approx(1.0)
+
+    def test_analysis_parameterset_from_init(self, ws):
+        """No parameter_set override → analysis.init ('nominal') is used."""
+        analysis = ws.analyses["sig_analysis"]
+        model = ws.model(analysis, progress=False)
+        assert model.parameterset.name == "nominal"
+        assert model.parameterset.get("mu").value == pytest.approx(0.0)
+
+    def test_analysis_no_init_no_override_uses_empty_default(self):
+        """Analysis without init + no parameter_set override → model is built with empty ParameterSet."""
+        ws_no_init = hs3.Workspace(
+            metadata={"hs3_version": "0.2"},
+            distributions=[
+                {
+                    "name": "sig",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "mu",
+                    "sigma": "sigma",
+                }
+            ],
+            domains=[
+                {
+                    "name": "d",
+                    "type": "product_domain",
+                    "axes": [{"name": "x", "min": -5.0, "max": 5.0}],
+                }
+            ],
+            data=[{"name": "obs", "type": "point", "value": 0.0}],
+            likelihoods=[{"name": "lh", "distributions": ["sig"], "data": ["obs"]}],
+            analyses=[
+                {
+                    "name": "a",
+                    "likelihood": "lh",
+                    "parameters_of_interest": ["mu"],
+                    "domains": ["d"],
+                    # no "init" key → init=None
+                }
+            ],
+        )
+        model = ws_no_init.model("a", progress=False)
+        assert model is not None
+        assert model.parameterset.name == "default"
+
+    def test_analysis_parameterset_missing_no_parameter_points_raises(self):
+        """parameter_set given but workspace has no parameter_points → ValueError."""
+
+        ws_no_params = hs3.Workspace(
+            metadata={"hs3_version": "0.2"},
+            distributions=[
+                {
+                    "name": "sig",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "mu",
+                    "sigma": "sigma",
+                }
+            ],
+            domains=[
+                {
+                    "name": "d",
+                    "type": "product_domain",
+                    "axes": [{"name": "x", "min": -5.0, "max": 5.0}],
+                }
+            ],
+            data=[{"name": "obs", "type": "point", "value": 0.0}],
+            likelihoods=[
+                {
+                    "name": "lh",
+                    "distributions": ["sig"],
+                    "data": ["obs"],
+                }
+            ],
+            analyses=[
+                {
+                    "name": "a",
+                    "likelihood": "lh",
+                    "parameters_of_interest": ["mu"],
+                    "domains": ["d"],
+                    "init": None,
+                }
+            ],
+        )
+        analysis = ws_no_params.analyses["a"]
+        with pytest.raises(ValueError, match="parameter_set="):
+            ws_no_params.model(analysis, parameter_set="nominal", progress=False)
+
+    # ------------------------------------------------------------------ #
+    # String target dispatch                                              #
+    # ------------------------------------------------------------------ #
+
+    def test_str_dispatches_to_analysis(self, ws):
+        """workspace.model('sig_analysis') resolves to the Analysis overload."""
+        model = ws.model("sig_analysis", progress=False)
+        # Analysis overload uses analysis.init → 'nominal'
+        assert model is not None
+        assert model.parameterset.name == "nominal"
+
+    def test_str_dispatches_to_likelihood(self, ws):
+        """workspace.model('sig_likelihood') resolves to the Likelihood overload."""
+        model = ws.model("sig_likelihood", progress=False)
+        assert model is not None
+        assert "sig" in model.distributions
+
+    def test_str_analysis_domain_override_raises(self, ws):
+        """domain override is not allowed when a string resolves to an Analysis."""
+        with pytest.raises(ValueError, match="domain override not supported"):
+            ws.model(
+                "sig_analysis",
+                domain=ProductDomain(name="other"),
+                progress=False,
+            )
+
+    def test_str_legacy_fallback_uses_domain_name(self, ws):
+        """String that matches no analysis or likelihood falls back to domain-by-name lookup."""
+        model = ws.model("first_domain", progress=False)
+        assert model is not None
+
+    # ------------------------------------------------------------------ #
+    # parameterset fallback — ValueError when not resolvable             #
+    # (int/Likelihood/str-legacy paths)                                  #
+    # ------------------------------------------------------------------ #
+
+    def test_int_target_parameterset_unresolvable_raises(self):
+        """int path: parameter_set given but no parameter_points → ValueError."""
+        ws_no_params = hs3.Workspace(
+            metadata={"hs3_version": "0.2"},
+            distributions=[
+                {
+                    "name": "g",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "mu",
+                    "sigma": "sigma",
+                }
+            ],
+            domains=[
+                {
+                    "name": "d",
+                    "type": "product_domain",
+                    "axes": [{"name": "x", "min": -5.0, "max": 5.0}],
+                }
+            ],
+        )
+        with pytest.raises(ValueError, match="parameter_set="):
+            ws_no_params.model(0, parameter_set="nominal", progress=False)
+
+    def test_likelihood_target_parameterset_unresolvable_raises(self):
+        """Likelihood path: parameter_set given but no parameter_points → ValueError."""
+        ws_no_params = hs3.Workspace(
+            metadata={"hs3_version": "0.2"},
+            distributions=[
+                {
+                    "name": "sig",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "mu",
+                    "sigma": "sigma",
+                }
+            ],
+            domains=[
+                {
+                    "name": "d",
+                    "type": "product_domain",
+                    "axes": [{"name": "x", "min": -5.0, "max": 5.0}],
+                }
+            ],
+            data=[{"name": "obs", "type": "point", "value": 0.0}],
+            likelihoods=[{"name": "lh", "distributions": ["sig"], "data": ["obs"]}],
+        )
+        lh = ws_no_params.likelihoods["lh"]
+        with pytest.raises(ValueError, match="parameter_set="):
+            ws_no_params.model(lh, parameter_set="nominal", progress=False)
+
+    def test_str_legacy_parameterset_unresolvable_raises(self):
+        """str-legacy path: parameter_set given but no parameter_points → ValueError."""
+        ws_no_params = hs3.Workspace(
+            metadata={"hs3_version": "0.2"},
+            distributions=[
+                {
+                    "name": "g",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "mu",
+                    "sigma": "sigma",
+                }
+            ],
+            domains=[
+                {
+                    "name": "d",
+                    "type": "product_domain",
+                    "axes": [{"name": "x", "min": -5.0, "max": 5.0}],
+                }
+            ],
+        )
+        with pytest.raises(ValueError, match="parameter_set="):
+            ws_no_params.model("d", parameter_set="nominal", progress=False)
+
+    # ------------------------------------------------------------------ #
+    # domain=0 falsy-zero fix                                            #
+    # ------------------------------------------------------------------ #
+
+    def test_int_target_domain_zero_is_honored(self, ws):
+        """domain=0 on the int path must select domains[0], not fall back to target."""
+
+        # domain=0 should select 'first_domain' (index 0, x in [-5,5])
+        model = ws.model(0, domain=0, progress=False)
+        assert model is not None
+
+    def test_str_legacy_domain_zero_is_honored(self, ws):
+        """domain=0 on the str-legacy path must select domains[0]."""
+        # 'unknown_name' falls through to legacy; domain=0 should pick first_domain
+        model = ws.model("first_domain", domain=0, progress=False)
+        assert model is not None

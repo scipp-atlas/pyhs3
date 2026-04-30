@@ -256,6 +256,11 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         observed_data_param = f"{self.name}_observed"
         observed_data = context[observed_data_param]
 
+        # Observables are reshaped to (N, 1) by the model builder for broadcasting.
+        # Flatten to 1-D here so element-wise Poisson matches the (N,) expected_rates.
+        if observed_data.ndim == 2:
+            observed_data = observed_data[:, 0]
+
         # Build product of individual Poisson probabilities for each bin
         # P(observed_i | expected_i) = exp(observed_i * log(expected_i) - expected_i - log(observed_i!))
         log_probs = (

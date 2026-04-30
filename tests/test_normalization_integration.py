@@ -7,6 +7,7 @@ import warnings
 import numpy as np
 import pytensor.tensor as pt
 from pytensor.compile.function import function
+from pytensor.graph.traversal import explicit_graph_inputs
 
 from pyhs3 import Model, Workspace
 from pyhs3.data import BinnedData, Data
@@ -58,18 +59,18 @@ class TestModelNormalization:
         c_var = model.parameters["c"]
         f = function([x_var, c_var], dist_expr)
 
-        # Integrate over the domain
+        # x_var is the 1-D leaf — pass a plain 1-D array
         xs = np.linspace(0, 10, 10000)
-        ys = f(xs, -0.5)
+        ys = f(xs, -0.5).squeeze()
         integral = np.trapezoid(ys, xs)
 
         # Should integrate to 1.0
         assert np.isclose(integral, 1.0, atol=1e-6)
 
     def test_model_with_two_observables(self):
-        """Model with observables normalizes distributions correctly."""
+        """Model with two observables normalizes distribution correctly."""
         # Create a simple GenericDist
-        generic_dist = GenericDist(name="test_dist", expression="exp(c*x)")
+        generic_dist = GenericDist(name="test_dist", expression="exp(c*x*y)")
 
         # Create Model with observables
         parameterset = ParameterSet(
@@ -82,7 +83,7 @@ class TestModelNormalization:
         domain = ProductDomain(name="default")
         functions = Functions([])
 
-        observables = {"x": (0.0, 10.0), "c": (-5.0, 5.0)}
+        observables = {"x": (0.0, 10.0), "y": (-5.0, 5.0)}
 
         model = Model(
             parameterset=parameterset,
@@ -96,18 +97,20 @@ class TestModelNormalization:
         # Get the compiled distribution
         dist_expr = model.distributions["test_dist"]
 
-        # Create a function to evaluate it
+        # Both x and y are observables — model.parameters returns 1-D leaves
         x_var = model.parameters["x"]
+        y_var = model.parameters["y"]
         c_var = model.parameters["c"]
-        f = function([x_var, c_var], dist_expr)
+        f = function([x_var, y_var, c_var], dist_expr)
 
-        # Integrate over the domain
+        # Pass plain 1-D arrays
         xs = np.linspace(0, 10, 10000)
-        cs = np.linspace(-5.0, 5.0, 10000)
-        ys = f(xs, cs)
-        integral = np.trapezoid(ys, xs)
+        ys = np.linspace(-5.0, 5.0, 10000)
+        vals = f(xs, ys, -0.5).squeeze()
+        integral = np.trapezoid(vals, xs)
 
-        # Should integrate to 0.1 (integral over x gives 1.0, then over c gives 1/(5-(-5)) = 0.1
+        # Should integrate to 0.1 (integral over x gives 1.0, then over y gives
+        # 1/(5-(-5)) = 0.1 for the joint normalization over [0,10] x [-5,5])
         assert np.isclose(integral, 0.1, atol=1e-6)
 
     def test_model_without_observables(self):
@@ -149,9 +152,9 @@ class TestModelNormalization:
         c_var = model.parameters["c"]
         f = function([x_var, c_var], dist_expr)
 
-        # Integrate over the domain
+        # x is a non-observable vector override — pass a plain 1-D array
         xs = np.linspace(0, 10, 10000)
-        ys = f(xs, -0.5)
+        ys = f(xs, -0.5).squeeze()
         integral = np.trapezoid(ys, xs)
 
         # Should NOT integrate to 1.0 (unnormalized)
@@ -253,9 +256,9 @@ class TestWorkspaceNormalization:
         c_var = model.parameters["c"]
         f = function([x_var, c_var], dist_expr)
 
-        # Integrate over the domain
+        # x is an observable — model.parameters["x"] is the 1-D leaf
         xs = np.linspace(0, 10, 10000)
-        ys = f(xs, -0.5)
+        ys = f(xs, -0.5).squeeze()
         integral = np.trapezoid(ys, xs)
 
         # Should integrate to 1.0
@@ -304,9 +307,9 @@ class TestWorkspaceNormalization:
         c_var = model.parameters["c"]
         f = function([x_var, c_var], dist_expr)
 
-        # Integrate over the domain
+        # x is a non-observable vector override — pass a plain 1-D array
         xs = np.linspace(0, 10, 10000)
-        ys = f(xs, -0.5)
+        ys = f(xs, -0.5).squeeze()
         integral = np.trapezoid(ys, xs)
 
         # Should NOT integrate to 1.0 (unnormalized)
@@ -365,10 +368,50 @@ class TestWorkspaceNormalization:
         sigma_var = model.parameters["sigma"]
         f = function([x_var, mu_var, sigma_var], dist_expr)
 
-        # Integrate over the domain
+        # x is an observable — model.parameters["x"] is the 1-D leaf
         xs = np.linspace(100, 160, 10000)
-        ys = f(xs, 130.0, 10.0)
+        ys = f(xs, 130.0, 10.0).squeeze()
         integral = np.trapezoid(ys, xs)
 
         # Should integrate to 1.0 (normalized over finite domain)
         assert np.isclose(integral, 1.0, atol=1e-6)
+
+
+class TestNormalizationRegression:
+    """Regression tests ensuring normalization correctness."""
+
+    def test_normalization_substitutes_integration_variable(self):
+        """The integration variable (leaf) must not leak into the normalized expression.
+
+        After normalization, the denominator subgraph must be fully substituted
+        to a constant — the observable leaf should not appear as a free input
+        to the denominator.
+        """
+        generic_dist = GenericDist(name="test_dist", expression="exp(c*x)")
+
+        parameterset = ParameterSet(
+            name="default",
+            parameters=[ParameterPoint(name="c", value=-0.5)],
+        )
+        model = Model(
+            parameterset=parameterset,
+            distributions=Distributions([generic_dist]),
+            domain=ProductDomain(name="default"),
+            functions=Functions([]),
+            progress=False,
+            observables={"x": (0.0, 10.0)},
+        )
+
+        dist_expr = model.distributions["test_dist"]
+
+        # dist_expr is raw / integral (a True_div Apply node)
+        assert dist_expr.owner is not None
+        denominator = dist_expr.owner.inputs[1]
+
+        # The integration variable must be fully substituted out of the denominator.
+        # Only non-observable parameters (like "c") may remain as free inputs.
+        denom_input_names = {
+            v.name for v in explicit_graph_inputs([denominator]) if v.name
+        }
+        assert "x" not in denom_input_names
+        assert denom_input_names <= {"c"}

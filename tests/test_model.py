@@ -436,7 +436,7 @@ class TestModelWithoutParameterPoints:
         workspace = hs3.Workspace(**workspace_data)
         model = workspace.model(0)
 
-        # obs_x should be a vector because it's an observable
+        # obs_x is an observable: stored as the 1-D leaf, ndim == 1
         assert model.parameters["obs_x"].type.ndim == 1
 
     def test_parameter_kind_override_warns(self):
@@ -532,6 +532,7 @@ class TestModelWithoutParameterPoints:
         # Override the kind programmatically
         workspace.parameter_points[0]["obs_x"].kind = pt.vector
         model = workspace.model(0)
+        # Observable override to vector: stored as the 1-D leaf, ndim == 1
         assert model.parameters["obs_x"].type.ndim == 1
 
     def test_non_observable_parameter_stays_scalar(self):

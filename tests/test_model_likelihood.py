@@ -368,7 +368,8 @@ def test_log_prob_matches_truncnorm():
         v.name: v for v in explicit_graph_inputs([model.log_prob]) if v.name is not None
     }
     fn = pytensor.function(list(inputs_map.values()), model.log_prob)
-    val = float(fn(**model.data, **model.nominal_params))
+    # log_prob sums events over axis 0, returning shape (1,); use .item() to extract scalar
+    val = float(fn(**model.data, **model.nominal_params).item())
 
     events1 = [1.0, 2.0, 3.0, 4.0, 5.0]
     events2 = [0.5, 1.5, 2.5, 3.5, 4.5]
@@ -390,7 +391,7 @@ def test_nll_is_minus_two_log_prob():
         v.name: v for v in explicit_graph_inputs([nll_expr]) if v.name is not None
     }
     fn = pytensor.function(list(inputs_map.values()), nll_expr)
-    nll_val = float(fn(**model.data, **model.nominal_params))
+    nll_val = float(fn(**model.data, **model.nominal_params).item())
 
     events1 = [1.0, 2.0, 3.0, 4.0, 5.0]
     events2 = [0.5, 1.5, 2.5, 3.5, 4.5]
@@ -417,7 +418,7 @@ def test_log_prob_reusable_with_different_data():
         "x_obs": np.array([-1.0, 0.0, 1.0]),
         "y_obs": np.array([-0.5, 0.5, 1.5]),
     }
-    val = float(fn(**alt_data, **model.nominal_params))
+    val = float(fn(**alt_data, **model.nominal_params).item())
 
     expected_lp = sum(
         _truncnorm_logpdf(x, 2.0, 1.0, -10.0, 10.0) for x in alt_data["x_obs"]
@@ -451,7 +452,9 @@ def test_nll_jaxify_matches_truncnorm():
     jg = jaxify(nll)
 
     val = float(
-        jg(**{k: jnp.array(v) for k, v in model.data.items()}, mean=jnp.float64(2.0))[0]
+        jg(**{k: jnp.array(v) for k, v in model.data.items()}, mean=jnp.float64(2.0))[
+            0
+        ].item()
     )
 
     events1 = [1.0, 2.0, 3.0, 4.0, 5.0]
@@ -617,8 +620,8 @@ def test_log_prob_aux_distributions_contributes_to_log_prob():
     fn_without = pytensor.function(list(inputs_without.values()), lp_without_aux_expr)
 
     common = {"x_obs": np.array([1.0, 2.0, 3.0]), "mean": np.float64(0.0)}
-    val_with = float(fn_with(**common, alpha=np.float64(0.0)))
-    val_without = float(fn_without(**common))
+    val_with = float(fn_with(**common, alpha=np.float64(0.0)).item())
+    val_without = float(fn_without(**common).item())
 
     # With the constraint, log_prob gains an extra log(N(0|0,1)) term.
     assert val_with != pytest.approx(val_without)

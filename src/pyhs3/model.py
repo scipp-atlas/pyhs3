@@ -108,6 +108,10 @@ class Model:
         self._compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]] = {}
         self._compiled_inputs: dict[str, list[TensorVar]] = {}
         self._likelihood = likelihood
+        # Views used internally for broadcasting: leaf[:, None] for observables,
+        # leaf[None, :] for non-observable vector overrides.  Distributions see
+        # these via Context; model.parameters[name] always holds the leaf.
+        self._views: dict[str, TensorVar] = {}
 
         # Build dependency graph with proper entity identification
         self._build_dependency_graph(functions, distributions, progress)
@@ -304,14 +308,15 @@ class Model:
 
         tensor = create_bounded_tensor(node_name, domain_bounds, param_kind)
 
-        # Shape convention for vector parameters so broadcasting is unambiguous:
-        #   observables → (N, 1): events on the first axis
-        #   non-observable overrides → (1, N): scan dimension on the second axis
+        # For vector parameters, cache the ExpandDims view used internally for
+        # broadcasting, but return the leaf so model.parameters[name] is 1-D:
+        #   observables → leaf[:, None] cached as (N, 1) view
+        #   non-observable overrides → leaf[None, :] cached as (1, N) view
         # Scalars have no axes and broadcast trivially — no reshaping needed.
         if param_kind is pt.vector:
-            # (N,) → (N, 1) if is_observable else (N,) → (1, N)
-            tensor = tensor[:, None] if is_observable else tensor[None, :]
-            tensor.name = node_name  # propagate name through shape op
+            view: TensorVar = tensor[:, None] if is_observable else tensor[None, :]
+            view.name = node_name  # propagate name through shape op for readability
+            self._views[node_name] = view
 
         return tensor
 
@@ -399,6 +404,7 @@ class Model:
                         **self.modifiers,
                     },
                     observables=self._observables,
+                    views=self._views,
                 )
 
                 if node_type == "parameter":

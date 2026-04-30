@@ -115,7 +115,7 @@ Let's see how normalization affects a Gaussian distribution over a finite domain
    >>> sigma_var = model_norm.parameters["sigma"]
    >>> f_norm = function([x_var, mu_var, sigma_var], expr_norm)
    >>> xs = np.linspace(100, 160, 10000)
-   >>> ys = f_norm(xs, 130.0, 10.0).squeeze(axis=-1)
+   >>> ys = f_norm(xs, 130.0, 10.0).squeeze()
    >>> integral_norm = np.trapezoid(ys, xs)
    >>> abs(integral_norm - 1.0) < 1e-5  # Normalized PDF integrates to 1
    np.True_
@@ -125,7 +125,7 @@ Let's see how normalization affects a Gaussian distribution over a finite domain
    >>> mu_var_u = model_unnorm.parameters["mu"]
    >>> sigma_var_u = model_unnorm.parameters["sigma"]
    >>> f_unnorm = function([x_var_u, mu_var_u, sigma_var_u], expr_unnorm)
-   >>> ys_unnorm = f_unnorm(xs, 130.0, 10.0).squeeze(axis=-1)
+   >>> ys_unnorm = f_unnorm(xs, 130.0, 10.0).squeeze()
    >>> integral_unnorm = np.trapezoid(ys_unnorm, xs)
    >>> 0.99 < integral_unnorm < 1.0  # Gaussian over [100, 160] is almost all of the probability
    np.True_

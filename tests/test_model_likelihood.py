@@ -271,6 +271,70 @@ def test_log_prob_warns_for_weighted_data():
         _ = model.log_prob
 
 
+@pytest.mark.parametrize(
+    "weights",
+    [
+        [0.0, 0.0, 0.0, 0.0, 0.0],
+        [1.0, -1.0, 0.0, 0.0, 0.0],
+    ],
+    ids=["all-zero", "net-zero"],
+)
+def test_log_prob_raises_for_zero_total_weight(weights):
+    ws_w = Workspace(
+        **{
+            **_WS_DICT,
+            "data": [
+                {
+                    "name": "data1",
+                    "type": "unbinned",
+                    "axes": [{"name": "x_obs", "min": -10.0, "max": 10.0}],
+                    "entries": [[1.0], [2.0], [3.0], [4.0], [5.0]],
+                    "weights": weights,
+                },
+                _WS_DICT["data"][1],
+            ],
+        }
+    )
+    model = ws_w.model(ws_w.analyses["A"], progress=False)
+    with (
+        pytest.warns(UserWarning, match="weights"),
+        pytest.raises(ValueError, match="invalid total weight"),
+    ):
+        _ = model.log_prob
+
+
+@pytest.mark.parametrize(
+    "weights",
+    [
+        [1.0, float("inf"), 1.0, 1.0, 1.0],
+        [1.0, float("nan"), 1.0, 1.0, 1.0],
+    ],
+    ids=["inf", "nan"],
+)
+def test_log_prob_raises_for_nonfinite_weight(weights):
+    ws_w = Workspace(
+        **{
+            **_WS_DICT,
+            "data": [
+                {
+                    "name": "data1",
+                    "type": "unbinned",
+                    "axes": [{"name": "x_obs", "min": -10.0, "max": 10.0}],
+                    "entries": [[1.0], [2.0], [3.0], [4.0], [5.0]],
+                    "weights": weights,
+                },
+                _WS_DICT["data"][1],
+            ],
+        }
+    )
+    model = ws_w.model(ws_w.analyses["A"], progress=False)
+    with (
+        pytest.warns(UserWarning, match="weights"),
+        pytest.raises(ValueError, match="invalid total weight"),
+    ):
+        _ = model.log_prob
+
+
 def test_model_data_from_analysis():
     ws = _ws()
     model = ws.model(ws.analyses["A"])

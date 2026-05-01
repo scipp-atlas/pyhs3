@@ -234,8 +234,18 @@ class Model:
                     stacklevel=2,
                 )
                 # (N,) → (N, 1) so it broadcasts correctly against (N, M) log_pdf
-                weights_t = pt.constant(np.asarray(weights, dtype=np.float64))[:, None]
-                terms.append(pt.sum(weights_t * log_pdf, axis=0) / pt.sum(weights_t))  # type: ignore[no-untyped-call]
+                weights_arr = np.asarray(weights, dtype=np.float64)
+                total_weight = float(np.sum(weights_arr))
+                if not np.isfinite(total_weight) or np.isclose(total_weight, 0.0):
+                    msg = (
+                        f"'{datum.name}' has invalid total weight ({total_weight}); "
+                        "sum of weights must be finite and non-zero."
+                    )
+                    raise ValueError(msg)
+                weights_t = pt.constant(weights_arr)[:, None]
+                terms.append(
+                    pt.sum(weights_t * log_pdf, axis=0) / np.float64(total_weight)  # type: ignore[no-untyped-call]
+                )
             else:
                 terms.append(pt.sum(log_pdf, axis=0))  # type: ignore[no-untyped-call]
 

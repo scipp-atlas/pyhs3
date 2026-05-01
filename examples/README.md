@@ -4,19 +4,57 @@
 > branch and is **not** part of any release. It is a living sandbox — commits
 > accumulate here; no PR to `main` is ever opened from this branch.
 
-## `nll_validation_dihiggs.py`
+## `minimization_dihiggs.py`
 
-A vectorized NLL validation against the ROOT reference for the ATLAS bbyy
-workspace (pyhs3 issue #41). No JAX required.
+Profile-likelihood minimization demo: compile `model.log_prob` into a pytensor
+function and minimize over nuisance parameters at a fixed `mu_HH` using scipy.
 
 ### What it demonstrates
 
-| Feature                                        | API used                                    |
-| ---------------------------------------------- | ------------------------------------------- |
-| Build model with merged best-fit parameter set | `ws.model(parameter_set=merged_pset)`       |
-| Vectorized per-channel log-PDF evaluation      | `model.logpdf_unsafe(name, **{obs: array})` |
-| Weighted data access                           | `UnbinnedData.weighted_entries[:, 0]`       |
-| Comparison against ROOT reference values       | embedded `_REFERENCE` dict                  |
+| Feature                                              | API used                                |
+| ---------------------------------------------------- | --------------------------------------- |
+| Build a joint symbolic NLL from a workspace Analysis | `ws.model(analysis)` → `model.log_prob` |
+| Compile the PyTensor expression                      | `pytensor.compile.function.function`    |
+| Extract symbolic free inputs                         | `explicit_graph_inputs([expression])`   |
+| Profile minimization with scipy                      | `scipy.optimize.minimize` (SLSQP)       |
+
+### Install
+
+```bash
+pip install "pyhs3" scipy skhep-testdata
+```
+
+### Run
+
+```bash
+python examples/minimization_dihiggs.py
+```
+
+The script profiles the NLL at a single `mu_HH = 1.0` value. A commented-out
+section shows how to loop over a full `MU_GRID` scan.
+
+---
+
+## `nll_validation_dihiggs.py`
+
+NLL validation against the ROOT reference for the ATLAS bbyy workspace (pyhs3
+issue #41). Demonstrates **two approaches** to computing an NLL scan over a
+`mu_HH` grid:
+
+1. **Scalar (non-batched)** — compile `model.log_prob` with scalar `mu_HH`, loop
+   over the scan grid evaluating one point at a time.
+2. **Vectorized (batched)** — set `param_set["mu_HH"].kind = pt.vector` before
+   building the model, pass the entire grid in a single compiled function call.
+
+### What it demonstrates
+
+| Feature                                              | API used                                 |
+| ---------------------------------------------------- | ---------------------------------------- |
+| Build a joint symbolic NLL from a workspace Analysis | `ws.model(analysis)` → `model.log_prob`  |
+| Compile the PyTensor expression                      | `pytensor.compile.function.function`     |
+| Scalar NLL evaluation (one point at a time)          | loop with `np.asarray` wrapping per call |
+| Batched NLL evaluation (all points at once)          | `param_set["mu_HH"].kind = pt.vector`    |
+| Comparison against ROOT reference values             | embedded `_REFERENCE` dict               |
 
 ### Install
 
@@ -30,8 +68,9 @@ pip install "pyhs3" matplotlib skhep-testdata
 python examples/nll_validation_dihiggs.py
 ```
 
-The script computes one `logpdf_unsafe` call per channel per mu value (instead
-of a per-event Python loop), writes `nll_validation.pdf` and
+The script builds two models (one scalar, one batched — each cached separately
+as `ws_scalar.pkl` / `ws_batched.pkl`), runs both scans, compares them against
+each other and the ROOT reference, and writes `nll_validation.pdf` +
 `nll_validation.json`.
 
 ---

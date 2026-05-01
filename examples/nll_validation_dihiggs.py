@@ -1,9 +1,16 @@
 # ruff: noqa: T201
-"""Vectorized NLL validation for the ATLAS diHiggs bbyy workspace (issue #41).
+"""NLL validation for the ATLAS diHiggs bbyy workspace (issue #41).
 
-Reproduces the NLL curve from tests/test_manual.py using vectorized
-``model.logpdf_unsafe`` calls instead of a per-event Python loop.  No JAX
-or optimistix required.
+Demonstrates two approaches to computing NLL over a mu_HH scan grid:
+
+1. **Scalar (non-batched)**: compile ``model.log_prob`` with scalar mu_HH,
+   then loop over the scan grid evaluating one point at a time.
+
+2. **Vectorized (batched)**: set ``param_set["mu_HH"].kind = pt.vector``
+   before building the model, then pass the entire scan grid in a single call.
+
+Both approaches produce identical results and are validated against ROOT
+reference values from ATLAS bbyy diHiggs (issue #41).
 
 Install: pip install "pyhs3" matplotlib skhep-testdata
 Run:     python examples/nll_validation_dihiggs.py
@@ -18,6 +25,9 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pytensor.tensor as pt
+from pytensor.compile.function import function
+from pytensor.graph.traversal import explicit_graph_inputs
 from skhep_testdata import data_path as skhep_testdata_path
 
 import pyhs3
@@ -99,42 +109,19 @@ _REFERENCE = {
 MU_GRID = _REFERENCE["mu_HH"][1:]
 REF_NLL = _REFERENCE["nll"][1:]
 
-_MODEL_CACHE = Path("ws.pkl")
+_SCALAR_CACHE = Path("ws_scalar.pkl")
+_BATCHED_CACHE = Path("ws_batched.pkl")
 
 
-def plot_dist(
-    model: pyhs3.Model,
-    parameters: dict,
-    dist_name: str,
-    data_set,
-    *,
-    factor: float = 1.0,
-    plot_name: str | None = None,
-    label: str | None = None,
-    color: str = "red",
-    linewidth: float = 2.5,
-) -> None:
-    """Plot a distribution PDF overlaid on its data points."""
-    obs_name = data_set.axes[0].name
-    xs = np.asarray([val[0] for val in data_set.entries], dtype=np.float64)
-    sort_idx = np.argsort(xs)
-    xs = xs[sort_idx]
-    ys = model.pdf_unsafe(dist_name, **{**parameters, obs_name: xs}) * factor
-    plt.figure(plot_name)
-    plt.title(plot_name)
-    kwargs = {"color": color, "linewidth": linewidth}
-    if label is not None:
-        kwargs["label"] = label
-    plt.plot(xs, ys, **kwargs)
-    plt.ylim(0, 18)
+def load_workspace():
+    """Load workspace and collect parameter points.
 
-
-def main() -> None:
+    Returns (workspace, analysis, param_set).
+    """
     ws_path = skhep_testdata_path("test_hs3_unbinned_pyhs3_validation_issue41.json")
     print(f"Loading workspace from {Path(ws_path).name} ...")
     ws = pyhs3.Workspace.load(ws_path)
     analysis = ws.analyses["CombinedPdf_combData"]
-    likelihood = analysis.likelihood
 
     pset_names = [
         "default_values",
@@ -144,85 +131,170 @@ def main() -> None:
         "unconditionalNuis_muhat",
         "POI_muhat",
     ]
-
     param_set = pyhs3.parameter_points.ParameterSet(
         name="collected",
         parameters=[
             pp for pset_name in pset_names for pp in ws.parameter_points[pset_name]
         ],
     )
+    return ws, analysis, param_set
 
-    # ------------------------------------------------------------------ #
-    # Build or load model                                                  #
-    # ------------------------------------------------------------------ #
-    if _MODEL_CACHE.exists():
-        print(f"Loading cached model from {_MODEL_CACHE} ...")
-        with _MODEL_CACHE.open("rb") as f:
-            model = pickle.load(f)
-    else:
-        print("Building symbolic model (this takes ~1 min) ...")
-        model = ws.model(analysis, parameter_set=param_set, progress=True)
-        with _MODEL_CACHE.open("wb") as f:
-            pickle.dump(model, f)
-        print(f"  Model cached to {_MODEL_CACHE}")
 
-    # Only keep unbinned data sets that are not the "binned-resampled" copies.
-    unbinned = [
-        d
-        for d in ws.data.root
-        if getattr(d, "type", None) == "unbinned" and "binned" not in d.name
+def build_or_load_model(ws, analysis, param_set, cache_path):
+    """Build model from workspace, or load from pickle cache."""
+    if cache_path.exists():
+        print(f"Loading cached model from {cache_path} ...")
+        with cache_path.open("rb") as f:
+            return pickle.load(f)
+    print("Building symbolic model (this takes ~1 min) ...")
+    model = ws.model(analysis, parameter_set=param_set, progress=True)
+    with cache_path.open("wb") as f:
+        pickle.dump(model, f)
+    print(f"  Model cached to {cache_path}")
+    return model
+
+
+def compile_log_prob(model):
+    """Compile model.log_prob into a callable pytensor function.
+
+    Returns (log_prob_fn, inputs) where inputs is the ordered list of
+    symbolic input variables the compiled function expects.
+    """
+    dist_expression = model.log_prob
+    inputs = [
+        var for var in explicit_graph_inputs([dist_expression]) if var.name is not None
     ]
+    log_prob_fn = function(
+        inputs=inputs,
+        outputs=dist_expression,
+        mode=model.mode,
+        on_unused_input="ignore",
+        name=model._likelihood.name,
+        trust_input=True,
+    )
+    return log_prob_fn, inputs
 
-    # ------------------------------------------------------------------ #
-    # Vectorized NLL scan                                                  #
-    # ------------------------------------------------------------------ #
-    # For each channel, collect the weighted entries once (reused across mu).
-    channel_data: list[tuple[str, str, np.ndarray]] = []  # (dist_name, obs_name, vals)
-    for dist_obj, datum in zip(likelihood.distributions, unbinned, strict=False):
-        dist_name = dist_obj if isinstance(dist_obj, str) else dist_obj.name
-        obs_name = datum.axes[0].name
-        obs_vals = datum.weighted_entries[:, 0]
-        vals = np.sort(obs_vals[np.abs(obs_vals) > 1e-6])
-        channel_data.append((dist_name, obs_name, vals))
 
-    print(f"\nRunning NLL scan over {len(MU_GRID)} mu_HH values ...")
-    nll_given_mu: list[float] = []
+def scan_scalar(log_prob_fn, inputs, model, mu_grid):
+    """Evaluate -2*log_prob one mu_HH value at a time (non-batched).
+
+    Loops over *mu_grid*, calling the compiled function once per point.
+    Each call receives scalar parameter values wrapped via ``np.asarray``
+    (pytensor's C VM rejects bare ``np.float64`` scalars).
+    """
+    base_vals = {**model.free_params, **model.data}
+    nlls = []
+    for mu in mu_grid:
+        vals = {**base_vals, "mu_HH": mu}
+        args = [np.asarray(vals[inp.name]) for inp in inputs]
+        nll = float(-2.0 * log_prob_fn(*args)[0])
+        nlls.append(nll)
+    return nlls
+
+
+def scan_batched(log_prob_fn, inputs, model, mu_grid):
+    """Evaluate -2*log_prob for all mu_HH values in a single call (batched).
+
+    Passes the entire *mu_grid* as a 1-D array.  The model must have been
+    built with ``param_set["mu_HH"].kind = pt.vector`` so the symbolic
+    graph broadcasts correctly over the scan dimension.
+    """
+    vals = {**model.free_params, **model.data, "mu_HH": np.array(mu_grid)}
+    args = [np.asarray(vals[inp.name]) for inp in inputs]
+    # log_prob shape: (M,) where M = len(mu_grid)
+    log_probs = log_prob_fn(*args)[0]
+    return (-2.0 * log_probs).tolist()
+
+
+def main() -> None:
+    ws, analysis, param_set = load_workspace()
+
+    # ================================================================== #
+    # Approach 1: Scalar (non-batched)                                    #
+    # Build model with all parameters as scalars, then loop over mu_HH.  #
+    # ================================================================== #
+    print("\n=== Approach 1: Scalar (non-batched) ===")
+    model_scalar = build_or_load_model(ws, analysis, param_set, _SCALAR_CACHE)
+
+    print("Compiling log_prob ...")
     t0 = time.perf_counter()
+    log_prob_fn, inputs = compile_log_prob(model_scalar)
+    print(f"  Compiled in {time.perf_counter() - t0:.1f}s")
+    print(f"  {len(inputs)} input variables, {len(model_scalar.free_params)} free")
 
-    parameters = {
-        param_name: param.value for param_name, param in param_set.points.items()
-    }
+    print(f"Running NLL scan over {len(MU_GRID)} mu_HH values ...")
+    t0 = time.perf_counter()
+    nlls_scalar = scan_scalar(log_prob_fn, inputs, model_scalar, MU_GRID)
+    dt_scalar = time.perf_counter() - t0
+    print(f"  {dt_scalar:.2f}s  ({1000 * dt_scalar / len(MU_GRID):.1f} ms/point)")
 
-    for i, mu in enumerate(MU_GRID, 1):
-        parameters["mu_HH"] = mu
-        total_nll = 0.0
-        for dist_name, obs_name, vals in channel_data:
-            # One compiled-function call per channel — no per-event Python loop.
-            log_pdfs = model.logpdf_unsafe(
-                dist_name, **{**model.free_params, obs_name: vals, "mu_HH": mu}
-            )
-            total_nll += -2.0 * float(np.sum(log_pdfs)) / len(vals)
-        nll_given_mu.append(total_nll)
-        print(f"  ({i:2d}/{len(MU_GRID)}) mu_HH={mu:+.2f}  NLL={total_nll:.4f}")
+    # ================================================================== #
+    # Approach 2: Vectorized (batched)                                    #
+    # Set mu_HH to pt.vector so the entire grid is evaluated at once.     #
+    # ================================================================== #
+    print("\n=== Approach 2: Vectorized (batched) ===")
+    param_set["mu_HH"].kind = pt.vector
+    model_batched = build_or_load_model(ws, analysis, param_set, _BATCHED_CACHE)
 
-    dt = time.perf_counter() - t0
-    print(f"\nTotal: {dt:.2f}s  ({1000 * dt / len(MU_GRID):.1f} ms/mu)")
+    print("Compiling log_prob ...")
+    t0 = time.perf_counter()
+    log_prob_fn_b, inputs_b = compile_log_prob(model_batched)
+    print(f"  Compiled in {time.perf_counter() - t0:.1f}s")
+    print(f"  {len(inputs_b)} input variables, {len(model_batched.free_params)} free")
+
+    print(f"Running NLL scan over {len(MU_GRID)} mu_HH values ...")
+    t0 = time.perf_counter()
+    nlls_batched = scan_batched(log_prob_fn_b, inputs_b, model_batched, MU_GRID)
+    dt_batched = time.perf_counter() - t0
+    print(f"  {dt_batched:.2f}s  (single call)")
+
+    # ================================================================== #
+    # Compare approaches and validate against ROOT reference              #
+    # ================================================================== #
+    scalar_arr = np.array(nlls_scalar)
+    batched_arr = np.array(nlls_batched)
+    ref_arr = np.array(REF_NLL)
+
+    max_diff_approaches = float(np.max(np.abs(scalar_arr - batched_arr)))
+    print(f"\nMax |NLL(scalar) - NLL(batched)| = {max_diff_approaches:.6e}")
+
+    delta_scalar = scalar_arr - scalar_arr.min()
+    delta_batched = batched_arr - batched_arr.min()
+    delta_ref = ref_arr - ref_arr.min()
+
+    max_diff_scalar = float(np.max(np.abs(delta_scalar - delta_ref)))
+    max_diff_batched = float(np.max(np.abs(delta_batched - delta_ref)))
+    print(f"Max |ΔNLL(scalar)  - ΔNLL(ROOT)| = {max_diff_scalar:.4f}")
+    print(f"Max |ΔNLL(batched) - ΔNLL(ROOT)| = {max_diff_batched:.4f}")
+
+    for i, mu in enumerate(MU_GRID):
+        print(
+            f"  mu_HH={mu:+.2f}  "
+            f"scalar={nlls_scalar[i]:.4f}  "
+            f"batched={nlls_batched[i]:.4f}  "
+            f"ROOT={REF_NLL[i]:.4f}"
+        )
 
     # ------------------------------------------------------------------ #
-    # Compare with ROOT reference and plot                                 #
+    # Plot ΔNLL curves                                                     #
     # ------------------------------------------------------------------ #
-    computed = np.array(nll_given_mu)
-    ref = np.array(REF_NLL)
-
-    delta_computed = computed - computed.min()
-    delta_ref = ref - ref.min()
-    max_diff = float(np.max(np.abs(delta_computed - delta_ref)))
-    print(f"\nMax |ΔNLL(pyhs3) - ΔNLL(ROOT)| = {max_diff:.4f}")
-
     mu_arr = np.array(MU_GRID)
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.scatter(mu_arr, delta_ref, marker="o", zorder=3, label="ROOT reference")
-    ax.scatter(mu_arr, delta_computed, marker="x", s=80, label="pyhs3 (vectorized)")
+    ax.scatter(
+        mu_arr,
+        delta_scalar,
+        marker="x",
+        s=80,
+        label=f"pyhs3 scalar ({dt_scalar:.1f}s)",
+    )
+    ax.scatter(
+        mu_arr,
+        delta_batched,
+        marker="+",
+        s=80,
+        label=f"pyhs3 batched ({dt_batched:.1f}s)",
+    )
     ax.set_xlabel(r"$\mu_{HH}$")
     ax.set_ylabel(r"$\Delta\,(-2\ln\mathcal{L})$")
     ax.set_title("NLL validation: diHiggs bbyy (pyhs3 vs ROOT)")
@@ -231,13 +303,19 @@ def main() -> None:
     fig.tight_layout()
     out = Path("nll_validation.pdf")
     fig.savefig(out)
-    print(f"Wrote {out}")
+    print(f"\nWrote {out}")
 
     # Save JSON for downstream comparison.
     out_json = Path("nll_validation.json")
     out_json.write_text(
         json.dumps(
-            {"mu_HH": MU_GRID, "nll": nll_given_mu, "nll_ref": REF_NLL}, indent=2
+            {
+                "mu_HH": MU_GRID,
+                "nll_scalar": nlls_scalar,
+                "nll_batched": nlls_batched,
+                "nll_ref": REF_NLL,
+            },
+            indent=2,
         )
     )
     print(f"Wrote {out_json}")

@@ -260,7 +260,7 @@ class Model:
             return pt.constant(np.float64(0.0))
         if len(terms) == 1:
             return terms[0]
-        return cast(TensorVar, pt.add(*terms))
+        return cast(TensorVar, pt.add(*terms))  # pylint: disable=no-value-for-parameter
 
     @staticmethod
     def _ensure_array(

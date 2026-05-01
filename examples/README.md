@@ -18,16 +18,10 @@ function and minimize over nuisance parameters at a fixed `mu_HH` using scipy.
 | Extract symbolic free inputs                         | `explicit_graph_inputs([expression])`   |
 | Profile minimization with scipy                      | `scipy.optimize.minimize` (SLSQP)       |
 
-### Install
-
-```bash
-pip install "pyhs3" scipy skhep-testdata
-```
-
 ### Run
 
 ```bash
-python examples/minimization_dihiggs.py
+pixi run -e py312 python examples/minimization_dihiggs.py
 ```
 
 The script profiles the NLL at a single `mu_HH = 1.0` value. A commented-out
@@ -56,16 +50,10 @@ issue #41). Demonstrates **two approaches** to computing an NLL scan over a
 | Batched NLL evaluation (all points at once)          | `param_set["mu_HH"].kind = pt.vector`    |
 | Comparison against ROOT reference values             | embedded `_REFERENCE` dict               |
 
-### Install
-
-```bash
-pip install "pyhs3" matplotlib skhep-testdata
-```
-
 ### Run
 
 ```bash
-python examples/nll_validation_dihiggs.py
+pixi run -e py312 python examples/nll_validation_dihiggs.py
 ```
 
 The script builds two models (one scalar, one batched — each cached separately
@@ -89,21 +77,15 @@ the ATLAS bbyy non-resonant analysis (pyhs3 issue #41 validation workspace).
 | Profile scan with nuisance minimisation              | `optimistix.BFGS` / `optimistix.DFP`    |
 | Comparison against ROOT reference values             | embedded `_REFERENCE` dict              |
 
-### Install
-
-```bash
-pip install "pyhs3[jax]" optimistix matplotlib skhep-testdata
-```
-
-`pyhs3[jax]` pulls in `pytensor[jax]` which transitively installs JAX.
-`optimistix` is **not** a pyhs3 dependency — it is only needed to run this
-script.
-
 ### Run
 
 ```bash
-python examples/profile_scan_atlas_dihiggs.py
+pixi run -e py312-jax python -m pip install optimistix
+pixi run -e py312-jax python examples/profile_scan_atlas_dihiggs.py
 ```
+
+`optimistix` is **not** a pyhs3 dependency — it is only needed to run this
+script.
 
 The script:
 

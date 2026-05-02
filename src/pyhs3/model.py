@@ -204,9 +204,11 @@ class Model:
             msg = "log_prob requires a likelihood context; build via ws.model(analysis)"
             raise RuntimeError(msg)
 
-        # Accumulate with + so shapes broadcast correctly across the parameter axis.
-        # Summing over axis 0 (events) yields shape (M,) — the parameter batch size.
-        lp: TensorVar = pt.constant(np.float64(0.0))
+        # Collect per-channel and aux terms into a flat list, then combine with a
+        # single n-ary pt.add so that PyTensor sees one Elemwise{add} node rather
+        # than a left-deep chain of binary Adds.  Summing over axis 0 (events)
+        # yields shape (M,) per term — the parameter batch size.
+        terms: list[TensorVar] = []
 
         for dist_obj, datum in zip(
             self._likelihood.distributions, self._likelihood.data, strict=True
@@ -232,19 +234,33 @@ class Model:
                     stacklevel=2,
                 )
                 # (N,) → (N, 1) so it broadcasts correctly against (N, M) log_pdf
-                weights_t = pt.constant(np.asarray(weights, dtype=np.float64))[:, None]
-                lp = lp + pt.sum(weights_t * log_pdf, axis=0)  # type: ignore[no-untyped-call]
+                weights_arr = np.asarray(weights, dtype=np.float64)
+                total_weight = float(np.sum(weights_arr))
+                if not np.isfinite(total_weight) or np.isclose(total_weight, 0.0):
+                    msg = (
+                        f"'{datum.name}' has invalid total weight ({total_weight}); "
+                        "sum of weights must be finite and non-zero."
+                    )
+                    raise ValueError(msg)
+                weights_t = pt.constant(weights_arr)[:, None]
+                terms.append(
+                    pt.sum(weights_t * log_pdf, axis=0) / np.float64(total_weight)  # type: ignore[no-untyped-call]
+                )
             else:
-                lp = lp + pt.sum(log_pdf, axis=0)  # type: ignore[no-untyped-call]
+                terms.append(pt.sum(log_pdf, axis=0))  # type: ignore[no-untyped-call]
 
         # Auxiliary distributions (constraint terms) are scalars; they broadcast
         # onto the parameter-scan axis when non-scalar params are present.
         if self._likelihood.aux_distributions:
             for aux_name in self._likelihood.aux_distributions:
                 if aux_name in self.distributions:
-                    lp = lp + pt.log(self.distributions[aux_name])
+                    terms.append(pt.log(self.distributions[aux_name]))
 
-        return lp
+        if not terms:
+            return pt.constant(np.float64(0.0))
+        if len(terms) == 1:
+            return terms[0]
+        return cast(TensorVar, pt.add(*terms))  # pylint: disable=no-value-for-parameter
 
     @staticmethod
     def _ensure_array(

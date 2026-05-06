@@ -138,32 +138,35 @@ def main() -> None:
     print(f"  {len(inputs)} input variables, {len(model.free_params)} free parameters")
 
     # --- Single mu_HH demo ---
-    mu_demo = 1.0
-    print(f"\nProfiling NLL at mu_HH = {mu_demo} ...")
-    t0 = time.perf_counter()
-    result = profile_nll(log_prob_fn, inputs, model, mu_val=mu_demo)
-    dt = time.perf_counter() - t0
-    print(f"  -2*ln(L) = {result.fun:.6f}")
-    print(
-        f"  converged = {result.success}  ({result.nit} iterations, "
-        f"{result.nfev} fn evals, {dt:.1f}s)"
-    )
+    # mu_demo = 1.0
+    # print(f"\nProfiling NLL at mu_HH = {mu_demo} ...")
+    # t0 = time.perf_counter()
+    # result = profile_nll(log_prob_fn, inputs, model, mu_val=mu_demo)
+    # dt = time.perf_counter() - t0
+    # print(f"  -2*ln(L) = {result.fun:.6f}")
+    # print(
+    #     f"  converged = {result.success}  ({result.nit} iterations, "
+    #     f"{result.nfev} fn evals, {dt:.1f}s)"
+    # )
 
     # --- Uncomment below to scan over a grid of mu_HH values ---
-    # MU_GRID = [
-    #     -0.5, -0.4, -0.3, -0.2, -0.1,
-    #     0.0, 0.1, 0.2, 0.3, 0.4, 0.5,
-    #     0.6, 0.7, 0.8, 0.9, 1.0,
-    #     1.1, 1.2, 1.3, 1.4, 1.5,
-    #     1.6, 1.7, 1.8, 1.9, 2.0,
-    #     2.1, 2.2, 2.3, 2.4, 2.5,
-    # ]
-    # for mu in MU_GRID:
-    #     result = profile_nll(log_prob_fn, inputs, model, mu_val=mu)
-    #     print(
-    #         f"mu={mu:+.1f}  -2ln(L)={result.fun:.6f}  "
-    #         f"converged={result.success}"
-    #     )
+    MU_GRID = [
+        -0.5, -0.4, -0.3, -0.2, -0.1,
+        0.0, 0.1, 0.2, 0.3, 0.4, 0.5,
+        0.6, 0.7, 0.8, 0.9, 1.0,
+        1.1, 1.2, 1.3, 1.4, 1.5,
+        1.6, 1.7, 1.8, 1.9, 2.0,
+        2.1, 2.2, 2.3, 2.4, 2.5,
+    ]
+    for mu in MU_GRID:
+        t0 = time.perf_counter()
+        result = profile_nll(log_prob_fn, inputs, model, mu_val=mu)
+        dt = time.perf_counter() - t0
+        print(
+            f"mu={mu:+.1f}  -2ln(L)={result.fun:.6f}  "
+            f"converged={result.success} ({result.nit} iterations, "
+            f"{result.nfev} fn evals, {dt:.1f}s)"
+        )              
 
 
 if __name__ == "__main__":

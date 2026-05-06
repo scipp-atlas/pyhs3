@@ -26,6 +26,76 @@ import pyhs3
 
 _MODEL_CACHE = Path("ws.pkl")
 
+_REFERENCE = {
+    "mu_HH": [
+        0.9999909338901939,
+        -0.5,
+        -0.4,
+        -0.3,
+        -0.2,
+        -0.1,
+        0.0,
+        0.1,
+        0.2,
+        0.3,
+        0.4,
+        0.5,
+        0.6,
+        0.7,
+        0.8,
+        0.9,
+        1.0,
+        1.1,
+        1.2,
+        1.3,
+        1.4,
+        1.5,
+        1.6,
+        1.7,
+        1.8,
+        1.9,
+        2.0,
+        2.1,
+        2.2,
+        2.3,
+        2.4,
+        2.5,
+    ],
+    "nll": [
+        2115.2146170568185,
+        2116.5050528141624,
+        2116.32024442325,
+        2116.147536871291,
+        2115.9898748809364,
+        2115.8484135401295,
+        2115.7234904744287,
+        2115.614760462136,
+        2115.5217651455596,
+        2115.4428493502382,
+        2115.3774140758096,
+        2115.3244289405097,
+        2115.282917807648,
+        2115.2519751699165,
+        2115.2307707411514,
+        2115.2185475973124,
+        2115.214617056965,
+        2115.218352131681,
+        2115.229180543526,
+        2115.2465778591986,
+        2115.270060985844,
+        2115.299182173344,
+        2115.333523579179,
+        2115.372692531467,
+        2115.4163176659454,
+        2115.4640463133146,
+        2115.5155437672224,
+        2115.5704953916675,
+        2115.6286127532935,
+        2115.689167112463,
+        2115.7526215376183,
+        2115.8184195879385,
+    ],
+}
 
 def build_model() -> pyhs3.Model:
     """Load workspace and build (or load cached) model."""
@@ -130,6 +200,7 @@ def profile_nll(log_prob_fn, inputs, model, mu_val, method="SLSQP"):
 
 def main() -> None:
     model = build_model()
+    computed_nlls = []
 
     print("\nCompiling log_prob ...")
     t0 = time.perf_counter()
@@ -158,6 +229,8 @@ def main() -> None:
         1.6, 1.7, 1.8, 1.9, 2.0,
         2.1, 2.2, 2.3, 2.4, 2.5,
     ]
+    mu_arr = np.array(MU_GRID)
+
     for mu in MU_GRID:
         t0 = time.perf_counter()
         result = profile_nll(log_prob_fn, inputs, model, mu_val=mu)
@@ -166,8 +239,23 @@ def main() -> None:
             f"mu={mu:+.1f}  -2ln(L)={result.fun:.6f}  "
             f"converged={result.success} ({result.nit} iterations, "
             f"{result.nfev} fn evals, {dt:.1f}s)"
-        )              
+        )
+        computed_nlls.append(result)
 
+    provided_nll = json.loads(_REFERENCE)["nll"]
+    provided_nll_shifted = [v - min(provided_nll) for v in provided_nll]
+    computed_nll_shifted = [v - min(computed_nlls) for v in computed_nlls]
+    plt.figure()
+    plt.scatter(mu_arr, provided_nll_shifted, label="provided nll", marker="o")
+    plt.scatter(mu_arr, computed_nll_shifted, label="computed nll (unconstrained)", marker="x")
+    plt.xlabel("mu_HH")
+    plt.ylabel("nll")
+    plt.title("NLL Comparison")
+    plt.legend()
+    plt.savefig("nll_comparison.pdf")
+
+    breakpoint() 
+    
 
 if __name__ == "__main__":
     main()

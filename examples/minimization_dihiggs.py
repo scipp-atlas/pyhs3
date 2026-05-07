@@ -241,6 +241,8 @@ def main() -> None:
             f"{result.nfev} fn evals, {dt:.1f}s)"
         )
         computed_nlls.append(result)
+
+    computed_nlls = [optim.fun for optim in computed_nlls]
     
     breakpoint()
 

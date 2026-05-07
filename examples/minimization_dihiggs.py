@@ -15,6 +15,8 @@ from __future__ import annotations
 import pickle
 import time
 from pathlib import Path
+import json
+from matplotlib import pyplot as plt
 
 import numpy as np
 from pytensor.compile.function import function
@@ -28,7 +30,6 @@ _MODEL_CACHE = Path("ws.pkl")
 
 _REFERENCE = {
     "mu_HH": [
-        0.9999909338901939,
         -0.5,
         -0.4,
         -0.3,
@@ -62,7 +63,6 @@ _REFERENCE = {
         2.5,
     ],
     "nll": [
-        2115.2146170568185,
         2116.5050528141624,
         2116.32024442325,
         2116.147536871291,
@@ -120,10 +120,10 @@ def build_model() -> pyhs3.Model:
         ],
     )
 
-    if _MODEL_CACHE.exists():
-        print(f"Loading cached model from {_MODEL_CACHE} ...")
-        with _MODEL_CACHE.open("rb") as f:
-            return pickle.load(f)
+    #if _MODEL_CACHE.exists():
+    #    print(f"Loading cached model from {_MODEL_CACHE} ...")
+    #    with _MODEL_CACHE.open("rb") as f:
+    #        return pickle.load(f)
 
     print("Building symbolic model (this takes ~1 min) ...")
     model = ws.model(analysis, parameter_set=param_set, progress=True)
@@ -241,18 +241,20 @@ def main() -> None:
             f"{result.nfev} fn evals, {dt:.1f}s)"
         )
         computed_nlls.append(result)
+    
+    breakpoint()
 
-    provided_nll = json.loads(_REFERENCE)["nll"]
+    provided_nll = _REFERENCE["nll"]
     provided_nll_shifted = [v - min(provided_nll) for v in provided_nll]
     computed_nll_shifted = [v - min(computed_nlls) for v in computed_nlls]
     plt.figure()
     plt.scatter(mu_arr, provided_nll_shifted, label="provided nll", marker="o")
-    plt.scatter(mu_arr, computed_nll_shifted, label="computed nll (unconstrained)", marker="x")
+    plt.scatter(mu_arr, computed_nll_shifted, label="computed nll", marker="x")
     plt.xlabel("mu_HH")
     plt.ylabel("nll")
-    plt.title("NLL Comparison")
+    plt.title("NLL Comparison with minimization")
     plt.legend()
-    plt.savefig("nll_comparison.pdf")
+    plt.savefig("nll_comparison_minimization.pdf")
 
     breakpoint() 
     

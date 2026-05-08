@@ -22,7 +22,8 @@ from rich.progress import (
 
 from pyhs3.compile import function
 from pyhs3.context import Context
-from pyhs3.distributions import Distributions
+from pyhs3.data import BinnedData
+from pyhs3.distributions import Distributions, HistFactoryDistChannel
 from pyhs3.domains import Domain
 from pyhs3.functions import Functions
 from pyhs3.networks import build_dependency_graph
@@ -112,6 +113,16 @@ class Model:
         # leaf[None, :] for non-observable vector overrides.  Distributions see
         # these via Context; model.parameters[name] always holds the leaf.
         self._views: dict[str, TensorVar] = {}
+        # Pre-built HFDC constraint expressions, collected during graph construction.
+        # ParameterModifier constraints are deduped by parameter name across channels;
+        # ParametersModifier constraints (shapesys/staterror) are emitted per-channel.
+        self._hfdc_constraints: list[TensorVar] = []
+        self._hfdc_constraint_params_seen: set[str] = set()
+        # Poisson-only (no constraint product) expressions for HFDC channels.
+        # self.distributions[name] stores the full expression (Poisson x constraints)
+        # so that logpdf() continues to work; log_prob uses this dict to avoid
+        # double-counting constraint terms when multiple channels share a parameter.
+        self._hfdc_poisson: dict[str, TensorVar] = {}
 
         # Build dependency graph with proper entity identification
         self._build_dependency_graph(functions, distributions, progress)
@@ -216,10 +227,16 @@ class Model:
             if isinstance(datum, str):
                 continue
             entries = getattr(datum, "entries", None)
-            if entries is None:
-                continue
-
             dist_name = dist_obj if isinstance(dist_obj, str) else dist_obj.name
+
+            if entries is None:
+                # HFDC: log_prob uses the Poisson-only term here; deduplicated
+                # constraint terms are added after the loop.  Non-HFDC distributions
+                # paired with BinnedData (e.g. a Gaussian used as a template) are
+                # skipped because there is no sensible unbinned likelihood for them.
+                if dist_name in self._hfdc_poisson:
+                    terms.append(pt.log(self._hfdc_poisson[dist_name]))
+                continue
 
             # model.distributions[name] is the normalized PDF expression with
             # observables as symbolic pt.vector free inputs.
@@ -256,6 +273,11 @@ class Model:
                 if aux_name in self.distributions:
                     terms.append(pt.log(self.distributions[aux_name]))
 
+        # HFDC constraint terms: collected once per unique nuisance parameter
+        # across all channels during graph construction.
+        for constraint_expr in self._hfdc_constraints:
+            terms.append(pt.log(constraint_expr))
+
         if not terms:
             return pt.constant(np.float64(0.0))
         if len(terms) == 1:
@@ -282,6 +304,25 @@ class Model:
 
     def _build_parameter_node(self, node_name: str, context: Context) -> TensorVar:
         """Build a parameter node: baked constant (const=True) or bounded free variable."""
+        # Bake HFDC observed data as a 1-D constant when the model was built with a
+        # likelihood that pairs this channel's BinnedData with an HFDC distribution.
+        # This keeps the observed counts out of the free-input set so that
+        # explicit_graph_inputs and JAX transpilation only see the nuisance parameters.
+        if self._likelihood is not None and node_name.endswith("_observed"):
+            dist_name = node_name[: -len("_observed")]
+            for dist_obj, datum in zip(
+                self._likelihood.distributions, self._likelihood.data, strict=True
+            ):
+                if isinstance(datum, str) or not isinstance(datum, BinnedData):
+                    continue
+                actual_dist_name = (
+                    dist_obj if isinstance(dist_obj, str) else dist_obj.name
+                )
+                if actual_dist_name == dist_name:
+                    return pt.constant(
+                        np.asarray(datum.contents, dtype=np.float64), name=node_name
+                    )
+
         param_point = self.parameterset.get(node_name) if self.parameterset else None
         domain_bounds = (
             self.domain.get(node_name, (None, None)) if self.domain else (None, None)
@@ -357,8 +398,39 @@ class Model:
     def _build_distribution_node(
         self, node_name: str, distributions: Distributions, context: Context
     ) -> TensorVar:
-        """Build a distribution node by evaluating its symbolic expression."""
-        return distributions[node_name].expression(context)
+        """Build a distribution node by evaluating its symbolic expression.
+
+        For HistFactoryDistChannel the full expression (Poisson x constraints)
+        is returned and stored in ``self.distributions`` so that :meth:`logpdf`
+        continues to work as before.  In addition, the Poisson-only term is
+        stored in ``self._hfdc_poisson`` and the deduplicated constraint terms
+        are appended to ``self._hfdc_constraints`` so that :attr:`log_prob` can
+        combine them without double-counting when multiple channels share a
+        nuisance parameter.
+        """
+        dist = distributions[node_name]
+        if not isinstance(dist, HistFactoryDistChannel):
+            return dist.expression(context)
+
+        # Poisson-only term; the full expression is returned below for logpdf.
+        poisson = dist.likelihood(context)
+        self._hfdc_poisson[node_name] = poisson
+
+        # Collect constraint expressions, deduped across channels by parameter.
+        single, multi = dist.constraint_modifiers()
+        for param, (modifier, sample_data) in single.items():
+            if param not in self._hfdc_constraint_params_seen:
+                self._hfdc_constraint_params_seen.add(param)
+                self._hfdc_constraints.append(
+                    modifier.make_constraint(context, sample_data)
+                )
+        for modifier, sample_data in multi:
+            # Per-channel (shapesys/staterror) — validator forbids cross-channel sharing.
+            self._hfdc_constraints.append(
+                modifier.make_constraint(context, sample_data)
+            )
+
+        return dist.expression(context)
 
     def _build_dependency_graph(
         self,

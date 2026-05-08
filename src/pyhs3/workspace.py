@@ -14,7 +14,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from pyhs3.analyses import Analyses, Analysis
 from pyhs3.data import Data, DataType
-from pyhs3.distributions import Distributions, DistributionType
+from pyhs3.distributions import Distributions, DistributionType, HistFactoryDistChannel
+from pyhs3.distributions.histfactory.modifiers import (
+    ParameterModifier,
+    ParametersModifier,
+)
 from pyhs3.domains import Domain, Domains, DomainType, ProductDomain
 from pyhs3.exceptions import WorkspaceValidationError
 from pyhs3.functions import Functions
@@ -93,6 +97,14 @@ class Workspace(BaseModel):
                 except ValueError as exc:
                     errors.append(str(exc))
 
+        # Validate HFDC constraint consistency across channels
+        if self.likelihoods is not None:
+            for likelihood in self.likelihoods:
+                try:
+                    self._validate_hfdc_constraints(likelihood)
+                except ValueError as exc:
+                    errors.append(str(exc))
+
         # Resolve Analysis fields
         if self.analyses is not None:
             for analysis in self.analyses:
@@ -126,6 +138,64 @@ class Workspace(BaseModel):
             else:
                 resolved.append(ref)
         return resolved
+
+    def _validate_hfdc_constraints(self, likelihood: Likelihood) -> None:
+        """Validate constraint consistency across HFDC channels in a likelihood.
+
+        Rules enforced:
+        - A nuisance parameter may not have conflicting constraint types (e.g.,
+          Gauss in one channel, LogNormal in another).
+        - shapesys parameters must not be shared across channels (per-channel by design).
+        - staterror parameters must not be shared across channels (same reason).
+
+        Called after FK resolution so likelihood.distributions contains objects.
+        """
+        # param -> (constraint_literal, "channel/sample/modifier" description)
+        param_constraint: dict[str, tuple[str, str]] = {}
+        shapesys_owners: dict[str, str] = {}
+        staterror_owners: dict[str, str] = {}
+
+        for dist_obj in likelihood.distributions:
+            if isinstance(dist_obj, str) or not isinstance(
+                dist_obj, HistFactoryDistChannel
+            ):
+                continue
+            for sample in dist_obj.samples:
+                for modifier in sample.modifiers:
+                    if (
+                        not hasattr(modifier, "constraint")
+                        or modifier.constraint is None
+                    ):
+                        continue
+                    where = f"{dist_obj.name}/{sample.name}/{modifier.name}"
+                    constraint = modifier.constraint
+                    if isinstance(modifier, ParameterModifier):
+                        param = modifier.parameter
+                        prev = param_constraint.get(param)
+                        if prev is not None and prev[0] != constraint:
+                            msg = (
+                                f"Parameter '{param}' has conflicting constraint types: "
+                                f"'{prev[1]}' declared '{prev[0]}', "
+                                f"'{where}' declares '{constraint}'"
+                            )
+                            raise ValueError(msg)
+                        param_constraint[param] = (constraint, where)
+                    elif isinstance(modifier, ParametersModifier):
+                        owners = (
+                            shapesys_owners
+                            if modifier.type == "shapesys"
+                            else staterror_owners
+                        )
+                        for param in modifier.parameters:
+                            if param in owners and owners[param] != dist_obj.name:
+                                kind = modifier.type
+                                msg = (
+                                    f"{kind} parameter '{param}' appears in both "
+                                    f"'{owners[param]}' and '{dist_obj.name}'; "
+                                    f"{kind} is per-channel and may not be shared."
+                                )
+                                raise ValueError(msg)
+                            owners[param] = dist_obj.name
 
     def _resolve_likelihood_fields(
         self, likelihood: Likelihood, errors: list[str]

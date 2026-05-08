@@ -15,7 +15,6 @@ import math
 
 import numpy as np
 import pytensor
-import pytensor.tensor as pt
 import pytest
 
 from pyhs3.data import BinnedData, Data
@@ -26,6 +25,7 @@ from pyhs3.distributions.histfactory.modifiers import (
     ParametersModifier,
 )
 from pyhs3.domains import Domains, ProductDomain
+from pyhs3.exceptions import WorkspaceValidationError
 from pyhs3.likelihoods import Likelihood, Likelihoods
 from pyhs3.metadata import Metadata
 from pyhs3.parameter_points import ParameterPoint, ParameterPoints, ParameterSet
@@ -78,11 +78,6 @@ def _simple_workspace(channels: list[dict], params: list[dict]) -> Workspace:
         data.append(binned)
         likelihood_data.append(binned)
 
-    # Observed data parameters — HFDC requires "{name}_observed" in the context.
-    obs_params = [
-        ParameterPoint(name=f"{ch['name']}_observed", value=0.0, kind=pt.vector)
-        for ch in channels
-    ]
     param_points = [ParameterPoint(name=p["name"], value=p["value"]) for p in params]
 
     return Workspace(
@@ -103,7 +98,7 @@ def _simple_workspace(channels: list[dict], params: list[dict]) -> Workspace:
             [
                 ParameterSet(
                     name="default",
-                    parameters=obs_params + param_points,
+                    parameters=param_points,
                 )
             ]
         ),
@@ -523,7 +518,7 @@ class TestConstraintValidator:
                 }
             ],
         )
-        with pytest.raises(ValueError, match="conflicting constraint"):
+        with pytest.raises(WorkspaceValidationError, match="conflicting constraint"):
             _simple_workspace(
                 channels=[sr_channel, cr_channel],
                 params=[{"name": "lumi", "value": 0.0}],
@@ -544,7 +539,7 @@ class TestConstraintValidator:
         }
         sr = _make_channel("SR", [10.0], [shared_shapesys])
         cr = _make_channel("CR", [50.0], [shared_shapesys])
-        with pytest.raises(ValueError, match="shapesys"):
+        with pytest.raises(WorkspaceValidationError, match="shapesys"):
             _simple_workspace(channels=[sr, cr], params=[])
 
     def test_staterror_shared_across_channels_raises(self):
@@ -557,7 +552,7 @@ class TestConstraintValidator:
         }
         sr = _make_channel("SR", [10.0], [shared_staterror])
         cr = _make_channel("CR", [50.0], [shared_staterror])
-        with pytest.raises(ValueError, match="staterror"):
+        with pytest.raises(WorkspaceValidationError, match="staterror"):
             _simple_workspace(channels=[sr, cr], params=[])
 
     def test_same_normsys_type_across_channels_is_valid(self):

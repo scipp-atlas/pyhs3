@@ -219,8 +219,15 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     def _process_sample(
         self, context: Context, sample: Sample, total_bins: int
     ) -> TensorVar:
-        """Process a single sample with its modifiers."""
-        # Get nominal bin contents
+        """Process a single sample with its modifiers.
+
+        The HistFactory formula is lambda = (N + sum(delta_histosys(N))) * prod(kappa_multiplicative).
+        Additive variations (histosys) must each be computed against the sample
+        nominal N, then summed; multiplicative modifiers apply to the combined
+        result. Applying modifiers sequentially against accumulating rates would
+        cause histosys to compute its variation against already-scaled rates,
+        violating the formula when a multiplicative modifier precedes it.
+        """
         contents = sample.data.contents
         if len(contents) != total_bins:
             msg = (
@@ -230,13 +237,25 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
 
         nominal_rates = pt.as_tensor_variable(contents)
 
-        # Apply modifiers using pre-computed results where possible
-        modified_rates = nominal_rates
-
+        # Pass 1: accumulate additive variations against the nominal.
+        # modifier.apply(ctx, nominal) returns nominal + variation; subtract to
+        # isolate the variation so multiple histosys modifiers each reference
+        # the same nominal rather than each other's output.
+        additive_sum = pt.zeros(total_bins)
         for modifier in sample.modifiers:
-            modified_rates = modifier.apply(context, modified_rates)
+            if modifier.is_additive:
+                additive_sum = additive_sum + (
+                    modifier.apply(context, nominal_rates) - nominal_rates
+                )
 
-        return cast(TensorVar, modified_rates)
+        rates = nominal_rates + additive_sum
+
+        # Pass 2: apply multiplicative modifiers to (nominal + Σ additive).
+        for modifier in sample.modifiers:
+            if modifier.is_multiplicative:
+                rates = modifier.apply(context, rates)
+
+        return cast(TensorVar, rates)
 
     def _build_main_model(
         self, context: Context, expected_rates: TensorVar

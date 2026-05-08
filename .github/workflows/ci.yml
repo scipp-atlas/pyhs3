@@ -67,10 +67,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.13"]
+        python-version: ["3.10", "3.11", "3.13", "3.14"]
         runs-on: [ubuntu-latest, windows-latest, macos-14]
         variant: [default]
         include:
+          # Default / PyTensor 2
           - python-version: "3.10"
             variant: default
             pixi-environment: py310
@@ -80,6 +81,11 @@ jobs:
           - python-version: "3.13"
             variant: default
             pixi-environment: py313
+          - python-version: "3.14"
+            variant: default
+            pixi-environment: py314
+
+          # JAX / PyTensor 2
           - python-version: "3.13"
             runs-on: ubuntu-latest
             variant: jax
@@ -88,6 +94,23 @@ jobs:
             runs-on: macos-14
             variant: jax
             pixi-environment: py313-jax
+
+          # PyTensor 3 (Linux only)
+          - python-version: "3.12"
+            runs-on: ubuntu-latest
+            variant: default
+            pixi-environment: py312-pytensor3
+          - python-version: "3.14"
+            runs-on: ubuntu-latest
+            variant: default
+            pixi-environment: py314-pytensor3
+
+          # JAX / PyTensor 3
+          - python-version: "3.14"
+            runs-on: ubuntu-latest
+            variant: default
+            pixi-environment: py314-pytensor3-jax
+
         exclude:
           - runs-on: windows-latest
             python-version: "3.10"

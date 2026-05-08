@@ -154,7 +154,9 @@ def compile_log_prob(model: pyhs3.Model):
     return log_prob_fn, inputs
 
 
-def profile_nll(log_prob_fn, inputs, model, mu_val, method="SLSQP"):
+def profile_nll(
+    log_prob_fn, inputs, model, mu_val, method="SLSQP", ftol=1e-3, maxiter=1000
+):
     """Minimize -2*log_prob over nuisance parameters with mu_HH fixed.
 
     Parameters
@@ -164,6 +166,8 @@ def profile_nll(log_prob_fn, inputs, model, mu_val, method="SLSQP"):
     model : pyhs3.Model with .free_params and .data
     mu_val : float, the fixed value of mu_HH for this scan point
     method : str, scipy minimization method (default SLSQP)
+    ftol : float, tolerance for minimization to stop minimizing
+    maxiter : int, maximum number of iterations for minimization
 
     Returns
     -------
@@ -176,6 +180,9 @@ def profile_nll(log_prob_fn, inputs, model, mu_val, method="SLSQP"):
     template = []
     free_names = []
     free_input_indices = []
+    bounds = []
+
+    model_bounds = {axis.name: (axis.min, axis.max) for axis in model.domain.axes}
     for i, inp in enumerate(inputs):
         if inp.name in pinned:
             template.append(np.asarray(pinned[inp.name]))
@@ -183,19 +190,26 @@ def profile_nll(log_prob_fn, inputs, model, mu_val, method="SLSQP"):
             template.append(None)
             free_names.append(inp.name)
             free_input_indices.append(i)
+            bounds.append(model_bounds[inp.name])
 
     x0 = np.array([model.free_params[name] for name in free_names], dtype=float)
 
     def nll(x):
         vals = list(template)
-        for idx, xi in zip(free_input_indices, x, strict=False):
+        for idx, xi in zip(free_input_indices, x, strict=True):
             vals[idx] = xi
         # np.asarray is a no-op for existing ndarrays (data), but wraps
         # np.float64 scalars (from iterating over x) into 0-d ndarrays
         # that pytensor's C VM accepts.
         return float(-2.0 * log_prob_fn(*[np.asarray(v) for v in vals])[0])
 
-    return minimize(nll, x0, method=method, options={"maxiter": 1000, "ftol": 1e-4})
+    return minimize(
+        nll,
+        x0,
+        method=method,
+        options={"maxiter": maxiter, "ftol": ftol},
+        bounds=bounds,
+    )
 
 
 def main() -> None:

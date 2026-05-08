@@ -19,7 +19,13 @@ from pyhs3.context import Context
 
 # Import existing distributions for constraint terms
 from pyhs3.distributions.core import Distribution
-from pyhs3.distributions.histfactory.modifiers import HasConstraint, Modifier
+from pyhs3.distributions.histfactory.data import SampleData
+from pyhs3.distributions.histfactory.modifiers import (
+    HasConstraint,
+    Modifier,
+    ParameterModifier,
+    ParametersModifier,
+)
 from pyhs3.distributions.histfactory.samples import Sample, Samples
 from pyhs3.networks import HasDependencies, HasInternalNodes
 from pyhs3.typing.aliases import TensorVar
@@ -195,6 +201,34 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
 
         # Multiply all constraint probabilities
         return cast(TensorVar, pt.prod(pt.stack(constraint_probs)))  # type: ignore[no-untyped-call]
+
+    def constraint_modifiers(
+        self,
+    ) -> tuple[
+        dict[str, tuple[HasConstraint, SampleData]],
+        list[tuple[HasConstraint, SampleData]],
+    ]:
+        """Return constraint modifiers split for model-level deduplication.
+
+        The first element groups ``ParameterModifier`` constraints (normsys,
+        histosys) keyed by their single parameter so the model can dedup across
+        channels sharing a nuisance parameter — first-seen wins, validated for
+        consistency at workspace construction.
+
+        The second element lists ``ParametersModifier`` constraints (shapesys,
+        staterror) which are per-channel by validation and emitted as-is.
+        """
+        single: dict[str, tuple[HasConstraint, SampleData]] = {}
+        multi: list[tuple[HasConstraint, SampleData]] = []
+        for sample in self.samples:
+            for modifier in sample.modifiers:
+                if not isinstance(modifier, HasConstraint):
+                    continue
+                if isinstance(modifier, ParameterModifier):
+                    single.setdefault(modifier.parameter, (modifier, sample.data))
+                elif isinstance(modifier, ParametersModifier):
+                    multi.append((modifier, sample.data))
+        return single, multi
 
     def _get_total_bins(self) -> int:
         """Calculate total number of bins across all axes."""

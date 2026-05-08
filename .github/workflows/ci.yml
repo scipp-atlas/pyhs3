@@ -69,53 +69,55 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.13", "3.14"]
+        python-version: ["3.11", "3.14"]
         runs-on: [ubuntu-latest, windows-latest, macos-14]
         variant: [default]
         include:
-          # Default / PyTensor 2
-          - python-version: "3.10"
-            variant: default
-            pixi-environment: py310
+          # Default / PyTensor 3
           - python-version: "3.11"
             variant: default
             pixi-environment: py311
-          - python-version: "3.13"
-            variant: default
-            pixi-environment: py313
           - python-version: "3.14"
             variant: default
             pixi-environment: py314
 
-          # JAX / PyTensor 2
-          - python-version: "3.13"
-            runs-on: ubuntu-latest
-            variant: jax
-            pixi-environment: py313-jax
-          - python-version: "3.13"
-            runs-on: macos-14
-            variant: jax
-            pixi-environment: py313-jax
-
-          # PyTensor 3 (Linux only)
-          - python-version: "3.12"
-            runs-on: ubuntu-latest
-            variant: pytensor3
-            pixi-environment: py312-pytensor3
-          - python-version: "3.14"
-            runs-on: ubuntu-latest
-            variant: pytensor3
-            pixi-environment: py314-pytensor3
-
           # JAX / PyTensor 3
           - python-version: "3.14"
             runs-on: ubuntu-latest
-            variant: pytensor3-jax
-            pixi-environment: py314-pytensor3-jax
+            variant: jax
+            pixi-environment: py314-jax
 
-        exclude:
-          - runs-on: windows-latest
-            python-version: "3.10"
+          # PyTensor 2 (Linux only)
+          - python-version: "3.10"
+            runs-on: ubuntu-latest
+            variant: pytensor2
+            pixi-environment: py310-pytensor2
+          - python-version: "3.12"
+            runs-on: ubuntu-latest
+            variant: pytensor2
+            pixi-environment: py312-pytensor2
+          - python-version: "3.13"
+            runs-on: ubuntu-latest
+            variant: pytensor2
+            pixi-environment: py313-pytensor2
+          - python-version: "3.14"
+            runs-on: ubuntu-latest
+            variant: pytensor2
+            pixi-environment: py314-pytensor2
+
+          # JAX / PyTensor 2
+          - python-version: "3.13"
+            runs-on: ubuntu-latest
+            variant: pytensor2-jax
+            pixi-environment: py313-pytensor2-jax
+          - python-version: "3.13"
+            runs-on: macos-14
+            variant: pytensor2-jax
+            pixi-environment: py313-pytensor2-jax
+          - python-version: "3.14"
+            runs-on: ubuntu-latest
+            variant: pytensor2-jax
+            pixi-environment: py314-pytensor2-jax
 
     steps:
       - uses: actions/checkout@v6
@@ -138,7 +140,7 @@ jobs:
           junit_family=legacy --durations=20
 
       - name: Test docs
-        if: matrix.python-version == '3.13' && contains(matrix.variant, 'jax')
+        if: matrix.variant == 'jax'
         env:
           JAX_PLATFORMS: "cpu" # for jax-related tests
         run: |

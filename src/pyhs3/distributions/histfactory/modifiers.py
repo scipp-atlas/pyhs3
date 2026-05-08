@@ -12,8 +12,8 @@ from pydantic import (
     RootModel,
     model_validator,
 )
-from pytensor.compile.function import function
 
+from pyhs3.compile import function
 from pyhs3.context import Context
 from pyhs3.distributions.basic import GaussianDist, LogNormalDist, PoissonDist
 from pyhs3.distributions.core import Distribution

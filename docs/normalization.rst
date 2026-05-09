@@ -55,7 +55,7 @@ Let's see how normalization affects a Gaussian distribution over a finite domain
    >>> from pyhs3.context import Context
    >>> import pytensor.tensor as pt
    >>> import warnings
-   >>> from pytensor.compile.function import function
+   >>> from pyhs3.compile import function
    >>> import numpy as np
    >>> from scipy.integrate import quad
    >>>
@@ -167,7 +167,7 @@ Distributions can provide analytical normalization expressions to avoid numerica
    >>> from pyhs3.context import Context
    >>> context = Context(parameters={"x": x_var}, observables={"x": (0, 10)})
    >>> expr = dist.expression(context)
-   >>> from pytensor.compile.function import function
+   >>> from pyhs3.compile import function
    >>> f = function([x_var], expr)
    >>> xs = np.linspace(0, 10, 10000)
    >>> ys = f(xs)

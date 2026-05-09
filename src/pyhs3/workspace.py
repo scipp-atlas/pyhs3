@@ -139,6 +139,45 @@ class Workspace(BaseModel):
                 resolved.append(ref)
         return resolved
 
+    @staticmethod
+    def _check_hfdc_modifier(
+        modifier: object,
+        where: str,
+        channel_name: str,
+        param_constraint: dict[str, tuple[str, str]],
+        shapesys_owners: dict[str, str],
+        staterror_owners: dict[str, str],
+    ) -> None:
+        """Check one modifier's constraint for type consistency and ownership."""
+        if not hasattr(modifier, "constraint") or modifier.constraint is None:
+            return
+        constraint = modifier.constraint
+        if isinstance(modifier, ParameterModifier):
+            param = modifier.parameter
+            prev = param_constraint.get(param)
+            if prev is not None and prev[0] != constraint:
+                msg = (
+                    f"Parameter '{param}' has conflicting constraint types: "
+                    f"'{prev[1]}' declared '{prev[0]}', "
+                    f"'{where}' declares '{constraint}'"
+                )
+                raise ValueError(msg)
+            param_constraint[param] = (constraint, where)
+        elif isinstance(modifier, ParametersModifier):
+            owners = (
+                shapesys_owners if modifier.type == "shapesys" else staterror_owners
+            )
+            for param in modifier.parameters:
+                if param in owners and owners[param] != channel_name:
+                    kind = modifier.type
+                    msg = (
+                        f"{kind} parameter '{param}' appears in both "
+                        f"'{owners[param]}' and '{channel_name}'; "
+                        f"{kind} is per-channel and may not be shared."
+                    )
+                    raise ValueError(msg)
+                owners[param] = channel_name
+
     def _validate_hfdc_constraints(self, likelihood: Likelihood) -> None:
         """Validate constraint consistency across HFDC channels in a likelihood.
 
@@ -162,40 +201,15 @@ class Workspace(BaseModel):
                 continue
             for sample in dist_obj.samples:
                 for modifier in sample.modifiers:
-                    if (
-                        not hasattr(modifier, "constraint")
-                        or modifier.constraint is None
-                    ):
-                        continue
                     where = f"{dist_obj.name}/{sample.name}/{modifier.name}"
-                    constraint = modifier.constraint
-                    if isinstance(modifier, ParameterModifier):
-                        param = modifier.parameter
-                        prev = param_constraint.get(param)
-                        if prev is not None and prev[0] != constraint:
-                            msg = (
-                                f"Parameter '{param}' has conflicting constraint types: "
-                                f"'{prev[1]}' declared '{prev[0]}', "
-                                f"'{where}' declares '{constraint}'"
-                            )
-                            raise ValueError(msg)
-                        param_constraint[param] = (constraint, where)
-                    elif isinstance(modifier, ParametersModifier):
-                        owners = (
-                            shapesys_owners
-                            if modifier.type == "shapesys"
-                            else staterror_owners
-                        )
-                        for param in modifier.parameters:
-                            if param in owners and owners[param] != dist_obj.name:
-                                kind = modifier.type
-                                msg = (
-                                    f"{kind} parameter '{param}' appears in both "
-                                    f"'{owners[param]}' and '{dist_obj.name}'; "
-                                    f"{kind} is per-channel and may not be shared."
-                                )
-                                raise ValueError(msg)
-                            owners[param] = dist_obj.name
+                    self._check_hfdc_modifier(
+                        modifier,
+                        where,
+                        dist_obj.name,
+                        param_constraint,
+                        shapesys_owners,
+                        staterror_owners,
+                    )
 
     def _resolve_likelihood_fields(
         self, likelihood: Likelihood, errors: list[str]

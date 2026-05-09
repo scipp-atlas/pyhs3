@@ -106,15 +106,17 @@ You can inspect the model to understand its parameter structure:
 Behavior Difference: Scalar vs Vector Parameters
 ------------------------------------------------
 
-When you pass vector values to a scalar parameter model, it will only use the first element:
+When you pass vector values to a scalar parameter model, it will loudly complain... so be careful:
 
 .. code-block:: pycon
 
     >>> # Scalar model with vector input - only uses first element
     >>> parameters = {"x": [0.0, 1.0, 2.0], "mu": 0.0, "sigma": 1.0}
-    >>> result = model.pdf_unsafe("model", **parameters)
-    >>> print(f"Result with scalar model: {result}")
-    Result with scalar model: 0.3989422804014327
+    >>> result = model.pdf_unsafe("model", **parameters)  # doctest: +IGNORE_EXCEPTION_DETAIL
+    Traceback (most recent call last):
+    ...
+    numba.core.errors.TypingError: Failed in nopython mode pipeline ...
+
     >>> # Compare with vector model - shape (1, N): override vectors sit on axis 1
     >>> result_vector = new_model.pdf_unsafe("model", **parameters)
     >>> print(f"Result with vector model: {result_vector}")

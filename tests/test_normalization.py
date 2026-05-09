@@ -12,9 +12,9 @@ from pydantic import (
     ConfigDict,
     Field,
 )
-from pytensor.compile.function import function
 
 from pyhs3.axes import RegularAxis
+from pyhs3.compile import function
 from pyhs3.context import Context
 from pyhs3.distributions.basic import ExponentialDist, GaussianDist
 from pyhs3.distributions.composite import MixtureDist

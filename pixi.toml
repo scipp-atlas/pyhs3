@@ -46,6 +46,9 @@ python = "<3.13,>=3.12"
 [feature.py313.dependencies]
 python = "<3.14,>=3.13"
 
+[feature.py314.dependencies]
+python = "<3.15,>=3.14"
+
 # Need to wait for global pin to 3.14: https://github.com/conda-forge/python-feedstock/issues/794
 # [feature.py314.dependencies]
 # python = "<3.15,>=3.14"
@@ -141,18 +144,34 @@ build = { cmd = "python -m build", depends-on = ["build-clean"], description = "
 build-check = { cmd = "twine check --strict ./dist/*", depends-on = ["build"], description = "Run twine to check" }
 codeflash = { cmd = "codeflash", description = "Run codeflash to identify optimizations" }
 
+[feature.pytensor2.dependencies]
+pytensor = ">=2.33.0,<3"
+
+[feature.pytensor3.dependencies]
+pytensor = "==3.0.0"
+
 [environments]
 docs = ["docs", "jax"]
 dev = ["dev", "jax"]
-py310 = ["test", "py310"]
-py311 = ["test", "py311"]
-py312 = ["test", "py312"]
-py313 = ["test", "py313"]
-py310-jax = ["test", "py310", "jax"]
-py311-jax = ["test", "py311", "jax"]
-py312-jax = ["test", "py312", "jax"]
-py313-jax = ["test", "py313", "jax"]
-# py314 = ["test", "py314"]
+py311 = ["test", "py311", "pytensor3"]
+py312 = ["test", "py312", "pytensor3"]
+# py313 = ["test", "py313", "pytensor3"]  # pytensor3 not available for py313 on osx-64
+py314 = ["test", "py314", "pytensor3"]
+py311-jax = ["test", "py311", "pytensor3", "jax"]
+py312-jax = ["test", "py312", "pytensor3", "jax"]
+# py313-jax = ["test", "py313", "pytensor3", "jax"]  # pytensor3 not available for py313 on osx-64
+py314-jax = ["test", "py314", "pytensor3", "jax"]
+py310-pytensor2 = ["test", "py310", "pytensor2"]
+py311-pytensor2 = ["test", "py311", "pytensor2"]
+py312-pytensor2 = ["test", "py312", "pytensor2"]
+py313-pytensor2 = ["test", "py313", "pytensor2"]
+py314-pytensor2 = ["test", "py314", "pytensor2"]
+py310-pytensor2-jax = ["test", "py310", "pytensor2", "jax"]
+py311-pytensor2-jax = ["test", "py310", "pytensor2", "jax"]
+py312-pytensor2-jax = ["test", "py312", "pytensor2", "jax"]
+py313-pytensor2-jax = ["test", "py313", "pytensor2", "jax"]
+py314-pytensor2-jax = ["test", "py314", "pytensor2", "jax"]
+
 
 [tasks]
 # Composite tasks that span multiple features

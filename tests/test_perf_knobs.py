@@ -63,7 +63,7 @@ class TestCompiledFunctionFlags:
         model = simple_workspace.model(0)
         # Force compilation by calling pdf once
         model.pdf_unsafe(
-            "gauss", x=np.array([0.0]), mu=np.array(0.0), sigma=np.array(1.0)
+            "gauss", x=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0)
         )
 
         fn = model._compiled_functions["gauss"]
@@ -73,8 +73,10 @@ class TestCompiledFunctionFlags:
     def test_compiled_function_accepts_numpy_array_inputs(self, simple_workspace):
         """pdf_unsafe returns finite values when given numpy array inputs."""
         model = simple_workspace.model(0)
+        # x is pt.scalar here; pass 0-d ndarrays (np.float64 is a numpy scalar,
+        # not an ndarray, and would fail with trust_input=True).
         result = model.pdf_unsafe(
-            "gauss", x=np.float64(0.0), mu=np.float64(0.0), sigma=np.float64(1.0)
+            "gauss", x=np.asarray(0.0), mu=np.asarray(0.0), sigma=np.asarray(1.0)
         )
         assert np.all(np.isfinite(result))
 
@@ -82,12 +84,12 @@ class TestCompiledFunctionFlags:
         """Second pdf_unsafe call reuses the cached compiled function object."""
         model = simple_workspace.model(0)
         model.pdf_unsafe(
-            "gauss", x=np.array([0.0]), mu=np.array(0.0), sigma=np.array(1.0)
+            "gauss", x=np.asarray(0.0), mu=np.asarray(0.0), sigma=np.asarray(1.0)
         )
         fn_first = model._compiled_functions.get("gauss")
         assert fn_first is not None
         model.pdf_unsafe(
-            "gauss", x=np.array([1.0]), mu=np.array(0.0), sigma=np.array(1.0)
+            "gauss", x=np.asarray(1.0), mu=np.asarray(0.0), sigma=np.asarray(1.0)
         )
         fn_second = model._compiled_functions.get("gauss")
         assert fn_second is not None

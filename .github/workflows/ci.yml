@@ -69,7 +69,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.14"]
+        python-version: ["3.11", "3.12", "3.14"]
         runs-on: [ubuntu-latest, windows-latest, macos-14]
         variant: [default]
         include:
@@ -77,6 +77,9 @@ jobs:
           - python-version: "3.11"
             variant: default
             pixi-environment: py311
+          - python-version: "3.12"
+            variant: default
+            pixi-environment: py312
           - python-version: "3.14"
             variant: default
             pixi-environment: py314
@@ -92,6 +95,10 @@ jobs:
             runs-on: ubuntu-latest
             variant: pytensor2
             pixi-environment: py310-pytensor2
+          - python-version: "3.11"
+            runs-on: ubuntu-latest
+            variant: pytensor2
+            pixi-environment: py311-pytensor2
           - python-version: "3.12"
             runs-on: ubuntu-latest
             variant: pytensor2

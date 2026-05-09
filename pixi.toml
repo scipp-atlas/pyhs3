@@ -162,12 +162,14 @@ py312-jax = ["test", "py312", "pytensor3", "jax"]
 # py313-jax = ["test", "py313", "pytensor3", "jax"]  # pytensor3 not available for py313 on osx-64
 py314-jax = ["test", "py314", "pytensor3", "jax"]
 py310-pytensor2 = ["test", "py310", "pytensor2"]
-py313-pytensor2 = ["test", "py313", "pytensor2"]
+py311-pytensor2 = ["test", "py311", "pytensor2"]
 py312-pytensor2 = ["test", "py312", "pytensor2"]
+py313-pytensor2 = ["test", "py313", "pytensor2"]
 py314-pytensor2 = ["test", "py314", "pytensor2"]
 py310-pytensor2-jax = ["test", "py310", "pytensor2", "jax"]
-py313-pytensor2-jax = ["test", "py313", "pytensor2", "jax"]
+py311-pytensor2-jax = ["test", "py310", "pytensor2", "jax"]
 py312-pytensor2-jax = ["test", "py312", "pytensor2", "jax"]
+py313-pytensor2-jax = ["test", "py313", "pytensor2", "jax"]
 py314-pytensor2-jax = ["test", "py314", "pytensor2", "jax"]
 
 

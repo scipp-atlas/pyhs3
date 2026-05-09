@@ -106,15 +106,15 @@ def _simple_workspace(channels: list[dict], params: list[dict]) -> Workspace:
 
 
 # ---------------------------------------------------------------------------
-# Unit tests: constraint_modifiers()
+# Unit tests: constraint_specs()
 # ---------------------------------------------------------------------------
 
 
 class TestConstraintModifiers:
-    """Unit tests for HistFactoryDistChannel.constraint_modifiers()."""
+    """Unit tests for HistFactoryDistChannel.constraint_specs()."""
 
     def test_empty_no_constraints(self):
-        """Channel with no HasConstraint modifiers returns empty collections."""
+        """Channel with no HasConstraint modifiers yields nothing."""
         ch = HistFactoryDistChannel(
             **_make_channel(
                 "ch",
@@ -122,12 +122,10 @@ class TestConstraintModifiers:
                 [{"name": "mu", "type": "normfactor", "parameter": "mu"}],
             )
         )
-        single, multi = ch.constraint_modifiers()
-        assert single == {}
-        assert multi == []
+        assert list(ch.constraint_specs()) == []
 
     def test_normsys_is_in_single(self):
-        """normsys modifier (ParameterModifier + HasConstraint) appears in single dict."""
+        """normsys (ParameterModifier + HasConstraint) yields a string dedup_key."""
         ch = HistFactoryDistChannel(
             **_make_channel(
                 "ch",
@@ -143,15 +141,15 @@ class TestConstraintModifiers:
                 ],
             )
         )
-        single, multi = ch.constraint_modifiers()
-        assert "lumi" in single
-        modifier, _sample_data = single["lumi"]
+        specs = list(ch.constraint_specs())
+        assert len(specs) == 1
+        dedup_key, modifier, _sample_data = specs[0]
+        assert dedup_key == "lumi"
         assert isinstance(modifier, HasConstraint)
         assert isinstance(modifier, ParameterModifier)
-        assert multi == []
 
     def test_shapesys_is_in_multi(self):
-        """shapesys modifier (ParametersModifier + HasConstraint) appears in multi list."""
+        """shapesys (ParametersModifier + HasConstraint) yields dedup_key=None."""
         ch = HistFactoryDistChannel(
             **_make_channel(
                 "ch",
@@ -167,15 +165,15 @@ class TestConstraintModifiers:
                 ],
             )
         )
-        single, multi = ch.constraint_modifiers()
-        assert single == {}
-        assert len(multi) == 1
-        modifier, _sample_data = multi[0]
+        specs = list(ch.constraint_specs())
+        assert len(specs) == 1
+        dedup_key, modifier, _sample_data = specs[0]
+        assert dedup_key is None
         assert isinstance(modifier, HasConstraint)
         assert isinstance(modifier, ParametersModifier)
 
     def test_mixed_returns_both(self):
-        """Channel with both normsys and shapesys populates both collections."""
+        """Channel with both normsys and shapesys yields both kinds of specs."""
         ch = HistFactoryDistChannel(
             **_make_channel(
                 "ch",
@@ -198,12 +196,18 @@ class TestConstraintModifiers:
                 ],
             )
         )
-        single, multi = ch.constraint_modifiers()
-        assert "lumi" in single
-        assert len(multi) == 1
+        specs = list(ch.constraint_specs())
+        assert len(specs) == 2
+        keys = [key for key, _, _ in specs]
+        assert "lumi" in keys
+        assert None in keys
 
-    def test_duplicate_normsys_parameter_in_same_channel_first_wins(self):
-        """Two samples with the same normsys parameter: first sample wins in single dict."""
+    def test_duplicate_normsys_parameter_in_same_channel_yields_both(self):
+        """Two samples with the same normsys parameter yield two specs with the same key.
+
+        The caller (extended_likelihood, _build_distribution_node) is responsible for
+        deduping using the key — constraint_specs() yields all modifiers without dedup.
+        """
         dist = HistFactoryDistChannel(
             name="ch",
             axes=[{"name": "x", "min": 0.0, "max": 10.0, "nbins": 1}],
@@ -236,8 +240,10 @@ class TestConstraintModifiers:
                 },
             ],
         )
-        single, _multi = dist.constraint_modifiers()
-        assert list(single.keys()) == ["lumi"]  # only one entry
+        specs = list(dist.constraint_specs())
+        keys = [key for key, _, _ in specs]
+        # Both specs have the same dedup_key; callers apply the seen-set dedup.
+        assert keys == ["lumi", "lumi"]
 
 
 # ---------------------------------------------------------------------------

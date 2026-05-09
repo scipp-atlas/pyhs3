@@ -1196,6 +1196,65 @@ class TestModifierExpressions:
         assert result[1] == pytest.approx(1.05)
 
 
+class TestExtendedLikelihoodConstraintDedup:
+    """Test that extended_likelihood dedupes constraints by parameter name."""
+
+    def test_shared_normsys_parameter_emits_one_constraint(self):
+        """Two normsys modifiers on different samples sharing one parameter
+        must emit exactly ONE Gaussian factor, not one per modifier.
+
+        At alpha=1 the ratio extended_likelihood(alpha=1) / extended_likelihood(alpha=0)
+        equals exp(-0.5) for one Gaussian factor or exp(-1) for two.
+        """
+        axes = [{"name": "x", "min": 0.0, "max": 10.0, "nbins": 2}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {"contents": [5.0, 3.0], "errors": [1.0, 1.0]},
+                "modifiers": [
+                    {
+                        "name": "lumi",
+                        "type": "normsys",
+                        "parameter": "alpha_lumi",
+                        "data": {"hi": 1.1, "lo": 0.9},
+                        "constraint": "Gauss",
+                    }
+                ],
+            },
+            {
+                "name": "background",
+                "data": {"contents": [10.0, 8.0], "errors": [1.0, 1.0]},
+                "modifiers": [
+                    {
+                        "name": "lumi",
+                        "type": "normsys",
+                        "parameter": "alpha_lumi",
+                        "data": {"hi": 1.1, "lo": 0.9},
+                        "constraint": "Gauss",
+                    }
+                ],
+            },
+        ]
+
+        channel = HistFactoryDistChannel(name="ch", axes=axes, samples=samples)
+
+        alpha = pt.dscalar("alpha_lumi")
+        obs = pt.dvector("ch_observed")
+        context = Context({"alpha_lumi": alpha, "ch_observed": obs})
+
+        el_expr = channel.extended_likelihood(context)
+        f = function([alpha], el_expr)
+
+        val_at_0 = f(0.0)
+        val_at_1 = f(1.0)
+
+        # Ratio for ONE Gaussian factor N(alpha | 0, 1) at x=0:
+        #   exp(-0.5 * 1^2) / exp(0) = exp(-0.5)
+        # Ratio for TWO factors (the bug): exp(-1.0)
+        ratio = val_at_1 / val_at_0
+        assert ratio == pytest.approx(np.exp(-0.5), rel=1e-6)
+
+
 class TestHistFactoryChannelHistConversion:
     """Tests for HistFactoryDistChannel.to_hist() method."""
 

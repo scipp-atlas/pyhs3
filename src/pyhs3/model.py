@@ -49,6 +49,20 @@ class Model:
     and distributions, ensuring proper evaluation order through topological
     sorting of the computation graph.
 
+    **HFDC constraint storage.** For ``HistFactoryDistChannel`` distributions,
+    ``self.distributions[name]`` stores the full per-channel expression
+    (main Poisson x constraint product) so that ``logpdf(name, **params)``
+    matches pyhf/cabinetry semantics for callers asking about a single
+    channel's probability.  ``self._hfdc_poisson[name]`` stores only the
+    main Poisson term; ``log_prob`` uses it to assemble the joint NLL without
+    double-counting constraint factors when multiple channels share a nuisance
+    parameter.  Constraint expressions are appended to
+    ``self._hfdc_constraints`` exactly once per unique dedup key across all
+    channels: single-parameter modifiers (``normsys``, ``histosys``) are
+    deduped by parameter name using ``self._hfdc_constraint_params_seen``;
+    multi-parameter modifiers (``shapesys``, ``staterror``) are channel-local
+    by workspace validation and always emitted as-is.
+
     HS3 Reference:
         Models are computational representations of :hs3:label:`HS3 workspaces <hs3.file-format>`.
     """
@@ -413,19 +427,17 @@ class Model:
             return dist.expression(context)
 
         # Poisson-only term; the full expression is returned below for logpdf.
-        poisson = dist.likelihood(context)
-        self._hfdc_poisson[node_name] = poisson
+        self._hfdc_poisson[node_name] = dist.likelihood(context)
 
-        # Collect constraint expressions, deduped across channels by parameter.
-        single, multi = dist.constraint_modifiers()
-        for param, (modifier, sample_data) in single.items():
-            if param not in self._hfdc_constraint_params_seen:
-                self._hfdc_constraint_params_seen.add(param)
-                self._hfdc_constraints.append(
-                    modifier.make_constraint(context, sample_data)
-                )
-        for modifier, sample_data in multi:
-            # Per-channel (shapesys/staterror) — validator forbids cross-channel sharing.
+        # Collect constraint expressions, deduped across channels by parameter name.
+        # Single-parameter modifiers carry a dedup_key; multi-parameter modifiers
+        # (shapesys/staterror) have dedup_key=None and are emitted per-channel because
+        # the workspace validator forbids cross-channel sharing of those parameters.
+        for dedup_key, modifier, sample_data in dist.constraint_specs():
+            if dedup_key is not None:
+                if dedup_key in self._hfdc_constraint_params_seen:
+                    continue
+                self._hfdc_constraint_params_seen.add(dedup_key)
             self._hfdc_constraints.append(
                 modifier.make_constraint(context, sample_data)
             )

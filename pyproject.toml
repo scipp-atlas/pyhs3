@@ -156,6 +156,7 @@ module = [
   "sympy.*",  # https://github.com/sympy/sympy/pull/26158
   "jax.*",
   "pytensor.link.jax.*",
+  "pytensor.compile.function",  # removed in pytensor >= 3; replaced by pytensor.compile.maker
 ]
 ignore_missing_imports = true
 

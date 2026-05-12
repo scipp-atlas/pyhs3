@@ -1455,3 +1455,171 @@ class TestHistFactoryChannelHistConversion:
         # We should be able to recover the errors by taking sqrt of variances
         recovered_errors = np.sqrt(h["data", :].variances())
         assert np.allclose(recovered_errors, [10.0, 12.0, 11.0])
+
+
+class TestHistoSysNominalRates:
+    """Tests for issue #219: histosys variations must be computed against sample nominal.
+
+    The HistFactory formula is lambda = (N + sum(delta_histosys(N))) * prod(kappa_multiplicative).
+    Each histosys variation is relative to the sample nominal N, not to the
+    incrementally-modified rates. When a multiplicative modifier (normfactor,
+    normsys) runs before histosys in the modifier list, the buggy sequential
+    application computes δ against the already-scaled rates instead of N.
+    """
+
+    def _make_channel(self, modifiers: list[dict]) -> HistFactoryDistChannel:
+        axes = [{"name": "x", "min": 0.0, "max": 10.0, "nbins": 2}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {"contents": [10.0, 20.0], "errors": [1.0, 1.0]},
+                "modifiers": modifiers,
+            }
+        ]
+        return HistFactoryDistChannel(name="ch", axes=axes, samples=samples)
+
+    def test_histosys_with_normfactor_uses_nominal(self):
+        """Histosys variation must be against nominal, not normfactor-scaled rates.
+
+        nominal=[10, 20], histosys hi=[15, 25] lo=[5, 15], normfactor mu=2, alpha=0.5.
+        Correct: (N + variation_against_N) * mu = [12.5, 22.5] * 2 = [25.0, 45.0].
+        Buggy (normfactor first): rates=[20, 40], variation computed against [20, 40].
+        """
+        # normfactor listed first — this is the ordering that exposes the bug
+        dist = self._make_channel(
+            [
+                {"name": "mu", "type": "normfactor", "parameter": "mu"},
+                {
+                    "name": "alpha",
+                    "type": "histosys",
+                    "parameter": "alpha",
+                    "constraint": "Gauss",
+                    "data": {
+                        "hi": {"contents": [15.0, 25.0]},
+                        "lo": {"contents": [5.0, 15.0]},
+                    },
+                },
+            ]
+        )
+
+        mu_var = pt.dscalar("mu")
+        alpha_var = pt.dscalar("alpha")
+        context = Context({"mu": mu_var, "alpha": alpha_var})
+
+        expr = dist._compute_expected_rates(context, 2)
+        f = function([mu_var, alpha_var], expr)
+        result = f(2.0, 0.5)
+
+        # hi/lo are symmetric around nominal ([15-10]==[10-5]==5), so at alpha=0.5
+        # the variation equals 0.5*(hi-N)=[2.5, 2.5] for all interpolation methods.
+        # Correct: (N + [2.5, 2.5]) * 2 = [12.5, 22.5] * 2 = [25, 45].
+        np.testing.assert_allclose(result, [25.0, 45.0], rtol=1e-12)
+
+    def test_two_histosys_variations_sum_against_nominal(self):
+        """Two histosys modifiers on the same sample must both compute against the nominal.
+
+        If variations chain against each other's output, the second modifier
+        uses a different 'nominal' than intended.
+        nominal=[10.0], histosys1 hi=[15] lo=[5], histosys2 hi=[12] lo=[8], both alpha=0.5.
+        Correct: 10 + 0.5*(15-10) + 0.5*(12-10) = 10 + 2.5 + 1.0 = 13.5.
+        """
+        axes = [{"name": "x", "min": 0.0, "max": 10.0, "nbins": 1}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {"contents": [10.0], "errors": [1.0]},
+                "modifiers": [
+                    {
+                        "name": "alpha1",
+                        "type": "histosys",
+                        "parameter": "alpha1",
+                        "constraint": "Gauss",
+                        "data": {
+                            "hi": {"contents": [15.0]},
+                            "lo": {"contents": [5.0]},
+                        },
+                    },
+                    {
+                        "name": "alpha2",
+                        "type": "histosys",
+                        "parameter": "alpha2",
+                        "constraint": "Gauss",
+                        "data": {
+                            "hi": {"contents": [12.0]},
+                            "lo": {"contents": [8.0]},
+                        },
+                    },
+                ],
+            }
+        ]
+        dist = HistFactoryDistChannel(name="ch", axes=axes, samples=samples)
+
+        alpha1_var = pt.dscalar("alpha1")
+        alpha2_var = pt.dscalar("alpha2")
+        context = Context({"alpha1": alpha1_var, "alpha2": alpha2_var})
+
+        expr = dist._compute_expected_rates(context, 1)
+        f = function([alpha1_var, alpha2_var], expr)
+        result = f(0.5, 0.5)
+
+        np.testing.assert_allclose(result, [13.5], rtol=1e-12)
+
+    def test_modifier_order_invariant(self):
+        """Expected rates are the same regardless of histosys/normfactor ordering.
+
+        normfactor * (N + histosys_variation) must equal (N + histosys_variation) * normfactor.
+        The current sequential approach makes order matter, which is wrong.
+        Also verifies the same invariance holds for normsys (also multiplicative).
+        """
+        histosys_spec = {
+            "name": "alpha",
+            "type": "histosys",
+            "parameter": "alpha",
+            "constraint": "Gauss",
+            "data": {
+                "hi": {"contents": [15.0, 25.0]},
+                "lo": {"contents": [5.0, 15.0]},
+            },
+        }
+        normfactor_spec = {"name": "mu", "type": "normfactor", "parameter": "mu"}
+        normsys_spec = {
+            "name": "mu",
+            "type": "normsys",
+            "parameter": "mu",
+            "constraint": "Gauss",
+            "data": {"hi": 1.2, "lo": 0.8},
+        }
+
+        dist_hf_first = self._make_channel([histosys_spec, normfactor_spec])
+        dist_nf_first = self._make_channel([normfactor_spec, histosys_spec])
+
+        mu_var = pt.dscalar("mu")
+        alpha_var = pt.dscalar("alpha")
+        context = Context({"mu": mu_var, "alpha": alpha_var})
+
+        expr_hf = dist_hf_first._compute_expected_rates(context, 2)
+        expr_nf = dist_nf_first._compute_expected_rates(context, 2)
+
+        f_hf = function([mu_var, alpha_var], expr_hf)
+        f_nf = function([mu_var, alpha_var], expr_nf)
+
+        result_hf = f_hf(2.0, 0.5)
+        result_nf = f_nf(2.0, 0.5)
+
+        np.testing.assert_allclose(result_hf, result_nf, rtol=1e-12)
+
+        # Same invariance for normsys (multiplicative, like normfactor, but with
+        # hi/lo interpolation rather than direct scaling).
+        dist_ns_first = self._make_channel([normsys_spec, histosys_spec])
+        dist_sn_first = self._make_channel([histosys_spec, normsys_spec])
+
+        expr_ns = dist_ns_first._compute_expected_rates(context, 2)
+        expr_sn = dist_sn_first._compute_expected_rates(context, 2)
+
+        f_ns = function([mu_var, alpha_var], expr_ns)
+        f_sn = function([mu_var, alpha_var], expr_sn)
+
+        result_ns = f_ns(0.5, 0.5)
+        result_sn = f_sn(0.5, 0.5)
+
+        np.testing.assert_allclose(result_ns, result_sn, rtol=1e-12)

@@ -13,7 +13,7 @@ try:
     from pytensor.compile.maker import function
 except ImportError:
     # pytensor 2
-    from pytensor.compile.function import (  # type: ignore[import-not-found, no-redef]
+    from pytensor.compile.function import (  # type: ignore[no-redef]
         function,
     )
 

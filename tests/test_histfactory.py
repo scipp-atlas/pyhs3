@@ -1520,7 +1520,7 @@ class TestHistoSysNominalRates:
 
         If variations chain against each other's output, the second modifier
         uses a different 'nominal' than intended.
-        nominal=[10.0], histosys1 hi=[15] lo=[5], histosys2 hi=[12] lo=[8], code0, both alpha=0.5.
+        nominal=[10.0], histosys1 hi=[15] lo=[5], histosys2 hi=[12] lo=[8], both alpha=0.5.
         Correct: 10 + 0.5*(15-10) + 0.5*(12-10) = 10 + 2.5 + 1.0 = 13.5.
         """
         axes = [{"name": "x", "min": 0.0, "max": 10.0, "nbins": 1}]

@@ -1569,6 +1569,7 @@ class TestHistoSysNominalRates:
 
         normfactor * (N + histosys_variation) must equal (N + histosys_variation) * normfactor.
         The current sequential approach makes order matter, which is wrong.
+        Also verifies the same invariance holds for normsys (also multiplicative).
         """
         histosys_spec = {
             "name": "alpha",
@@ -1581,6 +1582,13 @@ class TestHistoSysNominalRates:
             },
         }
         normfactor_spec = {"name": "mu", "type": "normfactor", "parameter": "mu"}
+        normsys_spec = {
+            "name": "mu",
+            "type": "normsys",
+            "parameter": "mu",
+            "constraint": "Gauss",
+            "data": {"hi": 1.2, "lo": 0.8},
+        }
 
         dist_hf_first = self._make_channel([histosys_spec, normfactor_spec])
         dist_nf_first = self._make_channel([normfactor_spec, histosys_spec])
@@ -1599,3 +1607,19 @@ class TestHistoSysNominalRates:
         result_nf = f_nf(2.0, 0.5)
 
         np.testing.assert_allclose(result_hf, result_nf, rtol=1e-12)
+
+        # Same invariance for normsys (multiplicative, like normfactor, but with
+        # hi/lo interpolation rather than direct scaling).
+        dist_ns_first = self._make_channel([normsys_spec, histosys_spec])
+        dist_sn_first = self._make_channel([histosys_spec, normsys_spec])
+
+        expr_ns = dist_ns_first._compute_expected_rates(context, 2)
+        expr_sn = dist_sn_first._compute_expected_rates(context, 2)
+
+        f_ns = function([mu_var, alpha_var], expr_ns)
+        f_sn = function([mu_var, alpha_var], expr_sn)
+
+        result_ns = f_ns(0.5, 0.5)
+        result_sn = f_sn(0.5, 0.5)
+
+        np.testing.assert_allclose(result_ns, result_sn, rtol=1e-12)

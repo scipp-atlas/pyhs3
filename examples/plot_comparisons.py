@@ -6,11 +6,17 @@ import json
 from pathlib import Path
 
 import matplotlib as mpl
+from aquarel import load_theme
 
 mpl.use("Agg")
 
 import numpy as np
 from matplotlib import pyplot as plt
+
+# Layout: change these two lines to reshape the figure while keeping
+# each cell at a fixed _CELL_W x _CELL_H inches.
+_NROWS, _NCOLS = 2, 3
+_CELL_W, _CELL_H = 8.0, 3.0  # inches per cell; (3,2) -> 16x9, (2,3) -> 24x6
 
 
 def load_bundle(path: Path) -> dict:
@@ -34,7 +40,7 @@ def load_reference(path: Path | None) -> tuple[np.ndarray, np.ndarray] | None:
     finite = np.isfinite(nll)
     delta = np.full_like(nll, np.nan)
     if np.any(finite):
-        delta[finite] = 2.0 * (nll[finite] - np.min(nll[finite]))
+        delta[finite] = nll[finite] - np.min(nll[finite])
     return poi, delta
 
 
@@ -115,7 +121,12 @@ def plot(
         ti = all_tols.index(scan["tol"])
         return tab10(mi), markers[ti % len(markers)]
 
-    fig, axes = plt.subplots(2, 3, figsize=(16, 9))
+    fig, axes = plt.subplots(
+        _NROWS,
+        _NCOLS,
+        figsize=(_NCOLS * _CELL_W, _NROWS * _CELL_H),
+        constrained_layout=True,
+    )
     ax_nll, ax_time, ax_nfev, ax_nit, ax_mem, ax_cpu = axes.flat
 
     # ------------------------------------------------------------------ (0,0) ΔNLL
@@ -143,7 +154,7 @@ def plot(
         finite = np.isfinite(nll)
         delta = np.full_like(nll, np.nan)
         if np.any(finite):
-            delta[finite] = 2.0 * (nll[finite] - np.nanmin(nll[finite]))
+            delta[finite] = nll[finite] - np.nanmin(nll[finite])
         ax_nll.plot(
             poi[finite],
             delta[finite],
@@ -155,7 +166,7 @@ def plot(
         )
 
     ax_nll.set_xlabel(bundle.get("poi", "POI"))
-    ax_nll.set_ylabel(r"$-2\Delta\ln L$")
+    ax_nll.set_ylabel(r"$\Delta(-2\ln L)$")
     ax_nll.set_title(f"Profile likelihood  (N={n_poi} POI points)", fontsize=8)
     ax_nll.grid(True, alpha=0.25)
     ax_nll.legend(fontsize=5, ncol=2)
@@ -283,9 +294,8 @@ def plot(
         freq = machine.get("cpu_freq_mhz")
         freq_str = f"  {freq:.0f} MHz" if freq else ""
         machine_line = f"Machine: {proc}{freq_str} | {phys}P/{logi}L cores | {ram} GB RAM | {os_str}"
-        fig.text(0.5, 0.005, machine_line, ha="center", fontsize=6.5, color="0.4")
+        fig.text(0.5, 0.0, machine_line, ha="center", fontsize=6.5, color="0.4")
 
-    fig.tight_layout(rect=[0, 0.02, 1, 1])
     fig.savefig(output_pdf)
     fig.savefig(output_png, dpi=180)
     plt.close(fig)
@@ -337,7 +347,7 @@ def plot(
             finite = np.isfinite(nll_arr)
             delta_arr = np.full_like(nll_arr, np.nan)
             if np.any(finite):
-                delta_arr[finite] = 2.0 * (nll_arr[finite] - np.nanmin(nll_arr[finite]))
+                delta_arr[finite] = nll_arr[finite] - np.nanmin(nll_arr[finite])
             ref_at_scan = _interpolate_reference(ref_poi, ref_delta, poi_arr)
             comparable = np.isfinite(delta_arr) & np.isfinite(ref_at_scan)
             if np.any(comparable):
@@ -389,7 +399,8 @@ def main() -> None:
         msg = "No scans match the given filters."
         raise SystemExit(msg)
 
-    summary = plot(bundle, ref, scans, args.output_pdf, args.output_png)
+    with load_theme("scientific"):  # arctic_light"):
+        summary = plot(bundle, ref, scans, args.output_pdf, args.output_png)
 
     if args.output_json:
         args.output_json.write_text(

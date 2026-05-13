@@ -64,6 +64,37 @@ def apply_filters(
     return scans
 
 
+def _boxplot_panel(
+    ax: plt.Axes,
+    data: list[list[float]],
+    x: np.ndarray,
+    scans: list[dict],
+    style_fn,
+    ylabel: str,
+    title: str,
+    tick_labels: list[str],
+) -> None:
+    """Draw a single colour-coded boxplot panel."""
+    bp = ax.boxplot(
+        data,
+        positions=x,
+        widths=0.5,
+        patch_artist=True,
+        manage_ticks=False,
+        showfliers=True,
+        flierprops={"marker": "x", "markersize": 3, "alpha": 0.5},
+    )
+    for patch, scan in zip(bp["boxes"], scans, strict=False):
+        color, _ = style_fn(scan)
+        patch.set_facecolor(color)
+        patch.set_alpha(0.75)
+    ax.set_xticks(x)
+    ax.set_xticklabels(tick_labels, rotation=35, ha="right", fontsize=5)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title, fontsize=8)
+    ax.grid(True, axis="y", alpha=0.25)
+
+
 def plot(
     bundle: dict,
     ref: tuple[np.ndarray, np.ndarray] | None,
@@ -71,11 +102,11 @@ def plot(
     output_pdf: Path,
     output_png: Path,
 ) -> dict:
-    """Build 2x2 figure and return per-scan summary dict."""
+    """Build 2x3 figure and return per-scan summary dict."""
     tab10 = mpl.colormaps["tab10"]
     markers = ["o", "s", "^", "D"]
 
-    # Assign colour by method, marker by tolerance rank
+    # Colour by method, marker by tolerance rank
     all_methods = list(dict.fromkeys(s["method"] for s in scans))
     all_tols = sorted({s["tol"] for s in scans})
 
@@ -84,10 +115,14 @@ def plot(
         ti = all_tols.index(scan["tol"])
         return tab10(mi), markers[ti % len(markers)]
 
-    fig, axes = plt.subplots(2, 2, figsize=(11, 8))
-    ax_nll, ax_time, ax_nit, ax_mem = axes.flat
+    fig, axes = plt.subplots(2, 3, figsize=(16, 9))
+    ax_nll, ax_time, ax_nfev, ax_nit, ax_mem, ax_cpu = axes.flat
 
     # ------------------------------------------------------------------ (0,0) ΔNLL
+    n_poi = len(bundle.get("poi_grid", []))
+    if n_poi == 0 and scans:
+        n_poi = len(scans[0].get("points", []))
+
     if ref is not None:
         ref_poi, ref_delta = ref
         ax_nll.plot(
@@ -119,12 +154,13 @@ def plot(
             label=scan["label"],
         )
 
-    ax_nll.set_ylabel(r"-2$\Delta$NLL")
-    ax_nll.set_title("Profile likelihood")
+    ax_nll.set_xlabel(bundle.get("poi", "POI"))
+    ax_nll.set_ylabel(r"$-2\Delta\ln L$")
+    ax_nll.set_title(f"Profile likelihood  (N={n_poi} POI points)", fontsize=8)
     ax_nll.grid(True, alpha=0.25)
-    ax_nll.legend(fontsize=6, ncol=2)
+    ax_nll.legend(fontsize=5, ncol=2)
 
-    # --------------------------------- (0,1) wall + CPU time, (1,0) nit, (1,1) ΔRSS
+    # ------------------------------------------------------------------ boxplots
     tick_labels = [s["label"] for s in scans]
     x = np.arange(len(scans))
 
@@ -135,15 +171,17 @@ def plot(
             if isinstance(p.get(key), (int, float))
         ]
 
-    # (0,1) timing boxplot
+    # (0,1) timing: overlaid wall (solid) and cpu (translucent, narrower)
     wall_data = [_extract(s, "wall_s") for s in scans]
     cpu_data = [_extract(s, "cpu_s") for s in scans]
     bp_wall = ax_time.boxplot(
         wall_data,
         positions=x,
-        widths=0.35,
+        widths=0.5,
         patch_artist=True,
         manage_ticks=False,
+        showfliers=True,
+        flierprops={"marker": "x", "markersize": 3, "alpha": 0.5},
     )
     for patch, scan in zip(bp_wall["boxes"], scans, strict=False):
         color, _ = _style(scan)
@@ -152,42 +190,48 @@ def plot(
     bp_cpu = ax_time.boxplot(
         cpu_data,
         positions=x,
-        widths=0.2,
+        widths=0.25,
         patch_artist=True,
         manage_ticks=False,
+        showfliers=False,
     )
     for patch, scan in zip(bp_cpu["boxes"], scans, strict=False):
         color, _ = _style(scan)
         patch.set_facecolor(color)
         patch.set_alpha(0.35)
     ax_time.set_xticks(x)
-    ax_time.set_xticklabels(tick_labels, rotation=30, ha="right", fontsize=6)
+    ax_time.set_xticklabels(tick_labels, rotation=35, ha="right", fontsize=5)
     ax_time.set_ylabel("seconds")
-    ax_time.set_title("Per-fit time (solid=wall, translucent=cpu)")
+    ax_time.set_title("Per-fit time  (wide=wall, narrow=cpu)", fontsize=8)
     ax_time.grid(True, axis="y", alpha=0.25)
 
-    # (1,0) iterations boxplot
-    nit_data = [_extract(s, "nit") for s in scans]
-    # filter out -1 placeholders (migrad/methods without nit)
-    nit_data = [[v for v in d if v >= 0] for d in nit_data]
-    bp_nit = ax_nit.boxplot(
-        nit_data,
-        positions=x,
-        widths=0.35,
-        patch_artist=True,
-        manage_ticks=False,
+    # (0,2) nfev
+    nfev_data = [[v for v in _extract(s, "nfev") if v >= 0] for s in scans]
+    _boxplot_panel(
+        ax_nfev,
+        nfev_data,
+        x,
+        scans,
+        _style,
+        "function evaluations",
+        "Per-fit nfev",
+        tick_labels,
     )
-    for patch, scan in zip(bp_nit["boxes"], scans, strict=False):
-        color, _ = _style(scan)
-        patch.set_facecolor(color)
-        patch.set_alpha(0.8)
-    ax_nit.set_xticks(x)
-    ax_nit.set_xticklabels(tick_labels, rotation=30, ha="right", fontsize=6)
-    ax_nit.set_ylabel("iterations")
-    ax_nit.set_title("Per-fit iteration count")
-    ax_nit.grid(True, axis="y", alpha=0.25)
 
-    # (1,1) peak-RSS-delta boxplot
+    # (1,0) nit — filter out -1 placeholders (methods that don't report nit)
+    nit_data = [[v for v in _extract(s, "nit") if v >= 0] for s in scans]
+    _boxplot_panel(
+        ax_nit,
+        nit_data,
+        x,
+        scans,
+        _style,
+        "iterations",
+        "Per-fit nit",
+        tick_labels,
+    )
+
+    # (1,1) peak-RSS delta
     def _rss_delta(scan: dict) -> list[float]:
         return [
             p["rss_peak_mb"] - p["rss_before_mb"]
@@ -196,34 +240,57 @@ def plot(
             and isinstance(p.get("rss_before_mb"), (int, float))
         ]
 
-    mem_data = [_rss_delta(s) for s in scans]
-    bp_mem = ax_mem.boxplot(
-        mem_data,
-        positions=x,
-        widths=0.35,
-        patch_artist=True,
-        manage_ticks=False,
+    _boxplot_panel(
+        ax_mem,
+        [_rss_delta(s) for s in scans],
+        x,
+        scans,
+        _style,
+        "MB",
+        "Per-fit peak RSS delta",
+        tick_labels,
     )
-    for patch, scan in zip(bp_mem["boxes"], scans, strict=False):
-        color, _ = _style(scan)
-        patch.set_facecolor(color)
-        patch.set_alpha(0.8)
-    ax_mem.set_xticks(x)
-    ax_mem.set_xticklabels(tick_labels, rotation=30, ha="right", fontsize=6)
-    ax_mem.set_ylabel("MB")
-    ax_mem.set_title("Per-fit peak RSS delta")
-    ax_mem.grid(True, axis="y", alpha=0.25)
 
+    # (1,2) cpu_percent_mean
+    cpu_pct_data = [_extract(s, "cpu_percent_mean") for s in scans]
+    _boxplot_panel(
+        ax_cpu,
+        cpu_pct_data,
+        x,
+        scans,
+        _style,
+        "% CPU",
+        "Per-fit mean CPU %",
+        tick_labels,
+    )
+
+    # ------------------------------------------------------------------ titles + annotation
+    poi_key = bundle.get("poi", "")
+    workspace = bundle.get("workspace", "")
+    n_poi_str = f"N={n_poi} POI"
     fig.suptitle(
-        f"Minimizer benchmark — {bundle.get('workspace', '')}  POI={bundle.get('poi', '')}",
+        f"Minimizer benchmark — {workspace}  POI={poi_key}  {n_poi_str}",
         fontsize=10,
     )
-    fig.tight_layout()
+
+    machine = bundle.get("machine", {})
+    if machine:
+        proc = machine.get("processor") or machine.get("machine", "")
+        phys = machine.get("cpu_count_physical", "?")
+        logi = machine.get("cpu_count_logical", "?")
+        ram = machine.get("total_ram_gb", "?")
+        os_str = f"{machine.get('os', '')} {machine.get('os_release', '')}".strip()
+        freq = machine.get("cpu_freq_mhz")
+        freq_str = f"  {freq:.0f} MHz" if freq else ""
+        machine_line = f"Machine: {proc}{freq_str} | {phys}P/{logi}L cores | {ram} GB RAM | {os_str}"
+        fig.text(0.5, 0.005, machine_line, ha="center", fontsize=6.5, color="0.4")
+
+    fig.tight_layout(rect=[0, 0.02, 1, 1])
     fig.savefig(output_pdf)
     fig.savefig(output_png, dpi=180)
     plt.close(fig)
 
-    # ---- summary dict ----
+    # ------------------------------------------------------------------ summary dict
     summary: dict[str, dict] = {}
     for scan in scans:
         points = scan.get("points", [])
@@ -234,6 +301,11 @@ def plot(
         cpus = [p["cpu_s"] for p in points if isinstance(p.get("cpu_s"), (int, float))]
         nits = [
             p["nit"] for p in points if isinstance(p.get("nit"), int) and p["nit"] >= 0
+        ]
+        nfevs = [
+            p["nfev"]
+            for p in points
+            if isinstance(p.get("nfev"), int) and p["nfev"] >= 0
         ]
         rss_deltas = [
             p["rss_peak_mb"] - p["rss_before_mb"]
@@ -253,6 +325,7 @@ def plot(
             "mean_wall_s": float(np.mean(walls)) if walls else None,
             "mean_cpu_s": float(np.mean(cpus)) if cpus else None,
             "mean_nit": float(np.mean(nits)) if nits else None,
+            "mean_nfev": float(np.mean(nfevs)) if nfevs else None,
             "mean_rss_delta_mb": float(np.mean(rss_deltas)) if rss_deltas else None,
             "mean_cpu_percent": float(np.mean(cpu_pcts)) if cpu_pcts else None,
         }

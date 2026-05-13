@@ -18,6 +18,7 @@ import concurrent.futures
 import json
 import multiprocessing
 import pickle
+import platform
 import threading
 import time
 from itertools import product
@@ -36,6 +37,23 @@ import pyhs3
 
 _ALL_METHODS = ["SLSQP", "L-BFGS-B", "TNC", "trust-constr", "migrad"]
 _ALL_TOLERANCES = [1e-3, 1e-4, 1e-5, 1e-6]
+
+
+def _collect_machine_info() -> dict:
+    """Collect CPU / OS metadata for the bundle header."""
+    freq = psutil.cpu_freq()
+    return {
+        "os": platform.system(),
+        "os_release": platform.release(),
+        "machine": platform.machine(),
+        # processor() is empty on some platforms (e.g. macOS arm64); fall back to machine
+        "processor": platform.processor() or platform.machine(),
+        "python_version": platform.python_version(),
+        "cpu_count_physical": psutil.cpu_count(logical=False),
+        "cpu_count_logical": psutil.cpu_count(logical=True),
+        "cpu_freq_mhz": round(freq.current, 0) if freq else None,
+        "total_ram_gb": round(psutil.virtual_memory().total / 2**30, 1),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -370,13 +388,18 @@ def profile_nll(
                     options={"maxfun": maxiter, "ftol": tol},
                 )
             else:
+                # ftol intentionally omitted: tol= maps to the method's primary
+                # criterion (gtol for L-BFGS-B, ftol for SLSQP) via scipy's
+                # unified interface. Explicitly passing ftol here would override
+                # L-BFGS-B's tight default (2.22e-9) with a loose value and
+                # cause premature convergence to a suboptimal minimum.
                 result = scipy_minimize(
                     nll,
                     x0,
                     method=method,
                     bounds=bounds_list,
                     tol=tol,
-                    options={"maxiter": maxiter, "ftol": tol},
+                    options={"maxiter": maxiter},
                 )
         except Exception as exc:
             error_msg = f"{type(exc).__name__}: {exc}"
@@ -636,6 +659,7 @@ def main() -> None:
         "model_build_s": build_time_s,
         "rss_baseline_mb": round(rss_baseline_mb, 2),
         "sampler_hz": args.sampler_hz,
+        "machine": _collect_machine_info(),
         "scans": [],
     }
 

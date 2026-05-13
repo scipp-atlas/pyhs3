@@ -683,10 +683,17 @@ def main() -> None:
             )
             raise SystemExit(msg)
 
+    skip = {
+        ("SLSQP", 1e-4),
+        ("SLSQP", 1e-5),
+        ("SLSQP", 1e-6),
+    }
+
     scan_configs = [
         (m, t, _scan_label(m, t, args.label_prefix))
         for m, t in product(methods, tolerances)
-        if _scan_label(m, t, args.label_prefix) not in completed_labels
+        if (m, t) not in skip
+        and _scan_label(m, t, args.label_prefix) not in completed_labels
     ]
 
     print(f"\nRunning {len(scan_configs)} scans ...\n")

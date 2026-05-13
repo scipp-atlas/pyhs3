@@ -119,7 +119,7 @@ def plot(
             label=scan["label"],
         )
 
-    ax_nll.set_ylabel("2ΔNLL")
+    ax_nll.set_ylabel(r"-2$\Delta$NLL")
     ax_nll.set_title("Profile likelihood")
     ax_nll.grid(True, alpha=0.25)
     ax_nll.legend(fontsize=6, ncol=2)

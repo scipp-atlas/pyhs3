@@ -42,7 +42,7 @@ def _serialize_fk(v: Any) -> str | None:
 def _serialize_fk_list(v: Any) -> list[str]:
     """Serialize FK list to list of string names."""
     result: list[str] = []
-    for item in v:
+    for item in v or []:
         if isinstance(item, str):
             result.append(item)
         else:

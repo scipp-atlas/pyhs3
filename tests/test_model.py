@@ -738,7 +738,7 @@ class TestWorkspaceWithLikelihoodsAndAnalyses:
         assert len(combined_likelihood.data) == 2
         assert combined_likelihood.data[0].name == "observed_data"
         assert combined_likelihood.data[1].name == "observed_data"
-        assert combined_likelihood.aux_distributions == ["background_dist"]
+        assert combined_likelihood.aux_distributions[0].name == "background_dist"
 
     def test_workspace_loads_analyses_correctly(
         self, workspace_with_likelihoods_analyses

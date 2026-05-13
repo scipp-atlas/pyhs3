@@ -283,14 +283,20 @@ class Model:
         # Auxiliary distributions (constraint terms) are scalars; they broadcast
         # onto the parameter-scan axis when non-scalar params are present.
         if self._likelihood.aux_distributions:
-            for aux_name in self._likelihood.aux_distributions:
-                if aux_name in self.distributions:
-                    terms.append(pt.log(self.distributions[aux_name]))
+            terms.extend(
+                pt.log(
+                    self.distributions[
+                        aux_name if isinstance(aux_name, str) else aux_name.name
+                    ]
+                )
+                for aux_name in self._likelihood.aux_distributions
+            )
 
         # HFDC constraint terms: collected once per unique nuisance parameter
         # across all channels during graph construction.
-        for constraint_expr in self._hfdc_constraints:
-            terms.append(pt.log(constraint_expr))
+        terms.extend(
+            pt.log(constraint_expr) for constraint_expr in self._hfdc_constraints
+        )
 
         if not terms:
             return pt.constant(np.float64(0.0))

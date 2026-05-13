@@ -227,6 +227,18 @@ class Workspace(BaseModel):
             likelihood.distributions = Distributions(
                 cast(list[DistributionType], resolved)
             )
+
+            if likelihood.aux_distributions is not None:
+                resolved_aux = self._resolve_fk_list(
+                    likelihood.aux_distributions,
+                    self.distributions,
+                    f"Likelihood '{likelihood.name}'",
+                    "aux_distribution",
+                    errors,
+                )
+                likelihood.aux_distributions = Distributions(
+                    cast(list[DistributionType], resolved_aux)
+                )
         else:
             errors.append(
                 f"Likelihood '{likelihood.name}' references unknown distributions"

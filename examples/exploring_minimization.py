@@ -359,6 +359,16 @@ def profile_nll(
                     tol=tol,
                     options={"maxiter": maxiter},
                 )
+            elif method == "TNC":
+                # TNC uses maxfun (function evaluations), not maxiter
+                result = scipy_minimize(
+                    neg2ll,
+                    x0,
+                    method=method,
+                    bounds=bounds_list,
+                    tol=tol,
+                    options={"maxfun": maxiter, "ftol": tol},
+                )
             else:
                 result = scipy_minimize(
                     neg2ll,

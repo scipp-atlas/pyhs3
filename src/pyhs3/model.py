@@ -322,26 +322,33 @@ class Model:
         """
         return np.asarray(value, dtype=np.float64)
 
+    def _try_bake_hfdc_observed(self, node_name: str) -> TensorVar | None:
+        """Return a baked constant for an HFDC ``{name}_observed`` parameter, or None.
+
+        When a likelihood pairs an HFDC distribution with a BinnedData object,
+        the observed bin counts are baked in as compile-time constants so that
+        they are invisible to ``explicit_graph_inputs`` and JAX transpilation.
+        """
+        if self._likelihood is None or not node_name.endswith("_observed"):
+            return None
+        dist_name = node_name[: -len("_observed")]
+        for dist_obj, datum in zip(
+            self._likelihood.distributions, self._likelihood.data, strict=True
+        ):
+            if isinstance(datum, str) or not isinstance(datum, BinnedData):
+                continue
+            actual_dist_name = dist_obj if isinstance(dist_obj, str) else dist_obj.name
+            if actual_dist_name == dist_name:
+                return pt.constant(
+                    np.asarray(datum.contents, dtype=np.float64), name=node_name
+                )
+        return None
+
     def _build_parameter_node(self, node_name: str, context: Context) -> TensorVar:
         """Build a parameter node: baked constant (const=True) or bounded free variable."""
-        # Bake HFDC observed data as a 1-D constant when the model was built with a
-        # likelihood that pairs this channel's BinnedData with an HFDC distribution.
-        # This keeps the observed counts out of the free-input set so that
-        # explicit_graph_inputs and JAX transpilation only see the nuisance parameters.
-        if self._likelihood is not None and node_name.endswith("_observed"):
-            dist_name = node_name[: -len("_observed")]
-            for dist_obj, datum in zip(
-                self._likelihood.distributions, self._likelihood.data, strict=True
-            ):
-                if isinstance(datum, str) or not isinstance(datum, BinnedData):
-                    continue
-                actual_dist_name = (
-                    dist_obj if isinstance(dist_obj, str) else dist_obj.name
-                )
-                if actual_dist_name == dist_name:
-                    return pt.constant(
-                        np.asarray(datum.contents, dtype=np.float64), name=node_name
-                    )
+        baked = self._try_bake_hfdc_observed(node_name)
+        if baked is not None:
+            return baked
 
         param_point = self.parameterset.get(node_name) if self.parameterset else None
         domain_bounds = (

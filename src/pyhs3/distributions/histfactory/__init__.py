@@ -25,7 +25,6 @@ from pyhs3.distributions.histfactory.modifiers import (
     HasConstraint,
     Modifier,
     ParameterModifier,
-    ParametersModifier,
 )
 from pyhs3.distributions.histfactory.samples import Sample, Samples
 from pyhs3.networks import HasDependencies, HasInternalNodes
@@ -194,7 +193,7 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
                     continue
                 if isinstance(modifier, ParameterModifier):
                     yield modifier.parameter, modifier, sample.data
-                elif isinstance(modifier, ParametersModifier):
+                else:
                     yield None, modifier, sample.data
 
     def extended_likelihood(

@@ -163,13 +163,14 @@ class Workspace(BaseModel):
                 )
                 raise ValueError(msg)
             param_constraint[param] = (constraint, where)
-        elif isinstance(modifier, ParametersModifier):
+        else:
+            multi_mod = cast(ParametersModifier, modifier)
             owners = (
-                shapesys_owners if modifier.type == "shapesys" else staterror_owners
+                shapesys_owners if multi_mod.type == "shapesys" else staterror_owners
             )
-            for param in modifier.parameters:
+            for param in multi_mod.parameters:
                 if param in owners and owners[param] != channel_name:
-                    kind = modifier.type
+                    kind = multi_mod.type
                     msg = (
                         f"{kind} parameter '{param}' appears in both "
                         f"'{owners[param]}' and '{channel_name}'; "

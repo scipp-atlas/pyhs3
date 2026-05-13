@@ -12,12 +12,13 @@ nuisance parameter across all HFDC channels.
 from __future__ import annotations
 
 import math
+import types
 
 import numpy as np
 import pytensor
 import pytest
 
-from pyhs3.data import BinnedData, Data
+from pyhs3.data import BinnedData, Data, UnbinnedData
 from pyhs3.distributions import Distributions, HistFactoryDistChannel
 from pyhs3.distributions.histfactory.modifiers import (
     HasConstraint,
@@ -244,6 +245,49 @@ class TestConstraintModifiers:
         keys = [key for key, _, _ in specs]
         # Both specs have the same dedup_key; callers apply the seen-set dedup.
         assert keys == ["lumi", "lumi"]
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: Model._try_bake_hfdc_observed
+# ---------------------------------------------------------------------------
+
+
+class TestTryBakeHFDCObserved:
+    """Unit tests for Model._try_bake_hfdc_observed."""
+
+    def test_skips_non_binned_data_entries(self):
+        """Non-BinnedData likelihood entries are skipped; matching BinnedData is baked.
+
+        Exercises the ``continue`` branch where a datum is not a BinnedData —
+        the search must carry on to find the correct BinnedData for the channel.
+        """
+        ws = _simple_workspace(
+            channels=[_make_channel("SR", [10.0, 20.0], [])],
+            params=[],
+        )
+        model = ws.model(next(iter(ws.likelihoods)), progress=False)
+
+        sr_channel = next(iter(ws.distributions))
+        binned = BinnedData(
+            name="SR_data",
+            axes=[{"name": "x_SR", "min": 0.0, "max": 10.0, "nbins": 2}],
+            contents=[10.0, 20.0],
+        )
+        unbinned = UnbinnedData(
+            name="other_data",
+            entries=[[1.0]],
+            axes=[{"name": "y", "min": 0.0, "max": 5.0}],
+        )
+        # Unbinned datum comes first so the loop hits `continue` at least once
+        # before finding the matching BinnedData.
+        model._likelihood = types.SimpleNamespace(
+            distributions=["other_dist", sr_channel],
+            data=[unbinned, binned],
+        )
+
+        result = model._try_bake_hfdc_observed("SR_observed")
+        assert result is not None
+        np.testing.assert_array_equal(result.data, [10.0, 20.0])
 
 
 # ---------------------------------------------------------------------------

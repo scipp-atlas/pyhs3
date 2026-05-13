@@ -2,7 +2,7 @@
 """Benchmark multiple minimizers on any HS3 workspace POI scan.
 
 Demonstrates how to:
-1. Build a pyhs3 Model from any HistFactory workspace
+1. Build a pyhs3 Model from any HS3 workspace
 2. Cache both the Model and compiled log_prob in a single pickle
 3. Profile over nuisance parameters at each fixed POI value
 4. Capture per-fit wall time, CPU time, and memory usage

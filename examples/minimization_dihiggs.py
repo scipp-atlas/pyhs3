@@ -2,7 +2,7 @@
 """Profile-likelihood minimization demo for the ATLAS diHiggs bbyy workspace.
 
 Demonstrates how to:
-1. Build a pyhs3 Model from a HistFactory workspace
+1. Build a pyhs3 Model from an HS3 workspace
 2. Compile the joint log-probability into a fast pytensor function
 3. Profile over nuisance parameters at a fixed mu_HH using scipy
 
@@ -15,10 +15,9 @@ from __future__ import annotations
 import pickle
 import time
 from pathlib import Path
-import json
-from matplotlib import pyplot as plt
 
 import numpy as np
+from matplotlib import pyplot as plt
 from pytensor.compile.function import function
 from pytensor.graph.traversal import explicit_graph_inputs
 from scipy.optimize import minimize
@@ -97,6 +96,7 @@ _REFERENCE = {
     ],
 }
 
+
 def build_model() -> pyhs3.Model:
     """Load workspace and build (or load cached) model."""
     ws_path = skhep_testdata_path("test_hs3_unbinned_pyhs3_validation_issue41.json")
@@ -120,7 +120,7 @@ def build_model() -> pyhs3.Model:
         ],
     )
 
-    #if _MODEL_CACHE.exists():
+    # if _MODEL_CACHE.exists():
     #    print(f"Loading cached model from {_MODEL_CACHE} ...")
     #    with _MODEL_CACHE.open("rb") as f:
     #        return pickle.load(f)
@@ -236,12 +236,37 @@ def main() -> None:
 
     # --- Uncomment below to scan over a grid of mu_HH values ---
     MU_GRID = [
-        -0.5, -0.4, -0.3, -0.2, -0.1,
-        0.0, 0.1, 0.2, 0.3, 0.4, 0.5,
-        0.6, 0.7, 0.8, 0.9, 1.0,
-        1.1, 1.2, 1.3, 1.4, 1.5,
-        1.6, 1.7, 1.8, 1.9, 2.0,
-        2.1, 2.2, 2.3, 2.4, 2.5,
+        -0.5,
+        -0.4,
+        -0.3,
+        -0.2,
+        -0.1,
+        0.0,
+        0.1,
+        0.2,
+        0.3,
+        0.4,
+        0.5,
+        0.6,
+        0.7,
+        0.8,
+        0.9,
+        1.0,
+        1.1,
+        1.2,
+        1.3,
+        1.4,
+        1.5,
+        1.6,
+        1.7,
+        1.8,
+        1.9,
+        2.0,
+        2.1,
+        2.2,
+        2.3,
+        2.4,
+        2.5,
     ]
     mu_arr = np.array(MU_GRID)
 
@@ -257,8 +282,6 @@ def main() -> None:
         computed_nlls.append(result)
 
     computed_nlls = [optim.fun for optim in computed_nlls]
-    
-    breakpoint()
 
     provided_nll = _REFERENCE["nll"]
     provided_nll_shifted = [v - min(provided_nll) for v in provided_nll]
@@ -272,8 +295,6 @@ def main() -> None:
     plt.legend()
     plt.savefig("nll_comparison_minimization.pdf")
 
-    breakpoint() 
-    
 
 if __name__ == "__main__":
     main()

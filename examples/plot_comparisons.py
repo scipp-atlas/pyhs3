@@ -15,8 +15,8 @@ from matplotlib import pyplot as plt
 
 # Layout: change these two lines to reshape the figure while keeping
 # each cell at a fixed _CELL_W x _CELL_H inches.
-_NROWS, _NCOLS = 2, 3
-_CELL_W, _CELL_H = 8.0, 3.0  # inches per cell; (3,2) -> 16x9, (2,3) -> 24x6
+_NROWS, _NCOLS = 3, 3
+_CELL_W, _CELL_H = 5, 4  # inches per cell
 
 
 def load_bundle(path: Path) -> dict:
@@ -108,8 +108,19 @@ def plot(
     output_pdf: Path,
     output_png: Path,
 ) -> dict:
-    """Build 2x3 figure and return per-scan summary dict."""
-    tab10 = mpl.colormaps["tab10"]
+    """Build 3x3 figure and return per-scan summary dict."""
+
+    colormap = mpl.colors.ListedColormap(
+        [
+            "#d73027",
+            "#fc8d59",
+            "#fee090",
+            "#e0f3f8",
+            "#91bfdb",
+            "#4575b4",
+        ]
+    )
+
     markers = ["o", "s", "^", "D"]
 
     # Colour by method, marker by tolerance rank
@@ -119,7 +130,7 @@ def plot(
     def _style(scan: dict) -> tuple:
         mi = all_methods.index(scan["method"])
         ti = all_tols.index(scan["tol"])
-        return tab10(mi), markers[ti % len(markers)]
+        return colormap(mi), markers[ti % len(markers)]
 
     fig, axes = plt.subplots(
         _NROWS,
@@ -127,7 +138,18 @@ def plot(
         figsize=(_NCOLS * _CELL_W, _NROWS * _CELL_H),
         constrained_layout=True,
     )
-    ax_nll, ax_time, ax_nfev, ax_nit, ax_mem, ax_cpu = axes.flat
+    (
+        ax_nll,
+        ax_nll_raw,
+        ax_nll_global,
+        ax_time,
+        ax_nfev,
+        ax_nit,
+        ax_mem,
+        ax_cpu,
+        ax_unused,
+    ) = axes.flat
+    ax_unused.set_visible(False)
 
     # ------------------------------------------------------------------ (0,0) ΔNLL
     n_poi = len(bundle.get("poi_grid", []))
@@ -167,9 +189,78 @@ def plot(
 
     ax_nll.set_xlabel(bundle.get("poi", "POI"))
     ax_nll.set_ylabel(r"$\Delta(-2\ln L)$")
-    ax_nll.set_title(f"Profile likelihood  (N={n_poi} POI points)", fontsize=8)
+    ax_nll.set_title(f"Profile likelihood — per-scan min  (N={n_poi})", fontsize=8)
     ax_nll.grid(True, alpha=0.25)
     ax_nll.legend(fontsize=5, ncol=2)
+
+    # ------------------------------------------------------------------ (0,1) raw NLL
+    for scan in scans:
+        color, marker = _style(scan)
+        points = scan.get("points", [])
+        poi = np.array([p["poi"] for p in points], dtype=float)
+        nll = np.array([p["nll"] for p in points], dtype=float)
+        finite = np.isfinite(nll)
+        ax_nll_raw.plot(
+            poi[finite],
+            nll[finite],
+            color=color,
+            marker=marker,
+            markersize=4,
+            linewidth=1.2,
+            label=scan["label"],
+        )
+
+    ax_nll_raw.set_xlabel(bundle.get("poi", "POI"))
+    ax_nll_raw.set_ylabel(r"$-2\ln L$")
+    ax_nll_raw.set_title(f"Raw NLL  (N={n_poi})", fontsize=8)
+    ax_nll_raw.grid(True, alpha=0.25)
+    ax_nll_raw.legend(fontsize=5, ncol=2)
+
+    # ------------------------------------------------------------------ (0,2) global-min ΔNLL
+    all_finite_nlls = [
+        p["nll"]
+        for scan in scans
+        for p in scan.get("points", [])
+        if np.isfinite(p.get("nll", np.nan))
+    ]
+    global_nll_min = min(all_finite_nlls) if all_finite_nlls else 0.0
+
+    if ref is not None:
+        ref_poi, ref_delta = ref
+        ax_nll_global.plot(
+            ref_poi,
+            ref_delta,
+            color="0.4",
+            linewidth=1.5,
+            linestyle="--",
+            zorder=0,
+            label="reference (own min)",
+        )
+
+    for scan in scans:
+        color, marker = _style(scan)
+        points = scan.get("points", [])
+        poi = np.array([p["poi"] for p in points], dtype=float)
+        nll = np.array([p["nll"] for p in points], dtype=float)
+        finite = np.isfinite(nll)
+        delta_global = np.full_like(nll, np.nan)
+        if np.any(finite):
+            delta_global[finite] = nll[finite] - global_nll_min
+        ax_nll_global.plot(
+            poi[finite],
+            delta_global[finite],
+            color=color,
+            marker=marker,
+            markersize=4,
+            linewidth=1.2,
+            label=scan["label"],
+        )
+
+    ax_nll_global.set_xlabel(bundle.get("poi", "POI"))
+    ax_nll_global.set_ylabel(r"$\Delta(-2\ln L)$")
+    ax_nll_global.set_title(f"Profile likelihood — global min  (N={n_poi})", fontsize=8)
+    ax_nll_global.grid(True, alpha=0.25)
+    ax_nll_global.legend(fontsize=5, ncol=2)
 
     # ------------------------------------------------------------------ boxplots
     tick_labels = [s["label"] for s in scans]
@@ -399,7 +490,9 @@ def main() -> None:
         msg = "No scans match the given filters."
         raise SystemExit(msg)
 
-    with load_theme("scientific"):  # arctic_light"):
+    with load_theme("scientific").set_overrides(
+        {"xtick.major.size": 4, "xtick.minor.visible": False}
+    ):
         summary = plot(bundle, ref, scans, args.output_pdf, args.output_png)
 
     if args.output_json:

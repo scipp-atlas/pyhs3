@@ -502,6 +502,80 @@ class TestConstraintDeduplication:
         expected = poisson_sr + poisson_cr + 2 * gauss_lp  # two independent constraints
         assert abs(val - expected) < 1e-6, f"got {val}, expected {expected}"
 
+    def test_inactive_channel_constraints_excluded_from_log_prob(self):
+        """Constraints from HFDC channels not in the active likelihood must not
+        appear in log_prob even though all workspace distributions are built.
+
+        Regression: _build_distribution_node previously collected constraints
+        from ALL workspace distributions regardless of the active likelihood.
+        """
+        normsys_sr = {
+            "name": "alpha_sr",
+            "type": "normsys",
+            "parameter": "alpha_sr",
+            "constraint": "Gauss",
+            "data": {"hi": 1.1, "lo": 0.9},
+        }
+        normsys_cr = {
+            "name": "alpha_cr",
+            "type": "normsys",
+            "parameter": "alpha_cr",
+            "constraint": "Gauss",
+            "data": {"hi": 1.2, "lo": 0.8},
+        }
+        sr_channel = HistFactoryDistChannel(**_make_channel("SR", [10.0], [normsys_sr]))
+        cr_channel = HistFactoryDistChannel(**_make_channel("CR", [50.0], [normsys_cr]))
+        sr_data = BinnedData(
+            name="SR_data",
+            axes=[{"name": "x_SR", "min": 0.0, "max": 10.0, "nbins": 1}],
+            contents=[10.0],
+        )
+        ws = Workspace(
+            metadata=Metadata(hs3_version="0.3.0"),
+            distributions=Distributions([sr_channel, cr_channel]),
+            data=Data([sr_data]),
+            likelihoods=Likelihoods(
+                [
+                    Likelihood(
+                        name="L",
+                        distributions=[sr_channel],
+                        data=[sr_data],
+                    )
+                ]
+            ),
+            domains=Domains([ProductDomain(name="default")]),
+            parameter_points=ParameterPoints(
+                [
+                    ParameterSet(
+                        name="default",
+                        parameters=[
+                            ParameterPoint(name="alpha_sr", value=0.0),
+                            ParameterPoint(name="alpha_cr", value=0.0),
+                        ],
+                    )
+                ]
+            ),
+        )
+        likelihood = next(iter(ws.likelihoods))
+        model = ws.model(likelihood, progress=False)
+        lp = model.log_prob
+        inputs = {
+            v.name: v
+            for v in pytensor.graph.traversal.explicit_graph_inputs([lp])
+            if v.name
+        }
+        fn = pytensor.function(list(inputs.values()), lp)
+        # Filter to only the free inputs (after fix, alpha_cr is not a free input).
+        param_vals = {k: v for k, v in model.nominal_params.items() if k in inputs}
+        val = float(fn(**{**model.data, **param_vals}).item())
+
+        # Expected: Poisson(SR only) + 1 Gaussian(alpha_sr=0)
+        # With the bug, Gaussian(alpha_cr) from inactive CR also appears.
+        poisson_sr = 10.0 * math.log(10.0) - 10.0 - math.lgamma(11.0)
+        gauss_lp = -0.5 * math.log(2 * math.pi)
+        expected = poisson_sr + gauss_lp
+        assert abs(val - expected) < 1e-6, f"got {val}, expected {expected}"
+
     def test_normfactor_has_no_constraint(self):
         """normfactor adds no constraint term; log_prob equals Poisson only."""
         ws = _simple_workspace(

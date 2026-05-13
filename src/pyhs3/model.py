@@ -443,17 +443,23 @@ class Model:
         self._hfdc_poisson[node_name] = dist.likelihood(context)
 
         # Collect constraint expressions, deduped across channels by parameter name.
+        # Only channels referenced by the active likelihood contribute constraints —
+        # all HFDC distributions are still evaluated so logpdf() works for any channel.
         # Single-parameter modifiers carry a dedup_key; multi-parameter modifiers
         # (shapesys/staterror) have dedup_key=None and are emitted per-channel because
         # the workspace validator forbids cross-channel sharing of those parameters.
-        for dedup_key, modifier, sample_data in dist.constraint_specs():
-            if dedup_key is not None:
-                if dedup_key in self._hfdc_constraint_params_seen:
-                    continue
-                self._hfdc_constraint_params_seen.add(dedup_key)
-            self._hfdc_constraints.append(
-                modifier.make_constraint(context, sample_data)
-            )
+        if self._likelihood is None or any(
+            (d if isinstance(d, str) else d.name) == node_name
+            for d in self._likelihood.distributions
+        ):
+            for dedup_key, modifier, sample_data in dist.constraint_specs():
+                if dedup_key is not None:
+                    if dedup_key in self._hfdc_constraint_params_seen:
+                        continue
+                    self._hfdc_constraint_params_seen.add(dedup_key)
+                self._hfdc_constraints.append(
+                    modifier.make_constraint(context, sample_data)
+                )
 
         return dist.expression(context)
 

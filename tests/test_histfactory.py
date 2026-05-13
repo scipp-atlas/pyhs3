@@ -28,8 +28,10 @@ from pyhs3.context import Context
 from pyhs3.distributions import HistFactoryDistChannel
 from pyhs3.distributions.histfactory.modifiers import (
     HistoSysModifier,
+    NormFactorModifier,
     NormSysModifier,
     ShapeFactorModifier,
+    ShapeSysModifier,
     StatErrorModifier,
 )
 
@@ -1194,6 +1196,95 @@ class TestModifierExpressions:
         result = f(0.95, 1.05)
         assert result[0] == pytest.approx(0.95)
         assert result[1] == pytest.approx(1.05)
+
+    def test_normfactor_apply_equals_rates_times_expression(self):
+        """apply(ctx, rates) must equal rates * expression(ctx) for NormFactorModifier."""
+        modifier = NormFactorModifier(name="mu", parameter="mu")
+
+        mu_var = pt.dscalar("mu")
+        rates_var = pt.dvector("rates")
+        context = Context({"mu": mu_var})
+
+        expr_apply = modifier.apply(context, rates_var)
+        expr_product = rates_var * modifier.expression(context)
+
+        f_apply = function([mu_var, rates_var], expr_apply)
+        f_product = function([mu_var, rates_var], expr_product)
+
+        np.testing.assert_allclose(
+            f_apply(2.0, [10.0, 20.0]), f_product(2.0, [10.0, 20.0])
+        )
+        np.testing.assert_allclose(
+            f_apply(0.5, [10.0, 20.0]), f_product(0.5, [10.0, 20.0])
+        )
+
+    def test_normsys_apply_equals_rates_times_expression(self):
+        """apply(ctx, rates) must equal rates * expression(ctx) for NormSysModifier."""
+        modifier = NormSysModifier(
+            name="alpha", parameter="alpha", data={"hi": 1.2, "lo": 0.8}
+        )
+
+        alpha_var = pt.dscalar("alpha")
+        rates_var = pt.dvector("rates")
+        context = Context({"alpha": alpha_var})
+
+        expr_apply = modifier.apply(context, rates_var)
+        expr_product = rates_var * modifier.expression(context)
+
+        f_apply = function([alpha_var, rates_var], expr_apply)
+        f_product = function([alpha_var, rates_var], expr_product)
+
+        np.testing.assert_allclose(
+            f_apply(0.5, [10.0, 20.0]), f_product(0.5, [10.0, 20.0])
+        )
+        np.testing.assert_allclose(
+            f_apply(-0.5, [10.0, 20.0]), f_product(-0.5, [10.0, 20.0])
+        )
+        np.testing.assert_allclose(
+            f_apply(0.0, [10.0, 20.0]), f_product(0.0, [10.0, 20.0])
+        )
+
+    def test_shapefactor_apply_equals_rates_times_expression(self):
+        """apply(ctx, rates) must equal rates * expression(ctx) for ShapeFactorModifier."""
+        modifier = ShapeFactorModifier(name="gamma", parameters=["gamma_0", "gamma_1"])
+
+        g0 = pt.dscalar("gamma_0")
+        g1 = pt.dscalar("gamma_1")
+        rates_var = pt.dvector("rates")
+        context = Context({"gamma_0": g0, "gamma_1": g1})
+
+        expr_apply = modifier.apply(context, rates_var)
+        expr_product = rates_var * modifier.expression(context)
+
+        f_apply = function([g0, g1, rates_var], expr_apply)
+        f_product = function([g0, g1, rates_var], expr_product)
+
+        np.testing.assert_allclose(
+            f_apply(1.2, 0.8, [10.0, 20.0]), f_product(1.2, 0.8, [10.0, 20.0])
+        )
+
+    def test_shapesys_apply_equals_rates_times_expression(self):
+        """apply(ctx, rates) must equal rates * expression(ctx) for ShapeSysModifier."""
+        modifier = ShapeSysModifier(
+            name="staterr",
+            parameters=["gamma_0", "gamma_1"],
+            data={"vals": [0.1, 0.15]},
+        )
+
+        g0 = pt.dscalar("gamma_0")
+        g1 = pt.dscalar("gamma_1")
+        rates_var = pt.dvector("rates")
+        context = Context({"gamma_0": g0, "gamma_1": g1})
+
+        expr_apply = modifier.apply(context, rates_var)
+        expr_product = rates_var * modifier.expression(context)
+
+        f_apply = function([g0, g1, rates_var], expr_apply)
+        f_product = function([g0, g1, rates_var], expr_product)
+
+        np.testing.assert_allclose(
+            f_apply(1.1, 0.9, [10.0, 20.0]), f_product(1.1, 0.9, [10.0, 20.0])
+        )
 
 
 class TestExtendedLikelihoodConstraintDedup:

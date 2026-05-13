@@ -154,6 +154,9 @@ pytensor = "==3.0.0"
 iminuit = "*"
 psutil = "*"
 
+[feature.minimize.pypi-dependencies]
+aquarel = ">=0.0.7, <0.0.8"
+
 [environments]
 docs = ["docs", "jax"]
 dev = ["dev", "jax"]

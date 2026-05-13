@@ -15,7 +15,7 @@ from matplotlib import pyplot as plt
 
 # Layout: change these two lines to reshape the figure while keeping
 # each cell at a fixed _CELL_W x _CELL_H inches.
-_NROWS, _NCOLS = 2, 4
+_NROWS, _NCOLS = 4, 2
 _CELL_W, _CELL_H = 5, 4  # inches per cell
 
 

@@ -350,8 +350,8 @@ def profile_nll(
         for idx, xi in zip(free_input_indices, x, strict=True):
             vals[idx] = xi
         # log_prob_fn may return a 0-d array or a 1-element array depending on
-        # the model; flatten with [()] to get a plain scalar before float().
-        return float(-2.0 * log_prob_fn(*[np.asarray(v) for v in vals])[()])
+        # the model; .item() extracts the scalar correctly in both cases.
+        return -2.0 * log_prob_fn(*[np.asarray(v) for v in vals]).item()
 
     t_wall_start = time.perf_counter()
     t_cpu_start = time.thread_time()

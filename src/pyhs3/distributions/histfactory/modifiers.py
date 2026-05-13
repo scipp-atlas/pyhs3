@@ -173,9 +173,7 @@ class NormFactorModifier(ParameterModifier):
 
     def apply(self, context: Context, rates: TensorVar) -> TensorVar:
         """Apply normfactor modifier (simple scaling by parameter)."""
-
-        mu = context[self.parameter]
-        return cast("TensorVar", rates * mu)
+        return cast("TensorVar", rates * self.expression(context))
 
 
 class NormSysModifier(HasConstraint, ParameterModifier):
@@ -206,25 +204,7 @@ class NormSysModifier(HasConstraint, ParameterModifier):
     def expression(self, context: Context) -> TensorVar:
         """Return multiplicative factor for normsys."""
         alpha = context[self.parameter]
-
-        hi_factor = self.data.hi
-        lo_factor = self.data.lo
-
-        # Apply interpolation method
-        interpolation = self.data.interpolation
-        nominal_factor = pt.constant(1.0)
-        hi_factor_tensor = pt.constant(hi_factor)
-        lo_factor_tensor = pt.constant(lo_factor)
-
         return interpolations.apply_interpolation(
-            interpolation, alpha, nominal_factor, hi_factor_tensor, lo_factor_tensor
-        )
-
-    def apply(self, context: Context, rates: TensorVar) -> TensorVar:
-        """Apply normsys modifier (systematic with hi/lo interpolation)."""
-        alpha = context[self.parameter]
-
-        factor = interpolations.apply_interpolation(
             self.data.interpolation,
             alpha,
             self._nominal_factor,
@@ -232,7 +212,9 @@ class NormSysModifier(HasConstraint, ParameterModifier):
             self._lo_factor_tensor,
         )
 
-        return cast("TensorVar", rates * factor)
+    def apply(self, context: Context, rates: TensorVar) -> TensorVar:
+        """Apply normsys modifier (systematic with hi/lo interpolation)."""
+        return cast("TensorVar", rates * self.expression(context))
 
     def make_constraint(self, context: Context, _: SampleData) -> TensorVar:
         """Create constraint term using PyTensor operations."""
@@ -348,9 +330,7 @@ class ShapeFactorModifier(ParametersModifier):
 
     def apply(self, context: Context, rates: TensorVar) -> TensorVar:
         """Apply shapefactor modifier (uncorrelated bin-by-bin scaling)."""
-        param_names = self.parameters
-        factors = pt.stack([context[name] for name in param_names])
-        return cast("TensorVar", rates * factors)
+        return cast("TensorVar", rates * self.expression(context))
 
 
 class ShapeSysModifier(HasConstraint, ParametersModifier):
@@ -375,10 +355,7 @@ class ShapeSysModifier(HasConstraint, ParametersModifier):
 
     def apply(self, context: Context, rates: TensorVar) -> TensorVar:
         """Apply shapesys modifier (shape systematic with constraints)."""
-        # ShapeSys uses multiple parameters (one per bin)
-        param_names = self.parameters
-        factors = pt.stack([context[name] for name in param_names])
-        return cast("TensorVar", rates * factors)
+        return cast("TensorVar", rates * self.expression(context))
 
     def make_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
         """Create constraint term using PyTensor operations."""

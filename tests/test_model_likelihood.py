@@ -690,25 +690,3 @@ def test_log_prob_aux_distributions_contributes_to_log_prob():
     # With the constraint, log_prob gains an extra log(N(0|0,1)) term.
     assert val_with != pytest.approx(val_without)
     assert val_with < val_without  # constraint N(0|0,1) < 1, so log < 0
-
-
-def test_log_prob_aux_unknown_distribution_is_silently_skipped():
-    """aux_distributions names not in model.distributions are skipped without error."""
-    ws = Workspace(
-        **{
-            **_WS_AUX,
-            "likelihoods": [
-                {
-                    "name": "L",
-                    "distributions": ["gauss1"],
-                    "data": ["data1"],
-                    # "nonexistent" is not a distribution in the workspace.
-                    "aux_distributions": ["constraint", "nonexistent"],
-                }
-            ],
-        }
-    )
-    model = ws.model(ws.analyses["A"], progress=False)
-    # Should not raise; "nonexistent" is simply skipped.
-    lp = model.log_prob
-    assert hasattr(lp, "type")

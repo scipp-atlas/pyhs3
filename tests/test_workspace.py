@@ -83,6 +83,77 @@ class TestWorkspaceFKResolutionWithNoneCollections:
                 data=None,
             )
 
+    def test_likelihood_references_aux_distribution_nonexistent(self):
+        """aux_distributions names not in model.distributions raise error."""
+        with pytest.raises(
+            WorkspaceValidationError, match="references unknown aux_distribution"
+        ):
+            Workspace.model_validate(
+                {
+                    "metadata": {"hs3_version": "0.2"},
+                    "distributions": [
+                        {
+                            "name": "gauss1",
+                            "type": "gaussian_dist",
+                            "x": "x_obs",
+                            "mean": "mean",
+                            "sigma": 1.0,
+                        },
+                        {
+                            "name": "constraint",
+                            "type": "gaussian_dist",
+                            "x": "alpha",
+                            "mean": 0.0,
+                            "sigma": 1.0,
+                        },
+                    ],
+                    "domains": [
+                        {
+                            "name": "main",
+                            "type": "product_domain",
+                            "axes": [
+                                {"name": "mean", "min": -10.0, "max": 10.0},
+                                {"name": "alpha", "min": -5.0, "max": 5.0},
+                            ],
+                        }
+                    ],
+                    "data": [
+                        {
+                            "name": "data1",
+                            "type": "unbinned",
+                            "axes": [{"name": "x_obs", "min": -10.0, "max": 10.0}],
+                            "entries": [[1.0], [2.0], [3.0]],
+                        }
+                    ],
+                    "likelihoods": [
+                        {
+                            "name": "L",
+                            "distributions": ["gauss1"],
+                            "data": ["data1"],
+                            # "nonexistent" is not a distribution in the workspace.
+                            "aux_distributions": ["constraint", "nonexistent"],
+                        }
+                    ],
+                    "analyses": [
+                        {
+                            "name": "A",
+                            "likelihood": "L",
+                            "domains": ["main"],
+                            "init": "params",
+                        }
+                    ],
+                    "parameter_points": [
+                        {
+                            "name": "params",
+                            "parameters": [
+                                {"name": "mean", "value": 0.0},
+                                {"name": "alpha", "value": 0.0},
+                            ],
+                        }
+                    ],
+                }
+            )
+
     def test_likelihood_references_data_when_none(self):
         """Test error when likelihood references data but data=None."""
         with pytest.raises(WorkspaceValidationError, match="references unknown data"):

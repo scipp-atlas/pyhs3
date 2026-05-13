@@ -7,6 +7,7 @@ with samples and modifiers as defined in the HS3 specification.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any, Literal, cast
 
 import hist
@@ -19,7 +20,12 @@ from pyhs3.context import Context
 
 # Import existing distributions for constraint terms
 from pyhs3.distributions.core import Distribution
-from pyhs3.distributions.histfactory.modifiers import HasConstraint, Modifier
+from pyhs3.distributions.histfactory.data import SampleData
+from pyhs3.distributions.histfactory.modifiers import (
+    HasConstraint,
+    Modifier,
+    ParameterModifier,
+)
 from pyhs3.distributions.histfactory.samples import Sample, Samples
 from pyhs3.networks import HasDependencies, HasInternalNodes
 from pyhs3.typing.aliases import TensorVar
@@ -168,32 +174,51 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         # Build main Poisson model for observed data
         return self._build_main_model(context, expected_rates)
 
+    def constraint_specs(
+        self,
+    ) -> Iterator[tuple[str | None, HasConstraint, SampleData]]:
+        """Yield ``(dedup_key, modifier, sample_data)`` for each constraint modifier.
+
+        ``dedup_key`` is the modifier's parameter name for single-parameter
+        modifiers (``normsys``, ``histosys``); callers may use it to dedup
+        constraints when multiple modifier instances reference the same nuisance
+        parameter — within a channel or across channels in a joint fit.  For
+        multi-parameter modifiers (``shapesys``, ``staterror``) ``dedup_key``
+        is ``None`` — these constraints are channel-local by workspace validation
+        and are always emitted as-is.
+        """
+        for sample in self.samples:
+            for modifier in sample.modifiers:
+                if not isinstance(modifier, HasConstraint):
+                    continue
+                if isinstance(modifier, ParameterModifier):
+                    yield modifier.parameter, modifier, sample.data
+                else:
+                    yield None, modifier, sample.data
+
     def extended_likelihood(
         self, context: Context, _data: TensorVar | None = None
     ) -> TensorVar:
+        """Build constraint product for this channel.
+
+        Constraints are deduped by parameter — multiple ``ParameterModifier``
+        instances sharing one nuisance parameter (e.g., two ``normsys`` on
+        different samples both pointing at ``alpha_lumi``) emit a single
+        constraint factor, not one per modifier.  ``ParametersModifier``
+        constraints (``shapesys``, ``staterror``) carry per-bin nominal yields
+        and are always emitted per-modifier.
         """
-        Build constraint model for nuisance parameters.
-
-        Args:
-            context: Mapping of parameter names to PyTensor variables
-            data: Not used for HistFactory constraints (observed data is in main model)
-
-        Returns:
-            PyTensor expression for the constraint likelihood terms
-        """
-        constraint_probs = []
-
-        # Collect all constraint terms from modifiers
-        for sample in self.samples:
-            for modifier in sample.modifiers:
-                if isinstance(modifier, HasConstraint):
-                    prob = modifier.make_constraint(context, sample.data)
-                    constraint_probs.append(prob)
+        seen: set[str] = set()
+        constraint_probs: list[TensorVar] = []
+        for dedup_key, modifier, sample_data in self.constraint_specs():
+            if dedup_key is not None:
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
+            constraint_probs.append(modifier.make_constraint(context, sample_data))
 
         if not constraint_probs:
             return pt.constant(1.0)
-
-        # Multiply all constraint probabilities
         return cast(TensorVar, pt.prod(pt.stack(constraint_probs)))  # type: ignore[no-untyped-call]
 
     def _get_total_bins(self) -> int:

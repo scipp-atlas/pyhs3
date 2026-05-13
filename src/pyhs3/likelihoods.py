@@ -56,7 +56,12 @@ class Likelihood(NamedModel):
         FKListSerializer,
         FKListSchema,
     ] = Field(..., repr=False)
-    aux_distributions: list[str] | None = Field(default=None, repr=False)
+    aux_distributions: Annotated[
+        list[str] | Distributions | None,
+        make_fk_list_validator(Distribution),
+        FKListSerializer,
+        FKListSchema,
+    ] = Field(default=None, repr=False)
 
     def validate_unique_axis_names(self, workspace: Workspace | None = None) -> None:
         """Raise ValueError if any observable axis name appears more than once.

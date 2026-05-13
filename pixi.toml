@@ -150,6 +150,10 @@ pytensor = ">=2.33.0,<3"
 [feature.pytensor3.dependencies]
 pytensor = "==3.0.0"
 
+[feature.minimize.dependencies]
+iminuit = "*"
+psutil = "*"
+
 [environments]
 docs = ["docs", "jax"]
 dev = ["dev", "jax"]
@@ -172,6 +176,7 @@ py312-pytensor2-jax = ["test", "py312", "pytensor2", "jax"]
 py313-pytensor2-jax = ["test", "py313", "pytensor2", "jax"]
 py314-pytensor2-jax = ["test", "py314", "pytensor2", "jax"]
 
+minimize = ["test", "py314", "pytensor3", "jax", "minimize"]
 
 [tasks]
 # Composite tasks that span multiple features

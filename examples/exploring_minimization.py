@@ -327,7 +327,7 @@ def profile_nll(
 
     x0 = np.array([model.free_params[n] for n in free_names], dtype=float)
 
-    def neg2ll(x: np.ndarray) -> float:
+    def nll(x: np.ndarray) -> float:
         vals = list(template)
         for idx, xi in zip(free_input_indices, x, strict=True):
             vals[idx] = xi
@@ -342,7 +342,7 @@ def profile_nll(
         try:
             if method == "migrad":
                 result = iminuit_minimize(
-                    neg2ll,
+                    nll,
                     x0,
                     bounds=bounds_list,
                     tol=tol,
@@ -352,7 +352,7 @@ def profile_nll(
                 lb = [b[0] for b in bounds_list]
                 ub = [b[1] for b in bounds_list]
                 result = scipy_minimize(
-                    neg2ll,
+                    nll,
                     x0,
                     method=method,
                     bounds=Bounds(lb, ub),
@@ -362,7 +362,7 @@ def profile_nll(
             elif method == "TNC":
                 # TNC uses maxfun (function evaluations), not maxiter
                 result = scipy_minimize(
-                    neg2ll,
+                    nll,
                     x0,
                     method=method,
                     bounds=bounds_list,
@@ -371,7 +371,7 @@ def profile_nll(
                 )
             else:
                 result = scipy_minimize(
-                    neg2ll,
+                    nll,
                     x0,
                     method=method,
                     bounds=bounds_list,

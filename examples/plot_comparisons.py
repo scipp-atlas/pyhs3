@@ -95,9 +95,9 @@ def _boxplot_panel(
         patch.set_facecolor(color)
         patch.set_alpha(0.75)
     ax.set_xticks(x)
-    ax.set_xticklabels(tick_labels, rotation=35, ha="right", fontsize=5)
+    ax.set_xticklabels(tick_labels, rotation=35, ha="right")
     ax.set_ylabel(ylabel)
-    ax.set_title(title, fontsize=8)
+    ax.set_title(title)
     ax.grid(True, axis="y", alpha=0.25)
 
 
@@ -107,6 +107,7 @@ def plot(
     scans: list[dict],
     output_pdf: Path,
     output_png: Path,
+    ref_label: str = "reference",
 ) -> dict:
     """Build 2x4 figure and return per-scan summary dict."""
 
@@ -164,7 +165,7 @@ def plot(
             linewidth=1.5,
             linestyle="--",
             zorder=0,
-            label="reference",
+            label=ref_label,
         )
 
     for scan in scans:
@@ -188,9 +189,9 @@ def plot(
 
     ax_nll.set_xlabel(bundle.get("poi", "POI"))
     ax_nll.set_ylabel(r"$\Delta(-2\ln L)$")
-    ax_nll.set_title(f"Profile likelihood — per-scan min  (N={n_poi})", fontsize=8)
+    ax_nll.set_title(f"Profile likelihood — per-scan min  (N={n_poi})")
     ax_nll.grid(True, alpha=0.25)
-    ax_nll.legend(fontsize=5, ncol=2)
+    ax_nll.legend()
 
     # ------------------------------------------------------------------ (0,1) raw NLL
     for scan in scans:
@@ -211,9 +212,9 @@ def plot(
 
     ax_nll_raw.set_xlabel(bundle.get("poi", "POI"))
     ax_nll_raw.set_ylabel(r"$-2\ln L$")
-    ax_nll_raw.set_title(f"Raw NLL  (N={n_poi})", fontsize=8)
+    ax_nll_raw.set_title(f"Raw NLL  (N={n_poi})")
     ax_nll_raw.grid(True, alpha=0.25)
-    ax_nll_raw.legend(fontsize=5, ncol=2)
+    ax_nll_raw.legend()
 
     # ------------------------------------------------------------------ boxplots
     tick_labels = [s["label"] for s in scans]
@@ -228,7 +229,7 @@ def plot(
 
     # (0,1) timing: overlaid wall (solid) and cpu (translucent, narrower)
     wall_data = [_extract(s, "wall_s") for s in scans]
-    cpu_data = [_extract(s, "cpu_s") for s in scans]
+    # cpu_data = [_extract(s, "cpu_s") for s in scans]
     bp_wall = ax_time.boxplot(
         wall_data,
         positions=x,
@@ -242,22 +243,23 @@ def plot(
         color, _ = _style(scan)
         patch.set_facecolor(color)
         patch.set_alpha(0.8)
-    bp_cpu = ax_time.boxplot(
-        cpu_data,
-        positions=x,
-        widths=0.25,
-        patch_artist=True,
-        manage_ticks=False,
-        showfliers=False,
-    )
-    for patch, scan in zip(bp_cpu["boxes"], scans, strict=False):
-        color, _ = _style(scan)
-        patch.set_facecolor(color)
-        patch.set_alpha(0.35)
+    # bp_cpu = ax_time.boxplot(
+    #    cpu_data,
+    #    positions=x,
+    #    widths=0.25,
+    #    patch_artist=True,
+    #    manage_ticks=False,
+    #    showfliers=False,
+    # )
+    # for patch, scan in zip(bp_cpu["boxes"], scans, strict=False):
+    #    color, _ = _style(scan)
+    #    patch.set_facecolor(color)
+    #    patch.set_alpha(0.35)
     ax_time.set_xticks(x)
-    ax_time.set_xticklabels(tick_labels, rotation=35, ha="right", fontsize=5)
+    ax_time.set_xticklabels(tick_labels, rotation=35, ha="right")
     ax_time.set_ylabel("seconds")
-    ax_time.set_title("Per-fit time  (wide=wall, narrow=cpu)", fontsize=8)
+    ax_time.set_title("Per-fit wall time")
+    # ax_time.set_title("Per-fit time  (wide=wall, narrow=cpu)")
     ax_time.grid(True, axis="y", alpha=0.25)
 
     # (0,2) nfev
@@ -325,7 +327,6 @@ def plot(
     n_poi_str = f"N={n_poi} POI"
     fig.suptitle(
         f"Minimizer benchmark — {workspace}  POI={poi_key}  {n_poi_str}",
-        fontsize=10,
     )
 
     machine = bundle.get("machine", {})
@@ -416,6 +417,11 @@ def main() -> None:
         "--reference-json", type=Path, help="Optional reference scan JSON"
     )
     parser.add_argument(
+        "--reference-label",
+        default="reference",
+        help="Legend label for the reference scan (default: reference)",
+    )
+    parser.add_argument(
         "--filter-method",
         help="Comma-separated method names to include (default: all)",
     )
@@ -446,7 +452,14 @@ def main() -> None:
     with load_theme("scientific").set_overrides(
         {"xtick.major.size": 4, "xtick.minor.visible": False}
     ):
-        summary = plot(bundle, ref, scans, args.output_pdf, args.output_png)
+        summary = plot(
+            bundle,
+            ref,
+            scans,
+            args.output_pdf,
+            args.output_png,
+            ref_label=args.reference_label,
+        )
 
     if args.output_json:
         args.output_json.write_text(

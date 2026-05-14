@@ -1,0 +1,2564 @@
+{
+  "workspace": "WS-bbyy-non-resonant-non-param-isofix-unbinnedfix.json",
+  "analysis": "CombinedPdf_combData",
+  "poi": "mu_HH",
+  "poi_grid": [
+    -0.5, -0.4, -0.3, -0.19999999999999996, -0.09999999999999998, 0.0,
+    0.10000000000000009, 0.20000000000000007, 0.30000000000000004, 0.4, 0.5,
+    0.6000000000000001, 0.7000000000000002, 0.8, 0.9000000000000001, 1.0, 1.1,
+    1.2000000000000002, 1.3, 1.4000000000000001, 1.5, 1.6, 1.7000000000000002,
+    1.8000000000000003, 1.9000000000000004, 2.0, 2.1, 2.2, 2.3000000000000003,
+    2.4000000000000004, 2.5
+  ],
+  "n_inputs": 184,
+  "n_free_params": 184,
+  "compile_time_s": 2255.501733796671,
+  "model_build_s": 168.85683268681169,
+  "rss_baseline_mb": 7829.01,
+  "sampler_hz": 20.0,
+  "machine": {
+    "os": "Linux",
+    "os_release": "5.15.0-60-generic",
+    "machine": "x86_64",
+    "processor": "x86_64",
+    "python_version": "3.14.4",
+    "cpu_count_physical": 12,
+    "cpu_count_logical": 24,
+    "cpu_freq_mhz": 2209.0,
+    "total_ram_gb": 62.7
+  },
+  "scans": [
+    {
+      "label": "L-BFGS-B",
+      "method": "L-BFGS-B",
+      "tol": 0.001,
+      "maxiter": 1000,
+      "wall_s": 950.7723,
+      "cpu_s": 949.5901,
+      "peak_rss_mb": 7831.35,
+      "points": [
+        {
+          "poi": -0.5,
+          "nll": 3040.273076172529,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5995,
+          "cpu_s": 30.5584,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.34,
+          "n_samples": 43,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": -0.4,
+          "nll": 3040.1480630078654,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5412,
+          "cpu_s": 30.5042,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.16,
+          "n_samples": 66,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": -0.3,
+          "nll": 3040.0571254734023,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5181,
+          "cpu_s": 30.4811,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.31,
+          "n_samples": 65,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": -0.19999999999999996,
+          "nll": 3039.9884468307646,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.4549,
+          "cpu_s": 30.4172,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.48,
+          "n_samples": 67,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": -0.09999999999999998,
+          "nll": 3039.935494824709,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.4302,
+          "cpu_s": 30.3928,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.74,
+          "n_samples": 65,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 0.0,
+          "nll": 3039.894265493468,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5115,
+          "cpu_s": 30.4734,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.17,
+          "n_samples": 67,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 0.10000000000000009,
+          "nll": 3039.86213591504,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5228,
+          "cpu_s": 30.4838,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.69,
+          "n_samples": 66,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 0.20000000000000007,
+          "nll": 3039.8372742835786,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5176,
+          "cpu_s": 30.479,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.83,
+          "n_samples": 64,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 0.30000000000000004,
+          "nll": 3039.818338578908,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.4301,
+          "cpu_s": 30.393,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.52,
+          "n_samples": 65,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 0.4,
+          "nll": 3039.804309078985,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.4328,
+          "cpu_s": 30.3961,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.52,
+          "n_samples": 63,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 0.5,
+          "nll": 3039.7943936634065,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.4199,
+          "cpu_s": 30.3827,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 99.92,
+          "n_samples": 66,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 0.6000000000000001,
+          "nll": 3039.7879720044384,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.4442,
+          "cpu_s": 30.4066,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.91,
+          "n_samples": 65,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 0.7000000000000002,
+          "nll": 3039.7845491363814,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.426,
+          "cpu_s": 30.3884,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.34,
+          "n_samples": 66,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 0.8,
+          "nll": 3039.783724098178,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5069,
+          "cpu_s": 30.4689,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.36,
+          "n_samples": 66,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 0.9000000000000001,
+          "nll": 3039.785164499998,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5406,
+          "cpu_s": 30.5024,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 99.96,
+          "n_samples": 65,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 1.0,
+          "nll": 3039.788595114161,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5254,
+          "cpu_s": 30.4884,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.27,
+          "n_samples": 64,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 1.1,
+          "nll": 3039.7937825722724,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.527,
+          "cpu_s": 30.4892,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.55,
+          "n_samples": 65,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 1.2000000000000002,
+          "nll": 3039.800529212044,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.4869,
+          "cpu_s": 30.4494,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.3,
+          "n_samples": 64,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 1.3,
+          "nll": 3039.8086645240232,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5254,
+          "cpu_s": 30.4864,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.54,
+          "n_samples": 64,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 1.4000000000000001,
+          "nll": 3039.818042156776,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5356,
+          "cpu_s": 30.498,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.07,
+          "n_samples": 63,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 1.5,
+          "nll": 3039.8285338644046,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5255,
+          "cpu_s": 30.487,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.63,
+          "n_samples": 65,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 1.6,
+          "nll": 3039.8400281304203,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.4964,
+          "cpu_s": 30.4583,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.16,
+          "n_samples": 66,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 1.7000000000000002,
+          "nll": 3039.852426358446,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.4971,
+          "cpu_s": 30.4583,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 99.75,
+          "n_samples": 64,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 1.8000000000000003,
+          "nll": 3039.8656424613127,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5267,
+          "cpu_s": 30.4874,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.27,
+          "n_samples": 65,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 1.9000000000000004,
+          "nll": 3039.879599446596,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5381,
+          "cpu_s": 30.4982,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.41,
+          "n_samples": 65,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 2.0,
+          "nll": 3039.89422853565,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.513,
+          "cpu_s": 30.4757,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.5,
+          "n_samples": 63,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 2.1,
+          "nll": 3039.9094686560466,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5244,
+          "cpu_s": 30.4855,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.12,
+          "n_samples": 65,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 2.2,
+          "nll": 3039.925265083054,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5272,
+          "cpu_s": 30.4894,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.53,
+          "n_samples": 64,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 2.3000000000000003,
+          "nll": 3039.9415691566733,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5145,
+          "cpu_s": 30.4775,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.68,
+          "n_samples": 65,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 2.4000000000000004,
+          "nll": 3039.958335177464,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5168,
+          "cpu_s": 30.4792,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.71,
+          "n_samples": 64,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        },
+        {
+          "poi": 2.5,
+          "nll": 3039.9755241193925,
+          "success": true,
+          "nfev": 510,
+          "nit": 1,
+          "wall_s": 30.5329,
+          "cpu_s": 30.4928,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.27,
+          "n_samples": 53,
+          "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+          "error": null
+        }
+      ],
+      "points_scan_order": [
+        {
+          "poi": -0.5,
+          "nll": 3040.273076172529
+        },
+        {
+          "poi": -0.4,
+          "nll": 3040.1480630078654
+        },
+        {
+          "poi": -0.3,
+          "nll": 3040.0571254734023
+        },
+        {
+          "poi": -0.19999999999999996,
+          "nll": 3039.9884468307646
+        },
+        {
+          "poi": -0.09999999999999998,
+          "nll": 3039.935494824709
+        },
+        {
+          "poi": 0.0,
+          "nll": 3039.894265493468
+        },
+        {
+          "poi": 0.10000000000000009,
+          "nll": 3039.86213591504
+        },
+        {
+          "poi": 0.20000000000000007,
+          "nll": 3039.8372742835786
+        },
+        {
+          "poi": 0.30000000000000004,
+          "nll": 3039.818338578908
+        },
+        {
+          "poi": 0.4,
+          "nll": 3039.804309078985
+        },
+        {
+          "poi": 0.5,
+          "nll": 3039.7943936634065
+        },
+        {
+          "poi": 0.6000000000000001,
+          "nll": 3039.7879720044384
+        },
+        {
+          "poi": 0.7000000000000002,
+          "nll": 3039.7845491363814
+        },
+        {
+          "poi": 0.8,
+          "nll": 3039.783724098178
+        },
+        {
+          "poi": 0.9000000000000001,
+          "nll": 3039.785164499998
+        },
+        {
+          "poi": 1.0,
+          "nll": 3039.788595114161
+        },
+        {
+          "poi": 1.1,
+          "nll": 3039.7937825722724
+        },
+        {
+          "poi": 1.2000000000000002,
+          "nll": 3039.800529212044
+        },
+        {
+          "poi": 1.3,
+          "nll": 3039.8086645240232
+        },
+        {
+          "poi": 1.4000000000000001,
+          "nll": 3039.818042156776
+        },
+        {
+          "poi": 1.5,
+          "nll": 3039.8285338644046
+        },
+        {
+          "poi": 1.6,
+          "nll": 3039.8400281304203
+        },
+        {
+          "poi": 1.7000000000000002,
+          "nll": 3039.852426358446
+        },
+        {
+          "poi": 1.8000000000000003,
+          "nll": 3039.8656424613127
+        },
+        {
+          "poi": 1.9000000000000004,
+          "nll": 3039.879599446596
+        },
+        {
+          "poi": 2.0,
+          "nll": 3039.89422853565
+        },
+        {
+          "poi": 2.1,
+          "nll": 3039.9094686560466
+        },
+        {
+          "poi": 2.2,
+          "nll": 3039.925265083054
+        },
+        {
+          "poi": 2.3000000000000003,
+          "nll": 3039.9415691566733
+        },
+        {
+          "poi": 2.4000000000000004,
+          "nll": 3039.958335177464
+        },
+        {
+          "poi": 2.5,
+          "nll": 3039.9755241193925
+        }
+      ]
+    },
+    {
+      "label": "SLSQP",
+      "method": "SLSQP",
+      "tol": 0.001,
+      "maxiter": 1000,
+      "wall_s": 1680.9336,
+      "cpu_s": 1679.0159,
+      "peak_rss_mb": 7832.35,
+      "points": [
+        {
+          "poi": -0.5,
+          "nll": 3040.2040627215533,
+          "success": true,
+          "nfev": 1199,
+          "nit": 7,
+          "wall_s": 69.768,
+          "cpu_s": 69.6868,
+          "rss_before_mb": 7829.01,
+          "rss_after_mb": 7832.35,
+          "rss_peak_mb": 7832.35,
+          "cpu_percent_mean": 129.98,
+          "n_samples": 157,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": -0.4,
+          "nll": 3040.0842107241538,
+          "success": true,
+          "nfev": 1198,
+          "nit": 7,
+          "wall_s": 69.3387,
+          "cpu_s": 69.2578,
+          "rss_before_mb": 7832.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7832.35,
+          "cpu_percent_mean": 130.31,
+          "n_samples": 161,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": -0.3,
+          "nll": 3039.981759754858,
+          "success": true,
+          "nfev": 1199,
+          "nit": 7,
+          "wall_s": 69.4842,
+          "cpu_s": 69.4027,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 124.67,
+          "n_samples": 158,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": -0.19999999999999996,
+          "nll": 3039.9887758783975,
+          "success": true,
+          "nfev": 172,
+          "nit": 1,
+          "wall_s": 9.984,
+          "cpu_s": 9.9727,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 130.73,
+          "n_samples": 23,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": -0.09999999999999998,
+          "nll": 3039.9355860192686,
+          "success": true,
+          "nfev": 172,
+          "nit": 1,
+          "wall_s": 9.9799,
+          "cpu_s": 9.9684,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 118.43,
+          "n_samples": 23,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 0.0,
+          "nll": 3039.721729046117,
+          "success": true,
+          "nfev": 3077,
+          "nit": 18,
+          "wall_s": 178.2581,
+          "cpu_s": 178.058,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 125.12,
+          "n_samples": 412,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 0.10000000000000009,
+          "nll": 3039.7196849851216,
+          "success": true,
+          "nfev": 3077,
+          "nit": 18,
+          "wall_s": 178.3328,
+          "cpu_s": 178.1312,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 123.68,
+          "n_samples": 354,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 0.20000000000000007,
+          "nll": 3039.7204923611434,
+          "success": true,
+          "nfev": 2737,
+          "nit": 16,
+          "wall_s": 158.2602,
+          "cpu_s": 158.0803,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 124.06,
+          "n_samples": 373,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 0.30000000000000004,
+          "nll": 3039.747230911481,
+          "success": true,
+          "nfev": 2051,
+          "nit": 12,
+          "wall_s": 118.503,
+          "cpu_s": 118.3672,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 125.82,
+          "n_samples": 255,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 0.4,
+          "nll": 3039.7500517557046,
+          "success": true,
+          "nfev": 1196,
+          "nit": 7,
+          "wall_s": 69.1921,
+          "cpu_s": 69.1154,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 129.0,
+          "n_samples": 162,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 0.5,
+          "nll": 3039.7450907144344,
+          "success": true,
+          "nfev": 1539,
+          "nit": 9,
+          "wall_s": 89.1382,
+          "cpu_s": 89.0316,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 128.37,
+          "n_samples": 214,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 0.6000000000000001,
+          "nll": 3039.748267040698,
+          "success": true,
+          "nfev": 1027,
+          "nit": 6,
+          "wall_s": 59.4171,
+          "cpu_s": 59.3481,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 140.59,
+          "n_samples": 137,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 0.7000000000000002,
+          "nll": 3039.7508215738635,
+          "success": true,
+          "nfev": 1026,
+          "nit": 6,
+          "wall_s": 59.7358,
+          "cpu_s": 59.6669,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 135.38,
+          "n_samples": 137,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 0.8,
+          "nll": 3039.7520635456667,
+          "success": true,
+          "nfev": 1368,
+          "nit": 8,
+          "wall_s": 79.1628,
+          "cpu_s": 79.0711,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 128.24,
+          "n_samples": 181,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 0.9000000000000001,
+          "nll": 3039.7570442717206,
+          "success": true,
+          "nfev": 1369,
+          "nit": 8,
+          "wall_s": 79.0943,
+          "cpu_s": 79.0066,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 124.29,
+          "n_samples": 186,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 1.0,
+          "nll": 3039.7634698194715,
+          "success": true,
+          "nfev": 1369,
+          "nit": 8,
+          "wall_s": 79.2736,
+          "cpu_s": 79.1811,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 123.38,
+          "n_samples": 163,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 1.1,
+          "nll": 3039.793099558856,
+          "success": true,
+          "nfev": 343,
+          "nit": 2,
+          "wall_s": 19.89,
+          "cpu_s": 19.8666,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 134.47,
+          "n_samples": 45,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 1.2000000000000002,
+          "nll": 3039.8000313868783,
+          "success": true,
+          "nfev": 343,
+          "nit": 2,
+          "wall_s": 19.8765,
+          "cpu_s": 19.8548,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 128.35,
+          "n_samples": 48,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 1.3,
+          "nll": 3039.8082958470654,
+          "success": true,
+          "nfev": 343,
+          "nit": 2,
+          "wall_s": 19.891,
+          "cpu_s": 19.8686,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 120.67,
+          "n_samples": 45,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 1.4000000000000001,
+          "nll": 3039.8177566494123,
+          "success": true,
+          "nfev": 343,
+          "nit": 2,
+          "wall_s": 19.8859,
+          "cpu_s": 19.8631,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 136.83,
+          "n_samples": 46,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 1.5,
+          "nll": 3039.828305392481,
+          "success": true,
+          "nfev": 343,
+          "nit": 2,
+          "wall_s": 19.8746,
+          "cpu_s": 19.852,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 129.96,
+          "n_samples": 46,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 1.6,
+          "nll": 3039.839838968692,
+          "success": true,
+          "nfev": 343,
+          "nit": 2,
+          "wall_s": 19.8943,
+          "cpu_s": 19.8723,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 122.48,
+          "n_samples": 47,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 1.7000000000000002,
+          "nll": 3039.852263923967,
+          "success": true,
+          "nfev": 343,
+          "nit": 2,
+          "wall_s": 19.8849,
+          "cpu_s": 19.8621,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 127.74,
+          "n_samples": 47,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 1.8000000000000003,
+          "nll": 3039.8654962453625,
+          "success": true,
+          "nfev": 343,
+          "nit": 2,
+          "wall_s": 19.8977,
+          "cpu_s": 19.8773,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 120.46,
+          "n_samples": 51,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 1.9000000000000004,
+          "nll": 3039.8794628680516,
+          "success": true,
+          "nfev": 343,
+          "nit": 2,
+          "wall_s": 19.8956,
+          "cpu_s": 19.8737,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 119.94,
+          "n_samples": 49,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 2.0,
+          "nll": 3039.894093540892,
+          "success": true,
+          "nfev": 343,
+          "nit": 2,
+          "wall_s": 19.8974,
+          "cpu_s": 19.875,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 136.45,
+          "n_samples": 49,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 2.1,
+          "nll": 3039.909329771831,
+          "success": true,
+          "nfev": 343,
+          "nit": 2,
+          "wall_s": 19.8739,
+          "cpu_s": 19.8512,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 143.86,
+          "n_samples": 46,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 2.2,
+          "nll": 3039.925118224137,
+          "success": true,
+          "nfev": 343,
+          "nit": 2,
+          "wall_s": 19.8637,
+          "cpu_s": 19.8405,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 147.96,
+          "n_samples": 47,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 2.3000000000000003,
+          "nll": 3039.941409542,
+          "success": true,
+          "nfev": 343,
+          "nit": 2,
+          "wall_s": 19.863,
+          "cpu_s": 19.8403,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 124.99,
+          "n_samples": 44,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 2.4000000000000004,
+          "nll": 3039.9581598625123,
+          "success": true,
+          "nfev": 343,
+          "nit": 2,
+          "wall_s": 19.8532,
+          "cpu_s": 19.8302,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 127.83,
+          "n_samples": 45,
+          "message": "Optimization terminated successfully",
+          "error": null
+        },
+        {
+          "poi": 2.5,
+          "nll": 3039.975327910796,
+          "success": true,
+          "nfev": 343,
+          "nit": 2,
+          "wall_s": 20.4031,
+          "cpu_s": 20.3778,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 125.3,
+          "n_samples": 34,
+          "message": "Optimization terminated successfully",
+          "error": null
+        }
+      ],
+      "points_scan_order": [
+        {
+          "poi": -0.5,
+          "nll": 3040.2040627215533
+        },
+        {
+          "poi": -0.4,
+          "nll": 3040.0842107241538
+        },
+        {
+          "poi": -0.3,
+          "nll": 3039.981759754858
+        },
+        {
+          "poi": -0.19999999999999996,
+          "nll": 3039.9887758783975
+        },
+        {
+          "poi": -0.09999999999999998,
+          "nll": 3039.9355860192686
+        },
+        {
+          "poi": 0.0,
+          "nll": 3039.721729046117
+        },
+        {
+          "poi": 0.10000000000000009,
+          "nll": 3039.7196849851216
+        },
+        {
+          "poi": 0.20000000000000007,
+          "nll": 3039.7204923611434
+        },
+        {
+          "poi": 0.30000000000000004,
+          "nll": 3039.747230911481
+        },
+        {
+          "poi": 0.4,
+          "nll": 3039.7500517557046
+        },
+        {
+          "poi": 0.5,
+          "nll": 3039.7450907144344
+        },
+        {
+          "poi": 0.6000000000000001,
+          "nll": 3039.748267040698
+        },
+        {
+          "poi": 0.7000000000000002,
+          "nll": 3039.7508215738635
+        },
+        {
+          "poi": 0.8,
+          "nll": 3039.7520635456667
+        },
+        {
+          "poi": 0.9000000000000001,
+          "nll": 3039.7570442717206
+        },
+        {
+          "poi": 1.0,
+          "nll": 3039.7634698194715
+        },
+        {
+          "poi": 1.1,
+          "nll": 3039.793099558856
+        },
+        {
+          "poi": 1.2000000000000002,
+          "nll": 3039.8000313868783
+        },
+        {
+          "poi": 1.3,
+          "nll": 3039.8082958470654
+        },
+        {
+          "poi": 1.4000000000000001,
+          "nll": 3039.8177566494123
+        },
+        {
+          "poi": 1.5,
+          "nll": 3039.828305392481
+        },
+        {
+          "poi": 1.6,
+          "nll": 3039.839838968692
+        },
+        {
+          "poi": 1.7000000000000002,
+          "nll": 3039.852263923967
+        },
+        {
+          "poi": 1.8000000000000003,
+          "nll": 3039.8654962453625
+        },
+        {
+          "poi": 1.9000000000000004,
+          "nll": 3039.8794628680516
+        },
+        {
+          "poi": 2.0,
+          "nll": 3039.894093540892
+        },
+        {
+          "poi": 2.1,
+          "nll": 3039.909329771831
+        },
+        {
+          "poi": 2.2,
+          "nll": 3039.925118224137
+        },
+        {
+          "poi": 2.3000000000000003,
+          "nll": 3039.941409542
+        },
+        {
+          "poi": 2.4000000000000004,
+          "nll": 3039.9581598625123
+        },
+        {
+          "poi": 2.5,
+          "nll": 3039.975327910796
+        }
+      ]
+    },
+    {
+      "label": "TNC",
+      "method": "TNC",
+      "tol": 0.001,
+      "maxiter": 1000,
+      "wall_s": 3489.8453,
+      "cpu_s": 3485.6235,
+      "peak_rss_mb": 7831.35,
+      "points": [
+        {
+          "poi": -0.5,
+          "nll": 3040.074364696869,
+          "success": true,
+          "nfev": 1190,
+          "nit": 1,
+          "wall_s": 71.1671,
+          "cpu_s": 71.0795,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.42,
+          "n_samples": 152,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": -0.4,
+          "nll": 3039.7698347976107,
+          "success": true,
+          "nfev": 2040,
+          "nit": 1,
+          "wall_s": 121.9144,
+          "cpu_s": 121.7649,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.51,
+          "n_samples": 259,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": -0.3,
+          "nll": 3039.760848444323,
+          "success": true,
+          "nfev": 1360,
+          "nit": 1,
+          "wall_s": 81.1385,
+          "cpu_s": 81.0395,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.37,
+          "n_samples": 175,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": -0.19999999999999996,
+          "nll": 3039.7529411920373,
+          "success": true,
+          "nfev": 1700,
+          "nit": 1,
+          "wall_s": 101.5045,
+          "cpu_s": 101.3809,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.49,
+          "n_samples": 214,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": -0.09999999999999998,
+          "nll": 3039.747159857388,
+          "success": true,
+          "nfev": 1530,
+          "nit": 1,
+          "wall_s": 91.251,
+          "cpu_s": 91.1389,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.45,
+          "n_samples": 195,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 0.0,
+          "nll": 3039.7433788188496,
+          "success": true,
+          "nfev": 850,
+          "nit": 1,
+          "wall_s": 50.7048,
+          "cpu_s": 50.6427,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.09,
+          "n_samples": 108,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 0.10000000000000009,
+          "nll": 3039.7414349173,
+          "success": true,
+          "nfev": 1190,
+          "nit": 1,
+          "wall_s": 71.1312,
+          "cpu_s": 71.0438,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.35,
+          "n_samples": 152,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 0.20000000000000007,
+          "nll": 3039.741229098114,
+          "success": true,
+          "nfev": 1020,
+          "nit": 1,
+          "wall_s": 61.0668,
+          "cpu_s": 60.9917,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.46,
+          "n_samples": 131,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 0.30000000000000004,
+          "nll": 3039.7418790452894,
+          "success": true,
+          "nfev": 1360,
+          "nit": 1,
+          "wall_s": 81.4343,
+          "cpu_s": 81.335,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.44,
+          "n_samples": 171,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 0.4,
+          "nll": 3039.744261887518,
+          "success": true,
+          "nfev": 1190,
+          "nit": 1,
+          "wall_s": 71.2149,
+          "cpu_s": 71.124,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.25,
+          "n_samples": 153,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 0.5,
+          "nll": 3039.540888335144,
+          "success": true,
+          "nfev": 2720,
+          "nit": 1,
+          "wall_s": 162.5799,
+          "cpu_s": 162.3796,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.41,
+          "n_samples": 346,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 0.6000000000000001,
+          "nll": 3039.7240525074494,
+          "success": true,
+          "nfev": 1020,
+          "nit": 1,
+          "wall_s": 60.9835,
+          "cpu_s": 60.9085,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.58,
+          "n_samples": 131,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 0.7000000000000002,
+          "nll": 3039.709582504771,
+          "success": true,
+          "nfev": 1020,
+          "nit": 1,
+          "wall_s": 60.8716,
+          "cpu_s": 60.7965,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.26,
+          "n_samples": 128,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 0.8,
+          "nll": 3039.7039772790167,
+          "success": true,
+          "nfev": 1190,
+          "nit": 1,
+          "wall_s": 70.978,
+          "cpu_s": 70.8902,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.67,
+          "n_samples": 149,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 0.9000000000000001,
+          "nll": 3039.701685341792,
+          "success": true,
+          "nfev": 850,
+          "nit": 1,
+          "wall_s": 50.8334,
+          "cpu_s": 50.7712,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.38,
+          "n_samples": 110,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 1.0,
+          "nll": 3039.6049042127033,
+          "success": true,
+          "nfev": 7990,
+          "nit": 1,
+          "wall_s": 477.36,
+          "cpu_s": 476.7737,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.51,
+          "n_samples": 1022,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 1.1,
+          "nll": 3039.5337627611593,
+          "success": true,
+          "nfev": 1360,
+          "nit": 1,
+          "wall_s": 78.1581,
+          "cpu_s": 78.0649,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.53,
+          "n_samples": 180,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 1.2000000000000002,
+          "nll": 3039.546283374667,
+          "success": true,
+          "nfev": 1530,
+          "nit": 1,
+          "wall_s": 87.978,
+          "cpu_s": 87.8742,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.4,
+          "n_samples": 199,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 1.3,
+          "nll": 3039.561609768206,
+          "success": true,
+          "nfev": 1700,
+          "nit": 1,
+          "wall_s": 97.903,
+          "cpu_s": 97.7853,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.54,
+          "n_samples": 217,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 1.4000000000000001,
+          "nll": 3039.4994630342435,
+          "success": true,
+          "nfev": 1360,
+          "nit": 1,
+          "wall_s": 78.1996,
+          "cpu_s": 78.1057,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.4,
+          "n_samples": 177,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 1.5,
+          "nll": 3039.5035825172067,
+          "success": true,
+          "nfev": 1360,
+          "nit": 1,
+          "wall_s": 78.1915,
+          "cpu_s": 78.0992,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.39,
+          "n_samples": 176,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 1.6,
+          "nll": 3039.5801061096045,
+          "success": true,
+          "nfev": 5100,
+          "nit": 1,
+          "wall_s": 293.179,
+          "cpu_s": 292.8289,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.43,
+          "n_samples": 656,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 1.7000000000000002,
+          "nll": 3039.5959399167436,
+          "success": true,
+          "nfev": 4590,
+          "nit": 1,
+          "wall_s": 263.8653,
+          "cpu_s": 263.5508,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.48,
+          "n_samples": 596,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 1.8000000000000003,
+          "nll": 3039.528837154155,
+          "success": true,
+          "nfev": 1530,
+          "nit": 1,
+          "wall_s": 87.9652,
+          "cpu_s": 87.86,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.4,
+          "n_samples": 201,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 1.9000000000000004,
+          "nll": 3039.550733143374,
+          "success": true,
+          "nfev": 2040,
+          "nit": 1,
+          "wall_s": 117.3064,
+          "cpu_s": 117.1658,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.41,
+          "n_samples": 268,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 2.0,
+          "nll": 3039.5305469880914,
+          "success": true,
+          "nfev": 1530,
+          "nit": 1,
+          "wall_s": 88.0122,
+          "cpu_s": 87.9066,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.49,
+          "n_samples": 198,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 2.1,
+          "nll": 3039.5442315391488,
+          "success": true,
+          "nfev": 1700,
+          "nit": 1,
+          "wall_s": 97.7803,
+          "cpu_s": 97.6637,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.39,
+          "n_samples": 218,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 2.2,
+          "nll": 3039.5340334460666,
+          "success": true,
+          "nfev": 1870,
+          "nit": 1,
+          "wall_s": 107.536,
+          "cpu_s": 107.4081,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.49,
+          "n_samples": 236,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 2.3000000000000003,
+          "nll": 3039.511501174814,
+          "success": true,
+          "nfev": 2040,
+          "nit": 1,
+          "wall_s": 117.3135,
+          "cpu_s": 117.1739,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.53,
+          "n_samples": 264,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 2.4000000000000004,
+          "nll": 3039.5194965678866,
+          "success": true,
+          "nfev": 1700,
+          "nit": 1,
+          "wall_s": 97.7202,
+          "cpu_s": 97.6035,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.51,
+          "n_samples": 220,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        },
+        {
+          "poi": 2.5,
+          "nll": 3039.509369435732,
+          "success": true,
+          "nfev": 1870,
+          "nit": 1,
+          "wall_s": 107.552,
+          "cpu_s": 107.423,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.39,
+          "n_samples": 237,
+          "message": "Converged (|x_n-x_(n-1)| ~= 0)",
+          "error": null
+        }
+      ],
+      "points_scan_order": [
+        {
+          "poi": -0.5,
+          "nll": 3040.074364696869
+        },
+        {
+          "poi": -0.4,
+          "nll": 3039.7698347976107
+        },
+        {
+          "poi": -0.3,
+          "nll": 3039.760848444323
+        },
+        {
+          "poi": -0.19999999999999996,
+          "nll": 3039.7529411920373
+        },
+        {
+          "poi": -0.09999999999999998,
+          "nll": 3039.747159857388
+        },
+        {
+          "poi": 0.0,
+          "nll": 3039.7433788188496
+        },
+        {
+          "poi": 0.10000000000000009,
+          "nll": 3039.7414349173
+        },
+        {
+          "poi": 0.20000000000000007,
+          "nll": 3039.741229098114
+        },
+        {
+          "poi": 0.30000000000000004,
+          "nll": 3039.7418790452894
+        },
+        {
+          "poi": 0.4,
+          "nll": 3039.744261887518
+        },
+        {
+          "poi": 0.5,
+          "nll": 3039.540888335144
+        },
+        {
+          "poi": 0.6000000000000001,
+          "nll": 3039.7240525074494
+        },
+        {
+          "poi": 0.7000000000000002,
+          "nll": 3039.709582504771
+        },
+        {
+          "poi": 0.8,
+          "nll": 3039.7039772790167
+        },
+        {
+          "poi": 0.9000000000000001,
+          "nll": 3039.701685341792
+        },
+        {
+          "poi": 1.0,
+          "nll": 3039.6049042127033
+        },
+        {
+          "poi": 1.1,
+          "nll": 3039.5337627611593
+        },
+        {
+          "poi": 1.2000000000000002,
+          "nll": 3039.546283374667
+        },
+        {
+          "poi": 1.3,
+          "nll": 3039.561609768206
+        },
+        {
+          "poi": 1.4000000000000001,
+          "nll": 3039.4994630342435
+        },
+        {
+          "poi": 1.5,
+          "nll": 3039.5035825172067
+        },
+        {
+          "poi": 1.6,
+          "nll": 3039.5801061096045
+        },
+        {
+          "poi": 1.7000000000000002,
+          "nll": 3039.5959399167436
+        },
+        {
+          "poi": 1.8000000000000003,
+          "nll": 3039.528837154155
+        },
+        {
+          "poi": 1.9000000000000004,
+          "nll": 3039.550733143374
+        },
+        {
+          "poi": 2.0,
+          "nll": 3039.5305469880914
+        },
+        {
+          "poi": 2.1,
+          "nll": 3039.5442315391488
+        },
+        {
+          "poi": 2.2,
+          "nll": 3039.5340334460666
+        },
+        {
+          "poi": 2.3000000000000003,
+          "nll": 3039.511501174814
+        },
+        {
+          "poi": 2.4000000000000004,
+          "nll": 3039.5194965678866
+        },
+        {
+          "poi": 2.5,
+          "nll": 3039.509369435732
+        }
+      ]
+    },
+    {
+      "label": "migrad",
+      "method": "migrad",
+      "tol": 0.001,
+      "maxiter": 1000,
+      "wall_s": 4616.8814,
+      "cpu_s": 4611.434,
+      "peak_rss_mb": 7831.35,
+      "points": [
+        {
+          "poi": -0.5,
+          "nll": 3039.9642940166045,
+          "success": false,
+          "nfev": 3117,
+          "nit": -1,
+          "wall_s": 179.5349,
+          "cpu_s": 179.3211,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.49,
+          "n_samples": 402,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": -0.4,
+          "nll": 3039.448375068964,
+          "success": false,
+          "nfev": 3454,
+          "nit": -1,
+          "wall_s": 198.9412,
+          "cpu_s": 198.7054,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.37,
+          "n_samples": 445,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": -0.3,
+          "nll": 3039.4234788257927,
+          "success": false,
+          "nfev": 3794,
+          "nit": -1,
+          "wall_s": 219.4675,
+          "cpu_s": 219.2109,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.48,
+          "n_samples": 482,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": -0.19999999999999996,
+          "nll": 3039.4237229527826,
+          "success": false,
+          "nfev": 3473,
+          "nit": -1,
+          "wall_s": 200.8742,
+          "cpu_s": 200.6348,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.44,
+          "n_samples": 424,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": -0.09999999999999998,
+          "nll": 3039.42758784382,
+          "success": false,
+          "nfev": 3480,
+          "nit": -1,
+          "wall_s": 201.1721,
+          "cpu_s": 200.9386,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.52,
+          "n_samples": 441,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 0.0,
+          "nll": 3039.4341571769796,
+          "success": false,
+          "nfev": 3131,
+          "nit": -1,
+          "wall_s": 180.9096,
+          "cpu_s": 180.6983,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.52,
+          "n_samples": 402,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 0.10000000000000009,
+          "nll": 3039.4522517942023,
+          "success": false,
+          "nfev": 3154,
+          "nit": -1,
+          "wall_s": 182.2367,
+          "cpu_s": 182.0231,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.57,
+          "n_samples": 405,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 0.20000000000000007,
+          "nll": 3039.460333388214,
+          "success": false,
+          "nfev": 2428,
+          "nit": -1,
+          "wall_s": 140.1575,
+          "cpu_s": 139.993,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.46,
+          "n_samples": 308,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 0.30000000000000004,
+          "nll": 3039.5372329825614,
+          "success": false,
+          "nfev": 2434,
+          "nit": -1,
+          "wall_s": 140.5436,
+          "cpu_s": 140.3797,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.45,
+          "n_samples": 311,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 0.4,
+          "nll": 3039.516916110252,
+          "success": false,
+          "nfev": 3132,
+          "nit": -1,
+          "wall_s": 180.8494,
+          "cpu_s": 180.6364,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.52,
+          "n_samples": 405,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 0.5,
+          "nll": 3039.518992508885,
+          "success": false,
+          "nfev": 2778,
+          "nit": -1,
+          "wall_s": 160.0954,
+          "cpu_s": 159.9084,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.48,
+          "n_samples": 352,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 0.6000000000000001,
+          "nll": 3039.5131653522717,
+          "success": false,
+          "nfev": 2439,
+          "nit": -1,
+          "wall_s": 140.5932,
+          "cpu_s": 140.4298,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.47,
+          "n_samples": 305,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 0.7000000000000002,
+          "nll": 3039.5121724367386,
+          "success": false,
+          "nfev": 2082,
+          "nit": -1,
+          "wall_s": 119.8006,
+          "cpu_s": 119.6611,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.46,
+          "n_samples": 268,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 0.8,
+          "nll": 3039.5088965539335,
+          "success": false,
+          "nfev": 2426,
+          "nit": -1,
+          "wall_s": 139.8257,
+          "cpu_s": 139.6622,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.47,
+          "n_samples": 308,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 0.9000000000000001,
+          "nll": 3039.5186096572556,
+          "success": false,
+          "nfev": 2414,
+          "nit": -1,
+          "wall_s": 138.9875,
+          "cpu_s": 138.8237,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.51,
+          "n_samples": 311,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 1.0,
+          "nll": 3039.5222924556597,
+          "success": false,
+          "nfev": 2077,
+          "nit": -1,
+          "wall_s": 119.5734,
+          "cpu_s": 119.4334,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.49,
+          "n_samples": 267,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 1.1,
+          "nll": 3039.529878368481,
+          "success": false,
+          "nfev": 2077,
+          "nit": -1,
+          "wall_s": 119.2435,
+          "cpu_s": 119.1051,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.52,
+          "n_samples": 262,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 1.2000000000000002,
+          "nll": 3039.532613577269,
+          "success": false,
+          "nfev": 2423,
+          "nit": -1,
+          "wall_s": 139.4625,
+          "cpu_s": 139.302,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.5,
+          "n_samples": 313,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 1.3,
+          "nll": 3039.549714580843,
+          "success": false,
+          "nfev": 2424,
+          "nit": -1,
+          "wall_s": 139.4923,
+          "cpu_s": 139.3291,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.58,
+          "n_samples": 312,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 1.4000000000000001,
+          "nll": 3039.5611846127317,
+          "success": false,
+          "nfev": 2412,
+          "nit": -1,
+          "wall_s": 138.5912,
+          "cpu_s": 138.4301,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.47,
+          "n_samples": 305,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 1.5,
+          "nll": 3039.57343272472,
+          "success": false,
+          "nfev": 2076,
+          "nit": -1,
+          "wall_s": 119.4536,
+          "cpu_s": 119.3142,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.47,
+          "n_samples": 267,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 1.6,
+          "nll": 3039.5846803155473,
+          "success": false,
+          "nfev": 2430,
+          "nit": -1,
+          "wall_s": 140.9921,
+          "cpu_s": 140.826,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.37,
+          "n_samples": 309,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 1.7000000000000002,
+          "nll": 3039.59839390794,
+          "success": false,
+          "nfev": 2426,
+          "nit": -1,
+          "wall_s": 144.3313,
+          "cpu_s": 144.1569,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.51,
+          "n_samples": 304,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 1.8000000000000003,
+          "nll": 3039.626692336024,
+          "success": false,
+          "nfev": 2078,
+          "nit": -1,
+          "wall_s": 123.748,
+          "cpu_s": 123.5987,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.53,
+          "n_samples": 262,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 1.9000000000000004,
+          "nll": 3039.628392682012,
+          "success": false,
+          "nfev": 2426,
+          "nit": -1,
+          "wall_s": 144.5659,
+          "cpu_s": 144.3902,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.45,
+          "n_samples": 301,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 2.0,
+          "nll": 3039.6378613488273,
+          "success": false,
+          "nfev": 2782,
+          "nit": -1,
+          "wall_s": 165.4748,
+          "cpu_s": 165.2727,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.61,
+          "n_samples": 349,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 2.1,
+          "nll": 3039.672550487161,
+          "success": false,
+          "nfev": 2089,
+          "nit": -1,
+          "wall_s": 124.1427,
+          "cpu_s": 123.9917,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.45,
+          "n_samples": 265,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 2.2,
+          "nll": 3039.6831484709896,
+          "success": false,
+          "nfev": 2417,
+          "nit": -1,
+          "wall_s": 143.62,
+          "cpu_s": 143.4451,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.62,
+          "n_samples": 306,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 2.3000000000000003,
+          "nll": 3039.7067203007573,
+          "success": false,
+          "nfev": 2076,
+          "nit": -1,
+          "wall_s": 123.4822,
+          "cpu_s": 123.3342,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.56,
+          "n_samples": 264,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 2.4000000000000004,
+          "nll": 3039.736626720214,
+          "success": false,
+          "nfev": 1729,
+          "nit": -1,
+          "wall_s": 102.3497,
+          "cpu_s": 102.2261,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.5,
+          "n_samples": 221,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        },
+        {
+          "poi": 2.5,
+          "nll": 3039.755831628348,
+          "success": false,
+          "nfev": 1728,
+          "nit": -1,
+          "wall_s": 99.34,
+          "cpu_s": 99.2247,
+          "rss_before_mb": 7831.35,
+          "rss_after_mb": 7831.35,
+          "rss_peak_mb": 7831.35,
+          "cpu_percent_mean": 100.62,
+          "n_samples": 221,
+          "message": "Optimization failed. Call limit was reached.",
+          "error": null
+        }
+      ],
+      "points_scan_order": [
+        {
+          "poi": -0.5,
+          "nll": 3039.9642940166045
+        },
+        {
+          "poi": -0.4,
+          "nll": 3039.448375068964
+        },
+        {
+          "poi": -0.3,
+          "nll": 3039.4234788257927
+        },
+        {
+          "poi": -0.19999999999999996,
+          "nll": 3039.4237229527826
+        },
+        {
+          "poi": -0.09999999999999998,
+          "nll": 3039.42758784382
+        },
+        {
+          "poi": 0.0,
+          "nll": 3039.4341571769796
+        },
+        {
+          "poi": 0.10000000000000009,
+          "nll": 3039.4522517942023
+        },
+        {
+          "poi": 0.20000000000000007,
+          "nll": 3039.460333388214
+        },
+        {
+          "poi": 0.30000000000000004,
+          "nll": 3039.5372329825614
+        },
+        {
+          "poi": 0.4,
+          "nll": 3039.516916110252
+        },
+        {
+          "poi": 0.5,
+          "nll": 3039.518992508885
+        },
+        {
+          "poi": 0.6000000000000001,
+          "nll": 3039.5131653522717
+        },
+        {
+          "poi": 0.7000000000000002,
+          "nll": 3039.5121724367386
+        },
+        {
+          "poi": 0.8,
+          "nll": 3039.5088965539335
+        },
+        {
+          "poi": 0.9000000000000001,
+          "nll": 3039.5186096572556
+        },
+        {
+          "poi": 1.0,
+          "nll": 3039.5222924556597
+        },
+        {
+          "poi": 1.1,
+          "nll": 3039.529878368481
+        },
+        {
+          "poi": 1.2000000000000002,
+          "nll": 3039.532613577269
+        },
+        {
+          "poi": 1.3,
+          "nll": 3039.549714580843
+        },
+        {
+          "poi": 1.4000000000000001,
+          "nll": 3039.5611846127317
+        },
+        {
+          "poi": 1.5,
+          "nll": 3039.57343272472
+        },
+        {
+          "poi": 1.6,
+          "nll": 3039.5846803155473
+        },
+        {
+          "poi": 1.7000000000000002,
+          "nll": 3039.59839390794
+        },
+        {
+          "poi": 1.8000000000000003,
+          "nll": 3039.626692336024
+        },
+        {
+          "poi": 1.9000000000000004,
+          "nll": 3039.628392682012
+        },
+        {
+          "poi": 2.0,
+          "nll": 3039.6378613488273
+        },
+        {
+          "poi": 2.1,
+          "nll": 3039.672550487161
+        },
+        {
+          "poi": 2.2,
+          "nll": 3039.6831484709896
+        },
+        {
+          "poi": 2.3000000000000003,
+          "nll": 3039.7067203007573
+        },
+        {
+          "poi": 2.4000000000000004,
+          "nll": 3039.736626720214
+        },
+        {
+          "poi": 2.5,
+          "nll": 3039.755831628348
+        }
+      ]
+    }
+  ]
+}

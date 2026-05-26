@@ -24,6 +24,7 @@ from pyhs3.compile import function
 from pyhs3.context import Context
 from pyhs3.data import BinnedData
 from pyhs3.distributions import Distributions, HistFactoryDistChannel
+from pyhs3.distributions.composite import ProductDist
 from pyhs3.domains import Domain
 from pyhs3.functions import Functions
 from pyhs3.networks import build_dependency_graph
@@ -235,6 +236,14 @@ class Model:
         # yields shape (M,) per term — the parameter batch size.
         terms: list[TensorVar] = []
 
+        # Track constraint factor names already contributed so that constraints
+        # shared across multiple channels are only counted once globally.
+        # This prevents the N-fold overcounting that occurs when constraint PDFs
+        # (which do not depend on the observable) appear in a ProductDist alongside
+        # the shape PDF: naively summing log(shape × Π_j constr_j) over N events
+        # multiplies each constr_j term by N rather than counting it once.
+        _seen_constraint_factors: set[str] = set()
+
         for dist_obj, datum in zip(
             self._likelihood.distributions, self._likelihood.data, strict=True
         ):
@@ -252,11 +261,9 @@ class Model:
                     terms.append(pt.log(self._hfdc_poisson[dist_name]))
                 continue
 
-            # model.distributions[name] is the normalized PDF expression with
-            # observables as symbolic pt.vector free inputs.
-            log_pdf: TensorVar = pt.log(self.distributions[dist_name])
-
+            # Resolve weight tensor once for this datum.
             weights = getattr(datum, "weights", None)
+            weights_t: TensorVar | None = None
             if weights is not None:
                 warnings.warn(
                     f"'{datum.name}' has per-event weights; weights are baked as "
@@ -264,7 +271,6 @@ class Model:
                     UserWarning,
                     stacklevel=2,
                 )
-                # (N,) → (N, 1) so it broadcasts correctly against (N, M) log_pdf
                 weights_arr = np.asarray(weights, dtype=np.float64)
                 total_weight = float(np.sum(weights_arr))
                 if not np.isfinite(total_weight) or np.isclose(total_weight, 0.0):
@@ -273,12 +279,59 @@ class Model:
                         "sum of weights must be finite and non-zero."
                     )
                     raise ValueError(msg)
+                # (N,) → (N, 1) so it broadcasts against (N, M) log_pdf.
                 weights_t = pt.constant(weights_arr)[:, None]
-                terms.append(
-                    pt.sum(weights_t * log_pdf, axis=0) / np.float64(total_weight)  # type: ignore[no-untyped-call]
-                )
+
+            # For ProductDist channels, split factors into:
+            #   • shape factors  — depend on the observable (pt.vector inputs) → sum over events
+            #   • constraint factors — depend only on scalar NPs → add once globally
+            #
+            # This separation prevents constraints from being multiplied by N_events.
+            # Observable arrays are built as pt.vector (ndim=1); NP scalars are pt.scalar (ndim=0).
+            _dist_obj = self._distribution_objects.get(dist_name)
+            if isinstance(_dist_obj, ProductDist):
+                shape_log_terms: list[TensorVar] = []
+
+                for factor_name in _dist_obj.factors:
+                    factor_expr: TensorVar | None = self.distributions.get(factor_name)
+                    if factor_expr is None:
+                        continue  # should not happen, but be safe
+                    free_inputs = [
+                        v for v in explicit_graph_inputs([factor_expr])
+                        if v.name is not None
+                    ]
+                    # Observable-dependent factors have at least one vector (rank-1) input.
+                    is_shape = any(v.type.ndim >= 1 for v in free_inputs)
+
+                    if is_shape:
+                        shape_log_terms.append(pt.log(factor_expr))
+                    elif factor_name not in _seen_constraint_factors:
+                        # Add each unique constraint exactly once globally.
+                        _seen_constraint_factors.add(factor_name)
+                        terms.append(pt.log(factor_expr))
+                    # else: already counted from an earlier channel — skip.
+
+                # Sum shape log over events.  No /total_weight: the correct weighted
+                # log-likelihood is Σᵢ wᵢ log f(xᵢ), not a per-event average.
+                if shape_log_terms:
+                    shape_log_pdf: TensorVar = (
+                        pt.add(*shape_log_terms)
+                        if len(shape_log_terms) > 1
+                        else shape_log_terms[0]
+                    )
+                    if weights_t is not None:
+                        terms.append(pt.sum(weights_t * shape_log_pdf, axis=0))  # type: ignore[no-untyped-call]
+                    else:
+                        terms.append(pt.sum(shape_log_pdf, axis=0))  # type: ignore[no-untyped-call]
             else:
-                terms.append(pt.sum(log_pdf, axis=0))  # type: ignore[no-untyped-call]
+                # Non-ProductDist: standard unbinned log-likelihood.
+                # Weighted: Σᵢ wᵢ log f(xᵢ). Unweighted: Σᵢ log f(xᵢ).
+                # No /total_weight: that would give an average NLL (wrong scale).
+                log_pdf: TensorVar = pt.log(self.distributions[dist_name])
+                if weights_t is not None:
+                    terms.append(pt.sum(weights_t * log_pdf, axis=0))  # type: ignore[no-untyped-call]
+                else:
+                    terms.append(pt.sum(log_pdf, axis=0))  # type: ignore[no-untyped-call]
 
         # Auxiliary distributions (constraint terms) are scalars; they broadcast
         # onto the parameter-scan axis when non-scalar params are present.

@@ -24,7 +24,7 @@ from pyhs3.compile import function
 from pyhs3.context import Context
 from pyhs3.data import BinnedData
 from pyhs3.distributions import Distributions, HistFactoryDistChannel
-from pyhs3.distributions.composite import ProductDist
+from pyhs3.distributions.composite import MixtureDist, ProductDist
 from pyhs3.domains import Domain
 from pyhs3.functions import Functions
 from pyhs3.networks import build_dependency_graph
@@ -138,6 +138,17 @@ class Model:
         # so that logpdf() continues to work; log_prob uses this dict to avoid
         # double-counting constraint terms when multiple channels share a parameter.
         self._hfdc_poisson: dict[str, TensorVar] = {}
+        # Extended-MixtureDist Poisson-term support.
+        # For each channel name we store two nodes built during _build_distribution_node:
+        #   _extended_yields[name]  = ν = Σcᵢ  (total expected yield)
+        #   _extended_unnorm[name]  = Σcᵢfᵢ    (unnormalized mixture numerator)
+        #
+        # log_prob uses them to compute the extended log-likelihood as
+        #   Σⱼ log(Σcᵢfᵢ(xⱼ))  −  ν
+        # which is equivalent to  Σⱼ log(PDF(xⱼ)) + N·log(ν) − ν  but avoids
+        # a separate pt.log(ν) node that triggers costly optimizer rewrites.
+        self._extended_yields: dict[str, TensorVar] = {}
+        self._extended_unnorm: dict[str, TensorVar] = {}
 
         # Build dependency graph with proper entity identification
         self._build_dependency_graph(functions, distributions, progress)
@@ -304,7 +315,25 @@ class Model:
                     is_shape = any(v.type.ndim >= 1 for v in free_inputs)
 
                     if is_shape:
-                        shape_log_terms.append(pt.log(factor_expr))
+                        unnorm_expr = self._extended_unnorm.get(factor_name)
+                        nu_expr = self._extended_yields.get(factor_name)
+                        if unnorm_expr is not None and nu_expr is not None and entries is not None:
+                            # Extended MixtureDist: use the unnormalized mixture to
+                            # avoid a separate pt.log(ν) node.
+                            #
+                            # The full extended log-likelihood per channel is:
+                            #   Σⱼ log(Σcᵢfᵢ(xⱼ)/ν)  +  N·log(ν)  −  ν
+                            # which simplifies (the log(ν) terms cancel) to:
+                            #   Σⱼ log(Σcᵢfᵢ(xⱼ))  −  ν
+                            #
+                            # This is algebraically identical but avoids introducing
+                            # pt.log(ν) into the graph, preventing costly optimizer
+                            # rewrite cascades triggered by log(a/b) + N·log(b).
+                            shape_log_terms.append(pt.log(unnorm_expr))
+                            terms.append(-nu_expr)
+                        else:
+                            # Non-extended shape factor: just add log(PDF).
+                            shape_log_terms.append(pt.log(factor_expr))
                     elif factor_name not in _seen_constraint_factors:
                         # Add each unique constraint exactly once globally.
                         _seen_constraint_factors.add(factor_name)
@@ -327,11 +356,24 @@ class Model:
                 # Non-ProductDist: standard unbinned log-likelihood.
                 # Weighted: Σᵢ wᵢ log f(xᵢ). Unweighted: Σᵢ log f(xᵢ).
                 # No /total_weight: that would give an average NLL (wrong scale).
-                log_pdf: TensorVar = pt.log(self.distributions[dist_name])
-                if weights_t is not None:
-                    terms.append(pt.sum(weights_t * log_pdf, axis=0))  # type: ignore[no-untyped-call]
+                unnorm_expr = self._extended_unnorm.get(dist_name)
+                nu_expr = self._extended_yields.get(dist_name)
+                if unnorm_expr is not None and nu_expr is not None and entries is not None:
+                    # Extended MixtureDist without ProductDist wrapper: use
+                    # unnormalized mixture to avoid pt.log(ν) (see ProductDist
+                    # path above for the full explanation).
+                    log_pdf = pt.log(unnorm_expr)
+                    if weights_t is not None:
+                        terms.append(pt.sum(weights_t * log_pdf, axis=0))  # type: ignore[no-untyped-call]
+                    else:
+                        terms.append(pt.sum(log_pdf, axis=0))  # type: ignore[no-untyped-call]
+                    terms.append(-nu_expr)
                 else:
-                    terms.append(pt.sum(log_pdf, axis=0))  # type: ignore[no-untyped-call]
+                    log_pdf = pt.log(self.distributions[dist_name])
+                    if weights_t is not None:
+                        terms.append(pt.sum(weights_t * log_pdf, axis=0))  # type: ignore[no-untyped-call]
+                    else:
+                        terms.append(pt.sum(log_pdf, axis=0))  # type: ignore[no-untyped-call]
 
         # Auxiliary distributions (constraint terms) are scalars; they broadcast
         # onto the parameter-scan axis when non-scalar params are present.
@@ -490,7 +532,17 @@ class Model:
         """
         dist = distributions[node_name]
         if not isinstance(dist, HistFactoryDistChannel):
-            return dist.expression(context)
+            expr = dist.expression(context)
+            # For extended MixtureDist, cache the unnormalized mixture (Σcᵢfᵢ)
+            # and the expected yield (ν = Σcᵢ).  log_prob uses these to build
+            # the extended log-likelihood as
+            #   Σⱼ log(Σcᵢfᵢ(xⱼ)) − ν
+            # rather than  Σⱼ log(PDF) + N·log(ν) − ν, avoiding a separate
+            # pt.log(ν) node that can trigger expensive optimiser rewrites.
+            if isinstance(dist, MixtureDist) and dist.extended:
+                self._extended_yields[node_name] = dist.expected_yield(context)
+                self._extended_unnorm[node_name] = dist.unnormalized_expression(context)
+            return expr
 
         # Poisson-only term; the full expression is returned below for logpdf.
         self._hfdc_poisson[node_name] = dist.likelihood(context)

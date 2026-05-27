@@ -189,9 +189,15 @@ class MixtureDist(Distribution):
             # N coefficients case: direct summation with normalization
             mixturesum = pt.constant(0.0)
 
-            # Calculate the mixture sum
+            # Calculate the mixture sum (unnormalized: Σ cᵢ fᵢ)
             for i, coeff in enumerate(self.coefficients):
                 mixturesum += context[coeff] * context[self.summands[i]]
+
+            # Cache the unnormalized Σcᵢfᵢ so that model.log_prob can build
+            # the extended log-likelihood as Σⱼ log(Σcᵢfᵢ(xⱼ)) − ν without
+            # introducing a separate pt.log(ν) node that triggers costly
+            # optimizer rewrites when combined with log(Σcᵢfᵢ/ν).
+            self._cached_unnorm_expr = mixturesum
 
             # Handle normalization
             if self.ref_coef_norm is not None:
@@ -199,12 +205,18 @@ class MixtureDist(Distribution):
                 norm_sum = pt.constant(0.0)
                 for norm_coeff in self.ref_coef_norm:
                     norm_sum += context[norm_coeff]
+                # Cache the normalisation sum so expected_yield() can reuse
+                # the same PyTensor node rather than building a duplicate
+                # summation subgraph that the compiler then has to merge.
+                self._cached_nu_expr = norm_sum
                 mixturesum = mixturesum / norm_sum
             else:
                 # Standard normalization: divide by sum of all coefficients
                 coeffsum = pt.constant(0.0)
                 for coeff in self.coefficients:
                     coeffsum += context[coeff]
+                # Cache so expected_yield() reuses this node.
+                self._cached_nu_expr = coeffsum
                 mixturesum = mixturesum / coeffsum
 
         else:
@@ -244,6 +256,12 @@ class MixtureDist(Distribution):
             msg = "expected_yield only valid for extended PDFs"
             raise RuntimeError(msg)
 
+        # Reuse the normalisation sum cached by likelihood() to avoid building
+        # a duplicate PyTensor summation subgraph (which would slow compilation).
+        if hasattr(self, "_cached_nu_expr"):
+            return cast(TensorVar, self._cached_nu_expr)
+
+        # Fallback: likelihood() hasn't been called yet, compute fresh.
         nu = pt.constant(0.0)
 
         if self.ref_coef_norm is not None:
@@ -256,6 +274,31 @@ class MixtureDist(Distribution):
                 nu += context[coeff]
 
         return cast(TensorVar, nu)
+
+    def unnormalized_expression(self, context: Context) -> TensorVar:
+        """Return the unnormalized mixture Σcᵢfᵢ (before dividing by Σcᵢ).
+
+        After :meth:`likelihood` has been called this just returns the cached
+        intermediate result; it is used by :meth:`pyhs3.model.Model.log_prob`
+        to build the extended log-likelihood as
+
+            Σⱼ log(Σcᵢfᵢ(xⱼ)) − ν
+
+        which is algebraically equivalent to
+
+            Σⱼ log(Σcᵢfᵢ(xⱼ)/ν)  +  N·log(ν)  −  ν
+
+        but avoids introducing a separate ``pt.log(ν)`` node that can trigger
+        expensive rewrite cascades in the PyTensor graph optimiser.
+        """
+        if hasattr(self, "_cached_unnorm_expr"):
+            return cast(TensorVar, self._cached_unnorm_expr)
+
+        # Fallback: recompute (likelihood() hasn't been called yet).
+        unnorm = pt.constant(0.0)
+        for i, coeff in enumerate(self.coefficients):
+            unnorm += context[coeff] * context[self.summands[i]]
+        return cast(TensorVar, unnorm)
 
     def extended_likelihood(
         self, context: Context, data: TensorVar | None = None

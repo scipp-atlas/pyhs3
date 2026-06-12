@@ -183,6 +183,29 @@ class TestNamedCollection:
         with pytest.raises(ValueError, match=r"'a'.*'b'"):
             StrictDummyCollection(items)
 
+    def test_triple_occurrence_not_duplicated_in_error(self) -> None:
+        """A name that appears three times is listed once in the error message."""
+        # Third occurrence hits the ``item.name not in duplicates`` False branch —
+        # the guard ensures each colliding name is reported exactly once.
+        items = [
+            DummyItem(name="x", value=1),
+            DummyItem(name="x", value=2),
+            DummyItem(name="x", value=3),
+        ]
+        with pytest.raises(ValueError, match="duplicate item name"):
+            StrictDummyCollection(items)
+
+    def test_strict_collection_unique_names_passes(self) -> None:
+        """Strict collection with all-unique names builds successfully."""
+        # Exercises the ``if duplicates:`` False branch under enforce-uniqueness mode.
+        items = [
+            DummyItem(name="p", value=1),
+            DummyItem(name="q", value=2),
+            DummyItem(name="r", value=3),
+        ]
+        coll = StrictDummyCollection(items)
+        assert [i.name for i in coll] == ["p", "q", "r"]
+
     def test_serialization_roundtrip(self, collection: DummyCollection) -> None:
         """Collection can be serialized and deserialized."""
         # Serialize to dict

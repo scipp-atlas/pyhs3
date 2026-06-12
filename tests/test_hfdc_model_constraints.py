@@ -449,6 +449,57 @@ class TestConstraintDeduplication:
         expected = poisson_sr + poisson_cr + gauss_lp
         assert abs(val - expected) < 1e-6, f"got {val}, expected {expected}"
 
+    def test_shared_normsys_within_one_channel_single_constraint(self):
+        """Two samples in one channel sharing a normsys parameter yield one constraint.
+
+        Exercises the per-channel seen-set dedup in _build_distribution_node:
+        the second sample's spec carries an already-seen dedup_key, so the
+        channel product must contain the Gaussian constraint exactly once.
+        """
+        normsys_mod = {
+            "name": "lumi",
+            "type": "normsys",
+            "parameter": "lumi",
+            "constraint": "Gauss",
+            "data": {"hi": 1.05, "lo": 0.95},
+        }
+        channel = {
+            "name": "SR",
+            "axes": [{"name": "x_SR", "min": 0.0, "max": 10.0, "nbins": 1}],
+            "samples": [
+                {
+                    "name": "signal",
+                    "data": {"contents": [10.0], "errors": [1.0]},
+                    "modifiers": [normsys_mod],
+                },
+                {
+                    "name": "background",
+                    "data": {"contents": [5.0], "errors": [1.0]},
+                    "modifiers": [normsys_mod],
+                },
+            ],
+        }
+        ws = _simple_workspace(
+            channels=[channel],
+            params=[{"name": "lumi", "value": 0.0}],
+        )
+        likelihood = next(iter(ws.likelihoods))
+        model = ws.model(likelihood, progress=False)
+        lp = model.log_prob
+        inputs = {
+            v.name: v
+            for v in pytensor.graph.traversal.explicit_graph_inputs([lp])
+            if v.name
+        }
+        fn = pytensor.function(list(inputs.values()), lp)
+        val = float(fn(**model.data, **model.nominal_params).item())
+
+        # Observed is sample 0's contents (10); expected at lumi=0 is 10 + 5.
+        poisson = 10.0 * math.log(15.0) - 15.0 - math.lgamma(11.0)
+        gauss_lp = -0.5 * math.log(2 * math.pi)
+        expected = poisson + gauss_lp
+        assert abs(val - expected) < 1e-6, f"got {val}, expected {expected}"
+
     def test_two_channels_independent_normsys_both_constraints_present(self):
         """Two channels with different normsys parameters must each contribute a constraint."""
         ws = _simple_workspace(

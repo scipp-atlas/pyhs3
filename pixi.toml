@@ -131,8 +131,8 @@ python-build = "*"
 twine = "*"
 
 [feature.dev.pypi-dependencies]
+# pylint-pydantic has no conda-forge feedstock yet, so it stays on PyPI.
 pylint-pydantic = "*"
-codeflash = "*"
 
 [feature.dev.tasks]
 pre-commit = { cmd = "pre-commit run --all-files", description = "Run pre-commit hooks on all files" }
@@ -142,6 +142,19 @@ pre-commit-update = { cmd = "pre-commit autoupdate", description = "Update pre-c
 build-clean = { cmd = "rm -rf build dist", description = "Clean build artifacts" }
 build = { cmd = "python -m build", depends-on = ["build-clean"], description = "Build SDist and wheel distributions", outputs = ["dist"] }
 build-check = { cmd = "twine check --strict ./dist/*", depends-on = ["build"], description = "Run twine to check" }
+
+# codeflash lives in its own feature/environment so its heavy transitive
+# dependencies (crosshair -> z3-solver) don't get pulled into the dev/lint
+# environment, where z3-solver has no osx-arm64 wheel and builds from source.
+# Restricted to the platforms its conda-forge `crosshair` dependency is built
+# for (no osx-arm64 / linux-aarch64); CI runs codeflash on linux-64.
+[feature.codeflash]
+platforms = ["linux-64", "osx-64", "win-64"]
+
+[feature.codeflash.dependencies]
+codeflash = "*"
+
+[feature.codeflash.tasks]
 codeflash = { cmd = "codeflash", description = "Run codeflash to identify optimizations" }
 
 [feature.pytensor2.dependencies]
@@ -153,6 +166,7 @@ pytensor = "==3.0.0"
 [environments]
 docs = ["docs", "jax"]
 dev = ["dev", "jax"]
+codeflash = ["test", "codeflash"]
 py311 = ["test", "py311", "pytensor3"]
 py312 = ["test", "py312", "pytensor3"]
 # py313 = ["test", "py313", "pytensor3"]  # pytensor3 not available for py313 on osx-64

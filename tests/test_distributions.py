@@ -88,7 +88,11 @@ class TestDistribution:
                 return pt.constant(0.5)
 
         dist = TestDist(name="test", type="test")
-        terms = dist.log_prob_terms({"test": pt.constant(0.5)}, Distributions([]))
+        terms = dist.log_prob_terms(
+            {"test": pt.constant(0.5)},
+            {"test": pt.constant(np.log(0.5))},
+            Distributions([]),
+        )
 
         assert len(terms.per_event) == 1
         assert terms.channel == []
@@ -124,6 +128,10 @@ class TestProductDist:
             "shape": pt.exp(-x),
             "constr": pt.exp(-(alpha**2)),
         }
+        log_expressions = {
+            "shape": -x,
+            "constr": -(alpha**2),
+        }
         distributions = Distributions(
             [
                 GaussianDist(name="shape", x="x", mean=0.0, sigma=1.0),
@@ -131,7 +139,7 @@ class TestProductDist:
             ]
         )
 
-        terms = dist.log_prob_terms(expressions, distributions)
+        terms = dist.log_prob_terms(expressions, log_expressions, distributions)
 
         assert len(terms.per_event) == 1
         assert terms.channel == []
@@ -165,11 +173,15 @@ class TestProductDist:
             "mix": mix_expr,
             "constr": pt.exp(-(alpha**2)),
         }
+        log_expressions = {
+            "mix": pt.log(mix_expr),
+            "constr": -(alpha**2),
+        }
         distributions = Distributions(
             [mix, GaussianDist(name="constr", x="alpha", mean=0.0, sigma=1.0)]
         )
 
-        terms = dist.log_prob_terms(expressions, distributions)
+        terms = dist.log_prob_terms(expressions, log_expressions, distributions)
 
         assert len(terms.per_event) == 1
         assert len(terms.channel) == 1
@@ -2972,7 +2984,7 @@ class TestMixtureDist:
         }
         dist.likelihood(context)
 
-        terms = dist.log_prob_terms({}, Distributions([]))
+        terms = dist.log_prob_terms({}, {}, Distributions([]))
 
         assert len(terms.per_event) == 1
         assert len(terms.channel) == 1
@@ -2992,7 +3004,7 @@ class TestMixtureDist:
             extended=True,
         )
         with pytest.raises(RuntimeError, match="likelihood"):
-            dist.log_prob_terms({}, Distributions([]))
+            dist.log_prob_terms({}, {}, Distributions([]))
 
     def test_mixture_dist_log_prob_terms_non_extended_uses_default(self):
         """Non-extended mixture falls back to the base log(PDF) contribution."""
@@ -3002,7 +3014,11 @@ class TestMixtureDist:
             coefficients=["coeff1"],
             extended=False,
         )
-        terms = dist.log_prob_terms({"mix": pt.constant(0.7)}, Distributions([]))
+        terms = dist.log_prob_terms(
+            {"mix": pt.constant(0.7)},
+            {"mix": pt.constant(np.log(0.7))},
+            Distributions([]),
+        )
 
         assert len(terms.per_event) == 1
         assert terms.channel == []

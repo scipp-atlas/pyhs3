@@ -1668,6 +1668,37 @@ class TestObservedSuffixHeuristic:
         assert np.isfinite(float(result))
         assert float(result) > 0
 
+    def test_explicit_domain_without_domain_collection_falls_back(self):
+        """An explicit domain index on a workspace with no domains uses the default.
+
+        _select_domain must not index an empty domain collection; it falls
+        back to a default ProductDomain instead.
+        """
+        ws_no_domains = hs3.Workspace(
+            metadata={"hs3_version": "0.2"},
+            distributions=[
+                {
+                    "name": "g",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "mu",
+                    "sigma": "sigma",
+                }
+            ],
+            parameter_points=[
+                {
+                    "name": "nominal",
+                    "parameters": [
+                        {"name": "x", "value": 0.0},
+                        {"name": "mu", "value": 0.0},
+                        {"name": "sigma", "value": 1.0},
+                    ],
+                }
+            ],
+        )
+        model = ws_no_domains.model(0, domain=0, progress=False)
+        assert model is not None
+
 
 class TestGraphSummaryCompilationStatus:
     """Regression tests for graph_summary misreporting compilation status under FAST_COMPILE."""

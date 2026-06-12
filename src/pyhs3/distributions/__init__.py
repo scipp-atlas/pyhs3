@@ -146,6 +146,8 @@ class Distributions(NamedCollection[DistributionType]):
         :hs3:label:`distributions <hs3.sec:distributions>`
     """
 
+    _enforce_unique_names: bool = True
+
     root: Annotated[
         list[DistributionType],
         custom_error_msg(

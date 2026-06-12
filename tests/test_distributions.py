@@ -2925,3 +2925,27 @@ class TestHistogramDist:
         """Test HistogramDist not implemented."""
         with pytest.raises(TypeError):
             HistogramDist(name="test_histogram", data={"axes": [], "contents": []})
+
+
+class TestDistributionsUniqueness:
+    """Test that the Distributions collection rejects duplicate names."""
+
+    def test_duplicate_distribution_names_raise(self):
+        """Two distributions with the same name fail at validation time."""
+        with pytest.raises(ValidationError, match="duplicate item name"):
+            Distributions(
+                [
+                    GaussianDist(name="g", mean="mu", sigma="s", x="x"),
+                    GaussianDist(name="g", mean="nu", sigma="t", x="y"),
+                ]
+            )
+
+    def test_unique_distribution_names_ok(self):
+        """Distinct distribution names build without error."""
+        dists = Distributions(
+            [
+                GaussianDist(name="g1", mean="mu", sigma="s", x="x"),
+                GaussianDist(name="g2", mean="nu", sigma="t", x="y"),
+            ]
+        )
+        assert [d.name for d in dists] == ["g1", "g2"]

@@ -422,8 +422,19 @@ class Evaluable(NamedModel, ABC):
         """
         Evaluate and return a named PyTensor expression.
 
-        This is a template method that calls _expression() to get the result,
-        then automatically sets the name on the result before returning.
+        This is a template method that calls ``_expression()`` to get the result,
+        then names the result before returning.
+
+        ``_expression()`` may return a tensor it does not own — for example a
+        single-summand :class:`~pyhs3.functions.standard.SumFunction` or a
+        single-factor :class:`~pyhs3.functions.standard.ProductFunction` returns
+        ``context[param]`` directly, which is the *same* tensor object stored in
+        ``model.parameters``.  Renaming such a shared tensor in place would
+        silently corrupt the parameter it borrows (e.g. ``model.parameters['mu']``
+        would be renamed to the function's name).  To avoid this, a result that
+        already carries a *different* name is wrapped in a fresh identity copy
+        before being renamed; freshly built (unnamed) expressions are named in
+        place as before so that compilation and ``graph_summary`` keep working.
 
         Args:
             context: Mapping of names to PyTensor variables
@@ -432,7 +443,13 @@ class Evaluable(NamedModel, ABC):
             Named PyTensor expression representing the component
         """
         result = self._expression(context)
-        result.name = self.name
+        if result.name is not None and result.name != self.name:
+            # Borrowed tensor (a context value) — don't mutate it in place.
+            # Variable.copy(name=...) returns a fresh identity view that carries
+            # the new name without touching the borrowed tensor's own name.
+            result = cast(TensorVar, result.copy(name=self.name))  # type: ignore[no-untyped-call]
+        else:
+            result.name = self.name
         return result
 
     @abstractmethod

@@ -60,6 +60,8 @@ class Functions(NamedCollection[FunctionType]):
     function creation from configuration dictionaries.
     """
 
+    _enforce_unique_names: bool = True
+
     root: Annotated[
         list[FunctionType],
         custom_error_msg(

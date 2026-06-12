@@ -17,7 +17,13 @@ class DummyItem(NamedModel):
 
 
 class DummyCollection(NamedCollection[DummyItem]):
-    """Test collection of named items."""
+    """Test collection of named items (default last-wins on duplicates)."""
+
+
+class StrictDummyCollection(NamedCollection[DummyItem]):
+    """Test collection that rejects duplicate item names."""
+
+    _enforce_unique_names: bool = True
 
 
 @pytest.fixture
@@ -146,17 +152,36 @@ class TestNamedCollection:
         assert "second" in collection._map
         assert "third" in collection._map
 
-    def test_duplicate_names(self) -> None:
-        """Duplicate names - last one wins in the map."""
+    def test_duplicate_names_last_wins_by_default(self) -> None:
+        """By default, duplicate names use last-wins (opt-in to strict checking)."""
         items = [
             DummyItem(name="duplicate", value=1),
             DummyItem(name="duplicate", value=2),
         ]
         collection = DummyCollection(items)
-        # The map will have the last item with that name
+        # The map keeps the last item with that name; the full list is preserved.
         assert collection["duplicate"].value == 2
-        # But the full list is preserved
         assert len(collection) == 2
+
+    def test_duplicate_names_raise_when_enforced(self) -> None:
+        """A collection opting in to uniqueness raises on duplicate item names."""
+        items = [
+            DummyItem(name="duplicate", value=1),
+            DummyItem(name="duplicate", value=2),
+        ]
+        with pytest.raises(ValueError, match="duplicate item name"):
+            StrictDummyCollection(items)
+
+    def test_multiple_distinct_duplicate_names_reported(self) -> None:
+        """All distinct colliding names are listed in the error message."""
+        items = [
+            DummyItem(name="a", value=1),
+            DummyItem(name="a", value=2),
+            DummyItem(name="b", value=3),
+            DummyItem(name="b", value=4),
+        ]
+        with pytest.raises(ValueError, match=r"'a'.*'b'"):
+            StrictDummyCollection(items)
 
     def test_serialization_roundtrip(self, collection: DummyCollection) -> None:
         """Collection can be serialized and deserialized."""

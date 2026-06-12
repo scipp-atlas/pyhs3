@@ -16,8 +16,10 @@ import types
 
 import numpy as np
 import pytensor
+import pytensor.tensor as pt
 import pytest
 
+from pyhs3.context import Context
 from pyhs3.data import BinnedData, Data, UnbinnedData
 from pyhs3.distributions import Distributions, HistFactoryDistChannel
 from pyhs3.distributions.histfactory.modifiers import (
@@ -245,6 +247,52 @@ class TestConstraintModifiers:
         keys = [key for key, _, _ in specs]
         # Both specs have the same dedup_key; callers apply the seen-set dedup.
         assert keys == ["lumi", "lumi"]
+
+    def test_log_extended_likelihood_dedups_shared_parameter(self):
+        """Two samples sharing a normsys parameter contribute one log-constraint.
+
+        Mirrors the spec-level test above: log_extended_likelihood must apply
+        the seen-set dedup, so the shared Gaussian constraint appears once
+        (log N(0|0,1) = -0.5*log(2*pi)), not twice.
+        """
+        dist = HistFactoryDistChannel(
+            name="ch",
+            axes=[{"name": "x", "min": 0.0, "max": 10.0, "nbins": 1}],
+            samples=[
+                {
+                    "name": "sig",
+                    "data": {"contents": [10.0], "errors": [1.0]},
+                    "modifiers": [
+                        {
+                            "name": "lumi",
+                            "type": "normsys",
+                            "parameter": "lumi",
+                            "constraint": "Gauss",
+                            "data": {"hi": 1.05, "lo": 0.95},
+                        }
+                    ],
+                },
+                {
+                    "name": "bkg",
+                    "data": {"contents": [5.0], "errors": [1.0]},
+                    "modifiers": [
+                        {
+                            "name": "lumi",
+                            "type": "normsys",
+                            "parameter": "lumi",
+                            "constraint": "Gauss",
+                            "data": {"hi": 1.05, "lo": 0.95},
+                        }
+                    ],
+                },
+            ],
+        )
+        lumi = pt.dscalar("lumi")
+        context = Context({"lumi": lumi})
+        expr = dist.log_extended_likelihood(context)
+        fn = pytensor.function([lumi], expr)
+        val = float(fn(0.0))
+        assert abs(val - (-0.5 * math.log(2 * math.pi))) < 1e-9
 
 
 # ---------------------------------------------------------------------------

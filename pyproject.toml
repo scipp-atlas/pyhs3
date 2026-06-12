@@ -26,6 +26,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Scientific/Engineering",
   "Typing :: Typed",
 ]
@@ -37,7 +38,7 @@ dependencies = [
     'pytensor >= 2.33.0', # pytensor.graph.traversal
     'numpy',
     'sympy',
-    'pydantic',
+    'pydantic>=2.12',
     'hist >= 2.7.0',
 ]
 
@@ -196,7 +197,6 @@ isort.required-imports = ["from __future__ import annotations"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["T20"]
-"src/pyhs3/parse.py" = ["T201"]
 
 
 [tool.pylint]

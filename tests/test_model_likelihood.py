@@ -7,7 +7,7 @@ from __future__ import annotations
 import numpy as np
 import pytensor
 import pytest
-from scipy.stats import truncnorm
+from scipy.stats import norm, truncnorm
 
 try:
     import jax.numpy as jnp
@@ -690,3 +690,357 @@ def test_log_prob_aux_distributions_contributes_to_log_prob():
     # With the constraint, log_prob gains an extra log(N(0|0,1)) term.
     assert val_with != pytest.approx(val_without)
     assert val_with < val_without  # constraint N(0|0,1) < 1, so log < 0
+
+
+# ---------------------------------------------------------------------------
+# Weighted data: log_prob is sum(w_i * log f(x_i)), not a weighted average
+# ---------------------------------------------------------------------------
+
+
+def test_log_prob_weighted_data_sums_weighted_logpdf():
+    """Weighted unbinned data contributes sum(w_i * log f(x_i)) at full scale."""
+    weights = [2.0, 1.0, 1.0, 1.0, 3.0]
+    ws_w = Workspace(
+        **{
+            **_WS_DICT,
+            "data": [
+                {
+                    "name": "data1",
+                    "type": "unbinned",
+                    "axes": [{"name": "x_obs", "min": -10.0, "max": 10.0}],
+                    "entries": [[1.0], [2.0], [3.0], [4.0], [5.0]],
+                    "weights": weights,
+                },
+                _WS_DICT["data"][1],
+            ],
+        }
+    )
+    model = ws_w.model(ws_w.analyses["A"], progress=False)
+    with pytest.warns(UserWarning, match="weights"):
+        lp_expr = model.log_prob
+
+    inputs_map = {
+        v.name: v for v in explicit_graph_inputs([lp_expr]) if v.name is not None
+    }
+    fn = pytensor.function(list(inputs_map.values()), lp_expr)
+    val = float(fn(**model.data, **model.nominal_params).item())
+
+    events1 = [1.0, 2.0, 3.0, 4.0, 5.0]
+    events2 = [0.5, 1.5, 2.5, 3.5, 4.5]
+    expected = sum(
+        w * _truncnorm_logpdf(x, 2.0, 1.0, -10.0, 10.0)
+        for w, x in zip(weights, events1, strict=True)
+    ) + sum(_truncnorm_logpdf(y, 2.0, 2.0, -10.0, 10.0) for y in events2)
+
+    assert val == pytest.approx(expected, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# ProductDist channels: constraint factors counted once, not once per event
+# ---------------------------------------------------------------------------
+
+_WS_PRODUCT_CONSTRAINT: dict = {
+    "metadata": {"hs3_version": "0.2"},
+    "distributions": [
+        {
+            "name": "shape1",
+            "type": "gaussian_dist",
+            "x": "x_obs",
+            "mean": "mean",
+            "sigma": 1.0,
+        },
+        {
+            "name": "constr_alpha",
+            "type": "gaussian_dist",
+            "x": "alpha",
+            "mean": 0.0,
+            "sigma": 1.0,
+        },
+        {
+            "name": "channel1",
+            "type": "product_dist",
+            "factors": ["shape1", "constr_alpha"],
+        },
+    ],
+    "domains": [
+        {
+            "name": "main",
+            "type": "product_domain",
+            "axes": [
+                {"name": "mean", "min": -10.0, "max": 10.0},
+                {"name": "alpha", "min": -5.0, "max": 5.0},
+            ],
+        }
+    ],
+    "data": [
+        {
+            "name": "data1",
+            "type": "unbinned",
+            "axes": [{"name": "x_obs", "min": -10.0, "max": 10.0}],
+            "entries": [[1.0], [2.0], [3.0], [4.0], [5.0]],
+        },
+    ],
+    "likelihoods": [{"name": "L", "distributions": ["channel1"], "data": ["data1"]}],
+    "analyses": [
+        {"name": "A", "likelihood": "L", "domains": ["main"], "init": "params"}
+    ],
+    "parameter_points": [
+        {
+            "name": "params",
+            "parameters": [
+                {"name": "mean", "value": 2.0},
+                {"name": "alpha", "value": 0.5},
+            ],
+        }
+    ],
+}
+
+
+def test_log_prob_product_dist_counts_constraint_once():
+    """A scalar constraint factor in a ProductDist contributes once, not N_events times."""
+    ws = Workspace(**_WS_PRODUCT_CONSTRAINT)
+    model = ws.model(ws.analyses["A"], progress=False)
+    lp_expr = model.log_prob
+
+    inputs_map = {
+        v.name: v for v in explicit_graph_inputs([lp_expr]) if v.name is not None
+    }
+    fn = pytensor.function(list(inputs_map.values()), lp_expr)
+    val = float(fn(**model.data, **model.nominal_params).item())
+
+    events1 = [1.0, 2.0, 3.0, 4.0, 5.0]
+    shape_lp = sum(_truncnorm_logpdf(x, 2.0, 1.0, -10.0, 10.0) for x in events1)
+    constraint_lp = float(norm.logpdf(0.5, loc=0.0, scale=1.0))
+
+    assert val == pytest.approx(shape_lp + constraint_lp, abs=1e-6)
+
+
+def test_log_prob_shared_constraint_across_channels_counted_once():
+    """A constraint factor shared by two ProductDist channels is counted once globally."""
+    ws_dict = {
+        **_WS_PRODUCT_CONSTRAINT,
+        "distributions": [
+            *_WS_PRODUCT_CONSTRAINT["distributions"],
+            {
+                "name": "shape2",
+                "type": "gaussian_dist",
+                "x": "y_obs",
+                "mean": "mean",
+                "sigma": 2.0,
+            },
+            {
+                "name": "channel2",
+                "type": "product_dist",
+                "factors": ["shape2", "constr_alpha"],
+            },
+        ],
+        "data": [
+            *_WS_PRODUCT_CONSTRAINT["data"],
+            {
+                "name": "data2",
+                "type": "unbinned",
+                "axes": [{"name": "y_obs", "min": -10.0, "max": 10.0}],
+                "entries": [[0.5], [1.5], [2.5]],
+            },
+        ],
+        "likelihoods": [
+            {
+                "name": "L",
+                "distributions": ["channel1", "channel2"],
+                "data": ["data1", "data2"],
+            }
+        ],
+    }
+    ws = Workspace(**ws_dict)
+    model = ws.model(ws.analyses["A"], progress=False)
+    lp_expr = model.log_prob
+
+    inputs_map = {
+        v.name: v for v in explicit_graph_inputs([lp_expr]) if v.name is not None
+    }
+    fn = pytensor.function(list(inputs_map.values()), lp_expr)
+    val = float(fn(**model.data, **model.nominal_params).item())
+
+    events1 = [1.0, 2.0, 3.0, 4.0, 5.0]
+    events2 = [0.5, 1.5, 2.5]
+    shape_lp = sum(_truncnorm_logpdf(x, 2.0, 1.0, -10.0, 10.0) for x in events1) + sum(
+        _truncnorm_logpdf(y, 2.0, 2.0, -10.0, 10.0) for y in events2
+    )
+    constraint_lp = float(norm.logpdf(0.5, loc=0.0, scale=1.0))
+
+    assert val == pytest.approx(shape_lp + constraint_lp, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Extended MixtureDist channels: Poisson yield term included in log_prob
+# ---------------------------------------------------------------------------
+
+_WS_EXTENDED_MIXTURE: dict = {
+    "metadata": {"hs3_version": "0.2"},
+    "distributions": [
+        {
+            "name": "sig",
+            "type": "gaussian_dist",
+            "x": "x_obs",
+            "mean": "mean",
+            "sigma": 1.0,
+        },
+        {
+            "name": "bkg",
+            "type": "gaussian_dist",
+            "x": "x_obs",
+            "mean": 0.0,
+            "sigma": 2.0,
+        },
+        {
+            "name": "mix",
+            "type": "mixture_dist",
+            "summands": ["sig", "bkg"],
+            "coefficients": ["c_sig", "c_bkg"],
+            "extended": True,
+        },
+    ],
+    "domains": [
+        {
+            "name": "main",
+            "type": "product_domain",
+            "axes": [
+                {"name": "mean", "min": -10.0, "max": 10.0},
+                {"name": "c_sig", "min": 0.0, "max": 100.0},
+                {"name": "c_bkg", "min": 0.0, "max": 100.0},
+            ],
+        }
+    ],
+    "data": [
+        {
+            "name": "data1",
+            "type": "unbinned",
+            "axes": [{"name": "x_obs", "min": -10.0, "max": 10.0}],
+            "entries": [[1.0], [2.0], [3.0], [4.0], [5.0]],
+        },
+    ],
+    "likelihoods": [{"name": "L", "distributions": ["mix"], "data": ["data1"]}],
+    "analyses": [
+        {"name": "A", "likelihood": "L", "domains": ["main"], "init": "params"}
+    ],
+    "parameter_points": [
+        {
+            "name": "params",
+            "parameters": [
+                {"name": "mean", "value": 2.0},
+                {"name": "c_sig", "value": 30.0},
+                {"name": "c_bkg", "value": 20.0},
+            ],
+        }
+    ],
+}
+
+
+def _extended_mixture_logprob(
+    events: list[float], mean: float, c_sig: float, c_bkg: float
+) -> float:
+    """Reference extended log-likelihood: sum_j log(sum_i c_i f_i(x_j)) - nu.
+
+    Equivalent to sum_j log(PDF(x_j)) + N*log(nu) - nu with nu = sum_i c_i
+    (RooFit RooAddPdf extended-likelihood convention, up to the data-only
+    -log(N!) constant which pyhs3 omits).
+    """
+    nu = c_sig + c_bkg
+    lp = sum(
+        np.log(
+            c_sig * np.exp(_truncnorm_logpdf(x, mean, 1.0, -10.0, 10.0))
+            + c_bkg * np.exp(_truncnorm_logpdf(x, 0.0, 2.0, -10.0, 10.0))
+        )
+        for x in events
+    )
+    return float(lp - nu)
+
+
+def test_log_prob_extended_mixture_includes_poisson_term():
+    """Extended MixtureDist channel includes the -nu Poisson yield term."""
+    ws = Workspace(**_WS_EXTENDED_MIXTURE)
+    model = ws.model(ws.analyses["A"], progress=False)
+    lp_expr = model.log_prob
+
+    inputs_map = {
+        v.name: v for v in explicit_graph_inputs([lp_expr]) if v.name is not None
+    }
+    fn = pytensor.function(list(inputs_map.values()), lp_expr)
+    val = float(fn(**model.data, **model.nominal_params).item())
+
+    expected = _extended_mixture_logprob(
+        [1.0, 2.0, 3.0, 4.0, 5.0], mean=2.0, c_sig=30.0, c_bkg=20.0
+    )
+    assert val == pytest.approx(expected, abs=1e-6)
+
+
+def test_log_prob_extended_mixture_depends_on_yield():
+    """log_prob changes by -delta(nu) when only the total yield changes."""
+    ws = Workspace(**_WS_EXTENDED_MIXTURE)
+    model = ws.model(ws.analyses["A"], progress=False)
+    lp_expr = model.log_prob
+
+    inputs_map = {
+        v.name: v for v in explicit_graph_inputs([lp_expr]) if v.name is not None
+    }
+    fn = pytensor.function(list(inputs_map.values()), lp_expr)
+
+    params = dict(model.nominal_params)
+    val_nominal = float(fn(**model.data, **params).item())
+    # Double both yields: the normalized PDF (shape) is unchanged, so the
+    # difference comes from N*log(2) - nu_extra in the extended term.
+    params["c_sig"] = np.float64(60.0)
+    params["c_bkg"] = np.float64(40.0)
+    val_doubled = float(fn(**model.data, **params).item())
+
+    n_events = 5
+    expected_delta = n_events * np.log(2.0) - 50.0
+    assert val_doubled - val_nominal == pytest.approx(expected_delta, abs=1e-6)
+
+
+def test_log_prob_product_extended_mixture_with_constraint():
+    """ProductDist(extended mixture, scalar constraint): both new paths combine."""
+    ws_dict = {
+        **_WS_EXTENDED_MIXTURE,
+        "distributions": [
+            *_WS_EXTENDED_MIXTURE["distributions"],
+            {
+                "name": "constr_alpha",
+                "type": "gaussian_dist",
+                "x": "alpha",
+                "mean": 0.0,
+                "sigma": 1.0,
+            },
+            {
+                "name": "channel1",
+                "type": "product_dist",
+                "factors": ["mix", "constr_alpha"],
+            },
+        ],
+        "likelihoods": [
+            {"name": "L", "distributions": ["channel1"], "data": ["data1"]}
+        ],
+        "parameter_points": [
+            {
+                "name": "params",
+                "parameters": [
+                    *_WS_EXTENDED_MIXTURE["parameter_points"][0]["parameters"],
+                    {"name": "alpha", "value": 0.5},
+                ],
+            }
+        ],
+    }
+    ws = Workspace(**ws_dict)
+    model = ws.model(ws.analyses["A"], progress=False)
+    lp_expr = model.log_prob
+
+    inputs_map = {
+        v.name: v for v in explicit_graph_inputs([lp_expr]) if v.name is not None
+    }
+    fn = pytensor.function(list(inputs_map.values()), lp_expr)
+    val = float(fn(**model.data, **model.nominal_params).item())
+
+    expected = _extended_mixture_logprob(
+        [1.0, 2.0, 3.0, 4.0, 5.0], mean=2.0, c_sig=30.0, c_bkg=20.0
+    ) + float(norm.logpdf(0.5, loc=0.0, scale=1.0))
+    assert val == pytest.approx(expected, abs=1e-6)

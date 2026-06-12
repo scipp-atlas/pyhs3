@@ -140,13 +140,13 @@ class Model:
         self._hfdc_poisson: dict[str, TensorVar] = {}
         # Extended-MixtureDist Poisson-term support.
         # For each channel name we store two nodes built during _build_distribution_node:
-        #   _extended_yields[name]  = ν = Σcᵢ  (total expected yield)
+        #   _extended_yields[name]  = nu = Σcᵢ  (total expected yield)
         #   _extended_unnorm[name]  = Σcᵢfᵢ    (unnormalized mixture numerator)
         #
         # log_prob uses them to compute the extended log-likelihood as
-        #   Σⱼ log(Σcᵢfᵢ(xⱼ))  −  ν
-        # which is equivalent to  Σⱼ log(PDF(xⱼ)) + N·log(ν) − ν  but avoids
-        # a separate pt.log(ν) node that triggers costly optimizer rewrites.
+        #   Σⱼ log(Σcᵢfᵢ(xⱼ))  -  nu
+        # which is equivalent to  Σⱼ log(PDF(xⱼ)) + N·log(nu) - nu  but avoids
+        # a separate pt.log(nu) node that triggers costly optimizer rewrites.
         self._extended_yields: dict[str, TensorVar] = {}
         self._extended_unnorm: dict[str, TensorVar] = {}
 
@@ -251,7 +251,7 @@ class Model:
         # shared across multiple channels are only counted once globally.
         # This prevents the N-fold overcounting that occurs when constraint PDFs
         # (which do not depend on the observable) appear in a ProductDist alongside
-        # the shape PDF: naively summing log(shape × Π_j constr_j) over N events
+        # the shape PDF: naively summing log(shape x Π_j constr_j) over N events
         # multiplies each constr_j term by N rather than counting it once.
         _seen_constraint_factors: set[str] = set()
 
@@ -308,7 +308,8 @@ class Model:
                     if factor_expr is None:
                         continue  # should not happen, but be safe
                     free_inputs = [
-                        v for v in explicit_graph_inputs([factor_expr])
+                        v
+                        for v in explicit_graph_inputs([factor_expr])
                         if v.name is not None
                     ]
                     # Observable-dependent factors have at least one vector (rank-1) input.
@@ -317,17 +318,21 @@ class Model:
                     if is_shape:
                         unnorm_expr = self._extended_unnorm.get(factor_name)
                         nu_expr = self._extended_yields.get(factor_name)
-                        if unnorm_expr is not None and nu_expr is not None and entries is not None:
+                        if (
+                            unnorm_expr is not None
+                            and nu_expr is not None
+                            and entries is not None
+                        ):
                             # Extended MixtureDist: use the unnormalized mixture to
-                            # avoid a separate pt.log(ν) node.
+                            # avoid a separate pt.log(nu) node.
                             #
                             # The full extended log-likelihood per channel is:
-                            #   Σⱼ log(Σcᵢfᵢ(xⱼ)/ν)  +  N·log(ν)  −  ν
-                            # which simplifies (the log(ν) terms cancel) to:
-                            #   Σⱼ log(Σcᵢfᵢ(xⱼ))  −  ν
+                            #   Σⱼ log(Σcᵢfᵢ(xⱼ)/nu)  +  N·log(nu)  -  nu
+                            # which simplifies (the log(nu) terms cancel) to:
+                            #   Σⱼ log(Σcᵢfᵢ(xⱼ))  -  nu
                             #
                             # This is algebraically identical but avoids introducing
-                            # pt.log(ν) into the graph, preventing costly optimizer
+                            # pt.log(nu) into the graph, preventing costly optimizer
                             # rewrite cascades triggered by log(a/b) + N·log(b).
                             shape_log_terms.append(pt.log(unnorm_expr))
                             terms.append(-nu_expr)
@@ -358,9 +363,13 @@ class Model:
                 # No /total_weight: that would give an average NLL (wrong scale).
                 unnorm_expr = self._extended_unnorm.get(dist_name)
                 nu_expr = self._extended_yields.get(dist_name)
-                if unnorm_expr is not None and nu_expr is not None and entries is not None:
+                if (
+                    unnorm_expr is not None
+                    and nu_expr is not None
+                    and entries is not None
+                ):
                     # Extended MixtureDist without ProductDist wrapper: use
-                    # unnormalized mixture to avoid pt.log(ν) (see ProductDist
+                    # unnormalized mixture to avoid pt.log(nu) (see ProductDist
                     # path above for the full explanation).
                     log_pdf = pt.log(unnorm_expr)
                     if weights_t is not None:
@@ -534,11 +543,11 @@ class Model:
         if not isinstance(dist, HistFactoryDistChannel):
             expr = dist.expression(context)
             # For extended MixtureDist, cache the unnormalized mixture (Σcᵢfᵢ)
-            # and the expected yield (ν = Σcᵢ).  log_prob uses these to build
+            # and the expected yield (nu = Σcᵢ).  log_prob uses these to build
             # the extended log-likelihood as
-            #   Σⱼ log(Σcᵢfᵢ(xⱼ)) − ν
-            # rather than  Σⱼ log(PDF) + N·log(ν) − ν, avoiding a separate
-            # pt.log(ν) node that can trigger expensive optimiser rewrites.
+            #   Σⱼ log(Σcᵢfᵢ(xⱼ)) - nu
+            # rather than  Σⱼ log(PDF) + N·log(nu) - nu, avoiding a separate
+            # pt.log(nu) node that can trigger expensive optimiser rewrites.
             if isinstance(dist, MixtureDist) and dist.extended:
                 self._extended_yields[node_name] = dist.expected_yield(context)
                 self._extended_unnorm[node_name] = dist.unnormalized_expression(context)

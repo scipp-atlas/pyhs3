@@ -194,9 +194,9 @@ class MixtureDist(Distribution):
                 mixturesum += context[coeff] * context[self.summands[i]]
 
             # Cache the unnormalized Σcᵢfᵢ so that model.log_prob can build
-            # the extended log-likelihood as Σⱼ log(Σcᵢfᵢ(xⱼ)) − ν without
-            # introducing a separate pt.log(ν) node that triggers costly
-            # optimizer rewrites when combined with log(Σcᵢfᵢ/ν).
+            # the extended log-likelihood as Σⱼ log(Σcᵢfᵢ(xⱼ)) - nu without
+            # introducing a separate pt.log(nu) node that triggers costly
+            # optimizer rewrites when combined with log(Σcᵢfᵢ/nu).
             self._cached_unnorm_expr = mixturesum
 
             # Handle normalization
@@ -282,13 +282,13 @@ class MixtureDist(Distribution):
         intermediate result; it is used by :meth:`pyhs3.model.Model.log_prob`
         to build the extended log-likelihood as
 
-            Σⱼ log(Σcᵢfᵢ(xⱼ)) − ν
+            Σⱼ log(Σcᵢfᵢ(xⱼ)) - nu
 
         which is algebraically equivalent to
 
-            Σⱼ log(Σcᵢfᵢ(xⱼ)/ν)  +  N·log(ν)  −  ν
+            Σⱼ log(Σcᵢfᵢ(xⱼ)/nu)  +  N·log(nu)  -  nu
 
-        but avoids introducing a separate ``pt.log(ν)`` node that can trigger
+        but avoids introducing a separate ``pt.log(nu)`` node that can trigger
         expensive rewrite cascades in the PyTensor graph optimiser.
         """
         if hasattr(self, "_cached_unnorm_expr"):

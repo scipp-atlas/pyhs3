@@ -27,7 +27,11 @@ from pyhs3.functions import (
     SumFunction,
     registered_functions,
 )
-from pyhs3.functions.standard import CMSAsymPowFunction, RooRecursiveFractionFunction
+from pyhs3.functions.standard import (
+    CMSAsymPowFunction,
+    RooRecursiveFractionFunction,
+    _asym_interpolation,
+)
 
 
 class TestFunction:
@@ -614,14 +618,19 @@ class TestInterpolationFunction:
         f = function([], result)
         result_val = f()
 
-        # Code 6: polynomial multiplicative mode
-        # Expected: 10.0 * (1 + 0.5 * (2.0 - 1.0) * (1 + 0.5^2 * (-3 + 0.5^2) / 16))
-        # = 10.0 * (1 + 0.5 * 1.0 * (1 + 0.25 * (-3 + 0.25) / 16))
-        # = 10.0 * (1 + 0.5 * (1 + 0.25 * (-2.75) / 16))
-        # = 10.0 * (1 + 0.5 * (1 - 0.04296875))
-        # = 10.0 * (1 + 0.5 * 0.95703125) = 10.0 * 1.478515625 ≈ 14.785
-        expected = 10.0 * (1 + 0.5 * (2.0 - 1.0) * (1 + 0.25 * (-3 + 0.25) / 16))
-        np.testing.assert_allclose(result_val, expected, rtol=1e-10)
+        # Code 6 (ROOT): 6th-degree polynomial in ratio space with linear
+        # extrapolation. In ratio space nom=1, hi=2.0, lo=0.5, alpha=0.5.
+        #   S = 0.5 * (hi - lo) = 0.75
+        #   A = (1/16) * (hi + lo - 2) = 0.03125
+        #   poly = S + alpha * A * (15 + alpha^2 * (3*alpha^2 - 10))
+        #   ratio = 1 + alpha * poly
+        # result = nom * ratio = 10.0 * ratio
+        alpha = 0.5
+        s = 0.5 * (2.0 - 0.5)
+        a_coef = (1.0 / 16.0) * (2.0 + 0.5 - 2.0)
+        poly = s + alpha * a_coef * (15 + alpha**2 * (3 * alpha**2 - 10))
+        expected = 10.0 * (1 + alpha * poly)
+        np.testing.assert_allclose(result_val, expected, rtol=1e-5)
 
     def test_interpolation_function_parameter_index_warning(self, caplog):
         """Test InterpolationFunction logs warning when parameter index exceeds lists."""
@@ -839,13 +848,12 @@ class TestProcessNormalizationFunction:
         f = function([], result)
         result_val = f()
 
-        # For asymmetric interpolation at theta=0:
+        # For asymmetric interpolation at theta=0 (CMS smooth-step convention):
         # kappa_sum = 0.2 + (-0.1) = 0.1, kappa_diff = 0.2 - (-0.1) = 0.3
-        # smooth_function at theta=0: polynomial = 15/8 = 1.875
-        # asymShift = 0.5 * (0.3 * 0 + 0.1 * 1.875) = 0.5 * 0.1875 = 0.09375
-        # Expected: 1.0 * exp(0.09375)
-        expected = np.exp(0.5 * (0.1 * 15.0 / 8.0))
-        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+        # The factor multiplying kappa_sum is theta * smoothStep(theta), which is
+        # 0 at theta=0. Hence asymShift = 0.5 * (0.3 * 0 + 0.1 * 0) = 0.
+        # Expected: 1.0 * exp(0) = 1.0
+        np.testing.assert_allclose(result_val, 1.0, rtol=1e-10)
 
     def test_process_normalization_asymmetric_interpolation_positive(self):
         """Test ProcessNormalizationFunction asymmetric variations with positive theta."""
@@ -1522,8 +1530,9 @@ class TestRooRecursiveFractionFunction:
         f = function([], result)
         result_val = f()
 
-        # For single coefficient in recursive mode, should return 1.0
-        np.testing.assert_allclose(result_val, 1.0, rtol=1e-10)
+        # For a single coefficient in recursive mode, ROOT returns a_0 itself
+        # (empty product).
+        np.testing.assert_allclose(result_val, 5.0, rtol=1e-10)
 
     def test_recursive_fraction_single_coefficient_non_recursive(self):
         """Test RooRecursiveFractionFunction with single coefficient, non-recursive."""
@@ -1550,17 +1559,19 @@ class TestRooRecursiveFractionFunction:
         )
 
         context = {
-            "a": pt.constant(2.0),
-            "b": pt.constant(3.0),
-            "c": pt.constant(1.0),
+            "a": pt.constant(0.2),
+            "b": pt.constant(0.5),
+            "c": pt.constant(0.5),
         }
         result = func.expression(context)
         f = function([], result)
         result_val = f()
 
-        # For recursive fractions: first fraction is a / (a + b + c) = 2.0 / 6.0 = 1/3
-        expected = 2.0 / (2.0 + 3.0 + 1.0)  # = 1/3
-        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+        # ROOT RooRecursiveFraction: a * (1 - b) * (1 - c)
+        # = 0.2 * 0.5 * 0.5 = 0.05
+        expected = 0.2 * (1.0 - 0.5) * (1.0 - 0.5)
+        np.testing.assert_allclose(result_val, expected, rtol=1e-10)
+        np.testing.assert_allclose(result_val, 0.05, rtol=1e-10)
 
     def test_recursive_fraction_multiple_coefficients_non_recursive(self):
         """Test RooRecursiveFractionFunction with multiple coefficients in non-recursive mode."""
@@ -1647,6 +1658,216 @@ class TestRooRecursiveFractionFunction:
         # Should handle division by zero gracefully (0/0 case)
         # In practice this would be NaN, but we just test that it doesn't crash
         assert np.isfinite(result_val) or np.isnan(result_val)
+
+    def test_recursive_fraction_four_coefficients(self):
+        """Test ROOT recursive product a_0 * prod(1 - a_i) for >2 coefficients."""
+        func = RooRecursiveFractionFunction(
+            name="four_recursive",
+            list=["a", "b", "c", "d"],
+            recursive=True,
+        )
+
+        context = {
+            "a": pt.constant(0.4),
+            "b": pt.constant(0.25),
+            "c": pt.constant(0.5),
+            "d": pt.constant(0.1),
+        }
+        result = func.expression(context)
+        f = function([], result)
+        result_val = f()
+
+        # a * (1 - b) * (1 - c) * (1 - d)
+        expected = 0.4 * (1.0 - 0.25) * (1.0 - 0.5) * (1.0 - 0.1)
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+
+class TestAsymInterpolation:
+    """Test the CMS ProcessNormalization asymmetric smooth-step interpolation."""
+
+    @staticmethod
+    def _evaluate(theta_val, kappa_sum, kappa_diff):
+        """Evaluate _asym_interpolation at a single theta value."""
+        result = _asym_interpolation(pt.constant(theta_val), kappa_sum, kappa_diff)
+        return float(function([], result)())
+
+    @staticmethod
+    def _reference(theta, kappa_sum, kappa_diff):
+        """Reference CMS smooth-step interpolation in plain numpy."""
+        if abs(theta) < 1.0:
+            smooth = theta * (3.0 * theta**4 - 10.0 * theta**2 + 15.0) / 8.0
+        else:
+            smooth = np.sign(theta)
+        return 0.5 * (kappa_diff * theta + kappa_sum * theta * smooth)
+
+    def test_shift_is_zero_at_origin(self):
+        """At theta=0 the shift must vanish (smoothStep contribution is 0)."""
+        assert self._evaluate(0.0, 0.1, 0.3) == pytest.approx(0.0, abs=1e-12)
+
+    def test_continuity_at_boundary(self):
+        """Value is continuous across |theta|=1."""
+        ks, kd = 0.1, 0.3
+        for sign in (1.0, -1.0):
+            below = self._evaluate(sign * (1.0 - 1e-5), ks, kd)
+            above = self._evaluate(sign * (1.0 + 1e-5), ks, kd)
+            np.testing.assert_allclose(below, above, atol=1e-4)
+
+    def test_first_derivative_continuity_at_boundary(self):
+        """First derivative is continuous across |theta|=1."""
+        ks, kd = 0.1, 0.3
+        eps = 1e-4
+        for center in (1.0, -1.0):
+            # finite-difference derivative just below and just above the boundary
+            d_below = (
+                self._evaluate(center - eps, ks, kd)
+                - self._evaluate(center - 3 * eps, ks, kd)
+            ) / (2 * eps)
+            d_above = (
+                self._evaluate(center + 3 * eps, ks, kd)
+                - self._evaluate(center + eps, ks, kd)
+            ) / (2 * eps)
+            np.testing.assert_allclose(d_below, d_above, atol=1e-3)
+
+    def test_large_theta_is_linear(self):
+        """For |theta| >> 1 the shift is linear: 0.5*(kd + ks*sign)*theta."""
+        ks, kd = 0.1, 0.3
+        for theta in (5.0, -5.0, 12.0):
+            expected = 0.5 * (kd * theta + ks * abs(theta))
+            np.testing.assert_allclose(
+                self._evaluate(theta, ks, kd), expected, rtol=1e-6
+            )
+
+    @pytest.mark.parametrize("theta", [-0.9, -0.3, 0.25, 0.6, 0.9])
+    def test_interior_matches_reference(self, theta):
+        """Interior points match the analytic smooth-step formula."""
+        ks, kd = 0.1, 0.3
+        np.testing.assert_allclose(
+            self._evaluate(theta, ks, kd),
+            self._reference(theta, ks, kd),
+            rtol=1e-5,
+        )
+
+    def test_boundary_value_equals_abs(self):
+        """At |theta|=1 the smoothStep factor equals 1, giving |theta| behaviour."""
+        ks, kd = 0.1, 0.3
+        # at theta=1: 0.5*(kd*1 + ks*1*1) ; at theta=-1: 0.5*(kd*-1 + ks*1)
+        np.testing.assert_allclose(
+            self._evaluate(1.0, ks, kd), 0.5 * (kd + ks), rtol=1e-6
+        )
+        np.testing.assert_allclose(
+            self._evaluate(-1.0, ks, kd), 0.5 * (-kd + ks), rtol=1e-6
+        )
+
+
+class TestInterpolationFunctionCodes:
+    """Continuity and reference-value tests for InterpolationFunction codes 2-6."""
+
+    @staticmethod
+    def _evaluate(interp_code, nom, hi, lo, theta):
+        """Evaluate a single-parameter InterpolationFunction at theta."""
+        func = InterpolationFunction(
+            name="interp",
+            high=["hi"],
+            low=["lo"],
+            nom="nom",
+            interpolationCodes=[interp_code],
+            positiveDefinite=False,
+            vars=["theta"],
+        )
+        context = {
+            "nom": pt.constant(nom),
+            "hi": pt.constant(hi),
+            "lo": pt.constant(lo),
+            "theta": pt.constant(theta),
+        }
+        return float(function([], func.expression(context))())
+
+    @pytest.mark.parametrize("interp_code", [0, 1, 2, 3, 4, 5, 6])
+    def test_continuity_at_boundaries(self, interp_code):
+        """Every code is continuous across alpha=+1 and alpha=-1."""
+        nom, hi, lo = 10.0, 13.0, 8.0
+        for center in (1.0, -1.0):
+            below = self._evaluate(interp_code, nom, hi, lo, center - 1e-4)
+            above = self._evaluate(interp_code, nom, hi, lo, center + 1e-4)
+            # discontinuity in the old code was ~delta/8 ~= 0.3; require << that
+            np.testing.assert_allclose(below, above, atol=2e-3)
+
+    def test_code4_symmetric_variation_is_linear(self):
+        """Code 4 with a symmetric variation reduces to exact linear interpolation."""
+        # hi - nom == nom - lo  =>  A == 0, so poly6 collapses to nom + alpha*S
+        nom, hi, lo = 10.0, 12.0, 8.0
+        for theta in (-0.9, -0.5, 0.0, 0.3, 0.75, 0.99):
+            expected = nom + theta * (hi - nom)
+            np.testing.assert_allclose(
+                self._evaluate(4, nom, hi, lo, theta), expected, rtol=1e-5
+            )
+
+    def test_code2_matches_root_parabola(self):
+        """Code 2 central region matches ROOT's a*theta^2 + b*theta parabola."""
+        nom, hi, lo = 10.0, 13.0, 8.0
+        a = 0.5 * ((hi - nom) + (lo - nom))
+        b = 0.5 * ((hi - nom) - (lo - nom))
+        theta = 0.5
+        expected = nom + a * theta**2 + b * theta
+        np.testing.assert_allclose(
+            self._evaluate(2, nom, hi, lo, theta), expected, rtol=1e-5
+        )
+
+    def test_code3_equals_code2(self):
+        """ROOT maps code 3 onto code 2; results must be identical."""
+        nom, hi, lo = 10.0, 13.0, 8.0
+        for theta in (-1.5, -0.4, 0.2, 1.2):
+            np.testing.assert_allclose(
+                self._evaluate(3, nom, hi, lo, theta),
+                self._evaluate(2, nom, hi, lo, theta),
+                rtol=1e-6,
+            )
+
+    def test_code4_matches_root_poly6(self):
+        """Code 4 central region matches ROOT's 6th-degree polynomial."""
+        nom, hi, lo = 10.0, 13.0, 8.0
+        theta = 0.5
+        eps_plus = hi - nom
+        eps_minus = nom - lo
+        s = 0.5 * (eps_plus + eps_minus)
+        a = 0.0625 * (eps_plus - eps_minus)
+        mod = theta * (s + theta * a * (15 + theta * theta * (-10 + theta * theta * 3)))
+        expected = nom + mod
+        np.testing.assert_allclose(
+            self._evaluate(4, nom, hi, lo, theta), expected, rtol=1e-5
+        )
+
+    def test_code2_linear_extrapolation(self):
+        """Code 2 extrapolates linearly beyond |alpha|=1 (matching slope at boundary)."""
+        nom, hi, lo = 10.0, 13.0, 8.0
+        # ROOT: a = 0.5*(hi+lo) - nom ; b = 0.5*(hi-lo)
+        # high ext: nom + (2a + b)*(alpha - 1) + (hi - nom)
+        a = 0.5 * (hi + lo) - nom
+        b = 0.5 * (hi - lo)
+        theta = 2.0
+        expected = nom + (2 * a + b) * (theta - 1) + (hi - nom)
+        np.testing.assert_allclose(
+            self._evaluate(2, nom, hi, lo, theta), expected, rtol=1e-5
+        )
+
+    def test_code5_exponential_extrapolation(self):
+        """Code 5 extrapolates exponentially (multiplicative) beyond |alpha|=1."""
+        nom, hi, lo = 10.0, 13.0, 8.0
+        theta = 2.0
+        expected = nom * (hi / nom) ** theta
+        np.testing.assert_allclose(
+            self._evaluate(5, nom, hi, lo, theta), expected, rtol=1e-5
+        )
+
+    def test_code6_linear_extrapolation_in_ratio_space(self):
+        """Code 6 extrapolates linearly in ratio space beyond |alpha|=1."""
+        nom, hi, lo = 10.0, 13.0, 8.0
+        theta = 2.0
+        # multiplicative: nom * (1 + alpha * (hi/nom - 1))
+        expected = nom * (1 + theta * (hi / nom - 1))
+        np.testing.assert_allclose(
+            self._evaluate(6, nom, hi, lo, theta), expected, rtol=1e-5
+        )
 
 
 class TestHistogramFunction:

@@ -319,6 +319,7 @@ class MixtureDist(Distribution):
     def log_prob_terms(  # pylint: disable=redefined-outer-name
         self,
         expressions: Mapping[str, TensorVar],
+        log_expressions: Mapping[str, TensorVar],
         distributions: Distributions,
     ) -> LogProbTerms:
         """
@@ -346,7 +347,7 @@ class MixtureDist(Distribution):
         Non-extended mixtures contribute the default per-event log(PDF).
         """
         if not self.extended:
-            return super().log_prob_terms(expressions, distributions)
+            return super().log_prob_terms(expressions, log_expressions, distributions)
 
         if self._cached_unnorm_expr is None or self._cached_nu_expr is None:
             msg = (
@@ -406,6 +407,7 @@ class ProductDist(Distribution):
     def log_prob_terms(  # pylint: disable=redefined-outer-name
         self,
         expressions: Mapping[str, TensorVar],
+        log_expressions: Mapping[str, TensorVar],
         distributions: Distributions,
     ) -> LogProbTerms:
         """
@@ -440,13 +442,13 @@ class ProductDist(Distribution):
 
             if is_shape:
                 factor_terms = distributions[factor_name].log_prob_terms(
-                    expressions, distributions
+                    expressions, log_expressions, distributions
                 )
                 terms.per_event.extend(factor_terms.per_event)
                 terms.channel.extend(factor_terms.channel)
                 terms.constraints.update(factor_terms.constraints)
             else:
-                terms.constraints[factor_name] = cast(TensorVar, pt.log(factor_expr))
+                terms.constraints[factor_name] = log_expressions[factor_name]
         return terms
 
 

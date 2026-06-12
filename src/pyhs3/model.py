@@ -127,6 +127,16 @@ class Model:
         # Ordered input names cached alongside _compiled_inputs so that pars()
         # and _reorder_params() avoid rebuilding the list on every pdf/logpdf call.
         self._compiled_input_names: dict[str, list[str]] = {}
+        # Log-space distribution expressions (dist.log_expression(context)), built
+        # alongside self.distributions during graph construction.  logpdf and
+        # log_prob use these to evaluate in log space so that log(prod(exp(...)))
+        # stays collapsed and does not underflow to -inf.  Compiled log functions
+        # are cached separately from the probability-space ones.
+        self.log_distributions: dict[str, TensorVar] = {}
+        self._compiled_log_functions: dict[
+            str, Callable[..., npt.NDArray[np.float64]]
+        ] = {}
+        self._compiled_log_inputs: dict[str, list[TensorVar]] = {}
         self._likelihood = likelihood
         # Views used internally for broadcasting: leaf[:, None] for observables,
         # leaf[None, :] for non-observable vector overrides.  Distributions see
@@ -142,6 +152,11 @@ class Model:
         # so that logpdf() continues to work; log_prob uses this dict to avoid
         # double-counting constraint terms when multiple channels share a parameter.
         self._hfdc_poisson: dict[str, TensorVar] = {}
+        # Log-space counterpart of self._hfdc_poisson: the summed per-bin Poisson
+        # log-pmf for each HFDC channel.  log_prob uses this instead of
+        # log(self._hfdc_poisson[name]) so the joint NLL stays finite where the
+        # probability-space product would underflow.
+        self._hfdc_log_poisson: dict[str, TensorVar] = {}
         # Build dependency graph with proper entity identification
         self._build_dependency_graph(functions, distributions, progress)
 
@@ -267,8 +282,10 @@ class Model:
                 # tracked in https://github.com/scipp-atlas/pyhs3/issues/242
                 # (spec: hep-statistics-serialization-standard issue #93,
                 # export: root-project/root issue #22598).
-                if dist_name in self._hfdc_poisson:
-                    terms.append(pt.log(self._hfdc_poisson[dist_name]))
+                if dist_name in self._hfdc_log_poisson:
+                    # Log-space Poisson term: sum of per-bin log-pmfs, finite even
+                    # where the probability-space product underflows to 0.0.
+                    terms.append(self._hfdc_log_poisson[dist_name])
                 continue
 
             # Resolve weight tensor once for this datum.
@@ -298,7 +315,9 @@ class Model:
             # the channel-dataset pairing and applies event weights, sums
             # over events, and deduplicates constraints globally.
             contrib = self._distribution_objects[dist_name].log_prob_terms(
-                self.distributions, self._distribution_objects
+                self.distributions,
+                self.log_distributions,
+                self._distribution_objects,
             )
 
             # Sum the per-event log-density over events.  Weighted:
@@ -333,11 +352,9 @@ class Model:
         # onto the parameter-scan axis when non-scalar params are present.
         if self._likelihood.aux_distributions:
             terms.extend(
-                pt.log(
-                    self.distributions[
-                        aux_name if isinstance(aux_name, str) else aux_name.name
-                    ]
-                )
+                self.log_distributions[
+                    aux_name if isinstance(aux_name, str) else aux_name.name
+                ]
                 for aux_name in self._likelihood.aux_distributions
             )
 
@@ -470,6 +487,9 @@ class Model:
         """
         dist = distributions[node_name]
         if not isinstance(dist, HistFactoryDistChannel):
+            # Build the log-space expression once for logpdf/log_prob (collapses
+            # log(prod(exp(...))) so it does not underflow to -inf).
+            self.log_distributions[node_name] = dist.log_expression(context)
             return dist.expression(context)
 
         # Build the Poisson term and each constraint factor exactly once, then
@@ -480,6 +500,10 @@ class Model:
         # Poisson subgraph or re-running make_constraint a second time.
         poisson = dist.likelihood(context)
         self._hfdc_poisson[node_name] = poisson
+        # Log-space Poisson-only term (sum of per-bin Poisson log-pmfs).
+        self._hfdc_log_poisson[node_name] = dist.log_likelihood(context)
+        # Full per-channel log expression (Poisson + constraints) for logpdf().
+        self.log_distributions[node_name] = dist.log_expression(context)
 
         # Whether this channel participates in the active likelihood; only then
         # do its constraints feed the joint log_prob.  All channels still build
@@ -665,6 +689,49 @@ class Model:
             )
         return self._compiled_functions[name]
 
+    def _get_compiled_log_function(
+        self, name: str
+    ) -> Callable[..., npt.NDArray[np.float64]]:
+        """
+        Get or create a compiled PyTensor function for a distribution's log-PDF.
+
+        Mirrors :meth:`_get_compiled_function` but compiles the log-space
+        expression (``self.log_distributions[name]``) instead of the
+        probability-space one.  Evaluating in log space keeps
+        ``log(prod(exp(...)))`` collapsed so it does not underflow to ``-inf``
+        for HistFactory channels with many bins or large expected counts.
+
+        Args:
+            name (str): Name of the distribution.
+
+        Returns:
+            Callable: Compiled PyTensor function returning the log-PDF.
+        """
+        if name not in self._compiled_log_functions:
+            log_expression = self.log_distributions[name]
+
+            inputs = [
+                var
+                for var in explicit_graph_inputs([log_expression])
+                if var.name is not None
+            ]
+
+            # Cache the inputs list for consistent ordering.
+            self._compiled_log_inputs[name] = cast(list[TensorVar], inputs)
+
+            self._compiled_log_functions[name] = cast(
+                Callable[..., npt.NDArray[np.float64]],
+                function(
+                    inputs=inputs,
+                    outputs=log_expression,
+                    mode=self.mode,
+                    on_unused_input="ignore",
+                    name=f"log_{name}",
+                    trust_input=True,
+                ),
+            )
+        return self._compiled_log_functions[name]
+
     def pdf_unsafe(
         self,
         name: str,
@@ -758,7 +825,11 @@ class Model:
         Example:
             >>> model.logpdf_unsafe("gauss", x=1.5, mu=0.0, sigma=1.0)  # floats ok  # doctest: +SKIP
         """
-        return np.log(self.pdf_unsafe(name, **parametervalues))
+        # Convert all parameter values to numpy arrays
+        converted_params = {
+            key: ensure_array(value) for key, value in parametervalues.items()
+        }
+        return self.logpdf(name, **converted_params)
 
     def logpdf(
         self, name: str, **parametervalues: npt.NDArray[np.float64]
@@ -768,6 +839,11 @@ class Model:
 
         This method requires all parameter values to be numpy arrays with dtype float64.
         For automatic type conversion, use :meth:`logpdf_unsafe` instead.
+
+        The logarithm is evaluated in log space via a compiled log-PDF function
+        (``log(prod(exp(...)))`` stays collapsed), so the result remains finite
+        for HistFactory channels where the probability-space ``pdf`` underflows
+        to ``0.0``.
 
         Args:
             name (str): Name of the distribution to evaluate.
@@ -787,7 +863,9 @@ class Model:
             >>> import numpy as np
             >>> model.logpdf("gauss", x=np.array(1.5), mu=np.array(0.0), sigma=np.array(1.0))  # doctest: +SKIP
         """
-        return np.log(self.pdf(name, **parametervalues))
+        func = self._get_compiled_log_function(name)
+        positional_values = self._reorder_log_params(name, parametervalues)
+        return func(*positional_values)
 
     def pars(self, name: str) -> list[str]:
         """
@@ -846,6 +924,45 @@ class Model:
             List of values in the correct order for the compiled function
         """
         input_order = self.pars(name)
+        return [params[param_name] for param_name in input_order]
+
+    def log_pars(self, name: str) -> list[str]:
+        """
+        Get the ordered input parameter names for a distribution's log-PDF.
+
+        Like :meth:`pars`, but for the compiled log-PDF function (:meth:`logpdf`).
+        The log-space expression can have a different set or ordering of inputs
+        than the probability-space one, so it has its own cached ordering.
+
+        Args:
+            name: Distribution name
+
+        Returns:
+            List of parameter names in the order expected by logpdf()
+        """
+        if name not in self._compiled_log_inputs:
+            # Trigger compilation to populate cache
+            self._get_compiled_log_function(name)
+        return [
+            var.name for var in self._compiled_log_inputs[name] if var.name is not None
+        ]
+
+    def _reorder_log_params(
+        self,
+        name: str,
+        params: Mapping[str, npt.NDArray[np.float64]],
+    ) -> list[npt.NDArray[np.float64]]:
+        """
+        Reorder parameters to match the input order of a distribution's log-PDF.
+
+        Args:
+            name: Distribution name
+            params: Dictionary of parameter values (numpy arrays)
+
+        Returns:
+            List of values in the correct order for the compiled log function
+        """
+        input_order = self.log_pars(name)
         return [params[param_name] for param_name in input_order]
 
     def visualize_graph(

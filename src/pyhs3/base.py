@@ -130,6 +130,7 @@ class Evaluable(NamedModel, ABC):
     type: str = Field(..., json_schema_extra={"preprocess": False}, repr=False)
     _parameters: dict[str, str] = PrivateAttr(default_factory=dict)
     _constants_values: dict[str, float | int] = PrivateAttr(default_factory=dict)
+    _constants_cache: dict[str, TensorVar] | None = PrivateAttr(default=None)
 
     @property
     def parameters(self) -> set[str]:
@@ -149,10 +150,12 @@ class Evaluable(NamedModel, ABC):
             Mapping from generated constant names to PyTensor constant tensors.
             Empty if all fields are string references.
         """
-        return {
-            name: cast(TensorVar, pt.constant(value))
-            for name, value in self._constants_values.items()
-        }
+        if self._constants_cache is None:
+            self._constants_cache = {
+                name: cast(TensorVar, pt.constant(value))
+                for name, value in self._constants_values.items()
+            }
+        return self._constants_cache
 
     def process_parameter(self, param_key: str) -> tuple[str, float | int | None]:
         """Process a single parameter that can be either a string reference or numeric value.

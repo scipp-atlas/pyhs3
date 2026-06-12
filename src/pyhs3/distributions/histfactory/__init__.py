@@ -31,6 +31,30 @@ from pyhs3.networks import HasDependencies, HasInternalNodes
 from pyhs3.typing.aliases import TensorVar
 
 
+class ModifierNode(HasDependencies):
+    """Wrapper giving a modifier a globally unique name for the dependency graph.
+
+    Modifiers can share the same name across samples/types (e.g., a ``Lumi``
+    modifier appearing in several places), but the dependency graph requires
+    unique node identifiers.  This lightweight wrapper provides the unique name
+    while delegating all functionality to the wrapped modifier.
+    """
+
+    def __init__(self, name: str, modifier: Modifier):
+        """Store the unique node name and the wrapped modifier."""
+        self.name = name
+        self._modifier = modifier
+
+    @property
+    def dependencies(self) -> set[str]:
+        """Parameter names the wrapped modifier depends on."""
+        return self._modifier.dependencies
+
+    def expression(self, context: Context) -> TensorVar:
+        """Delegate expression building to the wrapped modifier."""
+        return self._modifier.expression(context)
+
+
 class HistFactoryDistChannel(Distribution, HasInternalNodes):
     r"""
     HistFactory probability distribution for a single channel/region.
@@ -117,24 +141,6 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
                 # Create unique node name: {dist_name}/{sample_name}/{modifier_type}/{modifier_name}
                 # This ensures uniqueness even when modifier names are reused across samples
                 node_name = f"{self.name}/{sample.name}/{modifier.type}/{modifier.name}"
-
-                # Create a lightweight wrapper that provides the unique name for the dependency graph
-                # while delegating all functionality to the original modifier
-                class ModifierNode(HasDependencies):
-                    """
-                    Wrapper Modifier to provide a globally unique internal name for the dependency graph.
-                    """
-
-                    def __init__(self, name: str, modifier: Modifier):
-                        self.name = name
-                        self._modifier = modifier
-
-                    @property
-                    def dependencies(self) -> set[str]:
-                        return self._modifier.dependencies
-
-                    def expression(self, context: Context) -> TensorVar:
-                        return self._modifier.expression(context)
 
                 nodes.append(ModifierNode(node_name, modifier))
 

@@ -8,8 +8,9 @@ individual parameters and parameter sets for defining model parameter values.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from typing import Any
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, PrivateAttr
 
 from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.typing.aliases import TensorVar
@@ -57,11 +58,16 @@ class ParameterSet(NamedModel):
     model_config = ConfigDict()
 
     parameters: list[ParameterPoint] = Field(default_factory=list, repr=False)
+    _points: dict[str, ParameterPoint] = PrivateAttr(default_factory=dict)
+
+    def model_post_init(self, __context: Any, /) -> None:
+        """Build the name-to-parameter mapping once after validation."""
+        self._points = {param.name: param for param in self.parameters}
 
     @property
     def points(self) -> dict[str, ParameterPoint]:
         """Compatibility property for core.py access."""
-        return {param.name: param for param in self.parameters}
+        return self._points
 
     def __len__(self) -> int:
         """Number of parameters in this set."""

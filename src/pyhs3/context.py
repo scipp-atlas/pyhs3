@@ -88,6 +88,44 @@ class Context:
         """Check if parameter name exists in context."""
         return key in self._parameters or key in self._auxiliaries
 
+    def add_parameter(self, key: str, value: TensorVar) -> None:
+        """Insert a single resolved parameter tensor into the context in place.
+
+        Used by the model builder to grow one long-lived context incrementally
+        as nodes are built in topological order, rather than reconstructing a
+        fresh context per node.  Preserves the parameter/auxiliary overlap
+        invariant enforced in :meth:`__init__`.
+
+        Args:
+            key: Parameter name to insert.
+            value: Resolved PyTensor variable for the parameter.
+
+        Raises:
+            ValueError: If ``key`` already exists among the auxiliaries.
+        """
+        if key in self._auxiliaries:
+            msg = (
+                "Parameter names cannot overlap between parameters and "
+                f"auxiliaries. Overlapping names: ['{key}']"
+            )
+            raise ValueError(msg)
+        self._parameters[key] = value
+
+    def add_view(self, key: str, view: TensorVar) -> None:
+        """Register a broadcasting view for ``key`` on this context in place.
+
+        Mirrors the ``views`` argument of :meth:`__init__` but lets the model
+        builder add the ExpandDims view of a vector parameter at the moment that
+        parameter node is built, so subsequent nodes see the correct broadcast
+        shape via ``context[key]``.
+
+        Args:
+            key: Parameter name the view belongs to.
+            view: ExpandDims view tensor (observable leaves are (N, 1),
+                non-observable vector overrides are (1, N)).
+        """
+        self._views[key] = view
+
     @property
     def parameters(self) -> dict[str, TensorVar]:
         """Get read-only view of parameters."""

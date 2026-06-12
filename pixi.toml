@@ -27,7 +27,7 @@ rustworkx = "*"
 pytensor = ">=2.33.0"
 numpy = "*"
 sympy = "*"
-pydantic = "*"
+pydantic = ">=2.12"
 hist = "*"
 
 # pytensor >=2.33 does not exist for win-64 for py310

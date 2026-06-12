@@ -113,11 +113,12 @@ class HasConstraint(ABC):
 class SingleParamConstraint(HasConstraint, ABC):
     """Mixin for single-parameter modifiers that use a standard Gauss/Poisson/LogNormal constraint."""
 
+    name: str
     parameter: str
 
     def make_constraint(self, context: Context, _: SampleData) -> TensorVar:
         """Create constraint term using a Gauss, Poisson, or LogNormal distribution."""
-        name = f"constraint_{self.name}"  # type: ignore[attr-defined]
+        name = f"constraint_{self.name}"
         constraint_dist: Distribution
 
         if self.constraint == "Gauss":

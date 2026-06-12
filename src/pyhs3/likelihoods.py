@@ -115,6 +115,9 @@ class Likelihood(NamedModel):
             if entries is None:
                 continue
             entries_arr = np.asarray(entries, dtype=np.float64)
+            n_axes = len(datum.axes)
+            if entries_arr.size == 0:
+                entries_arr = entries_arr.reshape(0, n_axes)
             for ax_idx, axis in enumerate(datum.axes):
                 result[axis.name] = entries_arr[:, ax_idx]
         return result

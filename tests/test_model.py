@@ -1534,3 +1534,87 @@ class TestWorkspaceModelDispatch:
         # 'unknown_name' falls through to legacy; domain=0 should pick first_domain
         model = ws.model("first_domain", domain=0, progress=False)
         assert model is not None
+
+
+class TestObservedSuffixHeuristic:
+    """Regression tests for the _observed suffix heuristic (bug: substring vs suffix)."""
+
+    def test_param_containing_observed_is_scalar(self):
+        """A parameter whose name *contains* but does not *end with* _observed is a scalar.
+
+        Before the fix, 'n_observed_total' was misclassified as a vector observable
+        because '_observed' appeared as a substring, producing wrong tensor shapes.
+        """
+        ws = hs3.Workspace(
+            metadata={"hs3_version": "0.2"},
+            distributions=[
+                {
+                    "name": "gauss",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "n_observed_total",
+                    "sigma": "sigma",
+                }
+            ],
+            parameter_points=[
+                {
+                    "name": "default",
+                    "parameters": [
+                        {"name": "x", "value": 0.0},
+                        {"name": "n_observed_total", "value": 0.0},
+                        {"name": "sigma", "value": 1.0},
+                    ],
+                }
+            ],
+            domains=[
+                {
+                    "name": "default_domain",
+                    "type": "product_domain",
+                    "axes": [
+                        {"name": "x", "min": -5.0, "max": 5.0},
+                        {"name": "n_observed_total", "min": -5.0, "max": 5.0},
+                        {"name": "sigma", "min": 0.1, "max": 3.0},
+                    ],
+                }
+            ],
+        )
+        model = ws.model(0, progress=False)
+
+        # n_observed_total should be a scalar, not a vector
+        tensor = model.parameters["n_observed_total"]
+        assert tensor.ndim == 0, (
+            f"Expected scalar (ndim=0), got ndim={tensor.ndim}; "
+            "n_observed_total was misclassified as an observable vector"
+        )
+
+        # The model should evaluate correctly with scalar inputs
+        result = model.pdf(
+            "gauss",
+            x=np.array(0.0),
+            n_observed_total=np.array(0.0),
+            sigma=np.array(1.0),
+        )
+        assert np.isfinite(float(result))
+        assert float(result) > 0
+
+
+class TestGraphSummaryCompilationStatus:
+    """Regression tests for graph_summary misreporting compilation status under FAST_COMPILE."""
+
+    def test_graph_summary_compiled_yes_after_fast_compile(self, simple_workspace):
+        """After calling pdf with FAST_COMPILE, graph_summary should report Compiled: Yes."""
+        model = simple_workspace.model(0, mode="FAST_COMPILE")
+
+        # Trigger compilation by calling pdf
+        model.pdf("gauss", x=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0))
+
+        summary = model.graph_summary("gauss")
+        # Under the old code, the mode guard prevented this from ever being 'Yes'
+        assert "Compiled: Yes" in summary
+
+    def test_graph_summary_compiled_no_before_any_call(self, simple_workspace):
+        """Before any call, graph_summary should report Compiled: No regardless of mode."""
+        for mode in ("FAST_RUN", "FAST_COMPILE"):
+            model = simple_workspace.model(0, mode=mode)
+            summary = model.graph_summary("gauss")
+            assert "Compiled: No" in summary, f"Expected 'Compiled: No' for mode={mode}"

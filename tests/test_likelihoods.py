@@ -7,10 +7,11 @@ of likelihood specifications and collection management.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from pyhs3 import Workspace
-from pyhs3.data import Data, Datum, PointData
+from pyhs3.data import Data, Datum, PointData, UnbinnedData
 from pyhs3.distributions import Distributions, GaussianDist
 from pyhs3.distributions.core import Distribution
 from pyhs3.exceptions import WorkspaceValidationError
@@ -604,3 +605,61 @@ class TestWorkspaceReferentialIntegrity:
             WorkspaceValidationError, match="duplicate observable axis names"
         ):
             Workspace(**ws_dict)
+
+
+class TestDataArraysEmptyEntries:
+    """Regression tests for data_arrays() crashing on empty UnbinnedData (bug: IndexError)."""
+
+    def test_data_arrays_empty_1d(self):
+        """data_arrays() on UnbinnedData with entries=[] returns a length-0 array per axis."""
+        datum = UnbinnedData(
+            name="empty_data",
+            entries=[],
+            axes=[{"name": "x", "min": -5.0, "max": 5.0}],
+        )
+        dist = GaussianDist(name="gauss", x="x", mean=0.0, sigma=1.0)
+        likelihood = Likelihood(name="L", distributions=[dist], data=[datum])
+
+        arrays = likelihood.data_arrays()
+
+        assert "x" in arrays
+        assert arrays["x"].shape == (0,)
+        assert arrays["x"].dtype == np.float64
+
+    def test_data_arrays_empty_2d(self):
+        """data_arrays() on 2-axis UnbinnedData with entries=[] returns one empty array per axis."""
+        datum = UnbinnedData(
+            name="empty_2d",
+            entries=[],
+            axes=[
+                {"name": "x", "min": -5.0, "max": 5.0},
+                {"name": "y", "min": 0.0, "max": 10.0},
+            ],
+        )
+        dist = GaussianDist(name="gauss", x="x", mean=0.0, sigma=1.0)
+        likelihood = Likelihood(name="L", distributions=[dist], data=[datum])
+
+        arrays = likelihood.data_arrays()
+
+        assert "x" in arrays
+        assert "y" in arrays
+        assert arrays["x"].shape == (0,)
+        assert arrays["y"].shape == (0,)
+
+    def test_data_arrays_nonempty_still_works(self):
+        """data_arrays() still extracts correct columns from non-empty entries."""
+        datum = UnbinnedData(
+            name="data",
+            entries=[[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]],
+            axes=[
+                {"name": "x", "min": -5.0, "max": 5.0},
+                {"name": "y", "min": 0.0, "max": 50.0},
+            ],
+        )
+        dist = GaussianDist(name="gauss", x="x", mean=0.0, sigma=1.0)
+        likelihood = Likelihood(name="L", distributions=[dist], data=[datum])
+
+        arrays = likelihood.data_arrays()
+
+        np.testing.assert_array_equal(arrays["x"], [1.0, 2.0, 3.0])
+        np.testing.assert_array_equal(arrays["y"], [10.0, 20.0, 30.0])

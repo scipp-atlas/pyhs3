@@ -29,6 +29,7 @@ numpy = "*"
 sympy = "*"
 pydantic = "*"
 hist = "*"
+pytensor-distributions = "*"
 
 # pytensor >=2.33 does not exist for win-64 for py310
 [feature.py310]

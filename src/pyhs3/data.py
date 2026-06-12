@@ -13,7 +13,6 @@ import hist
 import numpy as np
 from pydantic import (
     BaseModel,
-    ConfigDict,
     Field,
     model_validator,
 )
@@ -32,8 +31,6 @@ class GaussianUncertainty(BaseModel):
         sigma: Standard deviations for each data point
         correlation: Correlation matrix or 0 for no correlation
     """
-
-    model_config = ConfigDict()
 
     type: Literal["gaussian_uncertainty"] = Field(
         default="gaussian_uncertainty", repr=False
@@ -67,8 +64,6 @@ class Datum(NamedModel):
         name: Custom string identifier for the data
         type: Type identifier for the data format
     """
-
-    model_config = ConfigDict()
 
     type: str = Field(..., repr=False)
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from pyhs3.axes import BinnedAxis
 from pyhs3.distributions.core import Distribution
@@ -24,8 +24,6 @@ class HistogramData(BaseModel):
         axes: list of BinnedAxis used to describe the binning
         contents: list of bin content parameter values
     """
-
-    model_config = ConfigDict()
 
     axes: list[BinnedAxis] = Field(..., repr=False)
     contents: list[float] = Field(..., repr=False)
@@ -58,9 +56,10 @@ class HistogramDist(Distribution):  # pylint: disable=abstract-method
 
 
 # Registry of histogram distributions
-distributions: dict[str, type[Distribution]] = {
-    "histogram_dist": HistogramDist,  # type: ignore[type-abstract]
-}
+# NOTE: HistogramDist is intentionally NOT registered here because it has no
+# likelihood() implementation. Workspaces referencing "histogram_dist" will get
+# the normal clean unknown-type validation error from the discriminated union.
+distributions: dict[str, type[Distribution]] = {}
 
 # Define what should be exported from this module
 __all__ = [

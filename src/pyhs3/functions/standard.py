@@ -12,16 +12,11 @@ from enum import IntEnum
 from typing import Annotated, Literal, cast
 
 import pytensor.tensor as pt
-import sympy as sp
 from pydantic import (
-    BaseModel,
     ConfigDict,
     Field,
-    PrivateAttr,
-    model_validator,
 )
 
-from pyhs3.axes import BinnedAxis
 from pyhs3.context import Context
 from pyhs3.distributions.histfactory.interpolations import (
     interpolate_code0,
@@ -30,9 +25,10 @@ from pyhs3.distributions.histfactory.interpolations import (
     interpolate_parabolic,
     interpolate_poly6,
 )
+from pyhs3.distributions.histogram import HistogramData
 from pyhs3.exceptions import custom_error_msg
 from pyhs3.functions.core import Function
-from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor
+from pyhs3.generic_parse import GenericExpressionMixin
 from pyhs3.typing.aliases import TensorVar
 
 log = logging.getLogger(__name__)
@@ -163,7 +159,7 @@ class ProductFunction(Function):
         return result
 
 
-class GenericFunction(Function):
+class GenericFunction(GenericExpressionMixin, Function):
     """
     Generic function with custom mathematical expression.
 
@@ -186,27 +182,7 @@ class GenericFunction(Function):
         :hs3:label:`generic_function <hs3.generic-function>`
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, serialize_by_alias=True)
-
     type: Literal["generic_function"] = Field(default="generic_function", repr=False)
-    expression_str: str = Field(alias="expression", repr=False)
-    _sympy_expr: sp.Expr = PrivateAttr(default=None)
-    _dependent_vars: list[str] = PrivateAttr(default_factory=list)
-
-    @model_validator(mode="after")
-    def setup_expression(self) -> GenericFunction:
-        """Parse and analyze the expression during initialization."""
-        # Parse and analyze the expression during initialization
-        self._sympy_expr = parse_expression(self.expression_str)
-
-        # Analyze the expression to determine dependencies
-        analysis = analyze_sympy_expr(self._sympy_expr)
-        independent_vars = [str(symbol) for symbol in analysis["independent_vars"]]
-        self._dependent_vars = [str(symbol) for symbol in analysis["dependent_vars"]]
-
-        # Set parameters based on the analyzed expression
-        self._parameters = {var: var for var in independent_vars}
-        return self
 
     def _expression(self, context: Context) -> TensorVar:
         """
@@ -218,12 +194,7 @@ class GenericFunction(Function):
         Returns:
             TensorVar: PyTensor expression representing the parsed mathematical expression.
         """
-
-        # Get required variables using the parameters determined during initialization
-        variables = [context[name] for name in self._parameters.values()]
-
-        # Convert using the pre-parsed sympy expression
-        return sympy_to_pytensor(self._sympy_expr, variables)
+        return self._eval_expression(context)
 
 
 class InterpolationCode(IntEnum):
@@ -614,21 +585,6 @@ class CMSAsymPowFunction(Function):
         )
 
 
-class HistogramData(BaseModel):
-    """
-    Histogram data implementation for the HistogramFunction.
-
-    Parameters:
-        axes: list of BinnedAxis used to describe the binning
-        contents: list of bin content parameter values
-    """
-
-    model_config = ConfigDict()
-
-    axes: list[BinnedAxis] = Field(..., repr=False)
-    contents: list[float] = Field(..., repr=False)
-
-
 class HistogramFunction(Function):
     r"""
     Histogram function implementation.
@@ -720,6 +676,9 @@ class RooRecursiveFractionFunction(Function):
 
 
 # Registry for functions defined in this module
+# NOTE: HistogramFunction is intentionally NOT registered here because it has no
+# _expression() implementation. Workspaces referencing "histogram" will get
+# the normal clean unknown-type validation error from the discriminated union.
 functions: dict[str, type[Function]] = {
     "sum": SumFunction,
     "product": ProductFunction,
@@ -727,6 +686,5 @@ functions: dict[str, type[Function]] = {
     "interpolation": InterpolationFunction,
     "CMS::process_normalization": ProcessNormalizationFunction,
     "CMS::asympow": CMSAsymPowFunction,
-    "histogram": HistogramFunction,  # type: ignore[type-abstract]
     "roorecursivefraction_dist": RooRecursiveFractionFunction,
 }

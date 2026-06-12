@@ -3068,8 +3068,8 @@ class TestMixtureDist:
 class TestHistogramDist:
     """Test HistogramDist implementation."""
 
-    def test_histogram_function_creation(self):
-        """Test HistogramDist not implemented."""
+    def test_histogram_dist_direct_construction_raises_typeerror(self):
+        """Direct instantiation of the abstract HistogramDist raises TypeError."""
         with pytest.raises(TypeError):
             HistogramDist(name="test_histogram", data={"axes": [], "contents": []})
 
@@ -3096,3 +3096,18 @@ class TestDistributionsUniqueness:
             ]
         )
         assert [d.name for d in dists] == ["g1", "g2"]
+
+    def test_histogram_dist_in_workspace_raises_clean_validation_error(self):
+        """A workspace using 'histogram_dist' should get a clean unknown-type ValidationError."""
+        ws_json = {
+            "metadata": {"hs3version": "0.2"},
+            "distributions": [
+                {
+                    "name": "my_hist",
+                    "type": "histogram_dist",
+                    "data": {"axes": [], "contents": []},
+                }
+            ],
+        }
+        with pytest.raises(ValidationError, match="histogram_dist"):
+            Workspace(**ws_json)

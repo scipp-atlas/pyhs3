@@ -9,14 +9,10 @@ from __future__ import annotations
 
 import logging
 from abc import ABC
-from typing import TypeVar
 
 from pyhs3.base import Evaluable
 
 log = logging.getLogger(__name__)
-
-
-FuncT = TypeVar("FuncT", bound="Function")
 
 
 class Function(Evaluable, ABC):

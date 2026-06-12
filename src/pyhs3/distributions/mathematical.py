@@ -12,23 +12,19 @@ import logging
 from typing import Literal, cast
 
 import pytensor.tensor as pt
-import sympy as sp
 from pydantic import (
-    ConfigDict,
     Field,
-    PrivateAttr,
-    model_validator,
 )
 
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
-from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor
+from pyhs3.generic_parse import GenericExpressionMixin
 from pyhs3.typing.aliases import TensorVar
 
 log = logging.getLogger(__name__)
 
 
-class GenericDist(Distribution):
+class GenericDist(GenericExpressionMixin, Distribution):
     """
     Generic distribution implementation.
 
@@ -59,27 +55,7 @@ class GenericDist(Distribution):
         >>> dist = GenericDist(name="complex", expression="sin(x) + log(abs(y) + 1)")
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, serialize_by_alias=True)
-
     type: Literal["generic_dist"] = Field(default="generic_dist", repr=False)
-    expression_str: str = Field(alias="expression", repr=False)
-    _sympy_expr: sp.Expr = PrivateAttr(default=None)
-    _dependent_vars: list[str] = PrivateAttr(default_factory=list)
-
-    @model_validator(mode="after")
-    def setup_expression(self) -> GenericDist:
-        """Parse and analyze the expression during initialization."""
-        # Parse and analyze the expression during initialization
-        self._sympy_expr = parse_expression(self.expression_str)
-
-        # Analyze the expression to determine dependencies
-        analysis = analyze_sympy_expr(self._sympy_expr)
-        independent_vars = [str(symbol) for symbol in analysis["independent_vars"]]
-        self._dependent_vars = [str(symbol) for symbol in analysis["dependent_vars"]]
-
-        # Set parameters based on the analyzed expression
-        self._parameters = {var: var for var in independent_vars}
-        return self
 
     def likelihood(self, context: Context) -> TensorVar:
         """
@@ -94,13 +70,7 @@ class GenericDist(Distribution):
         Raises:
             ValueError: If the expression cannot be parsed or contains undefined variables
         """
-        # Get the required variables using the parameters determined during initialization
-        variables = [context[name] for name in self._parameters.values()]
-
-        # Convert using the pre-parsed sympy expression
-        result = sympy_to_pytensor(self._sympy_expr, variables)
-
-        return cast(TensorVar, result)
+        return self._eval_expression(context)
 
 
 class PolynomialDist(Distribution):

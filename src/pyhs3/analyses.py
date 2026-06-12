@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.domains import Domain, Domains
@@ -41,8 +41,6 @@ class Analysis(NamedModel):
         init: Optional name of initial values from parameter_points component
         prior: Optional name of prior distribution from distributions component
     """
-
-    model_config = ConfigDict()
 
     likelihood: Annotated[str | Likelihood, FKValidator, FKSerializer, FKSchema] = (
         Field(..., repr=False)

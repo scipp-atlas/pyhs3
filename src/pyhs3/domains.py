@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import Field, PrivateAttr, model_validator
 
 from pyhs3.axes import ConstantAxis, DomainAxes, DomainAxis, DomainCoordinateAxis
 from pyhs3.collections import NamedCollection, NamedModel
@@ -29,8 +29,6 @@ class Domain(NamedModel):
         name: Name identifier for the domain
         type: Domain type identifier
     """
-
-    model_config = ConfigDict()
 
     type: str = Field(..., repr=False)
 
@@ -149,14 +147,6 @@ class ProductDomain(Domain):
         msg = f"No axis named '{axis_name}' found in domain '{self.name}'"
         raise KeyError(msg)
 
-
-# Define the union type for all domain configurations
-DomainConfig = ProductDomain
-
-# Registry for domain types
-registered_domains: dict[str, type[Domain]] = {
-    "product_domain": ProductDomain,
-}
 
 # Type alias for all domain types using discriminated union
 # Currently only ProductDomain exists, but this allows for future domain types

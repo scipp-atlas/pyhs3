@@ -7,12 +7,18 @@ with samples and modifiers as defined in the HS3 specification.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import cast
 
 import pytensor.tensor as pt
 
 # Import existing distributions for constraint terms
+from pyhs3.exceptions import HS3Exception
 from pyhs3.typing.aliases import TensorVar
+
+
+class InterpolationError(HS3Exception):
+    """Raised when an unknown interpolation method name is requested."""
 
 
 def interpolate_lin(
@@ -222,6 +228,8 @@ def interpolate_code0(
     r"""
     pyhf code0 piecewise-linear interpolation (additive deltas).
 
+    Alias for :func:`interpolate_lin`.
+
     .. math::
 
         f(\alpha) = I^0 + I_{\text{lin}}(\alpha; I^0, I^+, I^-)
@@ -235,14 +243,7 @@ def interpolate_code0(
         \alpha(I^0 - I^-) & \text{if } \alpha < 0
         \end{cases}
     """
-    return cast(
-        TensorVar,
-        pt.where(  # type: ignore[no-untyped-call]
-            alpha >= 0,
-            nom + alpha * (hi - nom),
-            nom + alpha * (nom - lo),
-        ),
-    )
+    return interpolate_lin(alpha, nom, hi, lo)
 
 
 def interpolate_code1(
@@ -250,6 +251,8 @@ def interpolate_code1(
 ) -> TensorVar:
     r"""
     pyhf code1 piecewise-exponential interpolation (multiplicative factors).
+
+    Alias for :func:`interpolate_exp`.
 
     .. math::
 
@@ -264,14 +267,7 @@ def interpolate_code1(
         \left(\frac{I^-}{I^0}\right)^{-\alpha} & \text{if } \alpha < 0
         \end{cases}
     """
-    return cast(
-        TensorVar,
-        pt.where(  # type: ignore[no-untyped-call]
-            alpha >= 0,
-            nom * pt.power(hi / nom, alpha),  # type: ignore[no-untyped-call]
-            nom * pt.power(lo / nom, -alpha),  # type: ignore[no-untyped-call]
-        ),
-    )
+    return interpolate_exp(alpha, nom, hi, lo)
 
 
 def interpolate_code2(
@@ -384,29 +380,41 @@ def interpolate_code4p(
     return cast(TensorVar, result)
 
 
+_INTERPOLATION_METHODS: dict[
+    str,
+    Callable[[TensorVar, TensorVar, TensorVar, TensorVar], TensorVar],
+] = {
+    "lin": interpolate_lin,
+    "log": interpolate_log,
+    "exp": interpolate_exp,
+    "code0": interpolate_code0,
+    "code1": interpolate_code1,
+    "code2": interpolate_code2,
+    "code4": interpolate_code4,
+    "code4p": interpolate_code4p,
+    "parabolic": interpolate_parabolic,
+    "poly6": interpolate_poly6,
+}
+
+
 def apply_interpolation(
     method: str, alpha: TensorVar, nom: TensorVar, hi: TensorVar, lo: TensorVar
 ) -> TensorVar:
-    """Apply the specified interpolation method."""
-    if method == "lin":
-        return interpolate_lin(alpha, nom, hi, lo)
-    if method == "log":
-        return interpolate_log(alpha, nom, hi, lo)
-    if method == "exp":
-        return interpolate_exp(alpha, nom, hi, lo)
-    if method == "code0":
-        return interpolate_code0(alpha, nom, hi, lo)
-    if method == "code1":
-        return interpolate_code1(alpha, nom, hi, lo)
-    if method == "code2":
-        return interpolate_code2(alpha, nom, hi, lo)
-    if method == "code4":
-        return interpolate_code4(alpha, nom, hi, lo)
-    if method == "code4p":
-        return interpolate_code4p(alpha, nom, hi, lo)
-    if method == "parabolic":
-        return interpolate_parabolic(alpha, nom, hi, lo)
-    if method == "poly6":
-        return interpolate_poly6(alpha, nom, hi, lo)
-    # Default to linear interpolation
-    return interpolate_lin(alpha, nom, hi, lo)
+    """Apply the specified interpolation method.
+
+    Args:
+        method: Interpolation method name (e.g. ``"lin"``, ``"code0"``, ``"code4p"``).
+        alpha: The nuisance parameter value.
+        nom: Nominal value.
+        hi: High variation value.
+        lo: Low variation value.
+
+    Raises:
+        InterpolationError: If *method* is not a recognised interpolation name.
+    """
+    fn = _INTERPOLATION_METHODS.get(method)
+    if fn is None:
+        known = ", ".join(sorted(_INTERPOLATION_METHODS))
+        msg = f"Unknown interpolation method '{method}'. Known methods: {known}"
+        raise InterpolationError(msg)
+    return fn(alpha, nom, hi, lo)

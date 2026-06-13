@@ -240,6 +240,8 @@ class Model:
         # (which do not depend on the observable) appear in a ProductDist alongside
         # the shape PDF: naively summing log(shape x Π_j constr_j) over N events
         # multiplies each constr_j term by N rather than counting it once.
+        # Once-per-likelihood counting matches RooFit but is not specified by
+        # HS3; see https://github.com/scipp-atlas/pyhs3/issues/240.
         seen_constraint_factors: set[str] = set()
 
         for dist_obj, datum in zip(
@@ -253,8 +255,13 @@ class Model:
             if entries is None:
                 # HFDC: log_prob uses the Poisson-only term here; deduplicated
                 # constraint terms are added after the loop.  Non-HFDC distributions
-                # paired with BinnedData (e.g. a Gaussian used as a template) are
-                # skipped because there is no sensible unbinned likelihood for them.
+                # paired with BinnedData are skipped: HS3 does not define the
+                # likelihood of a continuous pdf evaluated on binned data
+                # (bin centers vs bin integrals), and ROOT exports do not record
+                # which convention the original fit used.  Native support is
+                # tracked in https://github.com/scipp-atlas/pyhs3/issues/242
+                # (spec: hep-statistics-serialization-standard issue #93,
+                # export: root-project/root issue #22598).
                 if dist_name in self._hfdc_poisson:
                     terms.append(pt.log(self._hfdc_poisson[dist_name]))
                 continue
@@ -291,7 +298,10 @@ class Model:
 
             # Sum the per-event log-density over events.  Weighted:
             # Σᵢ wᵢ log f(xᵢ); unweighted: Σᵢ log f(xᵢ).  No /total_weight:
-            # that would give an average NLL (wrong scale).
+            # that would give an average NLL (wrong scale).  The weighted form
+            # follows RooFit; HS3 does not define the weighted likelihood — see
+            # https://github.com/hep-statistics-serialization-standard/hep-statistics-serialization-standard/issues/92
+            # and https://github.com/scipp-atlas/pyhs3/issues/241.
             if contrib.per_event:
                 log_pdf: TensorVar = (
                     pt.add(*contrib.per_event)

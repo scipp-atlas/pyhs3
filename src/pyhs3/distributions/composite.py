@@ -337,6 +337,12 @@ class MixtureDist(Distribution):
         RooFit's sum-of-weights convention: weighting the log(Σcᵢfᵢ) term
         gives Σⱼwⱼ·log(PDF) + (Σwⱼ)·log(nu) - nu.
 
+        The data-only -log(N!) constant is omitted and N_eff = Σwⱼ is used
+        for weighted data; both are RooFit conventions adopted because HS3
+        does not specify the extended term exactly.  See
+        https://github.com/hep-statistics-serialization-standard/hep-statistics-serialization-standard/issues/91
+        and https://github.com/scipp-atlas/pyhs3/issues/241.
+
         Non-extended mixtures contribute the default per-event log(PDF).
         """
         if not self.extended:
@@ -415,6 +421,13 @@ class ProductDist(Distribution):
         globally.  This prevents the N-fold overcounting that occurs when
         naively summing log(shape x Π_j constr_j) over N events, which
         multiplies each constr_j term by N rather than counting it once.
+
+        The shape-vs-constraint classification is structural inference
+        (matching RooProdPdf), not HS3 spec semantics — nothing in an HS3
+        file marks a factor as a constraint.  If the spec adopts explicit
+        constraint encoding, this inference can be removed; see
+        https://github.com/hep-statistics-serialization-standard/hep-statistics-serialization-standard/issues/90
+        and https://github.com/scipp-atlas/pyhs3/issues/240.
         """
         terms = LogProbTerms()
         for factor_name in self.factors:

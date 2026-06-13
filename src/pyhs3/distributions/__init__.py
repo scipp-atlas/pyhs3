@@ -23,7 +23,7 @@ from pyhs3.distributions import (
     mathematical,
     physics,
 )
-from pyhs3.distributions.core import Distribution
+from pyhs3.distributions.core import Distribution, LogProbTerms
 from pyhs3.exceptions import custom_error_msg
 
 # Export distribution classes for backwards compatibility
@@ -79,6 +79,7 @@ __all__ = [
     "HistogramDist",
     "LandauDist",
     "LogNormalDist",
+    "LogProbTerms",
     "MixtureDist",
     "PoissonDist",
     "PolynomialDist",

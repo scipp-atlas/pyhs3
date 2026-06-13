@@ -7,24 +7,26 @@ multiple other distributions, including mixtures and products of distributions.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any, Literal, cast
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import pytensor.tensor as pt
 from pydantic import (
     Field,
+    PrivateAttr,
     ValidationInfo,
     field_serializer,
     field_validator,
     model_serializer,
 )
+from pytensor.graph.traversal import explicit_graph_inputs
 
 from pyhs3.context import Context
-
-# Import for Poisson extended likelihood calculation
-from pyhs3.distributions.basic import PoissonDist
-from pyhs3.distributions.core import Distribution
+from pyhs3.distributions.core import Distribution, LogProbTerms
 from pyhs3.typing.aliases import TensorVar
+
+if TYPE_CHECKING:
+    from pyhs3.distributions import Distributions
 
 
 class MixtureDist(Distribution):
@@ -71,6 +73,13 @@ class MixtureDist(Distribution):
     ref_coef_norm: list[str] | None = Field(
         default=None, json_schema_extra={"preprocess": False}
     )
+
+    # PyTensor nodes built by the most recent likelihood() call, reused by
+    # unnormalized_expression() and expected_yield() so that model.log_prob
+    # shares the same subgraphs instead of building duplicates the compiler
+    # then has to merge (a measurable compile-time cost on large workspaces).
+    _cached_unnorm_expr: TensorVar | None = PrivateAttr(default=None)
+    _cached_nu_expr: TensorVar | None = PrivateAttr(default=None)
 
     @model_serializer(mode="wrap")
     def serialize_model(self, handler: Callable[[Any], Any]) -> Any:
@@ -189,9 +198,15 @@ class MixtureDist(Distribution):
             # N coefficients case: direct summation with normalization
             mixturesum = pt.constant(0.0)
 
-            # Calculate the mixture sum
+            # Calculate the mixture sum (unnormalized: Σ cᵢ fᵢ)
             for i, coeff in enumerate(self.coefficients):
                 mixturesum += context[coeff] * context[self.summands[i]]
+
+            # Cache the unnormalized Σcᵢfᵢ so that model.log_prob can build
+            # the extended log-likelihood as Σⱼ log(Σcᵢfᵢ(xⱼ)) - nu without
+            # introducing a separate pt.log(nu) node that triggers costly
+            # optimizer rewrites when combined with log(Σcᵢfᵢ/nu).
+            self._cached_unnorm_expr = mixturesum
 
             # Handle normalization
             if self.ref_coef_norm is not None:
@@ -199,12 +214,18 @@ class MixtureDist(Distribution):
                 norm_sum = pt.constant(0.0)
                 for norm_coeff in self.ref_coef_norm:
                     norm_sum += context[norm_coeff]
+                # Cache the normalisation sum so expected_yield() can reuse
+                # the same PyTensor node rather than building a duplicate
+                # summation subgraph that the compiler then has to merge.
+                self._cached_nu_expr = norm_sum
                 mixturesum = mixturesum / norm_sum
             else:
                 # Standard normalization: divide by sum of all coefficients
                 coeffsum = pt.constant(0.0)
                 for coeff in self.coefficients:
                     coeffsum += context[coeff]
+                # Cache so expected_yield() reuses this node.
+                self._cached_nu_expr = coeffsum
                 mixturesum = mixturesum / coeffsum
 
         else:
@@ -244,6 +265,12 @@ class MixtureDist(Distribution):
             msg = "expected_yield only valid for extended PDFs"
             raise RuntimeError(msg)
 
+        # Reuse the normalisation sum cached by likelihood() to avoid building
+        # a duplicate PyTensor summation subgraph (which would slow compilation).
+        if self._cached_nu_expr is not None:
+            return self._cached_nu_expr
+
+        # Fallback: likelihood() hasn't been called yet, compute fresh.
         nu = pt.constant(0.0)
 
         if self.ref_coef_norm is not None:
@@ -257,36 +284,82 @@ class MixtureDist(Distribution):
 
         return cast(TensorVar, nu)
 
-    def extended_likelihood(
-        self, context: Context, data: TensorVar | None = None
-    ) -> TensorVar:
+    def unnormalized_expression(self, context: Context) -> TensorVar:
+        """Return the unnormalized mixture Σcᵢfᵢ (before dividing by Σcᵢ).
+
+        After :meth:`likelihood` has been called this just returns the cached
+        intermediate result; it is used by :meth:`pyhs3.model.Model.log_prob`
+        to build the extended log-likelihood as
+
+            Σⱼ log(Σcᵢfᵢ(xⱼ)) - nu
+
+        which is algebraically equivalent to
+
+            Σⱼ log(Σcᵢfᵢ(xⱼ)/nu)  +  N·log(nu)  -  nu
+
+        but avoids introducing a separate ``pt.log(nu)`` node that can trigger
+        expensive rewrite cascades in the PyTensor graph optimiser.
+
+        The Poisson yield term enters the likelihood once per channel and
+        involves the observed event count, so it is assembled by
+        :meth:`pyhs3.model.Model.log_prob` (which owns the channel-dataset
+        pairing) rather than via :meth:`extended_likelihood` (whose result is
+        multiplied into the per-event density and would be overcounted when
+        summing over events).
         """
-        Poisson term for the extended likelihood.
+        if self._cached_unnorm_expr is not None:
+            return self._cached_unnorm_expr
 
-        Args:
-            context: Mapping of names to pytensor variables
-            data: Tensor containing observed event count (if None, returns 1.0)
+        # Fallback: recompute (likelihood() hasn't been called yet).
+        unnorm = pt.constant(0.0)
+        for i, coeff in enumerate(self.coefficients):
+            unnorm += context[coeff] * context[self.summands[i]]
+        return cast(TensorVar, unnorm)
 
-        Returns:
-            pytensor.tensor.variable.TensorVariable: :func:`PoissonDist.expression` object
+    def log_prob_terms(  # pylint: disable=redefined-outer-name
+        self,
+        expressions: Mapping[str, TensorVar],
+        distributions: Distributions,
+    ) -> LogProbTerms:
+        """
+        Extended-likelihood contributions for the mixture.
 
-        Raises:
-            RuntimeError: If called on non-extended PDF
+        For an extended mixture the per-channel log-likelihood is built from
+        the unnormalized mixture and the expected yield:
+
+            Σⱼ log(Σcᵢfᵢ(xⱼ))  -  nu
+
+        which simplifies from Σⱼ log(Σcᵢfᵢ(xⱼ)/nu) + N·log(nu) - nu (the
+        log(nu) terms cancel).  This is algebraically identical to the full
+        extended likelihood but avoids introducing pt.log(nu) into the graph,
+        preventing costly optimizer rewrite cascades triggered by
+        log(a/b) + N·log(b).  For weighted data this form also reproduces
+        RooFit's sum-of-weights convention: weighting the log(Σcᵢfᵢ) term
+        gives Σⱼwⱼ·log(PDF) + (Σwⱼ)·log(nu) - nu.
+
+        The data-only -log(N!) constant is omitted and N_eff = Σwⱼ is used
+        for weighted data; both are RooFit conventions adopted because HS3
+        does not specify the extended term exactly.  See
+        https://github.com/hep-statistics-serialization-standard/hep-statistics-serialization-standard/issues/91
+        and https://github.com/scipp-atlas/pyhs3/issues/241.
+
+        Non-extended mixtures contribute the default per-event log(PDF).
         """
         if not self.extended:
-            return pt.constant(1.0)
+            return super().log_prob_terms(expressions, distributions)
 
-        if data is None:
-            # No data provided, return no contribution
-            return pt.constant(1.0)
+        if self._cached_unnorm_expr is None or self._cached_nu_expr is None:
+            msg = (
+                f"log_prob_terms for extended mixture '{self.name}' requires "
+                f"likelihood() to have been called (the model graph build does "
+                f"this) so the unnormalized mixture and yield nodes exist."
+            )
+            raise RuntimeError(msg)
 
-        nu = self.expected_yield(context)
-        n_obs = data  # data should contain the observed count
-
-        # Use the existing PoissonDist implementation for correctness
-        poisson_dist = PoissonDist(name="temp_poisson", mean="nu", x="n_obs")
-        poisson_context = Context(parameters={"nu": nu, "n_obs": n_obs})
-        return poisson_dist.expression(poisson_context)
+        return LogProbTerms(
+            per_event=[pt.log(self._cached_unnorm_expr)],
+            channel=[-self._cached_nu_expr],
+        )
 
 
 class ProductDist(Distribution):
@@ -329,6 +402,52 @@ class ProductDist(Distribution):
 
         vals = [context[factor] for factor in self.factors]
         return cast(TensorVar, pt.mul(*vals))
+
+    def log_prob_terms(  # pylint: disable=redefined-outer-name
+        self,
+        expressions: Mapping[str, TensorVar],
+        distributions: Distributions,
+    ) -> LogProbTerms:
+        """
+        Split factors into per-event shape terms and per-channel constraints.
+
+        Factors that depend on an observable (detected by a pt.vector free
+        input — observable arrays are built as pt.vector, NP scalars as
+        pt.scalar) delegate to their own log_prob_terms, so e.g. an extended
+        mixture inside a product contributes its yield term correctly.
+
+        Factors that depend only on scalar nuisance parameters are constraint
+        PDFs and are returned as named constraints for the model to add once
+        globally.  This prevents the N-fold overcounting that occurs when
+        naively summing log(shape x Π_j constr_j) over N events, which
+        multiplies each constr_j term by N rather than counting it once.
+
+        The shape-vs-constraint classification is structural inference
+        (matching RooProdPdf), not HS3 spec semantics — nothing in an HS3
+        file marks a factor as a constraint.  If the spec adopts explicit
+        constraint encoding, this inference can be removed; see
+        https://github.com/hep-statistics-serialization-standard/hep-statistics-serialization-standard/issues/90
+        and https://github.com/scipp-atlas/pyhs3/issues/240.
+        """
+        terms = LogProbTerms()
+        for factor_name in self.factors:
+            factor_expr = expressions[factor_name]
+            free_inputs = [
+                v for v in explicit_graph_inputs([factor_expr]) if v.name is not None
+            ]
+            # Observable-dependent factors have at least one vector (rank-1) input.
+            is_shape = any(v.type.ndim >= 1 for v in free_inputs)
+
+            if is_shape:
+                factor_terms = distributions[factor_name].log_prob_terms(
+                    expressions, distributions
+                )
+                terms.per_event.extend(factor_terms.per_event)
+                terms.channel.extend(factor_terms.channel)
+                terms.constraints.update(factor_terms.constraints)
+            else:
+                terms.constraints[factor_name] = cast(TensorVar, pt.log(factor_expr))
+        return terms
 
 
 # Registry of composite distributions

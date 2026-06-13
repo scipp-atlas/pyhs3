@@ -343,11 +343,22 @@ Distributions in pyhs3 separate the main probability model from extended likelih
 
 **When to Override extended_likelihood():**
 
-Override ``extended_likelihood()`` only when your distribution needs additional terms beyond the main PDF:
+Override ``extended_likelihood()`` only when your distribution needs additional terms beyond the main PDF that are computable from the context alone:
 
 - **HistFactory distributions**: Constraint terms for nuisance parameters (Gaussian/Poisson constraints)
-- **Mixture distributions**: Poisson yield terms for extended ML fits
 - **Most distributions**: Do not override (use default ``1.0``)
+
+Dataset-level terms cannot use this hook, for two reasons. First, ``expression()`` multiplies ``extended_likelihood()`` into the per-event density, so a term meant to enter the likelihood once per channel — like the extended Poisson yield term, which involves the observed event count — would be counted once per event when ``Model.log_prob`` sums over the data. Second, while the observable tensors are present in the ``Context``, a ``MixtureDist`` cannot identify them: its declared dependencies are its coefficients and summand distributions, not the random variable. Such terms are instead declared via ``log_prob_terms()`` (below) and assembled by ``Model.log_prob``, which owns the channel-dataset pairing.
+
+**Structured log-likelihood contributions: log_prob_terms()**
+
+Not every term a distribution contributes to the joint log-likelihood is a per-event log-density. ``Distribution.log_prob_terms(expressions, distributions)`` lets a distribution describe its contributions structurally, returning a ``LogProbTerms`` with three kinds of terms:
+
+- ``per_event``: log-density terms summed over events (with per-event weights applied when present)
+- ``channel``: scalar terms added once per channel (e.g. the ``-nu`` yield term of an extended ``MixtureDist``)
+- ``constraints``: log-terms keyed by factor name, added exactly once globally so constraints shared across channels are not double-counted
+
+The default implementation returns a single per-event ``log(PDF)`` term, which is correct for most distributions. ``ProductDist`` overrides it to split its factors into observable-dependent shape factors (delegating to each factor's own ``log_prob_terms``, so composition nests) and scalar-only constraint factors. ``MixtureDist`` overrides it to contribute the extended yield term. ``Model.log_prob`` calls this hook for each channel and owns the assembly — event weighting, summing, and global constraint deduplication — so new distribution types with channel-level terms only need to override ``log_prob_terms()``, never ``Model.log_prob`` itself.
 
 **Example with Extended Likelihood:**
 

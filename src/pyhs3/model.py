@@ -137,7 +137,6 @@ class Model:
         # so that logpdf() continues to work; log_prob uses this dict to avoid
         # double-counting constraint terms when multiple channels share a parameter.
         self._hfdc_poisson: dict[str, TensorVar] = {}
-
         # Build dependency graph with proper entity identification
         self._build_dependency_graph(functions, distributions, progress)
 
@@ -235,6 +234,16 @@ class Model:
         # yields shape (M,) per term — the parameter batch size.
         terms: list[TensorVar] = []
 
+        # Track constraint factor names already contributed so that constraints
+        # shared across multiple channels are only counted once globally.
+        # This prevents the N-fold overcounting that occurs when constraint PDFs
+        # (which do not depend on the observable) appear in a ProductDist alongside
+        # the shape PDF: naively summing log(shape x Π_j constr_j) over N events
+        # multiplies each constr_j term by N rather than counting it once.
+        # Once-per-likelihood counting matches RooFit but is not specified by
+        # HS3; see https://github.com/scipp-atlas/pyhs3/issues/240.
+        seen_constraint_factors: set[str] = set()
+
         for dist_obj, datum in zip(
             self._likelihood.distributions, self._likelihood.data, strict=True
         ):
@@ -246,17 +255,20 @@ class Model:
             if entries is None:
                 # HFDC: log_prob uses the Poisson-only term here; deduplicated
                 # constraint terms are added after the loop.  Non-HFDC distributions
-                # paired with BinnedData (e.g. a Gaussian used as a template) are
-                # skipped because there is no sensible unbinned likelihood for them.
+                # paired with BinnedData are skipped: HS3 does not define the
+                # likelihood of a continuous pdf evaluated on binned data
+                # (bin centers vs bin integrals), and ROOT exports do not record
+                # which convention the original fit used.  Native support is
+                # tracked in https://github.com/scipp-atlas/pyhs3/issues/242
+                # (spec: hep-statistics-serialization-standard issue #93,
+                # export: root-project/root issue #22598).
                 if dist_name in self._hfdc_poisson:
                     terms.append(pt.log(self._hfdc_poisson[dist_name]))
                 continue
 
-            # model.distributions[name] is the normalized PDF expression with
-            # observables as symbolic pt.vector free inputs.
-            log_pdf: TensorVar = pt.log(self.distributions[dist_name])
-
+            # Resolve weight tensor once for this datum.
             weights = getattr(datum, "weights", None)
+            weights_t: TensorVar | None = None
             if weights is not None:
                 warnings.warn(
                     f"'{datum.name}' has per-event weights; weights are baked as "
@@ -264,7 +276,6 @@ class Model:
                     UserWarning,
                     stacklevel=2,
                 )
-                # (N,) → (N, 1) so it broadcasts correctly against (N, M) log_pdf
                 weights_arr = np.asarray(weights, dtype=np.float64)
                 total_weight = float(np.sum(weights_arr))
                 if not np.isfinite(total_weight) or np.isclose(total_weight, 0.0):
@@ -273,12 +284,45 @@ class Model:
                         "sum of weights must be finite and non-zero."
                     )
                     raise ValueError(msg)
+                # (N,) → (N, 1) so it broadcasts against (N, M) log_pdf.
                 weights_t = pt.constant(weights_arr)[:, None]
-                terms.append(
-                    pt.sum(weights_t * log_pdf, axis=0) / np.float64(total_weight)  # type: ignore[no-untyped-call]
+
+            # Each distribution describes its own structured contributions
+            # (per-event log-density, once-per-channel scalars, named
+            # constraints) via Distribution.log_prob_terms; the model owns
+            # the channel-dataset pairing and applies event weights, sums
+            # over events, and deduplicates constraints globally.
+            contrib = self._distribution_objects[dist_name].log_prob_terms(
+                self.distributions, self._distribution_objects
+            )
+
+            # Sum the per-event log-density over events.  Weighted:
+            # Σᵢ wᵢ log f(xᵢ); unweighted: Σᵢ log f(xᵢ).  No /total_weight:
+            # that would give an average NLL (wrong scale).  The weighted form
+            # follows RooFit; HS3 does not define the weighted likelihood — see
+            # https://github.com/hep-statistics-serialization-standard/hep-statistics-serialization-standard/issues/92
+            # and https://github.com/scipp-atlas/pyhs3/issues/241.
+            if contrib.per_event:
+                log_pdf: TensorVar = (
+                    pt.add(*contrib.per_event)
+                    if len(contrib.per_event) > 1
+                    else contrib.per_event[0]
                 )
-            else:
-                terms.append(pt.sum(log_pdf, axis=0))  # type: ignore[no-untyped-call]
+                if weights_t is not None:
+                    terms.append(pt.sum(weights_t * log_pdf, axis=0))  # type: ignore[no-untyped-call]
+                else:
+                    terms.append(pt.sum(log_pdf, axis=0))  # type: ignore[no-untyped-call]
+
+            # Once-per-channel scalar terms (e.g. the -nu yield term of an
+            # extended mixture).
+            terms.extend(contrib.channel)
+
+            # Add each unique constraint exactly once globally; constraints
+            # shared with an earlier channel are skipped.
+            for factor_name, constraint_expr in contrib.constraints.items():
+                if factor_name not in seen_constraint_factors:
+                    seen_constraint_factors.add(factor_name)
+                    terms.append(constraint_expr)
 
         # Auxiliary distributions (constraint terms) are scalars; they broadcast
         # onto the parameter-scan axis when non-scalar params are present.

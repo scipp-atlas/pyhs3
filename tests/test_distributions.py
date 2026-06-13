@@ -80,6 +80,22 @@ class TestDistribution:
         f = function([], result)
         assert np.isclose(f(), 1.0)
 
+    def test_distribution_log_prob_terms_default(self):
+        """Base default: a single per-event log(PDF) term, nothing else."""
+
+        class TestDist(Distribution):
+            def likelihood(self, _context):
+                return pt.constant(0.5)
+
+        dist = TestDist(name="test", type="test")
+        terms = dist.log_prob_terms({"test": pt.constant(0.5)}, Distributions([]))
+
+        assert len(terms.per_event) == 1
+        assert terms.channel == []
+        assert terms.constraints == {}
+        f = function([], terms.per_event[0])
+        assert np.isclose(f(), np.log(0.5))
+
 
 class TestProductDist:
     """Test ProductDist implementation."""
@@ -97,6 +113,72 @@ class TestProductDist:
         dist = ProductDist(**config)
         assert dist.name == "test_product"
         assert dist.factors == ["pdf1", "pdf2", "pdf3"]
+
+    def test_product_dist_log_prob_terms_splits_factors(self):
+        """Observable-dependent factors contribute per-event; scalar-only factors
+        become named constraints."""
+        dist = ProductDist(name="channel", factors=["shape", "constr"])
+        x = pt.dvector("x")
+        alpha = pt.dscalar("alpha")
+        expressions = {
+            "shape": pt.exp(-x),
+            "constr": pt.exp(-(alpha**2)),
+        }
+        distributions = Distributions(
+            [
+                GaussianDist(name="shape", x="x", mean=0.0, sigma=1.0),
+                GaussianDist(name="constr", x="alpha", mean=0.0, sigma=1.0),
+            ]
+        )
+
+        terms = dist.log_prob_terms(expressions, distributions)
+
+        assert len(terms.per_event) == 1
+        assert terms.channel == []
+        assert set(terms.constraints) == {"constr"}
+        f = function([x, alpha], [terms.per_event[0], terms.constraints["constr"]])
+        per_event_val, constr_val = f([1.0, 2.0], 3.0)
+        np.testing.assert_allclose(per_event_val, [-1.0, -2.0])  # log(exp(-x)) = -x
+        np.testing.assert_allclose(constr_val, -9.0)  # log(exp(-alpha^2))
+
+    def test_product_dist_log_prob_terms_recurses_into_extended_mixture(self):
+        """A shape factor that is an extended mixture contributes its unnormalized
+        log term per event and its -nu yield term per channel."""
+        mix = MixtureDist(
+            name="mix",
+            summands=["s1", "s2"],
+            coefficients=["c1", "c2"],
+            extended=True,
+        )
+        x = pt.dvector("x")
+        alpha = pt.dscalar("alpha")
+        mix_context = {
+            "c1": pt.constant(10.0),
+            "c2": pt.constant(20.0),
+            "s1": pt.exp(-x),
+            "s2": pt.exp(-0.5 * x),
+        }
+        mix_expr = mix.likelihood(mix_context)
+
+        dist = ProductDist(name="channel", factors=["mix", "constr"])
+        expressions = {
+            "mix": mix_expr,
+            "constr": pt.exp(-(alpha**2)),
+        }
+        distributions = Distributions(
+            [mix, GaussianDist(name="constr", x="alpha", mean=0.0, sigma=1.0)]
+        )
+
+        terms = dist.log_prob_terms(expressions, distributions)
+
+        assert len(terms.per_event) == 1
+        assert len(terms.channel) == 1
+        assert set(terms.constraints) == {"constr"}
+        f = function([x], [terms.per_event[0], terms.channel[0]])
+        per_event_val, channel_val = f([0.0])
+        # per-event at x=0: log(10*1 + 20*1) = log(30); channel: -(10+20)
+        np.testing.assert_allclose(per_event_val, [np.log(30.0)])
+        np.testing.assert_allclose(channel_val, -30.0)
 
     def test_product_dist_expression(self):
         """Test ProductDist expression evaluation."""
@@ -2822,66 +2904,131 @@ class TestMixtureDist:
         ):
             dist.expected_yield(context)
 
-    def test_mixture_dist_extended_likelihood(self):
-        """Test extended_likelihood method."""
+    def test_mixture_dist_unnormalized_expression(self):
+        """Test unnormalized_expression returns sum(c_i * f_i) without normalization."""
         dist = MixtureDist(
             name="test_mixture",
-            summands=["pdf1", "pdf2", "pdf3"],
-            coefficients=["coeff1", "coeff2", "coeff3"],
+            summands=["pdf1", "pdf2"],
+            coefficients=["coeff1", "coeff2"],
             extended=True,
         )
 
         context = {
             "coeff1": pt.constant(10.0),
             "coeff2": pt.constant(20.0),
-            "coeff3": pt.constant(30.0),
+            "pdf1": pt.constant(0.5),
+            "pdf2": pt.constant(0.25),
         }
 
-        n_observed = pt.constant(50.0)
-        result = dist.extended_likelihood(context, n_observed)
+        result = dist.unnormalized_expression(context)
         f = function([], result)
-        likelihood_val = f()
 
-        # Expected: Pois(50 | 60) = exp(50 * log(60) - 60 - log(50!))
-        log_pois = 50 * np.log(60) - 60 - math.lgamma(50 + 1)
-        expected = np.exp(log_pois)
-        assert np.isclose(likelihood_val, expected)
+        # Expected: 10 * 0.5 + 20 * 0.25 = 10.0 (no division by sum of coefficients)
+        assert np.isclose(f(), 10.0)
 
-    def test_mixture_dist_extended_likelihood_non_extended_error(self):
-        """Test that extended_likelihood raises error for non-extended PDFs."""
+    def test_mixture_dist_unnormalized_expression_reuses_likelihood_nodes(self):
+        """After likelihood(), unnormalized_expression and expected_yield return the
+        same PyTensor nodes built during likelihood() rather than fresh subgraphs."""
         dist = MixtureDist(
             name="test_mixture",
-            summands=["pdf1", "pdf2", "pdf3"],
+            summands=["pdf1", "pdf2"],
             coefficients=["coeff1", "coeff2"],
+            extended=True,
+        )
+
+        context = {
+            "coeff1": pt.constant(10.0),
+            "coeff2": pt.constant(20.0),
+            "pdf1": pt.constant(0.5),
+            "pdf2": pt.constant(0.25),
+        }
+
+        dist.likelihood(context)
+        unnorm = dist.unnormalized_expression(context)
+        nu = dist.expected_yield(context)
+
+        # Repeated calls return the identical cached nodes (no duplicate subgraphs)
+        assert dist.unnormalized_expression(context) is unnorm
+        assert dist.expected_yield(context) is nu
+
+        f = function([], [unnorm, nu])
+        unnorm_val, nu_val = f()
+        assert np.isclose(unnorm_val, 10.0)
+        assert np.isclose(nu_val, 30.0)
+
+    def test_mixture_dist_log_prob_terms_extended(self):
+        """Extended mixture contributes log(sum c_i f_i) per event and -nu per channel."""
+        dist = MixtureDist(
+            name="mix",
+            summands=["pdf1", "pdf2"],
+            coefficients=["coeff1", "coeff2"],
+            extended=True,
+        )
+        context = {
+            "coeff1": pt.constant(10.0),
+            "coeff2": pt.constant(20.0),
+            "pdf1": pt.constant(0.5),
+            "pdf2": pt.constant(0.25),
+        }
+        dist.likelihood(context)
+
+        terms = dist.log_prob_terms({}, Distributions([]))
+
+        assert len(terms.per_event) == 1
+        assert len(terms.channel) == 1
+        assert terms.constraints == {}
+        f = function([], [terms.per_event[0], terms.channel[0]])
+        per_event_val, channel_val = f()
+        # per-event: log(10*0.5 + 20*0.25) = log(10); channel: -nu = -(10+20)
+        assert np.isclose(per_event_val, np.log(10.0))
+        assert np.isclose(channel_val, -30.0)
+
+    def test_mixture_dist_log_prob_terms_requires_likelihood(self):
+        """Extended mixture log_prob_terms raises if likelihood() has not run."""
+        dist = MixtureDist(
+            name="mix",
+            summands=["pdf1", "pdf2"],
+            coefficients=["coeff1", "coeff2"],
+            extended=True,
+        )
+        with pytest.raises(RuntimeError, match="likelihood"):
+            dist.log_prob_terms({}, Distributions([]))
+
+    def test_mixture_dist_log_prob_terms_non_extended_uses_default(self):
+        """Non-extended mixture falls back to the base log(PDF) contribution."""
+        dist = MixtureDist(
+            name="mix",
+            summands=["pdf1", "pdf2"],
+            coefficients=["coeff1"],
             extended=False,
         )
+        terms = dist.log_prob_terms({"mix": pt.constant(0.7)}, Distributions([]))
 
-        context = {"coeff1": pt.constant(10.0), "coeff2": pt.constant(20.0)}
+        assert len(terms.per_event) == 1
+        assert terms.channel == []
+        assert terms.constraints == {}
+        f = function([], terms.per_event[0])
+        assert np.isclose(f(), np.log(0.7))
 
-        extended_likelihood = dist.extended_likelihood(context, pt.constant(50.0))
-        assert isinstance(extended_likelihood, pt.variable.TensorConstant)
-        assert extended_likelihood.value == 1.0
-        assert extended_likelihood.type == pt.TensorType(dtype=np.float32, shape=())
-
-    def test_mixture_dist_extended_likelihood_no_data(self):
-        """Test extended_likelihood method when data is None."""
+    def test_mixture_dist_extended_likelihood_inherits_default(self):
+        """MixtureDist does not override extended_likelihood; the Poisson yield
+        term is data-dependent and assembled by Model.log_prob instead."""
         dist = MixtureDist(
             name="test_mixture",
             summands=["pdf1", "pdf2", "pdf3"],
             coefficients=["coeff1", "coeff2", "coeff3"],
             extended=True,
         )
+
         context = {
             "coeff1": pt.constant(10.0),
             "coeff2": pt.constant(20.0),
             "coeff3": pt.constant(30.0),
         }
 
-        # Test with data=None - should return 1.0 (no contribution)
-        result = dist.extended_likelihood(context, data=None)
+        result = dist.extended_likelihood(context)
         f = function([], result)
-        likelihood_val = f()
-        assert np.isclose(likelihood_val, 1.0)
+        assert np.isclose(f(), 1.0)
 
     def test_mixture_dist_log_expression(self):
         """Test log_expression method returns log of expression."""

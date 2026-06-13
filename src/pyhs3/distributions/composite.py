@@ -296,9 +296,12 @@ class MixtureDist(Distribution):
         but avoids introducing a separate ``pt.log(nu)`` node that can trigger
         expensive rewrite cascades in the PyTensor graph optimiser.
 
-        The Poisson yield term itself depends on the observed event count and
-        is therefore assembled by :meth:`pyhs3.model.Model.log_prob` (which has
-        the dataset), not by :meth:`extended_likelihood` (which does not).
+        The Poisson yield term enters the likelihood once per channel and
+        involves the observed event count, so it is assembled by
+        :meth:`pyhs3.model.Model.log_prob` (which owns the channel-dataset
+        pairing) rather than via :meth:`extended_likelihood` (whose result is
+        multiplied into the per-event density and would be overcounted when
+        summing over events).
         """
         if self._cached_unnorm_expr is not None:
             return self._cached_unnorm_expr

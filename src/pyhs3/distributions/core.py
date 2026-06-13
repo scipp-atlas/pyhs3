@@ -228,11 +228,14 @@ class Distribution(Evaluable, ABC):
         Extended likelihood contribution in normal space.
 
         Returns additional likelihood terms for extended ML fitting.
-        Override only when the distribution contributes extended terms that
-        are computable from the context alone, like constraint terms
-        (HistFactory).  Data-dependent terms (e.g. the Poisson yield term of
-        an extended MixtureDist) are assembled by ``Model.log_prob``, which
-        has the dataset; ``_expression()`` calls this method without data.
+        Override only when the extended terms belong in the distribution's
+        per-event density, like constraint terms (HistFactory).  Terms that
+        enter the likelihood once per channel (e.g. the Poisson yield term
+        of an extended MixtureDist, which involves the observed event count)
+        must not use this hook: ``_expression()`` multiplies the result into
+        the density, so ``Model.log_prob`` would count it once per event when
+        summing over data.  Such terms are assembled once per channel by
+        ``Model.log_prob``, which owns the channel-dataset pairing.
 
         Default: no contribution (returns 1.0 in normal space).
 

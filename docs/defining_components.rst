@@ -348,7 +348,7 @@ Override ``extended_likelihood()`` only when your distribution needs additional 
 - **HistFactory distributions**: Constraint terms for nuisance parameters (Gaussian/Poisson constraints)
 - **Most distributions**: Do not override (use default ``1.0``)
 
-Data-dependent terms cannot use this hook: ``expression()`` calls ``extended_likelihood()`` without data. The Poisson yield term of an extended ``MixtureDist``, which depends on the observed event count, is instead assembled by ``Model.log_prob`` from ``MixtureDist.unnormalized_expression()`` and ``MixtureDist.expected_yield()``.
+Dataset-level terms cannot use this hook, for two reasons. First, ``expression()`` multiplies ``extended_likelihood()`` into the per-event density, so a term meant to enter the likelihood once per channel — like the extended Poisson yield term, which involves the observed event count — would be counted once per event when ``Model.log_prob`` sums over the data. Second, while the observable tensors are present in the ``Context``, a ``MixtureDist`` cannot identify them: its declared dependencies are its coefficients and summand distributions, not the random variable. ``Model.log_prob``, which owns the channel-dataset pairing, therefore assembles the extended term once per channel from ``MixtureDist.unnormalized_expression()`` and ``MixtureDist.expected_yield()``.
 
 **Example with Extended Likelihood:**
 

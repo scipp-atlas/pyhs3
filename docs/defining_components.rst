@@ -343,11 +343,12 @@ Distributions in pyhs3 separate the main probability model from extended likelih
 
 **When to Override extended_likelihood():**
 
-Override ``extended_likelihood()`` only when your distribution needs additional terms beyond the main PDF:
+Override ``extended_likelihood()`` only when your distribution needs additional terms beyond the main PDF that are computable from the context alone:
 
 - **HistFactory distributions**: Constraint terms for nuisance parameters (Gaussian/Poisson constraints)
-- **Mixture distributions**: Poisson yield terms for extended ML fits
 - **Most distributions**: Do not override (use default ``1.0``)
+
+Data-dependent terms cannot use this hook: ``expression()`` calls ``extended_likelihood()`` without data. The Poisson yield term of an extended ``MixtureDist``, which depends on the observed event count, is instead assembled by ``Model.log_prob`` from ``MixtureDist.unnormalized_expression()`` and ``MixtureDist.expected_yield()``.
 
 **Example with Extended Likelihood:**
 

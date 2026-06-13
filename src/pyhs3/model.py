@@ -138,17 +138,15 @@ class Model:
         # so that logpdf() continues to work; log_prob uses this dict to avoid
         # double-counting constraint terms when multiple channels share a parameter.
         self._hfdc_poisson: dict[str, TensorVar] = {}
-        # Extended-MixtureDist Poisson-term support.
-        # For each channel name we store two nodes built during _build_distribution_node:
-        #   _extended_yields[name]  = nu = Σcᵢ  (total expected yield)
-        #   _extended_unnorm[name]  = Σcᵢfᵢ    (unnormalized mixture numerator)
+        # Extended-MixtureDist Poisson-term support.  For each extended mixture
+        # we store a (unnormalized mixture Σcᵢfᵢ, expected yield nu = Σcᵢ) pair
+        # of nodes built during _build_distribution_node.
         #
         # log_prob uses them to compute the extended log-likelihood as
         #   Σⱼ log(Σcᵢfᵢ(xⱼ))  -  nu
         # which is equivalent to  Σⱼ log(PDF(xⱼ)) + N·log(nu) - nu  but avoids
         # a separate pt.log(nu) node that triggers costly optimizer rewrites.
-        self._extended_yields: dict[str, TensorVar] = {}
-        self._extended_unnorm: dict[str, TensorVar] = {}
+        self._extended_mixtures: dict[str, tuple[TensorVar, TensorVar]] = {}
 
         # Build dependency graph with proper entity identification
         self._build_dependency_graph(functions, distributions, progress)
@@ -253,7 +251,7 @@ class Model:
         # (which do not depend on the observable) appear in a ProductDist alongside
         # the shape PDF: naively summing log(shape x Π_j constr_j) over N events
         # multiplies each constr_j term by N rather than counting it once.
-        _seen_constraint_factors: set[str] = set()
+        seen_constraint_factors: set[str] = set()
 
         for dist_obj, datum in zip(
             self._likelihood.distributions, self._likelihood.data, strict=True
@@ -299,14 +297,12 @@ class Model:
             #
             # This separation prevents constraints from being multiplied by N_events.
             # Observable arrays are built as pt.vector (ndim=1); NP scalars are pt.scalar (ndim=0).
-            _dist_obj = self._distribution_objects.get(dist_name)
-            if isinstance(_dist_obj, ProductDist):
+            channel_dist = self._distribution_objects.get(dist_name)
+            if isinstance(channel_dist, ProductDist):
                 shape_log_terms: list[TensorVar] = []
 
-                for factor_name in _dist_obj.factors:
-                    factor_expr: TensorVar | None = self.distributions.get(factor_name)
-                    if factor_expr is None:
-                        continue  # should not happen, but be safe
+                for factor_name in channel_dist.factors:
+                    factor_expr = self.distributions[factor_name]
                     free_inputs = [
                         v
                         for v in explicit_graph_inputs([factor_expr])
@@ -316,13 +312,8 @@ class Model:
                     is_shape = any(v.type.ndim >= 1 for v in free_inputs)
 
                     if is_shape:
-                        unnorm_expr = self._extended_unnorm.get(factor_name)
-                        nu_expr = self._extended_yields.get(factor_name)
-                        if (
-                            unnorm_expr is not None
-                            and nu_expr is not None
-                            and entries is not None
-                        ):
+                        extended = self._extended_mixtures.get(factor_name)
+                        if extended is not None:
                             # Extended MixtureDist: use the unnormalized mixture to
                             # avoid a separate pt.log(nu) node.
                             #
@@ -334,14 +325,19 @@ class Model:
                             # This is algebraically identical but avoids introducing
                             # pt.log(nu) into the graph, preventing costly optimizer
                             # rewrite cascades triggered by log(a/b) + N·log(b).
+                            #
+                            # For weighted data this form also reproduces RooFit's
+                            # sum-of-weights convention: weighting the log(Σcᵢfᵢ)
+                            # term gives Σⱼwⱼ·log(PDF) + (Σwⱼ)·log(nu) - nu.
+                            unnorm_expr, nu_expr = extended
                             shape_log_terms.append(pt.log(unnorm_expr))
                             terms.append(-nu_expr)
                         else:
                             # Non-extended shape factor: just add log(PDF).
                             shape_log_terms.append(pt.log(factor_expr))
-                    elif factor_name not in _seen_constraint_factors:
+                    elif factor_name not in seen_constraint_factors:
                         # Add each unique constraint exactly once globally.
-                        _seen_constraint_factors.add(factor_name)
+                        seen_constraint_factors.add(factor_name)
                         terms.append(pt.log(factor_expr))
                     # else: already counted from an earlier channel — skip.
 
@@ -361,16 +357,12 @@ class Model:
                 # Non-ProductDist: standard unbinned log-likelihood.
                 # Weighted: Σᵢ wᵢ log f(xᵢ). Unweighted: Σᵢ log f(xᵢ).
                 # No /total_weight: that would give an average NLL (wrong scale).
-                unnorm_expr = self._extended_unnorm.get(dist_name)
-                nu_expr = self._extended_yields.get(dist_name)
-                if (
-                    unnorm_expr is not None
-                    and nu_expr is not None
-                    and entries is not None
-                ):
+                extended = self._extended_mixtures.get(dist_name)
+                if extended is not None:
                     # Extended MixtureDist without ProductDist wrapper: use
                     # unnormalized mixture to avoid pt.log(nu) (see ProductDist
                     # path above for the full explanation).
+                    unnorm_expr, nu_expr = extended
                     log_pdf = pt.log(unnorm_expr)
                     if weights_t is not None:
                         terms.append(pt.sum(weights_t * log_pdf, axis=0))  # type: ignore[no-untyped-call]
@@ -549,8 +541,10 @@ class Model:
             # rather than  Σⱼ log(PDF) + N·log(nu) - nu, avoiding a separate
             # pt.log(nu) node that can trigger expensive optimiser rewrites.
             if isinstance(dist, MixtureDist) and dist.extended:
-                self._extended_yields[node_name] = dist.expected_yield(context)
-                self._extended_unnorm[node_name] = dist.unnormalized_expression(context)
+                self._extended_mixtures[node_name] = (
+                    dist.unnormalized_expression(context),
+                    dist.expected_yield(context),
+                )
             return expr
 
         # Poisson-only term; the full expression is returned below for logpdf.

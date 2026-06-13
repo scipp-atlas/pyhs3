@@ -228,8 +228,11 @@ class Distribution(Evaluable, ABC):
         Extended likelihood contribution in normal space.
 
         Returns additional likelihood terms for extended ML fitting.
-        Override only when the distribution contributes extended terms like
-        constraint terms (HistFactory) or Poisson yield terms (MixtureDist).
+        Override only when the distribution contributes extended terms that
+        are computable from the context alone, like constraint terms
+        (HistFactory).  Data-dependent terms (e.g. the Poisson yield term of
+        an extended MixtureDist) are assembled by ``Model.log_prob``, which
+        has the dataset; ``_expression()`` calls this method without data.
 
         Default: no contribution (returns 1.0 in normal space).
 

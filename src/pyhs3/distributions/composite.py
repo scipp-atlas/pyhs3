@@ -13,6 +13,7 @@ from typing import Any, Literal, cast
 import pytensor.tensor as pt
 from pydantic import (
     Field,
+    PrivateAttr,
     ValidationInfo,
     field_serializer,
     field_validator,
@@ -20,9 +21,6 @@ from pydantic import (
 )
 
 from pyhs3.context import Context
-
-# Import for Poisson extended likelihood calculation
-from pyhs3.distributions.basic import PoissonDist
 from pyhs3.distributions.core import Distribution
 from pyhs3.typing.aliases import TensorVar
 
@@ -71,6 +69,13 @@ class MixtureDist(Distribution):
     ref_coef_norm: list[str] | None = Field(
         default=None, json_schema_extra={"preprocess": False}
     )
+
+    # PyTensor nodes built by the most recent likelihood() call, reused by
+    # unnormalized_expression() and expected_yield() so that model.log_prob
+    # shares the same subgraphs instead of building duplicates the compiler
+    # then has to merge (a measurable compile-time cost on large workspaces).
+    _cached_unnorm_expr: TensorVar | None = PrivateAttr(default=None)
+    _cached_nu_expr: TensorVar | None = PrivateAttr(default=None)
 
     @model_serializer(mode="wrap")
     def serialize_model(self, handler: Callable[[Any], Any]) -> Any:
@@ -258,8 +263,8 @@ class MixtureDist(Distribution):
 
         # Reuse the normalisation sum cached by likelihood() to avoid building
         # a duplicate PyTensor summation subgraph (which would slow compilation).
-        if hasattr(self, "_cached_nu_expr"):
-            return cast(TensorVar, self._cached_nu_expr)
+        if self._cached_nu_expr is not None:
+            return self._cached_nu_expr
 
         # Fallback: likelihood() hasn't been called yet, compute fresh.
         nu = pt.constant(0.0)
@@ -290,46 +295,19 @@ class MixtureDist(Distribution):
 
         but avoids introducing a separate ``pt.log(nu)`` node that can trigger
         expensive rewrite cascades in the PyTensor graph optimiser.
+
+        The Poisson yield term itself depends on the observed event count and
+        is therefore assembled by :meth:`pyhs3.model.Model.log_prob` (which has
+        the dataset), not by :meth:`extended_likelihood` (which does not).
         """
-        if hasattr(self, "_cached_unnorm_expr"):
-            return cast(TensorVar, self._cached_unnorm_expr)
+        if self._cached_unnorm_expr is not None:
+            return self._cached_unnorm_expr
 
         # Fallback: recompute (likelihood() hasn't been called yet).
         unnorm = pt.constant(0.0)
         for i, coeff in enumerate(self.coefficients):
             unnorm += context[coeff] * context[self.summands[i]]
         return cast(TensorVar, unnorm)
-
-    def extended_likelihood(
-        self, context: Context, data: TensorVar | None = None
-    ) -> TensorVar:
-        """
-        Poisson term for the extended likelihood.
-
-        Args:
-            context: Mapping of names to pytensor variables
-            data: Tensor containing observed event count (if None, returns 1.0)
-
-        Returns:
-            pytensor.tensor.variable.TensorVariable: :func:`PoissonDist.expression` object
-
-        Raises:
-            RuntimeError: If called on non-extended PDF
-        """
-        if not self.extended:
-            return pt.constant(1.0)
-
-        if data is None:
-            # No data provided, return no contribution
-            return pt.constant(1.0)
-
-        nu = self.expected_yield(context)
-        n_obs = data  # data should contain the observed count
-
-        # Use the existing PoissonDist implementation for correctness
-        poisson_dist = PoissonDist(name="temp_poisson", mean="nu", x="n_obs")
-        poisson_context = Context(parameters={"nu": nu, "n_obs": n_obs})
-        return poisson_dist.expression(poisson_context)
 
 
 class ProductDist(Distribution):

@@ -24,7 +24,6 @@ from pyhs3.compile import function
 from pyhs3.context import Context
 from pyhs3.data import BinnedData
 from pyhs3.distributions import Distributions, HistFactoryDistChannel
-from pyhs3.distributions.composite import MixtureDist, ProductDist
 from pyhs3.domains import Domain
 from pyhs3.functions import Functions
 from pyhs3.networks import build_dependency_graph
@@ -138,16 +137,6 @@ class Model:
         # so that logpdf() continues to work; log_prob uses this dict to avoid
         # double-counting constraint terms when multiple channels share a parameter.
         self._hfdc_poisson: dict[str, TensorVar] = {}
-        # Extended-MixtureDist Poisson-term support.  For each extended mixture
-        # we store a (unnormalized mixture Σcᵢfᵢ, expected yield nu = Σcᵢ) pair
-        # of nodes built during _build_distribution_node.
-        #
-        # log_prob uses them to compute the extended log-likelihood as
-        #   Σⱼ log(Σcᵢfᵢ(xⱼ))  -  nu
-        # which is equivalent to  Σⱼ log(PDF(xⱼ)) + N·log(nu) - nu  but avoids
-        # a separate pt.log(nu) node that triggers costly optimizer rewrites.
-        self._extended_mixtures: dict[str, tuple[TensorVar, TensorVar]] = {}
-
         # Build dependency graph with proper entity identification
         self._build_dependency_graph(functions, distributions, progress)
 
@@ -291,90 +280,39 @@ class Model:
                 # (N,) → (N, 1) so it broadcasts against (N, M) log_pdf.
                 weights_t = pt.constant(weights_arr)[:, None]
 
-            # For ProductDist channels, split factors into:
-            #   • shape factors  — depend on the observable (pt.vector inputs) → sum over events
-            #   • constraint factors — depend only on scalar NPs → add once globally
-            #
-            # This separation prevents constraints from being multiplied by N_events.
-            # Observable arrays are built as pt.vector (ndim=1); NP scalars are pt.scalar (ndim=0).
-            channel_dist = self._distribution_objects.get(dist_name)
-            if isinstance(channel_dist, ProductDist):
-                shape_log_terms: list[TensorVar] = []
+            # Each distribution describes its own structured contributions
+            # (per-event log-density, once-per-channel scalars, named
+            # constraints) via Distribution.log_prob_terms; the model owns
+            # the channel-dataset pairing and applies event weights, sums
+            # over events, and deduplicates constraints globally.
+            contrib = self._distribution_objects[dist_name].log_prob_terms(
+                self.distributions, self._distribution_objects
+            )
 
-                for factor_name in channel_dist.factors:
-                    factor_expr = self.distributions[factor_name]
-                    free_inputs = [
-                        v
-                        for v in explicit_graph_inputs([factor_expr])
-                        if v.name is not None
-                    ]
-                    # Observable-dependent factors have at least one vector (rank-1) input.
-                    is_shape = any(v.type.ndim >= 1 for v in free_inputs)
-
-                    if is_shape:
-                        extended = self._extended_mixtures.get(factor_name)
-                        if extended is not None:
-                            # Extended MixtureDist: use the unnormalized mixture to
-                            # avoid a separate pt.log(nu) node.
-                            #
-                            # The full extended log-likelihood per channel is:
-                            #   Σⱼ log(Σcᵢfᵢ(xⱼ)/nu)  +  N·log(nu)  -  nu
-                            # which simplifies (the log(nu) terms cancel) to:
-                            #   Σⱼ log(Σcᵢfᵢ(xⱼ))  -  nu
-                            #
-                            # This is algebraically identical but avoids introducing
-                            # pt.log(nu) into the graph, preventing costly optimizer
-                            # rewrite cascades triggered by log(a/b) + N·log(b).
-                            #
-                            # For weighted data this form also reproduces RooFit's
-                            # sum-of-weights convention: weighting the log(Σcᵢfᵢ)
-                            # term gives Σⱼwⱼ·log(PDF) + (Σwⱼ)·log(nu) - nu.
-                            unnorm_expr, nu_expr = extended
-                            shape_log_terms.append(pt.log(unnorm_expr))
-                            terms.append(-nu_expr)
-                        else:
-                            # Non-extended shape factor: just add log(PDF).
-                            shape_log_terms.append(pt.log(factor_expr))
-                    elif factor_name not in seen_constraint_factors:
-                        # Add each unique constraint exactly once globally.
-                        seen_constraint_factors.add(factor_name)
-                        terms.append(pt.log(factor_expr))
-                    # else: already counted from an earlier channel — skip.
-
-                # Sum shape log over events.  No /total_weight: the correct weighted
-                # log-likelihood is Σᵢ wᵢ log f(xᵢ), not a per-event average.
-                if shape_log_terms:
-                    shape_log_pdf: TensorVar = (
-                        pt.add(*shape_log_terms)
-                        if len(shape_log_terms) > 1
-                        else shape_log_terms[0]
-                    )
-                    if weights_t is not None:
-                        terms.append(pt.sum(weights_t * shape_log_pdf, axis=0))  # type: ignore[no-untyped-call]
-                    else:
-                        terms.append(pt.sum(shape_log_pdf, axis=0))  # type: ignore[no-untyped-call]
-            else:
-                # Non-ProductDist: standard unbinned log-likelihood.
-                # Weighted: Σᵢ wᵢ log f(xᵢ). Unweighted: Σᵢ log f(xᵢ).
-                # No /total_weight: that would give an average NLL (wrong scale).
-                extended = self._extended_mixtures.get(dist_name)
-                if extended is not None:
-                    # Extended MixtureDist without ProductDist wrapper: use
-                    # unnormalized mixture to avoid pt.log(nu) (see ProductDist
-                    # path above for the full explanation).
-                    unnorm_expr, nu_expr = extended
-                    log_pdf = pt.log(unnorm_expr)
-                    if weights_t is not None:
-                        terms.append(pt.sum(weights_t * log_pdf, axis=0))  # type: ignore[no-untyped-call]
-                    else:
-                        terms.append(pt.sum(log_pdf, axis=0))  # type: ignore[no-untyped-call]
-                    terms.append(-nu_expr)
+            # Sum the per-event log-density over events.  Weighted:
+            # Σᵢ wᵢ log f(xᵢ); unweighted: Σᵢ log f(xᵢ).  No /total_weight:
+            # that would give an average NLL (wrong scale).
+            if contrib.per_event:
+                log_pdf: TensorVar = (
+                    pt.add(*contrib.per_event)
+                    if len(contrib.per_event) > 1
+                    else contrib.per_event[0]
+                )
+                if weights_t is not None:
+                    terms.append(pt.sum(weights_t * log_pdf, axis=0))  # type: ignore[no-untyped-call]
                 else:
-                    log_pdf = pt.log(self.distributions[dist_name])
-                    if weights_t is not None:
-                        terms.append(pt.sum(weights_t * log_pdf, axis=0))  # type: ignore[no-untyped-call]
-                    else:
-                        terms.append(pt.sum(log_pdf, axis=0))  # type: ignore[no-untyped-call]
+                    terms.append(pt.sum(log_pdf, axis=0))  # type: ignore[no-untyped-call]
+
+            # Once-per-channel scalar terms (e.g. the -nu yield term of an
+            # extended mixture).
+            terms.extend(contrib.channel)
+
+            # Add each unique constraint exactly once globally; constraints
+            # shared with an earlier channel are skipped.
+            for factor_name, constraint_expr in contrib.constraints.items():
+                if factor_name not in seen_constraint_factors:
+                    seen_constraint_factors.add(factor_name)
+                    terms.append(constraint_expr)
 
         # Auxiliary distributions (constraint terms) are scalars; they broadcast
         # onto the parameter-scan axis when non-scalar params are present.
@@ -533,19 +471,7 @@ class Model:
         """
         dist = distributions[node_name]
         if not isinstance(dist, HistFactoryDistChannel):
-            expr = dist.expression(context)
-            # For extended MixtureDist, cache the unnormalized mixture (Σcᵢfᵢ)
-            # and the expected yield (nu = Σcᵢ).  log_prob uses these to build
-            # the extended log-likelihood as
-            #   Σⱼ log(Σcᵢfᵢ(xⱼ)) - nu
-            # rather than  Σⱼ log(PDF) + N·log(nu) - nu, avoiding a separate
-            # pt.log(nu) node that can trigger expensive optimiser rewrites.
-            if isinstance(dist, MixtureDist) and dist.extended:
-                self._extended_mixtures[node_name] = (
-                    dist.unnormalized_expression(context),
-                    dist.expected_yield(context),
-                )
-            return expr
+            return dist.expression(context)
 
         # Poisson-only term; the full expression is returned below for logpdf.
         self._hfdc_poisson[node_name] = dist.likelihood(context)

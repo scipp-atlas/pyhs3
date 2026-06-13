@@ -8,7 +8,9 @@ standard and CMS-specific distribution implementations.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import cast
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, cast
 
 import pytensor.tensor as pt
 from pydantic import PrivateAttr
@@ -18,6 +20,38 @@ from pyhs3.base import Evaluable
 from pyhs3.context import Context
 from pyhs3.normalization import gauss_legendre_integral
 from pyhs3.typing.aliases import TensorVar
+
+if TYPE_CHECKING:
+    from pyhs3.distributions import Distributions
+
+
+@dataclass
+class LogProbTerms:
+    """
+    Structured per-channel contributions to :attr:`pyhs3.model.Model.log_prob`.
+
+    Distributions describe *what* they contribute via
+    :meth:`Distribution.log_prob_terms`; the model owns the channel-dataset
+    pairing and decides *how* the pieces enter the joint log-likelihood
+    (event weighting, summing over events, global constraint deduplication).
+
+    Attributes:
+        per_event: Log-density terms with the observable as a free pt.vector
+            input, broadcasting to shape (N, M) for N events and parameter
+            batch size M.  The model sums these over the event axis (applying
+            per-event weights when present).
+        channel: Scalar terms added once per channel, broadcasting onto the
+            (M,) parameter batch axis (e.g. the -nu yield term of an extended
+            mixture).
+        constraints: Log-terms keyed by factor name, depending only on scalar
+            nuisance parameters.  The model adds each name exactly once
+            globally, so constraints shared across channels are not
+            double-counted.
+    """
+
+    per_event: list[TensorVar] = field(default_factory=list)
+    channel: list[TensorVar] = field(default_factory=list)
+    constraints: dict[str, TensorVar] = field(default_factory=dict)
 
 
 class Distribution(Evaluable, ABC):
@@ -247,3 +281,31 @@ class Distribution(Evaluable, ABC):
             TensorVar: Likelihood contribution (default: 1.0 = no contribution)
         """
         return pt.constant(1.0)
+
+    def log_prob_terms(
+        self,
+        expressions: Mapping[str, TensorVar],
+        _distributions: Distributions,
+    ) -> LogProbTerms:
+        """
+        Structured contributions of this distribution to the joint log-likelihood.
+
+        Called by :attr:`pyhs3.model.Model.log_prob` for each channel after the
+        model graph is built.  Override when the distribution's terms do not
+        all enter the likelihood as a per-event log-density — e.g. once-per-
+        channel yield terms (extended :class:`~pyhs3.distributions.MixtureDist`)
+        or globally-deduplicated constraint factors
+        (:class:`~pyhs3.distributions.ProductDist`).
+
+        Default: a single per-event ``log(PDF)`` term.
+
+        Args:
+            expressions: Compiled symbolic expressions for all distributions,
+                keyed by name (``model.distributions``).
+            distributions: Distribution objects keyed by name, so composite
+                distributions can delegate to their components' hooks.
+
+        Returns:
+            LogProbTerms: per-event, per-channel, and constraint contributions.
+        """
+        return LogProbTerms(per_event=[pt.log(expressions[self.name])])

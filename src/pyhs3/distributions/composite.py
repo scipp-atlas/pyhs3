@@ -7,8 +7,8 @@ multiple other distributions, including mixtures and products of distributions.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any, Literal, cast
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import pytensor.tensor as pt
 from pydantic import (
@@ -19,10 +19,14 @@ from pydantic import (
     field_validator,
     model_serializer,
 )
+from pytensor.graph.traversal import explicit_graph_inputs
 
 from pyhs3.context import Context
-from pyhs3.distributions.core import Distribution
+from pyhs3.distributions.core import Distribution, LogProbTerms
 from pyhs3.typing.aliases import TensorVar
+
+if TYPE_CHECKING:
+    from pyhs3.distributions import Distributions
 
 
 class MixtureDist(Distribution):
@@ -312,6 +316,45 @@ class MixtureDist(Distribution):
             unnorm += context[coeff] * context[self.summands[i]]
         return cast(TensorVar, unnorm)
 
+    def log_prob_terms(
+        self,
+        expressions: Mapping[str, TensorVar],
+        distributions: Distributions,
+    ) -> LogProbTerms:
+        """
+        Extended-likelihood contributions for the mixture.
+
+        For an extended mixture the per-channel log-likelihood is built from
+        the unnormalized mixture and the expected yield:
+
+            Σⱼ log(Σcᵢfᵢ(xⱼ))  -  nu
+
+        which simplifies from Σⱼ log(Σcᵢfᵢ(xⱼ)/nu) + N·log(nu) - nu (the
+        log(nu) terms cancel).  This is algebraically identical to the full
+        extended likelihood but avoids introducing pt.log(nu) into the graph,
+        preventing costly optimizer rewrite cascades triggered by
+        log(a/b) + N·log(b).  For weighted data this form also reproduces
+        RooFit's sum-of-weights convention: weighting the log(Σcᵢfᵢ) term
+        gives Σⱼwⱼ·log(PDF) + (Σwⱼ)·log(nu) - nu.
+
+        Non-extended mixtures contribute the default per-event log(PDF).
+        """
+        if not self.extended:
+            return super().log_prob_terms(expressions, distributions)
+
+        if self._cached_unnorm_expr is None or self._cached_nu_expr is None:
+            msg = (
+                f"log_prob_terms for extended mixture '{self.name}' requires "
+                f"likelihood() to have been called (the model graph build does "
+                f"this) so the unnormalized mixture and yield nodes exist."
+            )
+            raise RuntimeError(msg)
+
+        return LogProbTerms(
+            per_event=[pt.log(self._cached_unnorm_expr)],
+            channel=[-self._cached_nu_expr],
+        )
+
 
 class ProductDist(Distribution):
     r"""
@@ -353,6 +396,45 @@ class ProductDist(Distribution):
 
         vals = [context[factor] for factor in self.factors]
         return cast(TensorVar, pt.mul(*vals))
+
+    def log_prob_terms(
+        self,
+        expressions: Mapping[str, TensorVar],
+        distributions: Distributions,
+    ) -> LogProbTerms:
+        """
+        Split factors into per-event shape terms and per-channel constraints.
+
+        Factors that depend on an observable (detected by a pt.vector free
+        input — observable arrays are built as pt.vector, NP scalars as
+        pt.scalar) delegate to their own log_prob_terms, so e.g. an extended
+        mixture inside a product contributes its yield term correctly.
+
+        Factors that depend only on scalar nuisance parameters are constraint
+        PDFs and are returned as named constraints for the model to add once
+        globally.  This prevents the N-fold overcounting that occurs when
+        naively summing log(shape x Π_j constr_j) over N events, which
+        multiplies each constr_j term by N rather than counting it once.
+        """
+        terms = LogProbTerms()
+        for factor_name in self.factors:
+            factor_expr = expressions[factor_name]
+            free_inputs = [
+                v for v in explicit_graph_inputs([factor_expr]) if v.name is not None
+            ]
+            # Observable-dependent factors have at least one vector (rank-1) input.
+            is_shape = any(v.type.ndim >= 1 for v in free_inputs)
+
+            if is_shape:
+                factor_terms = distributions[factor_name].log_prob_terms(
+                    expressions, distributions
+                )
+                terms.per_event.extend(factor_terms.per_event)
+                terms.channel.extend(factor_terms.channel)
+                terms.constraints.update(factor_terms.constraints)
+            else:
+                terms.constraints[factor_name] = cast(TensorVar, pt.log(factor_expr))
+        return terms
 
 
 # Registry of composite distributions

@@ -815,6 +815,38 @@ def test_log_prob_product_dist_counts_constraint_once():
     assert val == pytest.approx(shape_lp + constraint_lp, abs=1e-6)
 
 
+def test_log_prob_product_dist_constraint_only_channel():
+    """A ProductDist with only constraint factors (no shape factor) contributes
+    just the constraint term — the per-event sum is skipped entirely."""
+    ws_dict = {
+        **_WS_PRODUCT_CONSTRAINT,
+        "distributions": [
+            d
+            for d in _WS_PRODUCT_CONSTRAINT["distributions"]
+            if d["name"] != "channel1"
+        ]
+        + [
+            {
+                "name": "channel1",
+                "type": "product_dist",
+                "factors": ["constr_alpha"],
+            }
+        ],
+    }
+    ws = Workspace(**ws_dict)
+    model = ws.model(ws.analyses["A"], progress=False)
+    lp_expr = model.log_prob
+
+    inputs_map = {
+        v.name: v for v in explicit_graph_inputs([lp_expr]) if v.name is not None
+    }
+    fn = pytensor.function(list(inputs_map.values()), lp_expr)
+    params = {k: v for k, v in model.nominal_params.items() if k in inputs_map}
+    val = float(fn(**params).item())
+
+    assert val == pytest.approx(float(norm.logpdf(0.5, loc=0.0, scale=1.0)), abs=1e-6)
+
+
 def test_log_prob_shared_constraint_across_channels_counted_once():
     """A constraint factor shared by two ProductDist channels is counted once globally."""
     ws_dict = {

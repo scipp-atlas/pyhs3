@@ -316,7 +316,7 @@ class MixtureDist(Distribution):
             unnorm += context[coeff] * context[self.summands[i]]
         return cast(TensorVar, unnorm)
 
-    def log_prob_terms(
+    def log_prob_terms(  # pylint: disable=redefined-outer-name
         self,
         expressions: Mapping[str, TensorVar],
         distributions: Distributions,
@@ -403,7 +403,7 @@ class ProductDist(Distribution):
         vals = [context[factor] for factor in self.factors]
         return cast(TensorVar, pt.mul(*vals))
 
-    def log_prob_terms(
+    def log_prob_terms(  # pylint: disable=redefined-outer-name
         self,
         expressions: Mapping[str, TensorVar],
         distributions: Distributions,

@@ -56,6 +56,77 @@ def simple_workspace():
     return hs3.Workspace(**workspace_data)
 
 
+class TestSharedTensorRenaming:
+    """Regression tests for single-element functions renaming shared tensors.
+
+    A single-summand ``sum`` (or single-factor ``product``) function returns the
+    referenced parameter tensor directly from ``_expression``.  ``expression()``
+    must not rename that shared tensor in place, otherwise ``model.parameters``
+    is corrupted and the compiled PDF can no longer be evaluated by parameter
+    name.  See base.py ``Evaluable.expression``.
+    """
+
+    @staticmethod
+    def _build_workspace(func_def: dict, *, bounded: bool) -> hs3.Workspace:
+        """Build a workspace with a Gaussian whose mean is supplied by ``func_def``."""
+        axes = [{"name": "x", "min": -5.0, "max": 5.0}]
+        if bounded:
+            axes.append({"name": "mu", "min": -2.0, "max": 2.0})
+        workspace_data = {
+            "metadata": {"hs3_version": "0.2"},
+            "distributions": [
+                {
+                    "name": "gauss",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "f",
+                    "sigma": "sigma",
+                }
+            ],
+            "functions": [func_def],
+            "parameter_points": [
+                {
+                    "name": "p",
+                    "parameters": [
+                        {"name": "mu", "value": 0.0},
+                        {"name": "sigma", "value": 1.0},
+                    ],
+                }
+            ],
+            "domains": [
+                {"name": "d", "type": "product_domain", "axes": axes},
+            ],
+        }
+        return hs3.Workspace(**workspace_data)
+
+    @pytest.mark.parametrize("bounded", [False, True])
+    @pytest.mark.parametrize(
+        "func_def",
+        [
+            {"name": "f", "type": "sum", "summands": ["mu"]},
+            {"name": "f", "type": "product", "factors": ["mu"]},
+        ],
+        ids=["sum", "product"],
+    )
+    def test_single_element_function_preserves_parameter_name(
+        self, func_def: dict, bounded: bool
+    ) -> None:
+        """Single-element sum/product must not rename the shared 'mu' tensor."""
+        ws = self._build_workspace(func_def, bounded=bounded)
+        model = ws.model("d", parameter_set="p", progress=False)
+
+        # The shared parameter tensor must keep its own name.
+        assert model.parameters["mu"].name == "mu"
+
+        # The compiled interface must report 'mu', not the function name 'f'.
+        assert "mu" in model.pars("gauss")
+        assert "f" not in model.pars("gauss")
+
+        # And the PDF must actually evaluate by parameter name.
+        result = model.pdf_unsafe("gauss", x=0.0, mu=0.0, sigma=1.0)
+        npt.assert_allclose(result, 1.0 / np.sqrt(2.0 * np.pi), rtol=1e-6)
+
+
 class TestModelModes:
     """Test Model compilation modes and behavior."""
 

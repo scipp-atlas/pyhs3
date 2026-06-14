@@ -1877,3 +1877,27 @@ class TestHistogramFunction:
         """Test HistogramFunction not implemented."""
         with pytest.raises(TypeError):
             HistogramFunction(name="test_histogram", data={"axes": [], "contents": []})
+
+
+class TestFunctionsUniqueness:
+    """Test that the Functions collection rejects duplicate names."""
+
+    def test_duplicate_function_names_raise(self):
+        """Two functions with the same name fail at validation time."""
+        with pytest.raises(ValidationError, match="duplicate item name"):
+            Functions(
+                [
+                    SumFunction(name="f", summands=["a"]),
+                    SumFunction(name="f", summands=["b"]),
+                ]
+            )
+
+    def test_unique_function_names_ok(self):
+        """Distinct function names build without error."""
+        funcs = Functions(
+            [
+                SumFunction(name="f1", summands=["a"]),
+                SumFunction(name="f2", summands=["b"]),
+            ]
+        )
+        assert [f.name for f in funcs] == ["f1", "f2"]

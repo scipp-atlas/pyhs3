@@ -58,6 +58,23 @@ class WorkspaceValidationError(HS3Exception):
     """
 
 
+class DuplicateEntityError(HS3Exception):
+    """
+    Raised when two distinct entities share a single name in the dependency graph.
+
+    Distributions, functions, parameters, constants, and HistFactory modifiers
+    all live in one shared name namespace when the computation graph is built.
+    Two distinct entities with the same name (for example a function and a
+    distribution both named ``shared``, or two distributions named ``model``)
+    would silently shadow one another — only the last one built would survive,
+    and references to that name would be wired to the wrong node.  This error is
+    raised instead so the collision surfaces loudly at model-construction time.
+
+    A parameter declared in ``parameter_points`` that also appears as a graph
+    parameter is the *same* logical entity and is not a collision.
+    """
+
+
 def custom_error_msg(custom_messages: dict[str, str]) -> Any:
     r"""
     Customize an error message for pydantic validation errors.

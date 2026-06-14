@@ -9,8 +9,15 @@ from __future__ import annotations
 import pytest
 
 from pyhs3.distributions import GaussianDist
+from pyhs3.exceptions import DuplicateEntityError
 from pyhs3.functions import GenericFunction, ProductFunction
-from pyhs3.networks import NamedDiGraph, build_dependency_graph, build_entity_mappings
+from pyhs3.networks import (
+    HasDependencies,
+    HasInternalNodes,
+    NamedDiGraph,
+    build_dependency_graph,
+    build_entity_mappings,
+)
 from pyhs3.parameter_points import ParameterPoint, ParameterSet
 
 
@@ -276,6 +283,78 @@ class TestBuildEntityMappings:
 
         assert entity_types == {}
         assert constants_map == {}
+
+    def test_function_distribution_name_collision_raises(self):
+        """A function and a distribution sharing a name is a genuine collision."""
+        parameterset = ParameterSet(name="params", parameters=[])
+        func = ProductFunction(name="shared", factors=["mu"])
+        dist = GaussianDist(name="shared", mean="mu", sigma=1.0, x="x")
+
+        with pytest.raises(
+            DuplicateEntityError, match=r"shared.*function.*distribution"
+        ):
+            build_entity_mappings(parameterset, [func], [dist])
+
+    def test_two_distributions_same_name_raises(self):
+        """Two distributions with the same name collide (last-wins is silent)."""
+        parameterset = ParameterSet(name="params", parameters=[])
+        dist1 = GaussianDist(name="model", mean="mu", sigma=1.0, x="x")
+        dist2 = GaussianDist(name="model", mean="nu", sigma=2.0, x="y")
+
+        with pytest.raises(DuplicateEntityError, match="'model'"):
+            build_entity_mappings(parameterset, [], [dist1, dist2])
+
+    def test_function_shadowing_declared_parameter_raises(self):
+        """A function shadowing a declared parameter is a genuine collision."""
+        param = ParameterPoint(name="mu", value=0.0)
+        parameterset = ParameterSet(name="params", parameters=[param])
+        func = ProductFunction(name="mu", factors=["nu"])
+
+        with pytest.raises(DuplicateEntityError, match="'mu'"):
+            build_entity_mappings(parameterset, [func], [])
+
+    def test_parameter_dependency_matching_declared_parameter_ok(self):
+        """A declared parameter also referenced as a dependency is not a collision."""
+        param = ParameterPoint(name="mu", value=0.0)
+        parameterset = ParameterSet(name="params", parameters=[param])
+        # The distribution depends on 'mu' (declared) — same logical entity.
+        dist = GaussianDist(name="gauss", mean="mu", sigma=1.0, x="x")
+
+        entity_types, _ = build_entity_mappings(parameterset, [], [dist])
+        assert entity_types["mu"] == "parameter"
+        assert entity_types["gauss"] == "distribution"
+
+    def test_modifier_shadowing_distribution_raises(self):
+        """A modifier whose name collides with a distribution is flagged as duplicate."""
+
+        # Minimal HasDependencies stub — behaves like a HistFactory modifier.
+        class DummyModifier(HasDependencies):
+            """Minimal modifier stub for testing _claim with modifier entity type."""
+
+            def __init__(self, name: str) -> None:
+                """Create a modifier with the given name."""
+                self.name = name
+
+            @property
+            def dependencies(self) -> set[str]:
+                """Return an empty dependency set."""
+                return set()
+
+        # Distribution that exposes a modifier as an internal node, mimicking
+        # how HistFactoryDistChannel surfaces its modifier nodes.
+        class DistWithModifier(GaussianDist, HasInternalNodes):
+            """Distribution that exposes a modifier as an internal node."""
+
+            def get_internal_nodes(self) -> list[object]:
+                """Return a modifier whose name collides with the outer distribution."""
+                return [DummyModifier("shared")]
+
+        parameterset = ParameterSet(name="params", parameters=[])
+        dist = GaussianDist(name="shared", mean="mu", sigma=1.0, x="x")
+        collision_dist = DistWithModifier(name="outer", mean="mu", sigma=1.0, x="x")
+
+        with pytest.raises(DuplicateEntityError, match="'shared'"):
+            build_entity_mappings(parameterset, [], [dist, collision_dist])
 
 
 class TestBuildDependencyGraph:

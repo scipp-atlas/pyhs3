@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from typing import Annotated, Any, Literal, cast
 
+import numpy as np
 import pytensor.tensor as pt
 from pydantic import (
     BaseModel,
@@ -13,7 +14,6 @@ from pydantic import (
     model_validator,
 )
 
-from pyhs3.compile import function
 from pyhs3.context import Context
 from pyhs3.distributions.basic import GaussianDist, LogNormalDist, PoissonDist
 from pyhs3.distributions.core import Distribution
@@ -362,13 +362,11 @@ class ShapeSysModifier(HasConstraint, ParametersModifier):
 
         name = f"constraint_{self.name}"
 
-        nominal_yield = pt.vector("nominal_yield")
-        uncertainty = pt.vector("uncertainty")
-        # (sigma_b)^{-2} = (nominal / vals)^2
-        rate_fn = function(
-            [nominal_yield, uncertainty], (nominal_yield / uncertainty) ** 2
-        )
-        rates = rate_fn(sample_data.contents, self.data.vals)
+        # (sigma_b)^{-2} = (nominal / vals)^2, evaluated on concrete floats.
+        rates = (
+            np.asarray(sample_data.contents, dtype=np.float64)
+            / np.asarray(self.data.vals, dtype=np.float64)
+        ) ** 2
 
         # Use augmented context pattern for parameter * rate scaling
         augmented_context = dict(context)

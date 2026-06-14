@@ -628,6 +628,34 @@ class TestContext:
         copied._parameters["param1"] = pt.constant(2.0)
         assert context["param1"].value != copied["param1"].value
 
+    def test_add_parameter_inserts_value(self):
+        """Test add_parameter inserts a new tensor into an existing context."""
+        context = Context({"param1": pt.constant(1.0)})
+        new_tensor = pt.constant(99.0)
+        context.add_parameter("param2", new_tensor)
+        assert context["param2"] is new_tensor
+
+    def test_add_parameter_overlap_with_auxiliary_raises(self):
+        """Test add_parameter raises ValueError when key is already an auxiliary."""
+        aux_tensor = pt.constant(5.0)
+        context = Context({}, {"existing_aux": aux_tensor})
+        with pytest.raises(
+            ValueError,
+            match=r"Parameter names cannot overlap between parameters and auxiliaries",
+        ):
+            context.add_parameter("existing_aux", pt.constant(1.0))
+
+    def test_add_view_registers_view(self):
+        """Test add_view registers a broadcasting view accessible via __getitem__."""
+        raw = pt.constant(1.0)
+        context = Context({"param1": raw})
+        view_tensor = pt.constant(2.0)
+        context.add_view("param1", view_tensor)
+        # __getitem__ should now return the view, not the raw parameter
+        assert context["param1"] is view_tensor
+        # But context.parameters still returns the raw value
+        assert context.parameters["param1"] is raw
+
 
 class TestEvaluableAdvanced:
     """Test advanced Evaluable functionality and edge cases."""

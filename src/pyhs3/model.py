@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import warnings
 from collections.abc import Callable, Mapping
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -122,6 +123,9 @@ class Model:
         self.mode = mode
         self._compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]] = {}
         self._compiled_inputs: dict[str, list[TensorVar]] = {}
+        # Ordered input names cached alongside _compiled_inputs so that pars()
+        # and _reorder_params() avoid rebuilding the list on every pdf/logpdf call.
+        self._compiled_input_names: dict[str, list[str]] = {}
         self._likelihood = likelihood
         # Views used internally for broadcasting: leaf[:, None] for observables,
         # leaf[None, :] for non-observable vector overrides.  Distributions see
@@ -192,7 +196,7 @@ class Model:
                 result[pp.name] = float(pp.value)
         return result
 
-    @property
+    @cached_property
     def log_prob(self) -> TensorVar:
         """Symbolic joint log-probability expression for the full likelihood.
 
@@ -485,29 +489,59 @@ class Model:
         if not isinstance(dist, HistFactoryDistChannel):
             return dist.expression(context)
 
-        # Poisson-only term; the full expression is returned below for logpdf.
-        self._hfdc_poisson[node_name] = dist.likelihood(context)
+        # Build the Poisson term and each constraint factor exactly once, then
+        # assemble both the model-level deduped constraint list and the full
+        # per-channel expression from those shared pieces.  This mirrors
+        # Distribution._expression (likelihood -> normalization -> x constraints)
+        # and HistFactoryDistChannel.extended_likelihood without rebuilding the
+        # Poisson subgraph or re-running make_constraint a second time.
+        poisson = dist.likelihood(context)
+        self._hfdc_poisson[node_name] = poisson
 
-        # Collect constraint expressions, deduped across channels by parameter name.
-        # Only channels referenced by the active likelihood contribute constraints —
-        # all HFDC distributions are still evaluated so logpdf() works for any channel.
-        # Single-parameter modifiers carry a dedup_key; multi-parameter modifiers
-        # (shapesys/staterror) have dedup_key=None and are emitted per-channel because
-        # the workspace validator forbids cross-channel sharing of those parameters.
-        if self._likelihood is None or any(
+        # Whether this channel participates in the active likelihood; only then
+        # do its constraints feed the joint log_prob.  All channels still build
+        # their full expression so logpdf() works for any channel.
+        in_likelihood = self._likelihood is None or any(
             (d if isinstance(d, str) else d.name) == node_name
             for d in self._likelihood.distributions
-        ):
-            for dedup_key, modifier, sample_data in dist.constraint_specs():
+        )
+
+        # Single pass over constraint specs builds each constraint factor once.
+        # - channel_seen dedups by parameter for the per-channel product
+        #   (matches extended_likelihood's local dedup),
+        # - self._hfdc_constraint_params_seen dedups across channels for log_prob.
+        channel_seen: set[str] = set()
+        channel_constraints: list[TensorVar] = []
+        for dedup_key, modifier, sample_data in dist.constraint_specs():
+            constraint = modifier.make_constraint(context, sample_data)
+
+            if dedup_key is None or dedup_key not in channel_seen:
+                if dedup_key is not None:
+                    channel_seen.add(dedup_key)
+                channel_constraints.append(constraint)
+
+            if in_likelihood:
                 if dedup_key is not None:
                     if dedup_key in self._hfdc_constraint_params_seen:
                         continue
                     self._hfdc_constraint_params_seen.add(dedup_key)
-                self._hfdc_constraints.append(
-                    modifier.make_constraint(context, sample_data)
-                )
+                self._hfdc_constraints.append(constraint)
 
-        return dist.expression(context)
+        # Assemble the full per-channel expression: normalized Poisson term times
+        # the constraint product (extended likelihood).  HFDC is not normalizable
+        # (_normalizable defaults False here), so _apply_normalization is a no-op,
+        # but call it to stay faithful to Distribution._expression.
+        raw = dist._apply_normalization(poisson, context)  # pylint: disable=protected-access
+        if not channel_constraints:
+            extended: TensorVar = cast(TensorVar, pt.constant(1.0))
+        else:
+            extended = cast(
+                TensorVar,
+                pt.prod(pt.stack(channel_constraints)),  # type: ignore[no-untyped-call]
+            )
+        full = cast(TensorVar, raw * extended)
+        full.name = dist.name  # Evaluable.expression sets the name
+        return full
 
     def _build_dependency_graph(
         self,
@@ -543,6 +577,16 @@ class Model:
                 "Building expressions...", total=len(sorted_nodes)
             )
 
+            # A single long-lived context is grown incrementally as nodes are
+            # built.  Topological order guarantees every dependency is already
+            # present before a node that uses it is built, so there is no need
+            # to reconstruct (and re-validate) a fresh merged context per node.
+            context = Context(
+                parameters={},
+                observables=self._observables,
+                views=self._views,
+            )
+
             for node_idx in sorted_nodes:
                 node_data = graph[node_idx]
                 node_type: Literal[
@@ -561,37 +605,32 @@ class Model:
                     description=f"Building {node_type:<12}: {display_name:<{max_name_length}}",
                 )
 
-                context = Context(
-                    parameters={
-                        **self.parameters,
-                        **self.functions,
-                        **self.distributions,
-                        **self.modifiers,
-                    },
-                    observables=self._observables,
-                    views=self._views,
-                )
-
                 if node_type == "parameter":
-                    self.parameters[node_name] = self._build_parameter_node(
-                        node_name, context
-                    )
+                    built = self._build_parameter_node(node_name, context)
+                    self.parameters[node_name] = built
+                    # Vector parameters register a broadcasting view in
+                    # self._views during the build; propagate it so later
+                    # nodes resolve context[node_name] to the view.
+                    if node_name in self._views:
+                        context.add_view(node_name, self._views[node_name])
                 elif node_type == "constant":
-                    self.parameters[node_name] = self._build_constant_node(
-                        node_name, constants_map
-                    )
+                    built = self._build_constant_node(node_name, constants_map)
+                    self.parameters[node_name] = built
                 elif node_type == "function":
-                    self.functions[node_name] = self._build_function_node(
-                        node_name, functions, context
-                    )
+                    built = self._build_function_node(node_name, functions, context)
+                    self.functions[node_name] = built
                 elif node_type == "modifier":
-                    self.modifiers[node_name] = self._build_modifier_node(
-                        node_name, modifiers_map, context
-                    )
+                    built = self._build_modifier_node(node_name, modifiers_map, context)
+                    self.modifiers[node_name] = built
                 else:  # node_type == "distribution"
-                    self.distributions[node_name] = self._build_distribution_node(
+                    built = self._build_distribution_node(
                         node_name, distributions, context
                     )
+                    self.distributions[node_name] = built
+
+                # Make the freshly built node available to later nodes (any
+                # broadcasting view was propagated above for parameter nodes).
+                context.add_parameter(node_name, built)
 
                 progress_bar.advance(task)
 
@@ -620,8 +659,12 @@ class Model:
                 if var.name is not None
             ]
 
-            # Cache the inputs list for consistent ordering
+            # Cache the inputs list (and their names) for consistent ordering so
+            # pars()/_reorder_params don't rebuild the name list per evaluation.
             self._compiled_inputs[name] = cast(list[TensorVar], inputs)
+            self._compiled_input_names[name] = [
+                var.name for var in inputs if var.name is not None
+            ]
 
             # Use the specified PyTensor mode
             compilation_mode = self.mode
@@ -781,10 +824,10 @@ class Model:
             >>> model.pars("model_singlechannel") # doctest: +SKIP
             ['uncorr_bkguncrt_1', 'uncorr_bkguncrt_0', 'model_singlechannel_observed', 'mu', 'Lumi']
         """
-        if name not in self._compiled_inputs:
+        if name not in self._compiled_input_names:
             # Trigger compilation to populate cache
             self._get_compiled_function(name)
-        return [var.name for var in self._compiled_inputs[name] if var.name is not None]
+        return self._compiled_input_names[name]
 
     def parsort(self, name: str, names: list[str]) -> list[int]:
         """

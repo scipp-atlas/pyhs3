@@ -112,8 +112,8 @@ def sympy_to_pytensor(
             "sqrt": pt.math.sqrt,
             "abs": pt.math.abs,
             "erf": pt.math.erf,
-            "min": pt.math.min,
-            "max": pt.math.max,
+            "min": pt.math.minimum,
+            "max": pt.math.maximum,
         }
 
         # Convert variable names to SymPy symbols

@@ -226,6 +226,59 @@ class TestSymPyToPyTensor:
             assert np.isclose(f(val), 42)
 
 
+class TestElementwiseMinMax:
+    """Tests for elementwise min/max in generic expressions (regression for pt.math.minimum/maximum)."""
+
+    def test_min_elementwise(self):
+        """min(x, y) should map to pt.math.minimum (elementwise), not a reduction."""
+        x = pt.scalar("x")
+        y = pt.scalar("y")
+        variables = [x, y]
+
+        expr = parse_expression("min(x, y)")
+        result = sympy_to_pytensor(expr, variables)
+
+        f = function([x, y], result)
+
+        assert np.isclose(f(3.0, 5.0), 3.0)
+        assert np.isclose(f(5.0, 3.0), 3.0)
+        assert np.isclose(f(-1.0, 1.0), -1.0)
+
+    def test_max_elementwise(self):
+        """max(x, y) should map to pt.math.maximum (elementwise), not a reduction."""
+        x = pt.scalar("x")
+        y = pt.scalar("y")
+        variables = [x, y]
+
+        expr = parse_expression("max(x, y)")
+        result = sympy_to_pytensor(expr, variables)
+
+        f = function([x, y], result)
+
+        assert np.isclose(f(3.0, 5.0), 5.0)
+        assert np.isclose(f(5.0, 3.0), 5.0)
+        assert np.isclose(f(-1.0, 1.0), 1.0)
+
+    def test_min_max_combined(self):
+        """Expressions using both min and max work correctly."""
+        x = pt.scalar("x")
+        y = pt.scalar("y")
+        variables = [x, y]
+
+        # clamp(x, lo=y, hi=y+2) expressed as max(y, min(x, y + 2))
+        expr = parse_expression("max(y, min(x, y + 2))")
+        result = sympy_to_pytensor(expr, variables)
+
+        f = function([x, y], result)
+
+        # x=1, y=0 → clamp(1, 0, 2) = 1
+        assert np.isclose(f(1.0, 0.0), 1.0)
+        # x=-1, y=0 → clamp(-1, 0, 2) = 0
+        assert np.isclose(f(-1.0, 0.0), 0.0)
+        # x=5, y=0 → clamp(5, 0, 2) = 2
+        assert np.isclose(f(5.0, 0.0), 2.0)
+
+
 class TestExceptionHandling:
     """Test exception handling in parse_expression and sympy_to_pytensor."""
 

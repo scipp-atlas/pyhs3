@@ -414,7 +414,9 @@ class Model:
                 )
             return pt.constant(val, name=node_name)
 
-        is_observable = "_observed" in node_name or node_name in context.observables
+        is_observable = (
+            node_name.endswith("_observed") or node_name in context.observables
+        )
 
         # Free variable: determine default kind (vector for observables, scalar otherwise)
         default_kind: Callable[..., TensorVar] = (
@@ -920,7 +922,7 @@ class Model:
             op_name = type(apply.op).__name__
             op_types[op_name] = op_types.get(op_name, 0) + 1
 
-        compile_info = f"\n    Mode: {self.mode}\n    Compiled: {'Yes' if self.mode != 'FAST_COMPILE' and name in self._compiled_functions else 'No'}"
+        compile_info = f"\n    Mode: {self.mode}\n    Compiled: {'Yes' if name in self._compiled_functions else 'No'}"
 
         return f"""Distribution '{name}':
     Input variables: {len(inputs)}

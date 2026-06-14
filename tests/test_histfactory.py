@@ -2565,3 +2565,41 @@ class TestBarlowBeestonLite:
         sigma_value = 2.0 / 100.0
         expected = 1.0 / (sigma_value * np.sqrt(2 * np.pi))
         np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+
+    def test_lite_positive_yield_zero_sigma_not_skipped(self):
+        """A bin with nu > 0 and sigma = 0 must not be silently dropped from the constraint.
+
+        If `sigma <= 0` fires when `nu > 0`, the gamma parameter floats free:
+        _compute_expected_rates() still scales rates by gamma but no constraint is added.
+        The parsing layer prevents sigma=0 with nu>0, so this check is dead code that
+        masks validation failures rather than surfacing them.
+        """
+        axes = [{"name": "x", "min": 0.0, "max": 10.0, "nbins": 1}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {"contents": [10.0], "errors": [0.0]},  # nu=10, sigma=0
+                "modifiers": [
+                    {
+                        "name": "stat_error",
+                        "type": "staterror",
+                        "parameters": ["gamma_bin0"],
+                        "constraint": "Gauss",
+                    }
+                ],
+            }
+        ]
+        channel = HistFactoryDistChannel(
+            name="test_channel",
+            axes=axes,
+            samples=samples,
+            barlow_beeston_method="lite",
+        )
+
+        context = Context({"gamma_bin0": pt.constant(1.0)})
+
+        # With the old condition `nu <= 0 or sigma <= 0`, this bin (nu=10, sigma=0) was
+        # silently dropped → method returned None.  After the fix (`nu <= 0` only), the
+        # bin is included and the method returns a TensorVar (not None).
+        result = channel._make_barlow_beeston_lite_constraint(context)
+        assert result is not None

@@ -6,6 +6,8 @@ Test coverage for all modifier types and their constraint handling.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytensor.tensor as pt
 import pytest
@@ -483,6 +485,38 @@ class TestStatErrorModifier:
 
         with pytest.raises(ValueError, match="data is required for BB-full mode"):
             modifier.make_constraint(context, sample_data)
+
+    def test_make_constraint_poisson_constraint(self):
+        """make_constraint() with constraint='Poisson' builds Poisson (not Gaussian) terms.
+
+        For each bin: Poisson(tau | gamma * tau) where tau = (nominal / uncertainty)^2.
+        """
+        data = StatErrorData(uncertainties=[1.0, 2.0])
+        modifier = StatErrorModifier(
+            name="stat_unc",
+            parameters=["gamma_stat_bin0", "gamma_stat_bin1"],
+            constraint="Poisson",
+            data=data,
+        )
+
+        context = Context(
+            {"gamma_stat_bin0": pt.constant(1.0), "gamma_stat_bin1": pt.constant(1.0)}
+        )
+        sample_data = SampleData(contents=[10.0, 20.0], errors=[1.0, 2.0])
+
+        constraint = modifier.make_constraint(context, sample_data)
+        constraint_val = float(constraint.eval())
+
+        # sigma_value = uncertainty/nominal = [1/10, 2/20] = [0.1, 0.1]
+        # tau = 1/sigma_value^2 = [100, 100]
+        # At gamma=1.0: Poisson(tau | tau) = exp(tau*log(tau) - tau - lgamma(tau+1))
+        tau = np.array([1.0 / 0.1**2, 1.0 / 0.1**2])  # [100, 100]
+        log_factors = (
+            tau * np.log(tau) - tau - np.array([math.lgamma(t + 1.0) for t in tau])
+        )
+        expected = float(np.exp(np.sum(log_factors)))
+        # rtol=1e-4 to accommodate PyTensor float32 gammaln precision
+        np.testing.assert_allclose(constraint_val, expected, rtol=1e-4)
 
 
 class TestModifierConstraintTypes:

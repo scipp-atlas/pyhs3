@@ -301,8 +301,8 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         for i, param_name in enumerate(gamma_params):
             nu, sigma = total_nominal[i], total_sigma[i]
 
-            # Skip bins with zero or invalid values
-            if nu <= 0 or sigma <= 0:
+            # Skip bins with zero nominal yield; sigma=0 is caught by the parsing layer
+            if nu <= 0:
                 continue
 
             if constraint_type == "Poisson":

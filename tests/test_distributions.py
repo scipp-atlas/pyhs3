@@ -3100,7 +3100,7 @@ class TestDistributionsUniqueness:
     def test_histogram_dist_in_workspace_raises_clean_validation_error(self):
         """A workspace using 'histogram_dist' should get a clean unknown-type ValidationError."""
         ws_json = {
-            "metadata": {"hs3version": "0.2"},
+            "metadata": {"hs3_version": "0.2"},
             "distributions": [
                 {
                     "name": "my_hist",

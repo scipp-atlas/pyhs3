@@ -156,12 +156,21 @@ class GenericExpressionMixin:
     """
     Mixin for pydantic models that evaluate a user-supplied math expression string.
 
-    Classes using this mixin must:
-    - Inherit from a pydantic ``BaseModel`` (or subclass such as
-      :class:`~pyhs3.base.Evaluable`) **before** this mixin in MRO.
-    - Declare ``expression_str: str = Field(alias="expression", repr=False)``.
-    - Set ``model_config = ConfigDict(arbitrary_types_allowed=True, serialize_by_alias=True)``.
-    - Call :meth:`setup_expression` as a ``@model_validator(mode="after")``.
+    Inherit this mixin **before** the pydantic ``BaseModel`` (or subclass such as
+    :class:`~pyhs3.base.Evaluable`) in the MRO, e.g.::
+
+        class MyDist(GenericExpressionMixin, Distribution): ...
+
+    The mixin automatically provides:
+
+    - ``model_config`` — allows ``sp.Expr`` private attributes and alias-based
+      serialisation.
+    - ``expression_str`` — the raw expression string, aliased to ``"expression"``
+      in serialised form.
+    - ``setup_expression`` — a ``@model_validator(mode="after")`` that parses and
+      analyses the expression at construction time.
+
+    Subclasses do **not** need to redeclare any of these.
 
     Attributes:
         model_config: Pydantic config that permits ``sp.Expr`` private attrs.

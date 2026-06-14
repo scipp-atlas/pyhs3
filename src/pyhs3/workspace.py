@@ -497,9 +497,10 @@ class Workspace(BaseModel):
         if isinstance(domain, Domain):
             return domain
         if domain is not None:
-            if self.domains:
-                return self.domains[domain]
-            return ProductDomain(name="default")
+            if not self.domains:
+                msg = f"domain={domain!r} was requested but no domains are available in this workspace"
+                raise ValueError(msg)
+            return self.domains[domain]
         if default_index is not None and self.domains:
             return self.domains[default_index]
         if self.domains:

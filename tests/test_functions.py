@@ -1905,7 +1905,7 @@ class TestFunctionsUniqueness:
     def test_histogram_function_in_workspace_raises_clean_validation_error(self):
         """A workspace using 'histogram' function type should get a clean unknown-type ValidationError."""
         ws_json = {
-            "metadata": {"hs3version": "0.2"},
+            "metadata": {"hs3_version": "0.2"},
             "functions": [
                 {
                     "name": "my_hist",

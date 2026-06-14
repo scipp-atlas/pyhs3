@@ -1668,11 +1668,12 @@ class TestObservedSuffixHeuristic:
         assert np.isfinite(float(result))
         assert float(result) > 0
 
-    def test_explicit_domain_without_domain_collection_falls_back(self):
-        """An explicit domain index on a workspace with no domains uses the default.
+    def test_explicit_domain_without_domain_collection_raises(self):
+        """An explicit domain index on a workspace with no domains raises ValueError.
 
-        _select_domain must not index an empty domain collection; it falls
-        back to a default ProductDomain instead.
+        _select_domain must raise when an explicit domain is requested but the
+        workspace has no domain collection, matching the analogous behaviour of
+        _select_parameterset.
         """
         ws_no_domains = hs3.Workspace(
             metadata={"hs3_version": "0.2"},
@@ -1696,8 +1697,8 @@ class TestObservedSuffixHeuristic:
                 }
             ],
         )
-        model = ws_no_domains.model(0, domain=0, progress=False)
-        assert model is not None
+        with pytest.raises(ValueError, match="no domains are available"):
+            ws_no_domains.model(0, domain=0, progress=False)
 
 
 class TestGraphSummaryCompilationStatus:

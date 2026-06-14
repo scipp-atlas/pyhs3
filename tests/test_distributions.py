@@ -41,7 +41,7 @@ from pyhs3.distributions import (
     QQZZBackgroundDist,
     UniformDist,
 )
-from pyhs3.model import create_bounded_tensor
+from pyhs3.tensorutils import create_bounded_tensor
 
 
 class TestDistribution:

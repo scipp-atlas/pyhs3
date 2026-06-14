@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 import pyhs3 as hs3
-from pyhs3 import Model
+from pyhs3.tensorutils import ensure_array
 
 
 @pytest.fixture
@@ -174,12 +174,12 @@ class TestStrictPdfValidation:
 
 
 class TestEnsureArrayHelper:
-    """Test the _ensure_array helper method."""
+    """Test the ensure_array helper function."""
 
     def test_ensure_array_converts_float_to_0d_array(self):
-        """Test that _ensure_array converts float to 0-d array."""
+        """Test that ensure_array converts float to 0-d array."""
 
-        result = Model._ensure_array(1.5)
+        result = ensure_array(1.5)
 
         assert isinstance(result, np.ndarray)
         assert result.shape == ()
@@ -187,9 +187,9 @@ class TestEnsureArrayHelper:
         assert result == 1.5
 
     def test_ensure_array_converts_list_to_1d_array(self):
-        """Test that _ensure_array converts list to 1-d array."""
+        """Test that ensure_array converts list to 1-d array."""
 
-        result = Model._ensure_array([1.0, 2.0, 3.0])
+        result = ensure_array([1.0, 2.0, 3.0])
 
         assert isinstance(result, np.ndarray)
         assert result.shape == (3,)
@@ -197,10 +197,10 @@ class TestEnsureArrayHelper:
         assert np.array_equal(result, [1.0, 2.0, 3.0])
 
     def test_ensure_array_preserves_numpy_array(self):
-        """Test that _ensure_array preserves numpy arrays."""
+        """Test that ensure_array preserves numpy arrays."""
 
         input_array = np.array([1.0, 2.0], dtype=np.float32)
-        result = Model._ensure_array(input_array)
+        result = ensure_array(input_array)
 
         assert isinstance(result, np.ndarray)
         # Should convert to float64
@@ -208,9 +208,9 @@ class TestEnsureArrayHelper:
         assert np.array_equal(result, input_array)
 
     def test_ensure_array_converts_int_to_float64(self):
-        """Test that _ensure_array converts int to float64."""
+        """Test that ensure_array converts int to float64."""
 
-        result = Model._ensure_array(5)
+        result = ensure_array(5)
 
         assert isinstance(result, np.ndarray)
         assert result.dtype == np.float64

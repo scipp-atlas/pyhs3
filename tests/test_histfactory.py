@@ -7,6 +7,7 @@ Test the HistFactoryDist class with various modifiers and configurations.
 from __future__ import annotations
 
 import json
+import math
 import platform
 import warnings
 
@@ -631,6 +632,137 @@ class TestPyhfPrecisionValidation:
         pyhs3_logpdf = total_func(mu, staterror_bin_0, np.array([observed]))
 
         # Validate precision (use reasonable tolerances for staterror)
+        assert pyhs3_expected[0] == pytest.approx(pyhf_expected[0], abs=1e-12), (
+            f"Expected rates differ: pyhf={pyhf_expected[0]}, pyhs3={pyhs3_expected[0]}"
+        )
+        assert float(pyhs3_logpdf) == pytest.approx(pyhf_logpdf, abs=1e-12), (
+            f"Log PDF differs: pyhf={pyhf_logpdf}, pyhs3={float(pyhs3_logpdf)}"
+        )
+
+    def test_staterror_lite_precision_vs_pyhf(self):
+        """Test that BB-lite staterror (multi-sample, shared gamma) achieves perfect
+        precision vs pyhf.
+
+        pyhf's staterror is itself Barlow-Beeston lite with a shared Gaussian constraint
+        over samples with the same modifier name.  pyhs3 lite mode with matching errors
+        must produce identical logpdf and expected rates.
+        """
+        mu = 1.0
+        gamma = 1.0  # staterror gamma at nominal
+        observed = 30.0  # signal(10) + bkg1(15) + bkg2(5) = 30
+
+        # pyhf: two backgrounds with the same staterror name
+        # pyhf combines sigma_total = sqrt(3^2 + 4^2) = 5 over nu_total = 15+5 = 20
+        pyhf_spec = {
+            "channels": [
+                {
+                    "name": "singlechannel",
+                    "samples": [
+                        {
+                            "name": "signal",
+                            "data": [10],
+                            "modifiers": [
+                                {"name": "mu", "type": "normfactor", "data": None}
+                            ],
+                        },
+                        {
+                            "name": "background1",
+                            "data": [15],
+                            "modifiers": [
+                                {
+                                    "name": "stat_error",
+                                    "type": "staterror",
+                                    "data": [3.0],
+                                }
+                            ],
+                        },
+                        {
+                            "name": "background2",
+                            "data": [5],
+                            "modifiers": [
+                                {
+                                    "name": "stat_error",
+                                    "type": "staterror",
+                                    "data": [4.0],
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ]
+        }
+
+        pyhf_model = pyhf.Model(pyhf_spec)
+        pyhf_params = [mu, gamma]
+        pyhf_data = [int(observed), *pyhf_model.config.auxdata]
+
+        pyhf_expected = pyhf_model.expected_actualdata(pyhf_params)
+        pyhf_logpdf = pyhf_model.logpdf(pyhf_params, pyhf_data).item()
+
+        # pyhs3 lite mode: signal + 2 backgrounds with shared staterror parameters
+        # errors match pyhf staterror data so sigma_combined = sqrt(3^2+4^2) = 5
+        axes = [{"name": "observable", "min": 0.0, "max": 1.0, "nbins": 1}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {"contents": [10.0], "errors": [1.0]},
+                "modifiers": [{"name": "mu", "type": "normfactor", "parameter": "mu"}],
+            },
+            {
+                "name": "background1",
+                "data": {"contents": [15.0], "errors": [3.0]},
+                "modifiers": [
+                    {
+                        "name": "stat_error",
+                        "type": "staterror",
+                        "parameters": ["stat_error"],
+                        "constraint": "Gauss",
+                    }
+                ],
+            },
+            {
+                "name": "background2",
+                "data": {"contents": [5.0], "errors": [4.0]},
+                "modifiers": [
+                    {
+                        "name": "stat_error",
+                        "type": "staterror",
+                        "parameters": ["stat_error"],
+                        "constraint": "Gauss",
+                    }
+                ],
+            },
+        ]
+
+        dist = HistFactoryDistChannel(
+            name="singlechannel",
+            axes=axes,
+            samples=samples,
+            barlow_beeston_method="lite",
+        )
+
+        # Create symbolic context
+        mu_var = pt.dscalar("mu")
+        gamma_var = pt.dscalar("stat_error")
+        observed_data_var = pt.dvector("singlechannel_observed")
+
+        context = Context(
+            {
+                "mu": mu_var,
+                "stat_error": gamma_var,
+                "singlechannel_observed": observed_data_var,
+            }
+        )
+
+        expected_rates = dist._compute_expected_rates(context, 1)
+        total_expr = dist.log_expression(context)
+
+        rates_func = function([mu_var, gamma_var], expected_rates)
+        total_func = function([mu_var, gamma_var, observed_data_var], total_expr)
+
+        pyhs3_expected = rates_func(mu, gamma)
+        pyhs3_logpdf = total_func(mu, gamma, np.array([observed]))
+
         assert pyhs3_expected[0] == pytest.approx(pyhf_expected[0], abs=1e-12), (
             f"Expected rates differ: pyhf={pyhf_expected[0]}, pyhs3={pyhs3_expected[0]}"
         )
@@ -1886,8 +2018,19 @@ class TestBarlowBeestonLite:
         # total_sigma = [sqrt(9+16), sqrt(16+25)] = [5, sqrt(41)]
         # relerr = [5/30, sqrt(41)/50] = [0.1667, 0.1281]
 
-        # Verify the channel was created correctly
-        assert channel.barlow_beeston_method == "lite"
+        # At gamma=1.0 the exponent is 0: N(1|1, relerr) = 1/(relerr * sqrt(2*pi))
+        context = Context(
+            {"gamma_bin0": pt.constant(1.0), "gamma_bin1": pt.constant(1.0)}
+        )
+        constraint = channel._make_barlow_beeston_lite_constraint(context)
+        assert constraint is not None
+        constraint_val = float(constraint.eval())
+
+        total_nominal = np.array([30.0, 50.0])
+        total_sigma = np.array([5.0, np.sqrt(41.0)])
+        relerr = total_sigma / total_nominal
+        expected = float(np.prod(1.0 / (relerr * np.sqrt(2 * np.pi))))
+        np.testing.assert_allclose(constraint_val, expected, rtol=1e-6)
 
     def test_lite_poisson_constraint(self):
         """Test BB-lite Poisson constraint with tau = (nu/sigma)^2."""
@@ -1915,10 +2058,30 @@ class TestBarlowBeestonLite:
 
         # For Poisson: tau = (nu/sigma)^2
         # Bin 0: tau = (100/10)^2 = 100
-        # Bin 1: tau = (200/14.14)^2 ≈ 200
+        # Bin 1: tau = (200/14.14)^2 ≈ 200.06
 
-        # Verify the channel was created correctly
-        assert channel.barlow_beeston_method == "lite"
+        # At gamma=1.0: Poisson(tau | gamma*tau=tau) = exp(tau*log(tau) - tau - lgamma(tau+1))
+        context = Context(
+            {"gamma_bin0": pt.constant(1.0), "gamma_bin1": pt.constant(1.0)}
+        )
+        constraint = channel._make_barlow_beeston_lite_constraint(context)
+        assert constraint is not None
+        constraint_val = float(constraint.eval())
+
+        nu = np.array([100.0, 200.0])
+        sigma = np.array([10.0, 14.14])
+        tau = (nu / sigma) ** 2
+        # Generalized Poisson PMF: exp(x*log(mu) - mu - lgamma(x+1)) with x=mu=tau
+        log_factors = (
+            tau * np.log(tau)
+            - tau
+            - np.array([math.lgamma(float(t) + 1.0) for t in tau])
+        )
+        expected = float(np.exp(np.sum(log_factors)))
+        # PyTensor stores integer-valued tau (100.0) as float32, which reduces gammaln
+        # precision slightly compared to the float64 math.lgamma reference.  rtol=1e-4
+        # covers this implementation detail while still catching formula errors.
+        np.testing.assert_allclose(constraint_val, expected, rtol=1e-4)
 
     def test_lite_gaussian_constraint(self):
         """Test BB-lite Gaussian constraint with relerr = sigma/nu."""
@@ -1948,8 +2111,22 @@ class TestBarlowBeestonLite:
         # Bin 0: relerr = 10/100 = 0.1
         # Bin 1: relerr = 20/200 = 0.1
 
-        # Verify the channel was created correctly
-        assert channel.barlow_beeston_method == "lite"
+        # At off-nominal gamma=[0.9, 1.1], the Gaussian exponent is non-trivial:
+        # N(1.0 | gamma, relerr) = exp(-0.5*((1.0-gamma)/relerr)^2) / (relerr*sqrt(2*pi))
+        context = Context(
+            {"gamma_bin0": pt.constant(0.9), "gamma_bin1": pt.constant(1.1)}
+        )
+        constraint = channel._make_barlow_beeston_lite_constraint(context)
+        assert constraint is not None
+        constraint_val = float(constraint.eval())
+
+        relerr = 0.1
+        gamma_vals = np.array([0.9, 1.1])
+        factors = np.exp(-0.5 * ((1.0 - gamma_vals) / relerr) ** 2) / (
+            relerr * np.sqrt(2 * np.pi)
+        )
+        expected = float(np.prod(factors))
+        np.testing.assert_allclose(constraint_val, expected, rtol=1e-6)
 
     def test_lite_gamma_modifies_rates(self):
         """Test that shared gamma parameters scale all sample rates in BB-lite."""
@@ -2023,10 +2200,25 @@ class TestBarlowBeestonLite:
             barlow_beeston_method="lite",
         )
 
-        # In lite mode, the constraint should come from the channel, not per-sample
-        # This is verified by checking that extended_likelihood works without
-        # modifier.data being present
-        assert channel.barlow_beeston_method == "lite"
+        # In lite mode, make_constraint() must NOT be called on the data=None modifier —
+        # that would raise ValueError.  Success proves the per-sample path was skipped.
+        context = Context(
+            {
+                "gamma_bin0": pt.constant(1.0),
+                "gamma_bin1": pt.constant(1.0),
+            }
+        )
+
+        # extended_likelihood must complete without raising ValueError
+        result = channel.extended_likelihood(context)
+        result_val = float(result.eval())
+
+        # The result must equal the lite channel-level constraint (no per-sample term)
+        lite_constraint = channel._make_barlow_beeston_lite_constraint(context)
+        assert lite_constraint is not None
+        np.testing.assert_allclose(
+            result_val, float(lite_constraint.eval()), rtol=1e-10
+        )
 
     def test_full_mode_backward_compatible(self):
         """Test that barlow_beeston_method='full' uses original behavior."""
@@ -2106,8 +2298,31 @@ class TestBarlowBeestonLite:
             barlow_beeston_method="lite",
         )
 
-        # All modifiers should work together
-        assert channel.barlow_beeston_method == "lite"
+        # In lite mode: extended_likelihood = normsys_constraint * lite_staterror_constraint
+        # Crucially, make_constraint() is NOT called on the data=None staterror modifiers —
+        # that would raise ValueError.  The test succeeds only if the staterror was skipped.
+        context = Context(
+            {
+                "mu": pt.constant(1.0),
+                "bkg_norm": pt.constant(0.0),
+                "gamma_bin0": pt.constant(1.0),
+                "gamma_bin1": pt.constant(1.0),
+            }
+        )
+        result_val = float(channel.extended_likelihood(context).eval())
+
+        # normsys at alpha=0: N(0 | 0, 1) = 1/sqrt(2*pi)
+        normsys_val = 1.0 / np.sqrt(2 * np.pi)
+
+        # lite staterror (both samples have staterror):
+        # total_nominal=[10+20, 20+30]=[30,50], total_sigma=[sqrt(9+16), sqrt(16+25)]=[5,sqrt(41)]
+        total_sigma = np.array([5.0, np.sqrt(41.0)])
+        total_nominal = np.array([30.0, 50.0])
+        relerr = total_sigma / total_nominal
+        lite_val = float(np.prod(1.0 / (relerr * np.sqrt(2 * np.pi))))
+
+        expected = normsys_val * lite_val
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
 
     def test_lite_zero_yield_bin(self):
         """Test that bins with nu=0 or sigma=0 are skipped gracefully."""
@@ -2136,6 +2351,217 @@ class TestBarlowBeestonLite:
             barlow_beeston_method="lite",
         )
 
-        # Should handle zero bins without error
-        # Constraint should only be built for bins 0 and 2
-        assert channel.barlow_beeston_method == "lite"
+        # Bin 1 (nu=0, sigma=0) must be skipped; only bins 0 and 2 contribute.
+        context = Context(
+            {
+                "gamma_bin0": pt.constant(1.0),
+                "gamma_bin1": pt.constant(1.0),  # skipped — not used
+                "gamma_bin2": pt.constant(1.0),
+            }
+        )
+        constraint = channel._make_barlow_beeston_lite_constraint(context)
+        assert constraint is not None  # bins 0 and 2 are still valid
+
+        constraint_val = float(constraint.eval())
+
+        # relerr_0 = 3/10 = 0.3, relerr_2 = 4/20 = 0.2; exponent=0 at gamma=1
+        expected = float(
+            (1.0 / (0.3 * np.sqrt(2 * np.pi))) * (1.0 / (0.2 * np.sqrt(2 * np.pi)))
+        )
+        np.testing.assert_allclose(constraint_val, expected, rtol=1e-6)
+
+    def test_lite_constraint_none_without_staterror(self):
+        """_make_barlow_beeston_lite_constraint returns None when no staterror modifier
+        is present; extended_likelihood falls back to pt.constant(1.0)."""
+        axes = [{"name": "x", "min": 0.0, "max": 10.0, "nbins": 2}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {"contents": [5.0, 3.0], "errors": [1.0, 1.0]},
+                "modifiers": [{"name": "mu", "type": "normfactor", "parameter": "mu"}],
+            }
+        ]
+        channel = HistFactoryDistChannel(
+            name="test_channel",
+            axes=axes,
+            samples=samples,
+            barlow_beeston_method="lite",
+        )
+
+        context = Context({"mu": pt.constant(1.0)})
+
+        # No staterror modifier in any sample
+        assert channel._find_staterror_modifier() is None
+        # The private method returns None — staterror_mod is None guard fires
+        assert channel._make_barlow_beeston_lite_constraint(context) is None
+
+        # With no constraints at all, extended_likelihood returns constant 1.0
+        result_val = float(channel.extended_likelihood(context).eval())
+        assert result_val == pytest.approx(1.0)
+
+    def test_lite_constraint_none_all_bins_skipped(self):
+        """_make_barlow_beeston_lite_constraint returns None when every bin satisfies
+        the nu<=0 or sigma<=0 skip condition (the 'if not dists: return None' branch)."""
+        axes = [{"name": "x", "min": 0.0, "max": 10.0, "nbins": 2}]
+        samples = [
+            {
+                "name": "signal",
+                # All contents are zero → total_nominal=0 for every bin → all skipped
+                "data": {"contents": [0.0, 0.0], "errors": [1.0, 1.0]},
+                "modifiers": [
+                    {
+                        "name": "stat_error",
+                        "type": "staterror",
+                        "parameters": ["gamma_bin0", "gamma_bin1"],
+                        "constraint": "Gauss",
+                    }
+                ],
+            }
+        ]
+        channel = HistFactoryDistChannel(
+            name="test_channel",
+            axes=axes,
+            samples=samples,
+            barlow_beeston_method="lite",
+        )
+
+        context = Context(
+            {
+                "gamma_bin0": pt.constant(1.0),
+                "gamma_bin1": pt.constant(1.0),
+            }
+        )
+
+        # All bins have nu=0; every bin is skipped → method returns None
+        assert channel._make_barlow_beeston_lite_constraint(context) is None
+
+        # extended_likelihood with no valid constraints returns constant 1.0
+        result_val = float(channel.extended_likelihood(context).eval())
+        assert result_val == pytest.approx(1.0)
+
+    def test_lite_excludes_non_staterror_samples(self):
+        """BB-lite only accumulates uncertainty from samples carrying a staterror
+        modifier; samples without staterror are excluded from the combined sigma."""
+        axes = [{"name": "x", "min": 0.0, "max": 10.0, "nbins": 1}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {"contents": [10.0], "errors": [2.0]},
+                "modifiers": [
+                    {
+                        "name": "stat_error",
+                        "type": "staterror",
+                        "parameters": ["gamma_bin0"],
+                        "constraint": "Gauss",
+                    }
+                ],
+            },
+            {
+                "name": "background",
+                # errors=[5.0] would change the combined sigma if included
+                "data": {"contents": [20.0], "errors": [5.0]},
+                "modifiers": [],  # no staterror — must NOT contribute
+            },
+        ]
+        channel = HistFactoryDistChannel(
+            name="test_channel",
+            axes=axes,
+            samples=samples,
+            barlow_beeston_method="lite",
+        )
+
+        context = Context({"gamma_bin0": pt.constant(1.0)})
+        constraint = channel._make_barlow_beeston_lite_constraint(context)
+        assert constraint is not None
+        constraint_val = float(constraint.eval())
+
+        # Only signal contributes: nu=10, sigma=2, relerr=0.2
+        # N(1|1, 0.2) = 1 / (0.2 * sqrt(2*pi))
+        expected = 1.0 / (0.2 * np.sqrt(2 * np.pi))
+        np.testing.assert_allclose(constraint_val, expected, rtol=1e-6)
+
+        # Verify: if background (errors=5) were included, the result would differ.
+        # total_nominal would be 10+20=30 (both samples), total_sigma=sqrt(4+25)=sqrt(29)
+        relerr_if_included = np.sqrt(2.0**2 + 5.0**2) / (10.0 + 20.0)
+        wrong_expected = 1.0 / (relerr_if_included * np.sqrt(2 * np.pi))
+        assert not np.isclose(constraint_val, wrong_expected, rtol=1e-3)
+
+    def test_find_staterror_modifier_none(self):
+        """_find_staterror_modifier() returns None when no sample carries a staterror
+        modifier, and returns the modifier when one is present."""
+        axes = [{"name": "x", "min": 0.0, "max": 10.0, "nbins": 1}]
+
+        # Channel without staterror
+        channel_no_stat = HistFactoryDistChannel(
+            name="no_stat",
+            axes=axes,
+            samples=[
+                {
+                    "name": "signal",
+                    "data": {"contents": [10.0], "errors": [1.0]},
+                    "modifiers": [
+                        {"name": "mu", "type": "normfactor", "parameter": "mu"}
+                    ],
+                }
+            ],
+        )
+        assert channel_no_stat._find_staterror_modifier() is None
+
+        # Channel with staterror
+        channel_with_stat = HistFactoryDistChannel(
+            name="with_stat",
+            axes=axes,
+            samples=[
+                {
+                    "name": "signal",
+                    "data": {"contents": [10.0], "errors": [2.0]},
+                    "modifiers": [
+                        {
+                            "name": "stat_error",
+                            "type": "staterror",
+                            "parameters": ["gamma_bin0"],
+                            "constraint": "Gauss",
+                        }
+                    ],
+                }
+            ],
+        )
+        found = channel_with_stat._find_staterror_modifier()
+        assert found is not None
+        assert found.type == "staterror"
+        assert found.parameters == ["gamma_bin0"]
+
+    def test_extended_likelihood_full_mode(self):
+        """In full mode, extended_likelihood calls per-sample make_constraint on each
+        staterror modifier (not the channel-level lite path)."""
+        axes = [{"name": "x", "min": 0.0, "max": 10.0, "nbins": 1}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {"contents": [100.0], "errors": [2.0]},
+                "modifiers": [
+                    {
+                        "name": "stat_error",
+                        "type": "staterror",
+                        "parameters": ["gamma_bin0"],
+                        "constraint": "Gauss",
+                        "data": {"uncertainties": [2.0]},  # required for full mode
+                    }
+                ],
+            }
+        ]
+        channel = HistFactoryDistChannel(
+            name="test_channel",
+            axes=axes,
+            samples=samples,
+            barlow_beeston_method="full",
+        )
+
+        context = Context({"gamma_bin0": pt.constant(1.0)})
+        result_val = float(channel.extended_likelihood(context).eval())
+
+        # Full mode: N(1.0 | gamma=1.0, sigma_value) where sigma_value = unc/nominal
+        # sigma_value = 2.0 / 100.0 = 0.02; at gamma=1 the exponent is 0
+        sigma_value = 2.0 / 100.0
+        expected = 1.0 / (sigma_value * np.sqrt(2 * np.pi))
+        np.testing.assert_allclose(result_val, expected, rtol=1e-6)

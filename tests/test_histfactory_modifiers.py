@@ -465,6 +465,25 @@ class TestStatErrorModifier:
         # Should return 1.0 when there are no constraints
         assert constraint_val == pytest.approx(1.0)
 
+    def test_make_constraint_requires_data(self):
+        """Test that make_constraint raises ValueError when data=None (BB-full mode guard).
+
+        In BB-lite mode the StatErrorModifier carries no per-bin StatErrorData;
+        make_constraint() must never be called on such a modifier (the channel
+        builds the constraint at a higher level). This guards against accidentally
+        calling the per-sample path in lite mode.
+        """
+        modifier = StatErrorModifier(
+            name="stat_unc",
+            parameters=["gamma_stat_bin0"],
+            data=None,
+        )
+        context = Context({"gamma_stat_bin0": pt.constant(1.0)})
+        sample_data = SampleData(contents=[50.0], errors=[2.0])
+
+        with pytest.raises(ValueError, match="data is required for BB-full mode"):
+            modifier.make_constraint(context, sample_data)
+
 
 class TestModifierConstraintTypes:
     """Test different constraint types for modifiers."""

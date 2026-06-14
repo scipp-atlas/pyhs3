@@ -23,6 +23,13 @@ from pydantic import (
 
 from pyhs3.axes import BinnedAxis
 from pyhs3.context import Context
+from pyhs3.distributions.histfactory.interpolations import (
+    interpolate_code0,
+    interpolate_code1,
+    interpolate_code4,
+    interpolate_parabolic,
+    interpolate_poly6,
+)
 from pyhs3.exceptions import custom_error_msg
 from pyhs3.functions.core import Function
 from pyhs3.generic_parse import analyze_sympy_expr, parse_expression, sympy_to_pytensor
@@ -39,8 +46,31 @@ def _asym_interpolation(
 
     Based on the jaxfit implementation:
     https://github.com/nsmith-/jaxfit/blob/8479cd73e733ba35462287753fab44c0c560037b/src/jaxfit/roofit/combine.py#L197
-    and CMS Combine logic.
-    Uses polynomial interpolation for |theta| < 1 and linear extrapolation beyond.
+    and CMS Combine's ``ProcessNormalization::logKappaForX`` logic.
+
+    The shift is
+
+    .. math::
+
+        \\text{shift} = \\tfrac{1}{2}\\left(
+            \\kappa_\\text{diff}\\,\\theta
+            + \\kappa_\\text{sum}\\,\\theta\\,\\text{smoothStep}(\\theta)
+        \\right)
+
+    where ``smoothStep`` is the CMS smooth-step function
+
+    .. math::
+
+        \\text{smoothStep}(\\theta) = \\begin{cases}
+            \\theta\\,(3\\theta^4 - 10\\theta^2 + 15)/8 & |\\theta| < 1 \\\\
+            \\operatorname{sign}(\\theta) & |\\theta| \\geq 1
+        \\end{cases}
+
+    The factor multiplying ``kappa_sum`` is therefore
+    :math:`\\theta\\cdot\\text{smoothStep}(\\theta)`, a smooth approximation of
+    :math:`|\\theta|` that is ``0`` at :math:`\\theta=0`, equals ``1`` at
+    :math:`|\\theta|=1`, and matches the first derivative of :math:`|\\theta|`
+    at the boundary.
 
     Args:
         theta: The nuisance parameter value
@@ -50,13 +80,15 @@ def _asym_interpolation(
     Returns:
         The interpolated shift value
     """
-    # Polynomial interpolation for |theta| < 1
-    # Polynomial: (3*theta^4 - 10*theta^2 + 15) / 8
+    # smoothStep(theta) for |theta| < 1: theta * (3*theta^4 - 10*theta^2 + 15) / 8
+    # The factor multiplying kappa_sum is theta * smoothStep(theta), which for
+    # |theta| < 1 equals theta^2 * (3*theta^4 - 10*theta^2 + 15) / 8 and for
+    # |theta| >= 1 equals |theta| (a smooth approximation of |theta|).
     theta_sq = theta * theta
     theta_quad = theta_sq * theta_sq
-    poly_result = (3.0 * theta_quad - 10.0 * theta_sq + 15.0) / 8.0
+    poly_result = theta_sq * (3.0 * theta_quad - 10.0 * theta_sq + 15.0) / 8.0
 
-    # Linear extrapolation for |theta| >= 1
+    # Linear behaviour for |theta| >= 1: theta * sign(theta) == |theta|
     linear_result = pt.abs(theta)
 
     # Choose between polynomial and linear based on |theta|
@@ -275,9 +307,28 @@ class InterpolationFunction(Function):
         r"""
         Implement flexible interpolation for a single parameter.
 
-        Based on ROOT's flexibleInterpSingle method with support for
+        Based on ROOT's ``FlexibleInterpVar`` /
+        ``RooFit::Detail::MathFuncs::flexibleInterpSingle`` with support for
         interpolation codes 0-6. This method computes the interpolation
         contribution :math:`I_i(\theta_i)` for a single nuisance parameter.
+
+        The verified-correct building blocks from
+        :mod:`pyhs3.distributions.histfactory.interpolations` are reused
+        directly (those return the full ``nominal + delta`` value, so the
+        nominal/baseline is subtracted off here to recover the additive delta
+        or multiplicative factor that ROOT's ``flexibleInterpSingle`` returns):
+
+        - **Code 0** (additive): piecewise-linear, ``interpolate_code0``.
+        - **Code 1** (multiplicative): piecewise-exponential, ``interpolate_code1``.
+        - **Codes 2, 3** (additive): parabolic interpolation with linear
+          extrapolation, ``interpolate_parabolic``. ROOT maps code 3 onto code 2.
+        - **Code 4** (additive): 6th-degree polynomial interpolation with
+          linear extrapolation, ``interpolate_poly6``.
+        - **Code 5** (multiplicative): 6th-degree polynomial interpolation in
+          log space with exponential extrapolation, ``interpolate_code4``.
+        - **Code 6** (multiplicative): 6th-degree polynomial interpolation with
+          linear extrapolation in ratio space, ``interpolate_poly6`` applied to
+          ``high/nominal`` and ``low/nominal``.
 
         Args:
             interp_code: Interpolation code (0-6) determining the mathematical approach
@@ -294,175 +345,60 @@ class InterpolationFunction(Function):
         Note:
             The returned value interpretation depends on the interpolation code:
             - Codes 0,2,3,4: Direct additive contribution
-            - Codes 1,5,6: Multiplicative factor (subtract 1 before use)
+            - Codes 1,5,6: Multiplicative factor (already with 1 subtracted)
         """
-        # Codes 0, 2, 3, 4 are additive modes
-        # Codes 1, 5, 6 are multiplicative modes
+        # The interpolations helpers assume a boundary of 1.0; ProcessNormalization
+        # / PiecewiseInterpolation always use this boundary.
+        del boundary
 
         if interp_code == 0:
-            # Linear interpolation/extrapolation (additive)
+            # Piecewise-linear interpolation/extrapolation (additive)
             return cast(
                 TensorVar,
-                pt.switch(
-                    param_val >= 0,
-                    param_val * (high_val - nominal),
-                    param_val * (nominal - low_val),
-                ),
+                interpolate_code0(param_val, nominal, high_val, low_val) - nominal,
             )
 
         if interp_code == 1:
-            # Exponential interpolation/extrapolation (multiplicative)
-            ratio_high = high_val / nominal
-            ratio_low = low_val / nominal
+            # Piecewise-exponential interpolation/extrapolation (multiplicative)
             return cast(
                 TensorVar,
-                pt.switch(
-                    param_val >= 0,
-                    cast(TensorVar, pt.power(ratio_high, param_val)) - 1.0,  # type: ignore[no-untyped-call]
-                    cast(TensorVar, pt.power(ratio_low, -param_val)) - 1.0,  # type: ignore[no-untyped-call]
-                ),
+                interpolate_code1(param_val, nominal, high_val, low_val) / nominal
+                - 1.0,
             )
 
-        if interp_code == 2:
-            # Exponential interpolation, linear extrapolation (additive)
+        if interp_code in (2, 3):
+            # Parabolic interpolation with linear extrapolation (additive).
+            # ROOT converts code 3 to code 2. interpolate_parabolic matches ROOT's
+            # a*alpha^2 + b*alpha central region with continuous linear extensions.
             return cast(
                 TensorVar,
-                pt.switch(
-                    pt.abs(param_val) <= boundary,
-                    # Exponential interpolation for |theta| <= 1
-                    pt.switch(
-                        param_val >= 0,
-                        (high_val - nominal) * (pt.exp(param_val) - 1),
-                        (nominal - low_val) * (pt.exp(-param_val) - 1),
-                    ),
-                    # Linear extrapolation for |theta| > 1
-                    pt.switch(
-                        param_val >= 0,
-                        (high_val - nominal)
-                        * (
-                            pt.exp(boundary)
-                            - 1
-                            + (param_val - boundary) * pt.exp(boundary)
-                        ),
-                        (nominal - low_val)
-                        * (
-                            pt.exp(boundary)
-                            - 1
-                            + (-param_val - boundary) * pt.exp(boundary)
-                        ),
-                    ),
-                ),
-            )
-
-        if interp_code == 3:
-            # Similar to code 2 but with different extrapolation
-            return cast(
-                TensorVar,
-                pt.switch(
-                    pt.abs(param_val) <= boundary,
-                    # Exponential interpolation for |theta| <= 1
-                    pt.switch(
-                        param_val >= 0,
-                        (high_val - nominal) * (pt.exp(param_val) - 1),
-                        (nominal - low_val) * (pt.exp(-param_val) - 1),
-                    ),
-                    # Linear extrapolation for |theta| > 1
-                    pt.switch(
-                        param_val >= 0,
-                        param_val * (high_val - nominal),
-                        param_val * (nominal - low_val),
-                    ),
-                ),
+                interpolate_parabolic(param_val, nominal, high_val, low_val) - nominal,
             )
 
         if interp_code == 4:
-            # Polynomial interpolation + linear extrapolation (additive)
+            # 6th-degree polynomial interpolation + linear extrapolation (additive)
             return cast(
                 TensorVar,
-                pt.switch(
-                    pt.abs(param_val) >= boundary,
-                    # Linear extrapolation for |theta| >= 1
-                    pt.switch(
-                        param_val >= 0,
-                        param_val * (high_val - nominal),
-                        param_val * (nominal - low_val),
-                    ),
-                    # 6th order polynomial interpolation for |theta| < 1
-                    pt.switch(
-                        param_val >= 0,
-                        param_val
-                        * (high_val - nominal)
-                        * (
-                            1
-                            + param_val * param_val * (-3 + param_val * param_val) / 16
-                        ),
-                        param_val
-                        * (nominal - low_val)
-                        * (
-                            1
-                            + param_val * param_val * (-3 + param_val * param_val) / 16
-                        ),
-                    ),
-                ),
+                interpolate_poly6(param_val, nominal, high_val, low_val) - nominal,
             )
 
         if interp_code == 5:
-            # Polynomial interpolation + exponential extrapolation (multiplicative)
-            ratio_high = high_val / nominal
-            ratio_low = low_val / nominal
+            # 6th-degree polynomial in log space + exponential extrapolation
+            # (multiplicative)
             return cast(
                 TensorVar,
-                pt.switch(
-                    pt.abs(param_val) >= boundary,
-                    # Exponential extrapolation for |theta| >= 1
-                    pt.switch(
-                        param_val >= 0,
-                        cast(TensorVar, pt.power(ratio_high, param_val)) - 1.0,  # type: ignore[no-untyped-call]
-                        cast(TensorVar, pt.power(ratio_low, -param_val)) - 1.0,  # type: ignore[no-untyped-call]
-                    ),
-                    # 6th order polynomial interpolation for |theta| < 1
-                    pt.switch(
-                        param_val >= 0,
-                        param_val
-                        * (ratio_high - 1.0)
-                        * (
-                            1
-                            + param_val * param_val * (-3 + param_val * param_val) / 16
-                        ),
-                        param_val
-                        * (ratio_low - 1.0)
-                        * (
-                            1
-                            + param_val * param_val * (-3 + param_val * param_val) / 16
-                        ),
-                    ),
-                ),
+                interpolate_code4(param_val, nominal, high_val, low_val) / nominal
+                - 1.0,
             )
 
-        # Code 6: Polynomial interpolation + linear extrapolation (multiplicative)
+        # Code 6: 6th-degree polynomial + linear extrapolation in ratio space
+        # (multiplicative). Work in nominal=1 ratio space, as ROOT does.
+        one = pt.constant(1.0)
         ratio_high = high_val / nominal
         ratio_low = low_val / nominal
         return cast(
             TensorVar,
-            pt.switch(
-                pt.abs(param_val) >= boundary,
-                # Linear extrapolation for |theta| >= 1
-                pt.switch(
-                    param_val >= 0,
-                    param_val * (ratio_high - 1.0),
-                    param_val * (ratio_low - 1.0),
-                ),
-                # 6th order polynomial interpolation for |theta| < 1
-                pt.switch(
-                    param_val >= 0,
-                    param_val
-                    * (ratio_high - 1.0)
-                    * (1 + param_val * param_val * (-3 + param_val * param_val) / 16),
-                    param_val
-                    * (ratio_low - 1.0)
-                    * (1 + param_val * param_val * (-3 + param_val * param_val) / 16),
-                ),
-            ),
+            interpolate_poly6(param_val, one, ratio_high, ratio_low) - 1.0,
         )
 
     def _expression(self, context: Context) -> TensorVar:
@@ -720,14 +656,26 @@ class RooRecursiveFractionFunction(Function):
     r"""
     ROOT RooRecursiveFraction function implementation.
 
-    Implements ROOT's RooRecursiveFraction which computes fractions recursively.
-    Used for constrained fraction calculations where fractions must sum to 1.
+    Implements ROOT's ``RooRecursiveFraction`` which computes a recursive
+    fraction. Used for constructing a set of fractions that automatically sum
+    to one (e.g. ``RooAddPdf`` with ``recursiveFractions=True``).
+
+    For a coefficient list :math:`(a_0, a_1, \dots, a_{n-1})` ROOT's
+    ``RooRecursiveFraction::evaluate()`` returns
 
     .. math::
 
-        f_i = \frac{a_i}{\sum_{j=i}^n a_j}
+        f = a_0 \prod_{i=1}^{n-1} (1 - a_i)
 
-    where the recursive fractions ensure proper normalization.
+    so that the leading coefficient is scaled by the complement of all the
+    remaining ones. A single coefficient returns :math:`a_0` itself
+    (empty product).
+
+    Example:
+        :math:`(0.2, 0.5, 0.5) \to 0.2 \cdot (1-0.5) \cdot (1-0.5) = 0.05`.
+
+    The non-recursive branch keeps the simple normalization
+    :math:`a_0 / \sum_j a_j` for the (rare) flat-fraction convention.
 
     Parameters:
         name: Name of the function
@@ -757,22 +705,18 @@ class RooRecursiveFractionFunction(Function):
         coeffs = self.get_parameter_list(context, "coefficients")
 
         if not self.recursive:
-            # Simple normalization
+            # Simple normalization: a_0 / sum(all)
             total = sum(coeffs)
             return cast(TensorVar, coeffs[0] / total)
 
-        # Recursive fraction calculation
-        # For first coefficient: a_0 / (a_0 + a_1 + ... + a_n)
-        # For i-th coefficient: a_i / (a_i + a_{i+1} + ... + a_n) * (1 - sum of previous fractions)
+        # Recursive fraction (ROOT RooRecursiveFraction::evaluate):
+        #   f = a_0 * prod_{i>=1} (1 - a_i)
+        # A single coefficient yields a_0 (empty product).
+        result: TensorVar = coeffs[0]
+        for coeff in coeffs[1:]:
+            result = cast(TensorVar, result * (1.0 - coeff))
 
-        if len(coeffs) == 1:
-            return cast(TensorVar, pt.constant(1.0))
-
-        # Calculate the first recursive fraction: a_0 / sum(all)
-        total_sum = sum(coeffs)
-        first_fraction = coeffs[0] / total_sum
-
-        return cast(TensorVar, first_fraction)
+        return result
 
 
 # Registry for functions defined in this module

@@ -14,6 +14,7 @@ import pytest
 from pytensor import function
 
 from pyhs3.distributions.histfactory.interpolations import (
+    InterpolationError,
     apply_interpolation,
     interpolate_code0,
     interpolate_code1,
@@ -114,10 +115,9 @@ class TestInterpolationFunctions:
             # Should at least work at nominal point
             assert np.isclose(f(0.0), 1.0)
 
-        # Test default (unknown method should fall back to linear)
-        result = apply_interpolation("unknown", alpha, nom, hi, lo)
-        f = function([alpha], result)
-        assert np.isclose(f(0.0), 1.0)
+        # Unknown method should now raise InterpolationError
+        with pytest.raises(InterpolationError, match="unknown"):
+            apply_interpolation("unknown", alpha, nom, hi, lo)
 
 
 class TestInterpolationFunctionsCoverage:

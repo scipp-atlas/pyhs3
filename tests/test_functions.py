@@ -1873,8 +1873,8 @@ class TestInterpolationFunctionCodes:
 class TestHistogramFunction:
     """Test HistogramFunction implementation."""
 
-    def test_histogram_function_creation(self):
-        """Test HistogramFunction not implemented."""
+    def test_histogram_function_direct_construction_raises_typeerror(self):
+        """Direct instantiation of the abstract HistogramFunction raises TypeError."""
         with pytest.raises(TypeError):
             HistogramFunction(name="test_histogram", data={"axes": [], "contents": []})
 
@@ -1901,3 +1901,18 @@ class TestFunctionsUniqueness:
             ]
         )
         assert [f.name for f in funcs] == ["f1", "f2"]
+
+    def test_histogram_function_in_workspace_raises_clean_validation_error(self):
+        """A workspace using 'histogram' function type should get a clean unknown-type ValidationError."""
+        ws_json = {
+            "metadata": {"hs3_version": "0.2"},
+            "functions": [
+                {
+                    "name": "my_hist",
+                    "type": "histogram",
+                    "data": {"axes": [], "contents": []},
+                }
+            ],
+        }
+        with pytest.raises(ValidationError, match="histogram"):
+            Workspace(**ws_json)

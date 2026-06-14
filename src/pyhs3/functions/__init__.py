@@ -42,7 +42,6 @@ FunctionType = Annotated[
     | InterpolationFunction
     | ProcessNormalizationFunction
     | CMSAsymPowFunction
-    | HistogramFunction
     | RooRecursiveFractionFunction,
     Field(discriminator="type"),
 ]

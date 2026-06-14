@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Annotated, cast
 
 import numpy as np
 import numpy.typing as npt
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.data import Data, Datum
@@ -41,8 +41,6 @@ class Likelihood(NamedModel):
         data: Array of strings referencing data or inline values for constraints
         aux_distributions: Optional array of auxiliary distributions for regularization
     """
-
-    model_config = ConfigDict()
 
     distributions: Annotated[
         list[str] | Distributions,

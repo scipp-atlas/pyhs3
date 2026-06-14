@@ -8,7 +8,7 @@ Includes both standard HS3 distributions and CMS-specific extensions.
 
 from __future__ import annotations
 
-from typing import Annotated, TypeVar
+from typing import Annotated
 
 from pydantic import Field
 
@@ -89,8 +89,6 @@ __all__ = [
     "registered_distributions",
 ]
 
-DistT = TypeVar("DistT", bound="Distribution")
-
 # Combine all distribution registries
 registered_distributions: dict[str, type[Distribution]] = {
     **basic.distributions,
@@ -114,8 +112,6 @@ DistributionType = Annotated[
     # Composite distributions
     | composite.MixtureDist
     | composite.ProductDist
-    # Histogram distributions
-    | histogram.HistogramDist
     # HistFactory distributions
     | histfactory.HistFactoryDistChannel
     # Mathematical distributions

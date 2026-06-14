@@ -1668,6 +1668,38 @@ class TestObservedSuffixHeuristic:
         assert np.isfinite(float(result))
         assert float(result) > 0
 
+    def test_explicit_domain_without_domain_collection_raises(self):
+        """An explicit domain index on a workspace with no domains raises ValueError.
+
+        _select_domain must raise when an explicit domain is requested but the
+        workspace has no domain collection, matching the analogous behaviour of
+        _select_parameterset.
+        """
+        ws_no_domains = hs3.Workspace(
+            metadata={"hs3_version": "0.2"},
+            distributions=[
+                {
+                    "name": "g",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "mu",
+                    "sigma": "sigma",
+                }
+            ],
+            parameter_points=[
+                {
+                    "name": "nominal",
+                    "parameters": [
+                        {"name": "x", "value": 0.0},
+                        {"name": "mu", "value": 0.0},
+                        {"name": "sigma", "value": 1.0},
+                    ],
+                }
+            ],
+        )
+        with pytest.raises(ValueError, match="no domains are available"):
+            ws_no_domains.model(0, domain=0, progress=False)
+
 
 class TestGraphSummaryCompilationStatus:
     """Regression tests for graph_summary misreporting compilation status under FAST_COMPILE."""

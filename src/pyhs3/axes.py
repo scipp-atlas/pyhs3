@@ -9,7 +9,7 @@ including unbinned axes (with min/max bounds) and binned axes
 from __future__ import annotations
 
 from itertools import pairwise
-from typing import Annotated, Any, Literal, TypeAlias, TypeVar
+from typing import Annotated, Any, Literal, TypeAlias
 
 import hist
 import numpy as np
@@ -32,8 +32,6 @@ class Axis(NamedModel):
     Attributes:
         name: Name of the axis/variable
     """
-
-    model_config = ConfigDict()
 
 
 class BoundedAxis(Axis):
@@ -304,8 +302,6 @@ BinnedAxis = Annotated[
         }
     ),
 ]
-
-TAxis = TypeVar("TAxis", bound=Axis)
 
 
 class BinnedAxes(NamedCollection[BinnedAxis]):

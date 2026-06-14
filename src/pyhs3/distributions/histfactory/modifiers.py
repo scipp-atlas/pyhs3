@@ -110,6 +110,32 @@ class HasConstraint(ABC):
         """Create constraint term for this modifier."""
 
 
+class SingleParamConstraint(HasConstraint, ABC):
+    """Mixin for single-parameter modifiers that use a standard Gauss/Poisson/LogNormal constraint."""
+
+    name: str
+    parameter: str
+
+    def make_constraint(self, context: Context, _: SampleData) -> TensorVar:
+        """Create constraint term using a Gauss, Poisson, or LogNormal distribution."""
+        name = f"constraint_{self.name}"
+        constraint_dist: Distribution
+
+        if self.constraint == "Gauss":
+            constraint_dist = GaussianDist(
+                name=name, x=0.0, mean=self.parameter, sigma=1.0
+            )
+        elif self.constraint == "Poisson":
+            constraint_dist = PoissonDist(name=name, x=1.0, mean=self.parameter)
+        else:  # self.constraint == "LogNormal"
+            constraint_dist = LogNormalDist(
+                name=name, x=1.0, mu=self.parameter, sigma=1.0
+            )
+
+        augmented_context = {**context, **constraint_dist.constants}
+        return constraint_dist.expression(Context(augmented_context))
+
+
 # Parameterized modifier base (single parameter)
 class ParameterModifier(Modifier, ABC):
     """Base for modifiers that use a single parameter name."""
@@ -147,6 +173,10 @@ class ParametersModifier(Modifier, ABC):
     def auxdata(self) -> list[float]:
         """Auxiliary data values associated with this modifier (list of floats)."""
 
+    def expression(self, context: Context) -> TensorVar:
+        """Return stacked tensor of per-bin parameter values."""
+        return cast("TensorVar", pt.stack([context[name] for name in self.parameters]))
+
     @abstractmethod
     def apply(self, context: Context, rates: TensorVar) -> TensorVar:
         """Apply this modifier to the given rates tensor."""
@@ -176,7 +206,7 @@ class NormFactorModifier(ParameterModifier):
         return cast("TensorVar", rates * self.expression(context))
 
 
-class NormSysModifier(HasConstraint, ParameterModifier):
+class NormSysModifier(SingleParamConstraint, ParameterModifier):
     """Normalization systematic modifier (with hi/lo interpolation)."""
 
     type: Literal["normsys"] = "normsys"
@@ -216,31 +246,8 @@ class NormSysModifier(HasConstraint, ParameterModifier):
         """Apply normsys modifier (systematic with hi/lo interpolation)."""
         return cast("TensorVar", rates * self.expression(context))
 
-    def make_constraint(self, context: Context, _: SampleData) -> TensorVar:
-        """Create constraint term using PyTensor operations."""
 
-        name = f"constraint_{self.name}"
-        constraint_dist: Distribution
-
-        if self.constraint == "Gauss":
-            # Gaussian constraint: Normal(auxdata | mean=parameter, std=sigma)
-            constraint_dist = GaussianDist(
-                name=name, x=0.0, mean=self.parameter, sigma=1.0
-            )
-        elif self.constraint == "Poisson":
-            constraint_dist = PoissonDist(name=name, x=1.0, mean=self.parameter)
-        else:  # self.constraint == "LogNormal"
-            # LogNormal constraint: log(param) ~ N(0, 1)
-            constraint_dist = LogNormalDist(
-                name=name, x=1.0, mu=self.parameter, sigma=1.0
-            )
-
-        # Use the distribution's constants to augment the context
-        augmented_context = {**context, **constraint_dist.constants}
-        return constraint_dist.expression(Context(augmented_context))
-
-
-class HistoSysModifier(HasConstraint, ParameterModifier):
+class HistoSysModifier(SingleParamConstraint, ParameterModifier):
     """Additive correlated shape systematic modifier."""
 
     type: Literal["histosys"] = "histosys"
@@ -286,28 +293,6 @@ class HistoSysModifier(HasConstraint, ParameterModifier):
 
         return cast("TensorVar", rates + variation)
 
-    def make_constraint(self, context: Context, _: SampleData) -> TensorVar:
-        """Create constraint term using PyTensor operations."""
-
-        name = f"constraint_{self.name}"
-        constraint_dist: Distribution
-
-        if self.constraint == "Gauss":
-            # Gaussian constraint: Normal(auxdata | mean=parameter, std=sigma)
-            constraint_dist = GaussianDist(
-                name=name, x=0.0, mean=self.parameter, sigma=1.0
-            )
-        elif self.constraint == "Poisson":
-            constraint_dist = PoissonDist(name=name, x=1.0, mean=self.parameter)
-        else:  # self.constraint == "LogNormal"
-            constraint_dist = LogNormalDist(
-                name=name, x=1.0, mu=self.parameter, sigma=1.0
-            )
-
-        # Use the distribution's constants to augment the context
-        augmented_context = {**context, **constraint_dist.constants}
-        return constraint_dist.expression(Context(augmented_context))
-
 
 class ShapeFactorModifier(ParametersModifier):
     """Uncorrelated multiplicative bin-by-bin scaling modifier."""
@@ -321,12 +306,6 @@ class ShapeFactorModifier(ParametersModifier):
         """Auxiliary data values for shapefactor (empty list)."""
         # shapefactor doesn't produce aux measurements per se; return empty list
         return []
-
-    def expression(self, context: Context) -> TensorVar:
-        """Return multiplicative factors for shapefactor."""
-        param_names = self.parameters
-        factors = pt.stack([context[name] for name in param_names])
-        return cast("TensorVar", factors)
 
     def apply(self, context: Context, rates: TensorVar) -> TensorVar:
         """Apply shapefactor modifier (uncorrelated bin-by-bin scaling)."""
@@ -346,12 +325,6 @@ class ShapeSysModifier(HasConstraint, ParametersModifier):
         """Auxiliary data values for shapesys (from data vals)."""
         # shapesys typically uses auxiliary counts derived from the sample data and uncertainties.
         return self.data.vals
-
-    def expression(self, context: Context) -> TensorVar:
-        """Return multiplicative factors for shapesys."""
-        param_names = self.parameters
-        factors = pt.stack([context[name] for name in param_names])
-        return cast("TensorVar", factors)
 
     def apply(self, context: Context, rates: TensorVar) -> TensorVar:
         """Apply shapesys modifier (shape systematic with constraints)."""
@@ -409,20 +382,9 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
         # For staterror, each auxiliary measurement is typically 1.0 (or derived).
         return [1.0] * len(self.parameters)
 
-    def expression(self, context: Context) -> TensorVar:
-        """Return multiplicative factors for staterror."""
-        param_names = self.parameters
-        factors = pt.stack([context[name] for name in param_names])
-        return cast("TensorVar", factors)
-
     def apply(self, context: Context, rates: TensorVar) -> TensorVar:
         """Apply staterror modifier (Barlow-Beeston statistical uncertainties)."""
-
-        param_names = self.parameters
-        # Staterror is bin-by-bin statistical uncertainty
-        # Each bin gets its own gamma parameter
-        factors = pt.stack([context[name] for name in param_names])
-        return cast("TensorVar", rates * factors)
+        return cast("TensorVar", rates * self.expression(context))
 
     def make_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
         """Create constraint term using PyTensor operations.
@@ -512,14 +474,7 @@ class Modifiers(RootModel[list[ModifierType]]):
     and maintains type safety through discriminated unions.
     """
 
-    root: Annotated[
-        list[ModifierType],
-        custom_error_msg(
-            {
-                "union_tag_invalid": "Unknown modifier type '{tag}' does not match any supported modifier types"
-            }
-        ),
-    ] = Field(default_factory=list)
+    root: list[ModifierType] = Field(default_factory=list)
 
     def __iter__(self) -> Iterator[ModifierType]:  # type: ignore[override]
         return iter(self.root)

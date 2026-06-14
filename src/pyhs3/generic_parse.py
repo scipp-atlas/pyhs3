@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytensor.tensor as pt
 import sympy as sp
+from pydantic import ConfigDict, Field, PrivateAttr, model_validator
 from pytensor.tensor.type import TensorType
 from sympy.parsing import sympy_parser
 from sympy.parsing.sympy_parser import (
@@ -17,6 +18,10 @@ from sympy.parsing.sympy_parser import (
 )
 
 from pyhs3.exceptions import ExpressionEvaluationError, ExpressionParseError
+
+if TYPE_CHECKING:
+    from pyhs3.context import Context
+    from pyhs3.typing.aliases import TensorVar
 
 _transformations = (
     auto_symbol,
@@ -145,3 +150,52 @@ def sympy_to_pytensor(
 def _parse_expr_cached(expr_str: str) -> sp.Expr:
     # Delegate to SymPy's parser; results are cached to avoid repeated work
     return sympy_parser.parse_expr(expr_str, transformations=_transformations)
+
+
+class GenericExpressionMixin:
+    """
+    Mixin for pydantic models that evaluate a user-supplied math expression string.
+
+    Inherit this mixin **before** the pydantic ``BaseModel`` (or subclass such as
+    :class:`~pyhs3.base.Evaluable`) in the MRO, e.g.::
+
+        class MyDist(GenericExpressionMixin, Distribution): ...
+
+    The mixin automatically provides:
+
+    - ``model_config`` — allows ``sp.Expr`` private attributes and alias-based
+      serialisation.
+    - ``expression_str`` — the raw expression string, aliased to ``"expression"``
+      in serialised form.
+    - ``setup_expression`` — a ``@model_validator(mode="after")`` that parses and
+      analyses the expression at construction time.
+
+    Subclasses do **not** need to redeclare any of these.
+
+    Attributes:
+        model_config: Pydantic config that permits ``sp.Expr`` private attrs.
+        expression_str: The raw mathematical expression string (aliased to
+            ``"expression"`` in serialised form).
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, serialize_by_alias=True)
+
+    expression_str: str = Field(alias="expression", repr=False)
+    _sympy_expr: sp.Expr = PrivateAttr(default=None)
+
+    @model_validator(mode="after")
+    def setup_expression(self) -> GenericExpressionMixin:
+        """Parse and analyze the expression during initialization."""
+        self._sympy_expr = parse_expression(self.expression_str)
+
+        analysis = analyze_sympy_expr(self._sympy_expr)
+        independent_vars = [str(symbol) for symbol in analysis["independent_vars"]]
+
+        # _parameters is provided by Evaluable (for distributions/functions)
+        self._parameters = {var: var for var in independent_vars}
+        return self
+
+    def _eval_expression(self, context: Context) -> TensorVar:
+        """Evaluate the parsed expression using variables from *context*."""
+        variables = [context[name] for name in self._parameters.values()]
+        return cast("TensorVar", sympy_to_pytensor(self._sympy_expr, variables))

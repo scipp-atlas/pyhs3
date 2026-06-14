@@ -29,7 +29,8 @@ from pyhs3.domains import Domain
 from pyhs3.functions import Functions
 from pyhs3.networks import build_dependency_graph
 from pyhs3.parameter_points import ParameterSet
-from pyhs3.typing.aliases import DomainBounds, TensorVar
+from pyhs3.tensorutils import create_bounded_tensor, ensure_array
+from pyhs3.typing.aliases import TensorVar
 
 if TYPE_CHECKING:
     from pyhs3.likelihoods import Likelihood
@@ -351,24 +352,6 @@ class Model:
         if len(terms) == 1:
             return terms[0]
         return cast(TensorVar, pt.add(*terms))  # pylint: disable=no-value-for-parameter
-
-    @staticmethod
-    def _ensure_array(
-        value: float | list[float] | npt.NDArray[np.float64],
-    ) -> npt.NDArray[np.float64]:
-        """
-        Ensure a value is a numpy array with dtype float64.
-
-        Converts scalars to 0-d arrays and lists to 1-d arrays.
-        Existing numpy arrays are converted to float64 dtype if needed.
-
-        Args:
-            value: Input value (scalar, list, or array)
-
-        Returns:
-            NumPy array with dtype float64
-        """
-        return np.asarray(value, dtype=np.float64)
 
     def _try_bake_hfdc_observed(self, node_name: str) -> TensorVar | None:
         """Return a baked constant for an HFDC ``{name}_observed`` parameter, or None.
@@ -712,7 +695,7 @@ class Model:
         """
         # Convert all parameter values to numpy arrays
         converted_params = {
-            key: self._ensure_array(value) for key, value in parametervalues.items()
+            key: ensure_array(value) for key, value in parametervalues.items()
         }
         return self.pdf(name, **converted_params)
 
@@ -972,43 +955,3 @@ class Model:
     Graph operations: {len(applies)}
     Operation types: {dict(sorted(op_types.items()))}{compile_info}
 """
-
-
-def create_bounded_tensor(
-    name: str, domain: DomainBounds, kind: Callable[..., TensorVar] = pt.scalar
-) -> TensorVar:
-    """
-    Creates a tensor variable with optional domain constraints.
-
-    Args:
-        name: Name of the parameter.
-        domain (tuple): Tuple specifying (min, max) range. Use None for unbounded sides.
-                       For example: (0.0, None) for lower bound only, (None, 1.0) for upper bound only.
-                       If both bounds are None, returns an unbounded tensor.
-        kind: pt.scalar for scalars, pt.vector for vectors (default: pt.scalar).
-
-    Returns:
-        pytensor.tensor.variable.TensorVariable: The tensor variable, clipped to domain if bounds exist.
-
-    Examples:
-        >>> sigma = create_bounded_tensor("sigma", (0.0, None))  # sigma >= 0 (scalar)
-        >>> fraction = create_bounded_tensor("fraction", (0.0, 1.0))  # 0 <= fraction <= 1 (scalar)
-        >>> temperatures = create_bounded_tensor("temperatures", (None, 100.0), pt.vector)  # vector <= 100
-        >>> unbounded = create_bounded_tensor("unbounded", (None, None))  # no bounds applied
-    """
-    min_bound, max_bound = domain
-
-    # Create the base tensor
-    tensor = kind(name)
-
-    # If both bounds are None, return unbounded tensor
-    if min_bound is None and max_bound is None:
-        return tensor
-
-    # Use infinity constants for unbounded sides
-    min_val = pt.constant(-np.inf) if min_bound is None else pt.constant(min_bound)
-    max_val = pt.constant(np.inf) if max_bound is None else pt.constant(max_bound)
-
-    clipped = pt.clip(tensor, min_val, max_val)
-    clipped.name = tensor.name  # Preserve the original name
-    return cast(TensorVar, clipped)

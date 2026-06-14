@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from typing import Any
 
-from pydantic import ConfigDict, Field, PrivateAttr
+from pydantic import Field, PrivateAttr
 
 from pyhs3.collections import NamedCollection, NamedModel
 from pyhs3.typing.aliases import TensorVar
@@ -32,8 +32,6 @@ class ParameterPoint(NamedModel):
         kind: Type of tensor to create (optional)
     """
 
-    model_config = ConfigDict()
-
     value: float = Field(..., repr=False)
     const: bool = Field(default=False, repr=False)
     nbins: int | None = Field(default=None, repr=False)
@@ -54,8 +52,6 @@ class ParameterSet(NamedModel):
         name: Name identifier for the parameter set
         parameters: List of ParameterPoint specifications
     """
-
-    model_config = ConfigDict()
 
     parameters: list[ParameterPoint] = Field(default_factory=list, repr=False)
     _points: dict[str, ParameterPoint] = PrivateAttr(default_factory=dict)

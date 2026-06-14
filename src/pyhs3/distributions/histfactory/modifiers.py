@@ -449,6 +449,9 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
             sigma_value = uncertainty / nominal_yield if nominal_yield > 0 else 1.0
 
             if self.constraint == "Poisson":
+                # Skip zero-yield bins: tau = (nu/sigma)^2 is undefined when nu <= 0
+                if nominal_yield <= 0:
+                    continue
                 # Poisson: Poisson(tau | gamma * tau) where tau = (nominal/uncertainty)^2
                 # Equivalently: tau = 1/sigma_value^2
                 tau = 1.0 / sigma_value**2

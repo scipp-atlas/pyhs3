@@ -518,6 +518,36 @@ class TestStatErrorModifier:
         # rtol=1e-4 to accommodate PyTensor float32 gammaln precision
         np.testing.assert_allclose(constraint_val, expected, rtol=1e-4)
 
+    def test_make_constraint_poisson_skips_zero_yield_bin(self):
+        """make_constraint() with Poisson must skip bins where nominal_yield <= 0.
+
+        When nominal_yield=0 the formula tau=(nu/sigma)^2 is undefined.  Without
+        the skip the code fell back to sigma_value=1 → tau=1, silently inserting a
+        spurious Poisson(1 | gamma) factor.
+        """
+        data = StatErrorData(uncertainties=[1.0, 1.0])
+        modifier = StatErrorModifier(
+            name="stat_unc",
+            parameters=["gamma_stat_bin0", "gamma_stat_bin1"],
+            constraint="Poisson",
+            data=data,
+        )
+
+        context = Context(
+            {"gamma_stat_bin0": pt.constant(1.0), "gamma_stat_bin1": pt.constant(1.0)}
+        )
+        # bin 0: nominal_yield=0 (skip), bin 1: nominal_yield=10 (include)
+        sample_data = SampleData(contents=[0.0, 10.0], errors=[0.0, 1.0])
+
+        constraint = modifier.make_constraint(context, sample_data)
+        constraint_val = float(constraint.eval())
+
+        # Only bin 1 contributes: sigma_value=1/10=0.1, tau=100
+        tau = 1.0 / 0.1**2  # 100
+        log_factor = tau * np.log(tau) - tau - math.lgamma(tau + 1.0)
+        expected = float(np.exp(log_factor))
+        np.testing.assert_allclose(constraint_val, expected, rtol=1e-4)
+
 
 class TestModifierConstraintTypes:
     """Test different constraint types for modifiers."""

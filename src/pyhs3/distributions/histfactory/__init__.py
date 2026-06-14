@@ -13,7 +13,7 @@ from typing import Any, Literal, cast
 import hist
 import numpy as np
 import pytensor.tensor as pt
-from pydantic import Field, PrivateAttr
+from pydantic import Field, PrivateAttr, model_validator
 
 from pyhs3.axes import BinnedAxes
 from pyhs3.context import Context
@@ -106,6 +106,32 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         json_schema_extra={"preprocess": False},
     )
     _normalizable: bool = PrivateAttr(default=False)
+
+    @model_validator(mode="after")
+    def _validate_staterror(self) -> HistFactoryDistChannel:
+        total_bins = self.axes.get_total_bins()
+        for sample in self.samples:
+            for mod in sample.modifiers:
+                if not isinstance(mod, StatErrorModifier):
+                    continue
+                if self.barlow_beeston_method == "full" and mod.data is None:
+                    msg = (
+                        f"StatErrorModifier '{mod.name}' in channel '{self.name}' "
+                        f"requires 'data' (uncertainties) in BB-full mode"
+                    )
+                    raise ValueError(msg)
+                if self.barlow_beeston_method == "lite" and mod.data is not None:
+                    msg = (
+                        f"StatErrorModifier '{mod.name}' in channel '{self.name}' "
+                        f"must not specify 'data' in BB-lite mode; per-bin errors "
+                        f"come from the sample data"
+                    )
+                    raise ValueError(msg)
+                if not mod.parameters:
+                    mod.parameters = [
+                        f"staterror_{self.name}_bin{i}" for i in range(total_bins)
+                    ]
+        return self
 
     def get_internal_nodes(self) -> list[Any]:
         """

@@ -401,7 +401,7 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
 
     type: Literal["staterror"] = "staterror"
     application: Literal["multiplicative"] = Field("multiplicative", exclude=True)
-    parameters: list[str]
+    parameters: list[str] = Field(default_factory=list)
     constraint: Literal["Gauss", "Poisson"] = "Gauss"
     data: StatErrorData | None = None
 

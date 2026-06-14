@@ -23,6 +23,8 @@ try:
 except ImportError:
     HAS_PYHF = False
 
+from pydantic import ValidationError
+
 import pyhs3
 from pyhs3.axes import BinnedAxes
 from pyhs3.context import Context
@@ -2603,3 +2605,149 @@ class TestBarlowBeestonLite:
         # bin is included and the method returns a TensorVar (not None).
         result = channel._make_barlow_beeston_lite_constraint(context)
         assert result is not None
+
+    def test_full_mode_default_parameter_names(self):
+        """BB-full: omitting 'parameters' defaults to staterror_{channel}_bin{i}."""
+        axes = [{"name": "x", "min": 0.0, "max": 10.0, "nbins": 2}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {"contents": [10.0, 20.0], "errors": [1.0, 2.0]},
+                "modifiers": [
+                    {
+                        "name": "staterror",
+                        "type": "staterror",
+                        "constraint": "Gauss",
+                        "data": {"uncertainties": [0.1, 0.2]},
+                    }
+                ],
+            }
+        ]
+        channel = HistFactoryDistChannel(
+            name="test_channel",
+            axes=axes,
+            samples=samples,
+            barlow_beeston_method="full",
+        )
+        mod = channel._find_staterror_modifier()
+        assert mod is not None
+        assert mod.parameters == [
+            "staterror_test_channel_bin0",
+            "staterror_test_channel_bin1",
+        ]
+
+    def test_full_mode_missing_data_raises(self):
+        """BB-full: a staterror with no modifier 'data' is an invalid spec."""
+        axes = [{"name": "x", "min": 0.0, "max": 10.0, "nbins": 2}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {"contents": [10.0, 20.0], "errors": [1.0, 2.0]},
+                "modifiers": [
+                    {
+                        "name": "staterror",
+                        "type": "staterror",
+                        "parameters": ["gamma_bin0", "gamma_bin1"],
+                        "constraint": "Gauss",
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(ValidationError, match="requires 'data'"):
+            HistFactoryDistChannel(
+                name="test_channel",
+                axes=axes,
+                samples=samples,
+                barlow_beeston_method="full",
+            )
+
+    def test_lite_mode_default_parameter_names(self):
+        """BB-lite: omitting 'parameters' defaults to staterror_{channel}_bin{i}."""
+        axes = [{"name": "x", "min": 0.0, "max": 10.0, "nbins": 2}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {"contents": [10.0, 20.0], "errors": [1.0, 2.0]},
+                "modifiers": [
+                    {
+                        "name": "staterror",
+                        "type": "staterror",
+                        "constraint": "Gauss",
+                    }
+                ],
+            }
+        ]
+        channel = HistFactoryDistChannel(
+            name="test_channel",
+            axes=axes,
+            samples=samples,
+        )
+        mod = channel._find_staterror_modifier()
+        assert mod is not None
+        assert mod.parameters == [
+            "staterror_test_channel_bin0",
+            "staterror_test_channel_bin1",
+        ]
+
+    def test_lite_mode_with_data_raises(self):
+        """BB-lite: a staterror with modifier 'data' is an invalid spec."""
+        axes = [{"name": "x", "min": 0.0, "max": 10.0, "nbins": 2}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {"contents": [10.0, 20.0], "errors": [1.0, 2.0]},
+                "modifiers": [
+                    {
+                        "name": "staterror",
+                        "type": "staterror",
+                        "parameters": ["gamma_bin0", "gamma_bin1"],
+                        "constraint": "Gauss",
+                        "data": {"uncertainties": [0.1, 0.2]},
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(ValidationError, match="must not specify 'data'"):
+            HistFactoryDistChannel(
+                name="test_channel",
+                axes=axes,
+                samples=samples,
+            )
+
+    def test_lite_default_names_shared_across_samples(self):
+        """BB-lite: bare staterror in two samples gets same channel-scoped parameter names."""
+        axes = [{"name": "x", "min": 0.0, "max": 10.0, "nbins": 2}]
+        samples = [
+            {
+                "name": "signal",
+                "data": {"contents": [10.0, 20.0], "errors": [1.0, 2.0]},
+                "modifiers": [
+                    {
+                        "name": "staterror",
+                        "type": "staterror",
+                        "constraint": "Gauss",
+                    }
+                ],
+            },
+            {
+                "name": "background",
+                "data": {"contents": [5.0, 8.0], "errors": [0.5, 0.8]},
+                "modifiers": [
+                    {
+                        "name": "staterror",
+                        "type": "staterror",
+                        "constraint": "Gauss",
+                    }
+                ],
+            },
+        ]
+        channel = HistFactoryDistChannel(
+            name="SR",
+            axes=axes,
+            samples=samples,
+        )
+        expected = ["staterror_SR_bin0", "staterror_SR_bin1"]
+        for sample in channel.samples:
+            for mod in sample.modifiers:
+                if isinstance(mod, StatErrorModifier):
+                    assert mod.parameters == expected

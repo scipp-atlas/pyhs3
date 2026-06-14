@@ -672,7 +672,6 @@ class TestConstraintValidator:
             "name": "stat",
             "type": "staterror",
             "parameters": ["gamma_0"],
-            "data": {"uncertainties": [1.0]},
         }
         sr = _make_channel("SR", [10.0], [shared_staterror])
         cr = _make_channel("CR", [50.0], [shared_staterror])

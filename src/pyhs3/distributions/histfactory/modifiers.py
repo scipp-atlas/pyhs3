@@ -401,9 +401,9 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
 
     type: Literal["staterror"] = "staterror"
     application: Literal["multiplicative"] = Field("multiplicative", exclude=True)
-    parameters: list[str]
-    constraint: Literal["Gauss"] = "Gauss"
-    data: StatErrorData
+    parameters: list[str] = Field(default_factory=list)
+    constraint: Literal["Gauss", "Poisson"] = "Gauss"
+    data: StatErrorData | None = None
 
     @property
     def auxdata(self) -> list[float]:
@@ -427,9 +427,16 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
         return cast("TensorVar", rates * factors)
 
     def make_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
-        """Create constraint term using PyTensor operations."""
+        """Create constraint term using PyTensor operations.
 
-        # Barlow-Beeston method: per-bin Gaussian constraints with relative uncertainties
+        Only used in BB-full mode. In BB-lite mode, constraints are built at channel level.
+        """
+        if self.data is None:
+            msg = (
+                "StatErrorModifier.data is required for BB-full mode (make_constraint)"
+            )
+            raise ValueError(msg)
+
         name = f"constraint_{self.name}"
         augmented_context = dict(context)
         dists = []
@@ -437,21 +444,34 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
         for i, (parameter, uncertainty) in enumerate(
             zip(self.parameters, self.data.uncertainties, strict=False)
         ):
-            # Calculate relative uncertainty: sigma = uncertainty / nominal_yield
             nominal_yield = sample_data.contents[i]
+            # sigma_value is the relative uncertainty = uncertainty / nominal_yield
             sigma_value = uncertainty / nominal_yield if nominal_yield > 0 else 1.0
 
-            # Create sigma parameter in augmented context
-            sigma_param_name = f"{parameter}_sigma"
-            augmented_context[sigma_param_name] = pt.constant(sigma_value)
-
-            # Create Gaussian constraint: N(auxdata=1.0 | mean=parameter, sigma=relative_uncertainty)
-            dist = GaussianDist(
-                name=f"{name}_{parameter}",
-                x=1.0,  # Auxiliary data (typically 1.0 for staterror)
-                mean=parameter,
-                sigma=sigma_param_name,
-            )
+            if self.constraint == "Poisson":
+                # Skip zero-yield bins: tau = (nu/sigma)^2 is undefined when nu <= 0
+                if nominal_yield <= 0:
+                    continue
+                # Poisson: Poisson(tau | gamma * tau) where tau = (nominal/uncertainty)^2
+                # Equivalently: tau = 1/sigma_value^2
+                tau = 1.0 / sigma_value**2
+                scaled_name = f"{parameter}_scaled"
+                augmented_context[scaled_name] = context[parameter] * tau
+                dist: GaussianDist | PoissonDist = PoissonDist(
+                    name=f"{name}_{parameter}",
+                    x=float(tau),
+                    mean=scaled_name,
+                )
+            else:  # "Gauss"
+                # Gaussian: N(1.0 | gamma, sigma_value)
+                sigma_param_name = f"{parameter}_sigma"
+                augmented_context[sigma_param_name] = pt.constant(sigma_value)
+                dist = GaussianDist(
+                    name=f"{name}_{parameter}",
+                    x=1.0,
+                    mean=parameter,
+                    sigma=sigma_param_name,
+                )
             dists.append(dist)
 
         if not dists:

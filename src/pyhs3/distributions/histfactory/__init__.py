@@ -13,18 +13,20 @@ from typing import Any, Literal, cast
 import hist
 import numpy as np
 import pytensor.tensor as pt
-from pydantic import Field, PrivateAttr
+from pydantic import Field, PrivateAttr, model_validator
 
 from pyhs3.axes import BinnedAxes
 from pyhs3.context import Context
 
 # Import existing distributions for constraint terms
+from pyhs3.distributions.basic import GaussianDist, PoissonDist
 from pyhs3.distributions.core import Distribution
 from pyhs3.distributions.histfactory.data import SampleData
 from pyhs3.distributions.histfactory.modifiers import (
     HasConstraint,
     Modifier,
     ParameterModifier,
+    StatErrorModifier,
 )
 from pyhs3.distributions.histfactory.samples import Sample, Samples
 from pyhs3.networks import HasDependencies, HasInternalNodes
@@ -99,7 +101,37 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     type: Literal["histfactory_dist"] = "histfactory_dist"
     axes: BinnedAxes = Field(..., json_schema_extra={"preprocess": False})
     samples: Samples = Field(..., json_schema_extra={"preprocess": False})
+    barlow_beeston_method: Literal["full", "lite"] = Field(
+        default="lite",
+        json_schema_extra={"preprocess": False},
+    )
     _normalizable: bool = PrivateAttr(default=False)
+
+    @model_validator(mode="after")
+    def _validate_staterror(self) -> HistFactoryDistChannel:
+        total_bins = self.axes.get_total_bins()
+        for sample in self.samples:
+            for mod in sample.modifiers:
+                if not isinstance(mod, StatErrorModifier):
+                    continue
+                if self.barlow_beeston_method == "full" and mod.data is None:
+                    msg = (
+                        f"StatErrorModifier '{mod.name}' in channel '{self.name}' "
+                        f"requires 'data' (uncertainties) in BB-full mode"
+                    )
+                    raise ValueError(msg)
+                if self.barlow_beeston_method == "lite" and mod.data is not None:
+                    msg = (
+                        f"StatErrorModifier '{mod.name}' in channel '{self.name}' "
+                        f"must not specify 'data' in BB-lite mode; per-bin errors "
+                        f"come from the sample data"
+                    )
+                    raise ValueError(msg)
+                if not mod.parameters:
+                    mod.parameters = [
+                        f"staterror_{self.name}_bin{i}" for i in range(total_bins)
+                    ]
+        return self
 
     def get_internal_nodes(self) -> list[Any]:
         """
@@ -211,11 +243,22 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         seen: set[str] = set()
         constraint_probs: list[TensorVar] = []
         for dedup_key, modifier, sample_data in self.constraint_specs():
+            # Skip StatErrorModifier in lite mode - constraint built at channel level
+            if self.barlow_beeston_method == "lite" and isinstance(
+                modifier, StatErrorModifier
+            ):
+                continue
             if dedup_key is not None:
                 if dedup_key in seen:
                     continue
                 seen.add(dedup_key)
             constraint_probs.append(modifier.make_constraint(context, sample_data))
+
+        # Add channel-level BB-lite constraint if in lite mode
+        if self.barlow_beeston_method == "lite":
+            lite_constraint = self._make_barlow_beeston_lite_constraint(context)
+            if lite_constraint is not None:
+                constraint_probs.append(lite_constraint)
 
         if not constraint_probs:
             return pt.constant(1.0)
@@ -224,6 +267,106 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     def _get_total_bins(self) -> int:
         """Calculate total number of bins across all axes."""
         return self.axes.get_total_bins()
+
+    def _find_staterror_modifier(self) -> StatErrorModifier | None:
+        """Find the first staterror modifier from any sample.
+
+        In BB-lite mode, staterror modifiers share gamma parameters across samples,
+        so we only need one modifier to get the parameter names and constraint type.
+        """
+        for sample in self.samples:
+            for modifier in sample.modifiers:
+                if isinstance(modifier, StatErrorModifier):
+                    return modifier
+        return None
+
+    def _make_barlow_beeston_lite_constraint(
+        self, context: Context
+    ) -> TensorVar | None:
+        """Build BB-lite constraint from combined sample uncertainties.
+
+        BB-lite uses shared gamma parameters across samples with a channel-level
+        constraint built from combined MC statistical uncertainties.
+
+        The constraint can be either Poisson or Gaussian:
+        - Poisson: Poisson(tau | gamma * tau) where tau = (nu/sigma)^2
+        - Gaussian: N(1.0 | gamma, relerr) where relerr = sigma/nu
+
+        Combined uncertainties from samples:
+        - total_nominal = sum(sample.data.contents)
+        - total_sigma = sqrt(sum(sample.data.errors^2))
+        """
+        total_bins = self._get_total_bins()
+
+        # Find staterror modifier to get gamma params and constraint type
+        staterror_mod = self._find_staterror_modifier()
+        if staterror_mod is None:
+            return None
+
+        gamma_params = staterror_mod.parameters
+        constraint_type = staterror_mod.constraint
+
+        # Compute combined uncertainties from sample.data.errors
+        total_nominal = np.zeros(total_bins)
+        total_variance = np.zeros(total_bins)
+
+        for sample in self.samples:
+            # Only include samples that have the staterror modifier
+            has_staterror = any(
+                isinstance(mod, StatErrorModifier) for mod in sample.modifiers
+            )
+            if has_staterror:
+                total_nominal += np.array(sample.data.contents)
+                total_variance += np.square(sample.data.errors)
+
+        total_sigma = np.sqrt(total_variance)
+
+        augmented_context = dict(context)
+        dists: list[GaussianDist | PoissonDist] = []
+
+        for i, param_name in enumerate(gamma_params):
+            nu, sigma = total_nominal[i], total_sigma[i]
+
+            # Skip bins with zero nominal yield; sigma=0 is caught by the parsing layer
+            if nu <= 0:
+                continue
+
+            if constraint_type == "Poisson":
+                # Poisson: Poisson(tau | gamma * tau) where tau = (nu/sigma)^2
+                tau = (nu / sigma) ** 2
+                scaled_name = f"{param_name}_scaled"
+                augmented_context[scaled_name] = context[param_name] * tau
+                dists.append(
+                    PoissonDist(
+                        name=f"constraint_bblite_{self.name}_{i}",
+                        x=float(tau),
+                        mean=scaled_name,
+                    )
+                )
+            else:  # "Gauss"
+                # Gaussian: N(1.0 | gamma, relerr) where relerr = sigma / nu
+                relerr = sigma / nu
+                sigma_name = f"{param_name}_sigma"
+                augmented_context[sigma_name] = pt.constant(relerr)
+                dists.append(
+                    GaussianDist(
+                        name=f"constraint_bblite_{self.name}_{i}",
+                        x=1.0,
+                        mean=param_name,
+                        sigma=sigma_name,
+                    )
+                )
+
+        if not dists:
+            return None
+
+        # Evaluate all distributions with augmented context and multiply
+        factors = []
+        for dist in dists:
+            dist_ctx = Context({**augmented_context, **dist.constants})
+            factors.append(dist.expression(dist_ctx))
+
+        return cast(TensorVar, pt.prod(pt.stack(factors), axis=0))  # type: ignore[no-untyped-call]
 
     def _compute_expected_rates(self, context: Context, total_bins: int) -> TensorVar:
         """

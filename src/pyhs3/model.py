@@ -138,6 +138,10 @@ class Model:
             str, Callable[..., npt.NDArray[np.float64]]
         ] = {}
         self._compiled_log_inputs: dict[str, list[TensorVar]] = {}
+        # Ordered log-input names cached alongside _compiled_log_inputs, mirroring
+        # _compiled_input_names for the prob-space path so log_pars() avoids
+        # rebuilding the list via a comprehension on every logpdf call.
+        self._compiled_log_input_names: dict[str, list[str]] = {}
         self._likelihood = likelihood
         # Views used internally for broadcasting: leaf[:, None] for observables,
         # leaf[None, :] for non-observable vector overrides.  Distributions see
@@ -717,8 +721,12 @@ class Model:
                 if var.name is not None
             ]
 
-            # Cache the inputs list for consistent ordering.
+            # Cache the inputs list and their names for consistent ordering so
+            # log_pars()/_reorder_log_params() don't rebuild the name list per call.
             self._compiled_log_inputs[name] = cast(list[TensorVar], inputs)
+            self._compiled_log_input_names[name] = [
+                var.name for var in inputs if var.name is not None
+            ]
 
             self._compiled_log_functions[name] = cast(
                 Callable[..., npt.NDArray[np.float64]],
@@ -941,12 +949,10 @@ class Model:
         Returns:
             List of parameter names in the order expected by logpdf()
         """
-        if name not in self._compiled_log_inputs:
+        if name not in self._compiled_log_input_names:
             # Trigger compilation to populate cache
             self._get_compiled_log_function(name)
-        return [
-            var.name for var in self._compiled_log_inputs[name] if var.name is not None
-        ]
+        return self._compiled_log_input_names[name]
 
     def _reorder_log_params(
         self,

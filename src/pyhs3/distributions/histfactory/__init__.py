@@ -453,11 +453,20 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
 
         # Per-bin Poisson log-probability:
         # log P(observed_i | expected_i) = observed_i * log(expected_i) - expected_i - log(observed_i!)
-        return cast(
-            TensorVar,
+        #
+        # Guard against 0 * log(0) = NaN when observed_i == 0 and expected_i == 0.
+        # The Poisson log-pmf for k=0 is just -lambda (since log(0!) = 0), so when
+        # observed == 0 we only need -expected_rates; the full expression is only
+        # needed (and safe) when observed > 0.  When observed > 0 and expected == 0
+        # the result is correctly -inf (P(k>0 | lambda=0) = 0).
+        full = (
             observed_data * pt.log(expected_rates)
             - expected_rates
-            - pt.gammaln(observed_data + 1),
+            - pt.gammaln(observed_data + 1)
+        )
+        return cast(
+            TensorVar,
+            pt.switch(pt.eq(observed_data, 0), -expected_rates, full),
         )
 
     def _build_main_model(

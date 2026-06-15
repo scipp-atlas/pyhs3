@@ -284,7 +284,7 @@ class Distribution(Evaluable, ABC):
 
     def log_prob_terms(
         self,
-        expressions: Mapping[str, TensorVar],
+        _expressions: Mapping[str, TensorVar],
         log_expressions: Mapping[str, TensorVar],
         _distributions: Distributions,
     ) -> LogProbTerms:
@@ -303,11 +303,12 @@ class Distribution(Evaluable, ABC):
         probability-space PDF underflows.
 
         Args:
-            expressions: Compiled symbolic expressions for all distributions,
-                keyed by name (``model.distributions``).
+            _expressions: Compiled symbolic expressions for all distributions,
+                keyed by name (``model.distributions``).  Unused in the base
+                implementation; subclasses may reference it.
             log_expressions: Compiled log-space symbolic expressions for all
                 distributions, keyed by name (``model.log_distributions``).
-            distributions: Distribution objects keyed by name, so composite
+            _distributions: Distribution objects keyed by name, so composite
                 distributions can delegate to their components' hooks.
 
         Returns:

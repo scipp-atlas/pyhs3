@@ -43,9 +43,9 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - scipy is in the dev deps
 
     def _poisson_logpmf(counts: np.ndarray, rates: np.ndarray) -> np.ndarray:
-        from scipy.special import gammaln  # noqa: PLC0415
-
-        return counts * np.log(rates) - rates - gammaln(counts + 1)
+        # math.lgamma is a stdlib built-in (Python ≥ 3.5); no external deps needed.
+        lgamma = np.vectorize(math.lgamma)
+        return counts * np.log(rates) - rates - lgamma(counts + 1)
 
 
 def _underflow_workspace() -> tuple[Workspace, np.ndarray]:
@@ -172,3 +172,58 @@ def test_logpdf_matches_log_pdf_for_gaussian():
             np.asarray(model.logpdf_unsafe("gauss", x=x, mu=0.0, sigma=1.0))
         )
         assert logpdf_val == pytest.approx(math.log(pdf_val), rel=1e-12)
+
+
+def test_zero_bin_logprob_is_not_nan():
+    """When observed==0 and expected==0, the bin's Poisson log-pmf must be 0 (not NaN).
+
+    When the HFDC observed data is a symbolic pt.vector (built without a likelihood
+    context so it is not baked as a constant), PyTensor evaluates
+    ``0 * pt.log(0) = 0 * -inf = NaN``.  The correct Poisson log-pmf for k=0 is
+    just ``-expected`` (i.e. 0 when expected==0 too).  A ``pt.switch`` guard fixes
+    this: when observed==0, return only ``-expected_rates``.
+    """
+    channel = HistFactoryDistChannel(
+        name="zero",
+        axes=[{"name": "x_zero", "min": 0.0, "max": 1.0, "nbins": 1}],
+        samples=[
+            {
+                "name": "signal",
+                "data": {"contents": [5.0], "errors": [1.0]},
+                "modifiers": [
+                    # normfactor lets us drive expected_rates → 0 at mu=0
+                    {"name": "mu", "type": "normfactor", "parameter": "mu"},
+                ],
+            }
+        ],
+    )
+    ws = Workspace(
+        metadata=Metadata(hs3_version="0.3.0"),
+        distributions=Distributions([channel]),
+        data=Data([]),
+        likelihoods=Likelihoods([]),
+        domains=Domains([ProductDomain(name="default")]),
+        parameter_points=ParameterPoints(
+            [
+                ParameterSet(
+                    name="default",
+                    parameters=[{"name": "mu", "value": 0.0}],
+                )
+            ]
+        ),
+    )
+    # Build without a likelihood so zero_observed stays symbolic (not baked).
+    model = ws.model(0, progress=False)
+    observed = np.zeros(1, dtype=np.float64)
+
+    # logpdf at mu=0 → expected_rates=0.  With obs=0 this is Poisson(0|0)=1 → log=0.
+    # Without the pt.switch guard, PyTensor computes 0*log(0) = NaN.
+    logpdf_val = float(
+        np.asarray(
+            model.logpdf_unsafe("zero", zero_observed=observed, mu=np.float64(0.0))
+        )
+    )
+    assert math.isfinite(logpdf_val), (
+        f"logpdf should be finite (not NaN), got {logpdf_val}"
+    )
+    assert logpdf_val == pytest.approx(0.0, abs=1e-12)

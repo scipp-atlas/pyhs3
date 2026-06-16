@@ -340,3 +340,18 @@ def load_workspace(workspace_path: Path) -> Workspace:
     """
 
     return Workspace.load(workspace_path)
+
+def create_model(
+    workspace: Workspace,
+    target: str,
+    mode: str,
+) -> Model:
+    """
+    Create a model from the given workspace, target, and mode.
+    """
+
+    return workspace.model(
+        target,
+        progress=False,
+        mode=mode,
+    )

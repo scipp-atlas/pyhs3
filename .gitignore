@@ -162,3 +162,7 @@ Thumbs.db
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+benchmarking/results/
+benchmarking/plots/
+benchmarking/reports/

@@ -7,6 +7,7 @@ preview = ["pixi-build"]
 
 [dependencies]
 pyhs3 = { path = "./" }
+psutil = ">=7.2.2,<8"
 
 [package]
 name = "pyhs3"
@@ -192,3 +193,7 @@ py314-pytensor2-jax = ["test", "py314", "pytensor2", "jax"]
 lint = { depends-on = ["pre-commit", "pylint"], description = "Run all linting (pre-commit + pylint)" }
 check = { depends-on = ["lint", "test"], description = "Quick check: lint + basic tests" }
 check-all = { depends-on = ["lint", "test-all"], description = "Comprehensive check: lint + all tests" }
+
+[target.linux-64.dependencies]
+jax = ">=0.6.2,<0.11"
+jaxlib = ">=0.6.2,<0.11"

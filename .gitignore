@@ -166,3 +166,7 @@ Thumbs.db
 # Claude Code local runtime state
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+benchmarking/results/
+benchmarking/plots/
+benchmarking/reports/

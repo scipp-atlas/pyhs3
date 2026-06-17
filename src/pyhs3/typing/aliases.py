@@ -4,17 +4,17 @@ typing
 
 from __future__ import annotations
 
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal
 
 from pytensor.graph.basic import Apply
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.variable import TensorVariable
 
-TensorVar: TypeAlias = TensorVariable[TensorType, Apply[Any]]
-EntityType: TypeAlias = Literal[
+type TensorVar = TensorVariable[TensorType, Apply[Any]]
+type EntityType = Literal[
     "distribution", "function", "parameter", "modifier", "constant"
 ]
-DomainBounds: TypeAlias = tuple[float | None, float | None]
+type DomainBounds = tuple[float | None, float | None]
 
 __all__ = (
     "DomainBounds",

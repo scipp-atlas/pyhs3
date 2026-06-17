@@ -9,7 +9,7 @@ including unbinned axes (with min/max bounds) and binned axes
 from __future__ import annotations
 
 from itertools import pairwise
-from typing import Annotated, Any, Literal, TypeAlias
+from typing import Annotated, Any, Literal
 
 import hist
 import numpy as np
@@ -317,7 +317,7 @@ class BinnedAxes(NamedCollection[BinnedAxis]):
         return total
 
 
-DomainAxis: TypeAlias = DomainCoordinateAxis | ConstantAxis
+type DomainAxis = DomainCoordinateAxis | ConstantAxis
 
 
 class UnbinnedAxes(NamedCollection[UnbinnedAxis]):

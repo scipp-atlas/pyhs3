@@ -6,6 +6,21 @@ The goal is to provide a simple, reproducible, and extensible framework for eval
 
 The benchmarking suite is intentionally developed incrementally, starting with small benchmark components and expanding toward larger performance studies and comparisons.
 
+# Benchmark Baseline
+
+Benchmark results should always be interpreted relative to a specific
+pyHS3 version.
+
+Current benchmark development is based on:
+
+```text
+pyHS3 main SHA: 326aadd
+```
+
+When collecting benchmark results, the short SHA of the `main` commit
+used as the baseline should be recorded together with the benchmark
+outputs and reports.
+
 # Directory Structure
 
 ```text

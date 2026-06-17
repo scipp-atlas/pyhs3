@@ -7,6 +7,7 @@ import time
 import psutil
 import matplotlib.pyplot as plt
 import math
+import subprocess
 
 from matplotlib.ticker import (
     AutoMinorLocator,
@@ -80,6 +81,20 @@ def summarize_timings(timings):
             else 0.0
         ),
     }
+
+def get_main_sha() -> str:
+    """
+    Return the short SHA of the pyHS3 main branch used as the benchmark baseline.
+    """
+
+    result = subprocess.run(
+        ["git", "rev-parse", "--short", "origin/main"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    return result.stdout.strip()
 
 
 def save_json(data, output_path: Path):

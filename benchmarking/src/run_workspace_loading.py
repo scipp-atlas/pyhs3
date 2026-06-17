@@ -21,6 +21,7 @@ from utils import (
     run_repeated_timing,
     save_json,
     summarize_timings,
+    get_main_sha,
 )
 
 
@@ -255,6 +256,7 @@ def main() -> None:
         "benchmark": BENCHMARK_NAME,
         "n_workspaces": len(results),
         "results": results,
+        "pyhs3_main_sha": get_main_sha(),
     }
 
     output_path = args.output_dir / args.output_name

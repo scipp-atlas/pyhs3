@@ -22,6 +22,8 @@ from pyhs3.transpile import JaxifiedGraph
 from pyhs3.workspace import Workspace
 from pytensor.tensor.variable import TensorVariable
 
+from config import WORKSPACE_LABELS
+
 def get_current_rss_mb() -> float:
     """
     Return current process RSS usage in MB.
@@ -172,7 +174,8 @@ def _result_label(result: dict[str, Any]) -> str:
 
     workspace = result.get("workspace")
     if workspace is not None:
-        parts.append(str(workspace).replace(".json", ""))
+        workspace_key = str(workspace).replace(".json", "")
+        parts.append(WORKSPACE_LABELS.get(workspace_key, workspace_key))
 
     target = result.get("target")
     if target is not None:
@@ -370,3 +373,20 @@ def create_model(
         progress=False,
         mode=mode,
     )
+
+def build_log_prob(
+    workspace_path: Path,
+    target: str,
+    mode: str,
+) -> tuple[Model, TensorVariable]:
+    """
+    Build a log_prob graph from the given workspace, target, and mode.
+    """
+
+    workspace = load_workspace(workspace_path)
+    model = create_model(
+        workspace=workspace,
+        target=target,
+        mode=mode,
+    )
+    return model, model.log_prob

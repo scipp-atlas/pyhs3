@@ -29,6 +29,7 @@ benchmarking/
 ├── results/    # JSON benchmark outputs
 ├── plots/      # generated benchmark plots
 ├── src/        # benchmark implementations and shared utilities
+├── reports/    # reports benchmark outputs
 └── README.md
 ```
 
@@ -102,6 +103,52 @@ This benchmark does **not** include:
 * likelihood graph construction;
 * likelihood compilation;
 * likelihood evaluation.
+
+These stages are benchmarked separately.
+
+## Benchmark 3 — log_prob Construction
+
+Measures the runtime and memory usage required to construct the symbolic likelihood expression (`model.log_prob`) for a given likelihood target in pyHS3.
+
+Evaluates:
+
+computational graph construction;
+runtime characteristics;
+memory usage characteristics;
+correctness of the constructed expression.
+
+Measures:
+
+```text
+Model
+   ↓
+model.log_prob
+   ↓
+Likelihood expression
+```
+
+This benchmark evaluates:
+
+* symbolic likelihood expression construction;
+* PyTensor graph construction;
+* runtime characteristics;
+* memory usage characteristics;
+* expression validation.
+
+Workspace loading and model creation are intentionally excluded from the timed section so that the benchmark isolates the cost of constructing the likelihood expression.
+
+Validation checks include:
+
+* successful construction of `model.log_prob`;
+* expression is not `None`;
+* expression type is `TensorVariable`;
+* expression can proceed to compilation.
+
+This benchmark does **not** include:
+
+* likelihood compilation;
+* likelihood evaluation;
+* batched evaluation.
 
 These stages are benchmarked separately.
 
@@ -226,6 +273,104 @@ pixi run python benchmarking/src/run_model_creation.py \
   --plot
 ```
 
+## log_prob Construction
+
+### Command Line Arguments
+
+| Argument | Description | Default |
+|-----------|-------------|----------|
+| `--workspaces` | One or more HS3 workspace JSON files to benchmark. | `simple_workspace_nonp.json` |
+| `--targets` | One or more likelihood targets for log-probability construction. | `L_ch0` |
+| `--modes` | PyTensor compilation modes passed to `workspace.model(...)`. | `FAST_RUN` |
+| `--n-runs` | Number of repeated benchmark runs per target. | `5` |
+| `--output-dir` | Directory where benchmark JSON results will be stored. | `benchmarking/results/log_prob_construction` |
+| `--output-name` | Name of the benchmark JSON output file. | `log_prob_construction_result.json` |
+| `--plot` | Generate comparison plots for wall time and memory usage. Requires at least two benchmark results. | Disabled |
+| `--plot-dir` | Directory where generated plots will be stored. | `benchmarking/plots/log_prob_construction` |
+
+```bash
+pixi run python benchmarking/src/run_log_prob_construction.py
+```
+
+```bash
+pixi run python benchmarking/src/run_log_prob_construction.py \
+  --n-runs 20
+```
+
+```bash
+pixi run python benchmarking/src/run_log_prob_construction.py \
+  --workspaces \
+  benchmarking/inputs/simple_workspace_nonp.json \
+  benchmarking/inputs/simple_workspace.json
+```
+
+```bash
+pixi run python benchmarking/src/run_log_prob_construction.py \
+  --targets L_ch0 L_ch1 L_ch2
+```
+
+```bash
+pixi run python benchmarking/src/run_log_prob_construction.py \
+  --workspaces \
+  benchmarking/inputs/simple_workspace_nonp.json \
+  benchmarking/inputs/simple_workspace.json \
+  --targets L_ch0 L_ch1 L_ch2 \
+  --plot
+```
+
+## Benchmark Overview Plots
+
+The `plot_benchmark_overview.py` script creates combined overview plots from existing benchmark JSON outputs. Unlike individual benchmark plots, this script compares multiple pyHS3 workflow stages in a single stacked plot.
+
+It is useful for understanding how much each stage contributes to the total runtime and memory usage.
+
+Currently, the overview plot can combine:
+
+* workspace loading;
+* model creation;
+* log_prob construction.
+
+Measures:
+
+```text
+HS3 workspace JSON
+        ↓
+Workspace loading
+        ↓
+Model creation
+        ↓
+log_prob construction
+```
+
+### Command Line Arguments
+
+| Argument | Description | Default |
+|-----------|-------------|----------|
+| `--workspace-loading-result` | Path to the workspace loading benchmark JSON result. | Required |
+| `--model-creation-result` | Path to the model creation benchmark JSON result. | Required |
+| `--log-prob-construction-result` | Path to the log_prob construction benchmark JSON result. | Required |
+| `--output-dir` | Directory where overview plots will be stored. | `benchmarking/plots/overview` |
+| `--memory-metric` | Memory metric used for the overview memory plot. | `peak_rss_delta_mb` |
+
+### Running
+
+```bash
+pixi run python benchmarking/src/plot_benchmark_overview.py \
+  --workspace-loading-result benchmarking/results/workspace_loading/workspace_loading_result.json \
+  --model-creation-result benchmarking/results/model_creation/model_creation_result.json \
+  --log-prob-construction-result benchmarking/results/log_prob_construction/log_prob_construction_result.json
+```
+
+This creates overview plots under:
+
+```text
+benchmarking/plots/overview/
+├── benchmark_wall_time_overview.png
+└── benchmark_rss_delta_overview.png
+```
+
+The wall-time overview plot uses stacked bars to show the cumulative cost of the measured workflow stages for each workspace. The memory overview plot uses the selected RSS delta metric and is intended to provide a high-level comparison of memory usage across stages.
+
 # Outputs
 
 Benchmark results are saved under:
@@ -242,6 +387,9 @@ benchmarking/results/workspace_loading/
 
 benchmarking/results/model_creation/
 └── model_creation_result.json
+
+benchmarking/results/log_prob_construction/
+└── log_prob_construction_result.json
 ```
 
 Generated plots are saved under:
@@ -258,6 +406,9 @@ benchmarking/plots/workspace_loading/
 
 benchmarking/plots/model_creation/
 └── model_creation_wall_time.png
+
+benchmarking/plots/log_prob_construction/
+└── log_prob_construction_wall_time.png
 ```
 
 Memory plots are generated only when the measured memory metric contains non-zero values. This avoids producing empty plots for benchmarks where memory changes are below the measurement resolution.

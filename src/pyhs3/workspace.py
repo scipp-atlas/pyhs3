@@ -490,9 +490,10 @@ class Workspace(BaseModel):
         Args:
             domain: Explicit override (a ``Domain`` instance, int, or str key) or
                 ``None`` to use *default_index*.
-            default_index: Index/key to use when *domain* is ``None``.  If both are
-                ``None`` and no domain collection exists, returns a default
-                ``ProductDomain``.
+            default_index: Index/key to use when *domain* is ``None``. If both are
+                ``None``, ``default_domain`` is preferred when present before
+                falling back to the first domain. If no domain collection exists,
+                returns a default ``ProductDomain``.
         """
         if isinstance(domain, Domain):
             return domain
@@ -504,6 +505,9 @@ class Workspace(BaseModel):
         if default_index is not None and self.domains:
             return self.domains[default_index]
         if self.domains:
+            default_domain = self.domains.get("default_domain")
+            if default_domain is not None:
+                return default_domain
             return self.domains[0]
         return ProductDomain(name="default")
 
@@ -527,8 +531,9 @@ class Workspace(BaseModel):
           :attr:`~pyhs3.model.Model.log_prob`, :attr:`~pyhs3.model.Model.data`,
           and :attr:`~pyhs3.model.Model.free_params`.
         - :class:`~pyhs3.likelihoods.Likelihood` — observable bounds are derived
-          from the likelihood's data; ``domain`` and ``parameter_set`` fall back
-          to workspace defaults (index 0) unless overridden.
+          from the likelihood's data; ``domain`` falls back to ``default_domain``
+          then index 0, and ``parameter_set`` falls back to workspace defaults
+          unless overridden.
         - ``str`` — searches analyses then likelihoods by name; delegates to the
           appropriate registered path.  Falls back to legacy domain indexing if
           the name is not found in either.

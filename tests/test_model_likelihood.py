@@ -118,6 +118,37 @@ def test_model_from_likelihood_returns_model():
     assert isinstance(model, Model)
 
 
+def test_model_from_likelihood_prefers_named_default_domain():
+    """ws.model(likelihood) uses default_domain before falling back to domains[0]."""
+    ws = Workspace(
+        **{
+            **_WS_DICT,
+            "domains": [
+                {
+                    "name": "a_nondefault_domain",
+                    "type": "product_domain",
+                    "axes": [{"name": "mean", "min": -1.0, "max": 1.0}],
+                },
+                {
+                    "name": "default_domain",
+                    "type": "product_domain",
+                    "axes": [{"name": "mean", "min": -10.0, "max": 10.0}],
+                },
+                {
+                    "name": "non_default_domain",
+                    "type": "product_domain",
+                    "axes": [{"name": "mean", "min": -5.0, "max": 5.0}],
+                },
+            ],
+            "analyses": [],
+        }
+    )
+
+    model = ws.model(ws.likelihoods["L"], progress=False)
+
+    assert model.domain.name == "default_domain"
+
+
 def test_model_legacy_int_still_works():
     ws = _ws()
     model = ws.model(0)

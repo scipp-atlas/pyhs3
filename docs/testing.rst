@@ -440,7 +440,7 @@ Our CI pipeline runs:
 
 1. **Linting** via pre-commit hooks
 2. **Type checking** with mypy
-3. **Unit tests** across multiple Python versions (3.10, 3.11, 3.12, 3.13)
+3. **Unit tests** across multiple Python versions
 4. **Coverage reporting** to CodeCov
 5. **Documentation build** to ensure docs compile
 

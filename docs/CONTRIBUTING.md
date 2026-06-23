@@ -13,7 +13,7 @@ for a detailed description of best practices for developing scientific packages.
 
 Before contributing, ensure you have:
 
-- Python 3.10 or higher
+- Python 3.12 or higher
 - Git
 - A GitHub account
 

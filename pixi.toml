@@ -30,16 +30,6 @@ sympy = "*"
 pydantic = ">=2.12"
 hist = "*"
 
-# pytensor >=2.33 does not exist for win-64 for py310
-[feature.py310]
-platforms = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64"]
-
-[feature.py310.dependencies]
-python = "<3.11,>=3.10"
-
-[feature.py311.dependencies]
-python = "<3.12,>=3.11"
-
 [feature.py312.dependencies]
 python = "<3.13,>=3.12"
 
@@ -167,21 +157,15 @@ pytensor = "==3.0.0"
 docs = ["docs", "jax"]
 dev = ["dev", "jax"]
 codeflash = ["test", "codeflash"]
-py311 = ["test", "py311", "pytensor3"]
 py312 = ["test", "py312", "pytensor3"]
-# py313 = ["test", "py313", "pytensor3"]  # pytensor3 not available for py313 on osx-64
+py313 = ["test", "py313", "pytensor3"]  # pytensor3 not available for py313 on osx-64
 py314 = ["test", "py314", "pytensor3"]
-py311-jax = ["test", "py311", "pytensor3", "jax"]
 py312-jax = ["test", "py312", "pytensor3", "jax"]
-# py313-jax = ["test", "py313", "pytensor3", "jax"]  # pytensor3 not available for py313 on osx-64
+py313-jax = ["test", "py313", "pytensor3", "jax"]  # pytensor3 not available for py313 on osx-64
 py314-jax = ["test", "py314", "pytensor3", "jax"]
-py310-pytensor2 = ["test", "py310", "pytensor2"]
-py311-pytensor2 = ["test", "py311", "pytensor2"]
 py312-pytensor2 = ["test", "py312", "pytensor2"]
 py313-pytensor2 = ["test", "py313", "pytensor2"]
 py314-pytensor2 = ["test", "py314", "pytensor2"]
-py310-pytensor2-jax = ["test", "py310", "pytensor2", "jax"]
-py311-pytensor2-jax = ["test", "py310", "pytensor2", "jax"]
 py312-pytensor2-jax = ["test", "py312", "pytensor2", "jax"]
 py313-pytensor2-jax = ["test", "py313", "pytensor2", "jax"]
 py314-pytensor2-jax = ["test", "py314", "pytensor2", "jax"]

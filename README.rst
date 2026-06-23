@@ -18,8 +18,8 @@ pure-python implementation of HS3
    :target: https://github.com/scipp-atlas/pyhs3
 .. |GitHub Discussion| image:: https://img.shields.io/static/v1?label=Discussions&message=Ask&color=blue&logo=github
    :target: https://github.com/scipp-atlas/pyhs3/discussions
-.. |Docs from latest| image:: https://img.shields.io/badge/docs-v0.4.1-blue.svg
-   :target: https://pyhs3.readthedocs.io/en/v0.4.1/
+.. |Docs from latest| image:: https://img.shields.io/badge/docs-v0.4.2-blue.svg
+   :target: https://pyhs3.readthedocs.io/en/v0.4.2/
 .. |Docs from main| image:: https://img.shields.io/badge/docs-main-blue.svg
    :target: https://scipp-atlas.github.io/pyhs3
 .. |PyPI version| image:: https://badge.fury.io/py/pyhs3.svg

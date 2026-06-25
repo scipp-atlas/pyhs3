@@ -113,16 +113,28 @@ _SCALAR_CACHE = Path("ws_scalar.pkl")
 _BATCHED_CACHE = Path("ws_batched.pkl")
 
 
-def load_workspace():
-    """Load workspace and collect parameter points.
+def _collect_params(ws: pyhs3.Workspace) -> dict[str, float]:
+    """Collect parameter values; best-fit sets override nominal (last write wins)."""
+    params: dict[str, float] = {}
+    for pset_name in [
+        "default_values",
+        "nominalGlobs",
+        "nominalNuis",
+        "unconditionalGlobs_muhat",
+        "unconditionalNuis_muhat",
+        "POI_muhat",
+    ]:
+        for p in ws.parameter_points[pset_name]:
+            params[p.name] = float(p.value)
+    return params
 
-    Returns (workspace, analysis, param_set).
-    """
+
+def load_workspace():
+    """Load the ATLAS diHiggs bbyy workspace and collect parameter set."""
     ws_path = skhep_testdata_path("test_hs3_unbinned_pyhs3_validation_issue41.json")
     print(f"Loading workspace from {Path(ws_path).name} ...")
     ws = pyhs3.Workspace.load(ws_path)
     analysis = ws.analyses["CombinedPdf_combData"]
-
     pset_names = [
         "default_values",
         "nominalGlobs",

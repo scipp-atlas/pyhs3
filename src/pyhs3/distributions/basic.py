@@ -16,7 +16,7 @@ import pytensor.tensor as pt
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
 from pyhs3.typing.aliases import TensorVar
-
+import pytensor_distributions.exponential import Exponential
 
 class GaussianDist(Distribution):
     r"""
@@ -194,12 +194,8 @@ class ExponentialDist(Distribution):
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of exponential PDF.
         """
-        x = context[self._parameters["x"]]
-        c = context[self._parameters["c"]]
-
         # Exponential PDF: exp(-c * x)
-        return cast(TensorVar, (c) * pt.exp(-c * x))
-
+        return Exponential.pdf(context[self._parameters["x"]],context[self._parameters["c"]])
 
 class LogNormalDist(Distribution):
     r"""

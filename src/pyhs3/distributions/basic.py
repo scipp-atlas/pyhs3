@@ -16,7 +16,7 @@ import pytensor.tensor as pt
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
 from pyhs3.typing.aliases import TensorVar
-
+import pytensor_distributions.poisson import Poisson
 
 class GaussianDist(Distribution):
     r"""
@@ -145,13 +145,9 @@ class PoissonDist(Distribution):
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of the Poisson PMF.
         """
-        mean = context[self._parameters["mean"]]
-        x = context[self._parameters["x"]]
-
         # Poisson PMF: λ^k * e^(-λ) / k!
         # Using pt.gammaln for log(k!) = log(Γ(k+1))
-        log_pmf = x * pt.log(mean) - mean - pt.gammaln(x + 1)
-        return cast(TensorVar, pt.exp(log_pmf))
+        return Poisson.pdf(context[self._parameters["x"]],context[self._parameters["mean"]])
 
 
 class ExponentialDist(Distribution):

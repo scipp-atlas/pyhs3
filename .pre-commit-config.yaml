@@ -65,6 +65,7 @@ repos:
           - sympy
           - pydantic
           - hist
+          - pytensor_distributions
 
   - repo: https://github.com/codespell-project/codespell
     rev: "v2.4.2"

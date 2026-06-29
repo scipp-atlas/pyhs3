@@ -12,11 +12,12 @@ import math
 from typing import Literal, cast
 
 import pytensor.tensor as pt
+import pytensor_distributions.normal as Normal
 
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
 from pyhs3.typing.aliases import TensorVar
-import pytensor_distributions.normal as Normal
+
 
 class GaussianDist(Distribution):
     r"""
@@ -53,7 +54,11 @@ class GaussianDist(Distribution):
             pytensor.tensor.variable.TensorVariable: Symbolic representation of the Gaussian PDF.
         """
         # log.info("parameters: ", parameters)
-        return Normal.pdf(context[self._parameters["x"]],context[self._parameters["mean"]],context[self._parameters["sigma"]])
+        return Normal.pdf(
+            context[self._parameters["x"]],
+            context[self._parameters["mean"]],
+            context[self._parameters["sigma"]],
+        )
 
     def log_likelihood(self, context: Context) -> TensorVar:
         r"""

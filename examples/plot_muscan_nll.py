@@ -5,7 +5,7 @@ Each workspace gets its own axis showing two ΔNLL curves -- one from pyhs3 and
 one from quickFit -- with both curves shifted so their minimum is zero, so the
 shape (delta NLL) can be compared directly regardless of any constant offset.
 
-Consumed by ``eval_simple_muscan.py --plot``; the ``plot_nll_curves`` function
+Consumed by ``eval_simple_muscan.py --plot-nlls``; the ``plot_nll_curves`` function
 takes the result dicts returned by ``run_scan`` (each containing ``mus``,
 ``qf_nlls``, ``pyhs3_nlls`` and ``workspace``).
 """
@@ -37,7 +37,7 @@ def plot_nll_curves(results: list[dict], output_pdf: Path) -> Path:
     Each result needs ``mus``, ``qf_nlls``, ``pyhs3_nlls`` and ``workspace``.
     """
     n = len(results)
-    ncols = 1 if n == 1 else 2
+    ncols = 1 if n == 1 else 2 
     nrows = math.ceil(n / ncols)
 
     fig, axes = plt.subplots(

@@ -1,57 +1,4 @@
-# # ruff: noqa: T201
-# """Plot a graph showing the progression of offset and residual 
-# between qf and pyhs3 nll values.  
 
-# consumed by eval_simple_muscan --plot-resid
-# """
-# from __future__ import annotations
-
-# import math
-# from pathlib import Path
-
-# import matplotlib as mpl
-
-# mpl.use("Agg")
-
-# import numpy as np
-# from matplotlib import pyplot as plt
-
-# def plot_residual_and_offset(results: list[dict], output_pdf: Path) -> Path:
-#     fig, (ax1, ax2) = plt.subplots(2, 1)
-
-#     diffs_and_resids = []
-#     [
-#         diffs_and_resids.append(
-#             (
-#             result['mean_offset'], 
-#             result['max_abs_resid'], 
-#             result['workspace']
-#             )
-#         ) for result in results
-#     ]
-
-#     sorted_results = sorted(diffs_and_resids, key=lambda x: x[1])
-
-#     diffs, resids, names = zip(*sorted_results)
-
-#     names = [] 
-
-#     x = range(len(sorted_results))
-#     ax1.plot(x, diffs, label="diffs")
-#     ax1.set_title("mean offset by workspace")
-#     ax1.grid(True, alpha=0.25)
-#     ax1.set_xticks(x)
-#     ax1.set_xticklabels(names)
-
-#     ax2.plot(x, resids, label="resids")
-#     ax2.set_title("max residual by workspace")
-#     ax2.grid(True, alpha=0.25)
-#     ax2.set_xticks(x)
-#     ax2.set_xticklabels(names)
-
-#     plt.savefig(output_pdf)
-
-# ruff: noqa: T201
 """Plot a graph showing the progression of offset and residual
 between qf and pyhs3 nll values.
 consumed by eval_simple_muscan --plot-resid
@@ -102,11 +49,44 @@ def _label_sort_key(label: str):
     m = re.match(r"\D*(\d+)", label)
     return (0, int(m.group(1))) if m else (1, label)
 
+def numeric_of(token: str) -> int | None:
+    """Pull the first integer out of a field value, or None if there isn't one.
+ 
+    1ch -> 1, 30ch -> 30, yield1x -> 1, bkgRooExp -> None
+    """
+    m = re.search(r"\d+", token)
+    return int(m.group()) if m else None
+ 
+ 
+def _numeric_for(workspace: str, label_field: str | list[str]) -> int | None:
+    """Numeric x value for a workspace, only defined for a single numeric field."""
+    if isinstance(label_field, list):
+        if len(label_field) != 1:
+            return None  # multiple fields -> no single numeric axis
+        label_field = label_field[0]
+    token = parse_workspace(workspace).get(label_field, "")
+    return numeric_of(value_of(token))
+
+def describe_fixed(workspaces, label_field) -> list[str]:
+    """Summarise the fields held constant across the workspaces,
+    i.e. everything except the varied (label) field(s)."""
+    varied = {label_field} if isinstance(label_field, str) else set(label_field)
+    parsed = [parse_workspace(w) for w in workspaces]
+    parts = []
+    for key in FIELDS:
+        if key in varied:
+            continue
+        vals = {value_of(p[key]) for p in parsed if key in p}
+        parts.append(f"{key}={vals.pop()}" if len(vals) == 1 else f"{key}=mixed")
+    return parts
 
 def plot_residual_and_offset(
     results: list[dict],
     output_pdf: Path,
     label_field: str | list[str] = "channels",
+    numeric_x: bool | str = "auto",
+    log_x: bool = False,
+    log_y: bool = True
 ) -> Path:
     """Plot mean offset and max residual per workspace.
 
@@ -119,42 +99,70 @@ def plot_residual_and_offset(
     """
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
 
-    diffs_and_resids = [
+    rows = [
         (
             result["mean_offset"],
             result["max_abs_resid"],
             result["workspace"],
             label_for(result["workspace"], label_field),
+            _numeric_for(result["workspace"], label_field)
         )
         for result in results
     ]
 
-    sorted_results = sorted(diffs_and_resids, key=lambda x: x[1])   
-
-    diffs, resids, workspaces, names = zip(*sorted_results)
+    # Decide whether the x-axis is a true numeric scale or evenly-spaced bins.
+    have_all_numeric = all(r[4] is not None for r in rows)
+    use_numeric = have_all_numeric if numeric_x == "auto" else bool(numeric_x)
+    if use_numeric and not have_all_numeric:
+        use_numeric = False  # asked for it, but some field value has no number
+ 
+    if use_numeric:
+        rows.sort(key=lambda r: r[4])  # ascending by the numeric value
+    elif sort_by == "label":
+        rows.sort(key=lambda r: _label_sort_key(r[3]))
+    else:  # default: preserve the original sort by max residual
+        rows.sort(key=lambda r: r[1])
+ 
+    diffs, resids, workspaces, names, values = zip(*rows)
     diffs = [abs(diff) for diff in diffs]
-    x = range(len(sorted_results))
-
-    ax1.scatter(x, diffs, label="diffs")
-    ax1.set_title("mean offset by workspace")
-    ax1.grid(True, alpha=0.25)
-
-    ax2.scatter(x, resids, label="resids")
-    ax2.set_yscale('log')
-    ax2.set_title("max residual by workspace")
-    ax2.grid(True, alpha=0.25)
-
-    # Shared x-axis: setting ticks on the bottom axes is enough.
-    ax2.set_xticks(list(x))
-    ax2.set_xticklabels(names, rotation=45, ha="right")
+ 
     axis_label = (
         label_field if isinstance(label_field, str) else ", ".join(label_field)
     )
+ 
+    if use_numeric:
+        x = list(values)
+        ax1.scatter(x, diffs)
+        ax2.scatter(x, resids)
+        # Mark each actual data point, labelled with its short value (e.g. 1ch).
+        ax2.set_xticks(x)
+        ax2.set_xticklabels(names, rotation=45, ha="right")
+    else:
+        x = range(len(rows))
+        ax1.plot(x, diffs, label="diffs")
+        ax2.plot(x, resids, label="resids")
+        ax2.set_xticks(list(x))
+        ax2.set_xticklabels(names, rotation=45, ha="right")
+ 
+    ax1.set_title("mean offset by workspace")
+    ax1.grid(True, alpha=0.25)
+    ax1.set_yscale("log") if log_y else None
+ 
+    ax2.set_title("max residual by workspace")
+    ax2.grid(True, alpha=0.25)
     ax2.set_xlabel(axis_label)
+    ax2.set_yscale("log") if log_y else None
+    ax2.set_xscale("log") if log_x else None
+ 
+    varied_label = (
+        label_field if isinstance(label_field, str) else ", ".join(label_field)
+    )
+    fixed = ", ".join(describe_fixed(workspaces, label_field))
+    fig.suptitle(f"{fixed}\nvarying: {varied_label}")
 
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0, 1, 0.94))  # leave headroom for suptitle
     plt.savefig(output_pdf)
-    return output_pdf
+    return output_pdf 
 
 
 

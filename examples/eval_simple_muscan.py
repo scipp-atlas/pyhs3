@@ -251,7 +251,17 @@ def main() -> None:
         default=["channels"],
         choices=FIELDS,
         metavar="FIELD",
-        help= "specify the field for x labels on data"
+        help= "specify the field for x labels on data",
+    )
+    parser.add_argument(
+        "--plot-resid-log-x",
+        action="store_true",
+        help="enables log scale for the x-axis in a residual plot",
+    )
+    parser.add_argument(
+        "--plot-resid-log-y",
+        action="store_true",
+        help="enables log scale for the y-axis in a residual plot",
     )
     args = parser.parse_args()
 
@@ -294,7 +304,7 @@ def main() -> None:
         from plot_residuals import plot_residual_and_offset 
 
         out = _default_resid_plot_path(results) if args.plot_resid is _PLOT_DEFAULT else args.plot_resid
-        plot_residual_and_offset(results, out, label_field=args.plot_resid_field)
+        plot_residual_and_offset(results, out, label_field=args.plot_resid_field, log_x=args.plot_resid_log_x, log_y=args.plot_resid_log_y)
 
     # Rank by how flat the diff is: smaller max |residual| == closer to constant.
     results.sort(key=lambda r: r["max_abs_resid"])

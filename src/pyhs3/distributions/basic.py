@@ -12,6 +12,7 @@ import math
 from typing import Literal, cast
 
 import pytensor.tensor as pt
+import pytensor_distributions.normal as Normal
 
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
@@ -53,16 +54,11 @@ class GaussianDist(Distribution):
             pytensor.tensor.variable.TensorVariable: Symbolic representation of the Gaussian PDF.
         """
         # log.info("parameters: ", parameters)
-        norm_const = 1.0 / (pt.sqrt(2 * math.pi) * context[self._parameters["sigma"]])
-        exponent = pt.exp(
-            -0.5
-            * (
-                (context[self._parameters["x"]] - context[self._parameters["mean"]])
-                / context[self._parameters["sigma"]]
-            )
-            ** 2
+        return Normal.pdf(
+            context[self._parameters["x"]],
+            context[self._parameters["mean"]],
+            context[self._parameters["sigma"]],
         )
-        return cast(TensorVar, norm_const * exponent)
 
 
 class UniformDist(Distribution):

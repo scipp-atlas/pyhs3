@@ -38,6 +38,7 @@ dependencies = [
     'sympy',
     'pydantic>=2.12',
     'hist >= 2.7.0',
+    'pytensor-distributions',
 ]
 
 [project.optional-dependencies]

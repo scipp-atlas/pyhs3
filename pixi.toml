@@ -29,6 +29,7 @@ numpy = "*"
 sympy = "*"
 pydantic = ">=2.12"
 hist = "*"
+pytensor-distributions = "*"
 
 [feature.py312.dependencies]
 python = "<3.13,>=3.12"

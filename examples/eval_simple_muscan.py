@@ -140,6 +140,11 @@ def run_scan(ws_path: Path, scan_path: Path, *, verbose: bool = True) -> dict:
     for model, _ in channel_models:
         nominal.update(model.free_params)
 
+    num_channels = len(channel_models)
+    num_events = sum(
+        int(np.asarray(arr).size) for model, _ in channel_models for arr in model.data.values()
+    )
+
     if verbose:
         print(f"\nLoading scan points from {scan_path} ...")
     with scan_path.open() as fh:
@@ -173,7 +178,7 @@ def run_scan(ws_path: Path, scan_path: Path, *, verbose: bool = True) -> dict:
             params[name] = val
 
         pyhs3_nll = eval_nll(channel_models, params)
-        diff = pyhs3_nll - qf_nll
+        diff = pyhs3_nll - qf_nll + num_events * np.log(num_channels)
         mus.append(mu)
         qf_nlls.append(qf_nll)
         pyhs3_nlls.append(pyhs3_nll)
@@ -185,7 +190,7 @@ def run_scan(ws_path: Path, scan_path: Path, *, verbose: bool = True) -> dict:
     diff_arr = np.asarray(diffs, dtype=np.float64)
     mean_offset = float(diff_arr.mean())
     resid = diff_arr - mean_offset
-    max_abs_resid = float(np.abs(resid).max())
+    max_abs_resid = float(resid[np.abs(resid).argmax()]) 
 
     if verbose:
         pyhs3_nll_min = min(pyhs3_nlls)
@@ -307,7 +312,7 @@ def main() -> None:
         plot_residual_and_offset(results, out, label_field=args.plot_resid_field, log_x=args.plot_resid_log_x, log_y=args.plot_resid_log_y)
 
     # Rank by how flat the diff is: smaller max |residual| == closer to constant.
-    results.sort(key=lambda r: r["max_abs_resid"])
+    results.sort(key=lambda r: abs(r["max_abs_resid"]))
 
     name_width = max(len("workspace"), *(len(r["workspace"].name) for r in results))
     off_width, res_width = 14, 11
@@ -320,7 +325,7 @@ def main() -> None:
     print("-" * len(header))
     for r in results:
         name = r["workspace"].name
-        print(f"{name:<{name_width}}  {r['mean_offset']:>{off_width}.3f}  {r['max_abs_resid']:>{res_width}.3e}")
+        print(f"{name:<{name_width}}  {r['mean_offset']:>{off_width}.3e}  {r['max_abs_resid']:>{res_width}.3e}")
 
 
 if __name__ == "__main__":

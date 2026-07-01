@@ -124,7 +124,7 @@ def plot_residual_and_offset(
         rows.sort(key=lambda r: r[1])
  
     diffs, resids, workspaces, names, values = zip(*rows)
-    diffs = [abs(diff) for diff in diffs]
+    # diffs = [abs(diff) for diff in diffs]
  
     axis_label = (
         label_field if isinstance(label_field, str) else ", ".join(label_field)

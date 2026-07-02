@@ -131,6 +131,16 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     )
     _normalizable: bool = PrivateAttr(default=False)
 
+    # Per-bin Poisson log-probabilities built by likelihood() (via
+    # _build_main_model), reused by log_likelihood() so that a model build
+    # calling both methods for the same context does not rebuild the
+    # interpolation-spline/per-bin-modifier subgraph (_compute_expected_rates)
+    # and the Poisson log-pmf subgraph (_bin_log_probs) a second time.  This is
+    # a per-instance cache scoped to a single context, matching the caching
+    # pattern used by MixtureDist; it is not safe across differing contexts.
+    _cached_expected_rates: TensorVar | None = PrivateAttr(default=None)
+    _cached_bin_log_probs: TensorVar | None = PrivateAttr(default=None)
+
     @model_validator(mode="after")
     def _validate_staterror(self) -> HistFactoryDistChannel:
         total_bins = self.axes.get_total_bins()
@@ -206,8 +216,11 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         # Extract binning information
         total_bins = self._get_total_bins()
 
-        # Process all samples and compute expected rates
+        # Process all samples and compute expected rates.  Cached so
+        # log_likelihood() can reuse this subgraph for the same context
+        # instead of rebuilding it.
         expected_rates = self._compute_expected_rates(context, total_bins)
+        self._cached_expected_rates = expected_rates
 
         # Build main Poisson model for observed data
         return self._build_main_model(context, expected_rates)
@@ -490,7 +503,10 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         Returns:
             PyTensor expression for the Poisson probability (not log probability)
         """
+        # Cached so log_likelihood() can reuse this subgraph for the same
+        # context instead of rebuilding the Poisson log-pmf expression.
         log_probs = self._bin_log_probs(context, expected_rates)
+        self._cached_bin_log_probs = log_probs
         # Convert from log probabilities to probabilities
         probs = pt.exp(log_probs)
         main_prob = pt.prod(probs)  # type: ignore[no-untyped-call]
@@ -512,9 +528,20 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         Returns:
             PyTensor expression for the summed Poisson log-probability.
         """
-        total_bins = self._get_total_bins()
-        expected_rates = self._compute_expected_rates(context, total_bins)
-        return cast(TensorVar, pt.sum(self._bin_log_probs(context, expected_rates)))  # type: ignore[no-untyped-call]
+        # Reuse the per-bin log-probabilities cached by likelihood() (via
+        # _build_main_model) for the same context, if available, to avoid
+        # rebuilding the expected-rates and Poisson log-pmf subgraphs.
+        if self._cached_bin_log_probs is not None:
+            log_probs = self._cached_bin_log_probs
+        else:
+            total_bins = self._get_total_bins()
+            expected_rates = (
+                self._cached_expected_rates
+                if self._cached_expected_rates is not None
+                else self._compute_expected_rates(context, total_bins)
+            )
+            log_probs = self._bin_log_probs(context, expected_rates)
+        return cast(TensorVar, pt.sum(log_probs))  # type: ignore[no-untyped-call]
 
     def log_extended_likelihood(self, context: Context) -> TensorVar:
         """Log-space constraint sum for this channel.

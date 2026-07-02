@@ -26,6 +26,7 @@ from pyhs3.distributions.histfactory.modifiers import (
     HasConstraint,
     ParameterModifier,
     ParametersModifier,
+    SingleParamConstraint,
 )
 from pyhs3.domains import Domains, ProductDomain
 from pyhs3.exceptions import WorkspaceValidationError
@@ -449,6 +450,137 @@ class TestHFDCLogProb:
         gauss_lp = -0.5 * math.log(2 * math.pi)
         expected = poisson_lp + gauss_lp
         assert abs(val - expected) < 1e-6, f"got {val}, expected {expected}"
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: HFDC subgraphs are each built exactly once
+# ---------------------------------------------------------------------------
+
+
+class TestHFDCSubgraphBuildCounts:
+    """Model construction must build each HFDC subgraph exactly once.
+
+    ``_build_distribution_node`` previously called ``dist.likelihood(context)``,
+    ``dist.log_likelihood(context)``, and ``dist.log_expression(context)`` for
+    the same context; the last call internally re-ran ``log_likelihood`` (which
+    recomputes expected_rates) and ``log_extended_likelihood`` (which reruns
+    ``make_constraint`` for every constraint spec), duplicating work already
+    done for the probability-space expression and the constraint loop below it.
+    """
+
+    def test_compute_expected_rates_called_once_per_channel(self, monkeypatch):
+        """``_compute_expected_rates`` must build the expected-rates subgraph
+        exactly once per channel during model construction."""
+        calls: list[str] = []
+        original = HistFactoryDistChannel._compute_expected_rates
+
+        def counted(
+            self: HistFactoryDistChannel, context: Context, total_bins: int
+        ) -> object:
+            calls.append(self.name)
+            return original(self, context, total_bins)
+
+        monkeypatch.setattr(HistFactoryDistChannel, "_compute_expected_rates", counted)
+
+        ws = _simple_workspace(
+            channels=[
+                _make_channel(
+                    "SR",
+                    [10.0],
+                    [
+                        {
+                            "name": "lumi",
+                            "type": "normsys",
+                            "parameter": "lumi",
+                            "constraint": "Gauss",
+                            "data": {"hi": 1.05, "lo": 0.95},
+                        }
+                    ],
+                )
+            ],
+            params=[{"name": "lumi", "value": 0.0}],
+        )
+        likelihood = next(iter(ws.likelihoods))
+        ws.model(likelihood, progress=False)
+
+        assert calls == ["SR"], (
+            f"expected exactly one _compute_expected_rates call per channel, got {calls}"
+        )
+
+    def test_make_constraint_called_once_per_spec(self, monkeypatch):
+        """``make_constraint`` must build each constraint factor exactly once
+        during model construction, regardless of how many places (probability-space
+        expression, log-space expression, joint log_prob) reuse the result."""
+        calls: list[str] = []
+        original = SingleParamConstraint.make_constraint
+
+        def counted(
+            self: SingleParamConstraint, context: Context, sample_data: object
+        ) -> object:
+            calls.append(self.name)
+            return original(self, context, sample_data)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(SingleParamConstraint, "make_constraint", counted)
+
+        ws = _simple_workspace(
+            channels=[
+                _make_channel(
+                    "SR",
+                    [10.0],
+                    [
+                        {
+                            "name": "lumi",
+                            "type": "normsys",
+                            "parameter": "lumi",
+                            "constraint": "Gauss",
+                            "data": {"hi": 1.05, "lo": 0.95},
+                        }
+                    ],
+                )
+            ],
+            params=[{"name": "lumi", "value": 0.0}],
+        )
+        likelihood = next(iter(ws.likelihoods))
+        ws.model(likelihood, progress=False)
+
+        assert calls == ["lumi"], (
+            f"expected exactly one make_constraint call per constraint spec, got {calls}"
+        )
+
+    def test_logpdf_matches_log_pdf_for_hfdc_with_constraint(self):
+        """logpdf(channel) must equal log(pdf(channel)) for an HFDC channel with
+        a constraint modifier, confirming log_distributions is assembled from
+        the same pieces as the probability-space expression."""
+        ws = _simple_workspace(
+            channels=[
+                _make_channel(
+                    "SR",
+                    [10.0],
+                    [
+                        {
+                            "name": "lumi",
+                            "type": "normsys",
+                            "parameter": "lumi",
+                            "constraint": "Gauss",
+                            "data": {"hi": 1.05, "lo": 0.95},
+                        }
+                    ],
+                )
+            ],
+            params=[{"name": "lumi", "value": 0.0}],
+        )
+        likelihood = next(iter(ws.likelihoods))
+        model = ws.model(likelihood, progress=False)
+
+        pdf_val = float(
+            np.asarray(model.pdf_unsafe("SR", lumi=0.1, SR_observed=np.array([10.0])))
+        )
+        logpdf_val = float(
+            np.asarray(
+                model.logpdf_unsafe("SR", lumi=0.1, SR_observed=np.array([10.0]))
+            )
+        )
+        assert logpdf_val == pytest.approx(math.log(pdf_val), rel=1e-10)
 
 
 # ---------------------------------------------------------------------------

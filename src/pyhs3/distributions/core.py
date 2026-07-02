@@ -284,7 +284,8 @@ class Distribution(Evaluable, ABC):
 
     def log_prob_terms(
         self,
-        expressions: Mapping[str, TensorVar],
+        _expressions: Mapping[str, TensorVar],
+        log_expressions: Mapping[str, TensorVar],
         _distributions: Distributions,
     ) -> LogProbTerms:
         """
@@ -297,15 +298,20 @@ class Distribution(Evaluable, ABC):
         or globally-deduplicated constraint factors
         (:class:`~pyhs3.distributions.ProductDist`).
 
-        Default: a single per-event ``log(PDF)`` term.
+        Default: a single per-event ``log(PDF)`` term sourced from the
+        pre-built log-space expression so it stays finite where the
+        probability-space PDF underflows.
 
         Args:
-            expressions: Compiled symbolic expressions for all distributions,
-                keyed by name (``model.distributions``).
-            distributions: Distribution objects keyed by name, so composite
+            _expressions: Compiled symbolic expressions for all distributions,
+                keyed by name (``model.distributions``).  Unused in the base
+                implementation; subclasses may reference it.
+            log_expressions: Compiled log-space symbolic expressions for all
+                distributions, keyed by name (``model.log_distributions``).
+            _distributions: Distribution objects keyed by name, so composite
                 distributions can delegate to their components' hooks.
 
         Returns:
             LogProbTerms: per-event, per-channel, and constraint contributions.
         """
-        return LogProbTerms(per_event=[pt.log(expressions[self.name])])
+        return LogProbTerms(per_event=[log_expressions[self.name]])

@@ -431,6 +431,44 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
 
         return cast(TensorVar, rates)
 
+    def _bin_log_probs(self, context: Context, expected_rates: TensorVar) -> TensorVar:
+        r"""Per-bin Poisson log-probabilities for the observed bin counts.
+
+        Observed data must be provided in the context as '{name}_observed' where
+        name is the HistFactory distribution name. This is a required parameter
+        for likelihood evaluation.
+
+        Returns:
+            PyTensor expression for the per-bin Poisson log-probabilities,
+            :math:`\log P(observed_i \mid expected_i)`.
+        """
+        # Observed data is required - no defensive programming needed
+        observed_data_param = f"{self.name}_observed"
+        observed_data = context[observed_data_param]
+
+        # Observables are reshaped to (N, 1) by the model builder for broadcasting.
+        # Flatten to 1-D here so element-wise Poisson matches the (N,) expected_rates.
+        if observed_data.ndim == 2:
+            observed_data = observed_data[:, 0]
+
+        # Per-bin Poisson log-probability:
+        # log P(observed_i | expected_i) = observed_i * log(expected_i) - expected_i - log(observed_i!)
+        #
+        # Guard against 0 * log(0) = NaN when observed_i == 0 and expected_i == 0.
+        # The Poisson log-pmf for k=0 is just -lambda (since log(0!) = 0), so when
+        # observed == 0 we only need -expected_rates; the full expression is only
+        # needed (and safe) when observed > 0.  When observed > 0 and expected == 0
+        # the result is correctly -inf (P(k>0 | lambda=0) = 0).
+        full = (
+            observed_data * pt.log(expected_rates)
+            - expected_rates
+            - pt.gammaln(observed_data + 1)
+        )
+        return cast(
+            TensorVar,
+            pt.switch(pt.eq(observed_data, 0), -expected_rates, full),
+        )
+
     def _build_main_model(
         self, context: Context, expected_rates: TensorVar
     ) -> TensorVar:
@@ -444,28 +482,92 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         Returns:
             PyTensor expression for the Poisson probability (not log probability)
         """
-        # Create a Poisson likelihood for the observed bin counts
-        # Observed data is required - no defensive programming needed
-        observed_data_param = f"{self.name}_observed"
-        observed_data = context[observed_data_param]
-
-        # Observables are reshaped to (N, 1) by the model builder for broadcasting.
-        # Flatten to 1-D here so element-wise Poisson matches the (N,) expected_rates.
-        if observed_data.ndim == 2:
-            observed_data = observed_data[:, 0]
-
-        # Build product of individual Poisson probabilities for each bin
-        # P(observed_i | expected_i) = exp(observed_i * log(expected_i) - expected_i - log(observed_i!))
-        log_probs = (
-            observed_data * pt.log(expected_rates)
-            - expected_rates
-            - pt.gammaln(observed_data + 1)
-        )
+        log_probs = self._bin_log_probs(context, expected_rates)
         # Convert from log probabilities to probabilities
         probs = pt.exp(log_probs)
         main_prob = pt.prod(probs)  # type: ignore[no-untyped-call]
 
         return cast(TensorVar, main_prob)
+
+    def log_likelihood(self, context: Context) -> TensorVar:
+        """Log-space main Poisson likelihood: sum of per-bin Poisson log-pmfs.
+
+        This is the log-space counterpart of :meth:`likelihood`.  Returning the
+        sum of per-bin log-probabilities directly avoids the
+        ``log(prod(exp(log_probs)))`` round-trip, whose intermediate product
+        underflows float64 to ``0.0`` for channels with many bins or large
+        expected counts (turning ``log_prob`` into ``-inf``).
+
+        Args:
+            context: Mapping of parameter names to PyTensor variables
+
+        Returns:
+            PyTensor expression for the summed Poisson log-probability.
+        """
+        total_bins = self._get_total_bins()
+        expected_rates = self._compute_expected_rates(context, total_bins)
+        return cast(TensorVar, pt.sum(self._bin_log_probs(context, expected_rates)))  # type: ignore[no-untyped-call]
+
+    def log_extended_likelihood(self, context: Context) -> TensorVar:
+        """Log-space constraint sum for this channel.
+
+        Log-space counterpart of :meth:`extended_likelihood`: returns the sum of
+        ``log(constraint)`` terms (deduped by parameter exactly as in
+        :meth:`extended_likelihood`) instead of their product, avoiding the
+        ``log(prod(...))`` round-trip.
+
+        Args:
+            context: Mapping of parameter names to PyTensor variables
+
+        Returns:
+            PyTensor expression for the summed log-constraint contribution.
+        """
+        seen: set[str] = set()
+        log_constraints: list[TensorVar] = []
+        for dedup_key, modifier, sample_data in self.constraint_specs():
+            # Skip StatErrorModifier in lite mode - constraint built at channel level
+            if self.barlow_beeston_method == "lite" and isinstance(
+                modifier, StatErrorModifier
+            ):
+                continue
+            if dedup_key is not None:
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
+            log_constraints.append(
+                pt.log(modifier.make_constraint(context, sample_data))
+            )
+
+        # Add channel-level BB-lite constraint if in lite mode
+        if self.barlow_beeston_method == "lite":
+            lite_constraint = self._make_barlow_beeston_lite_constraint(context)
+            if lite_constraint is not None:
+                log_constraints.append(cast(TensorVar, pt.log(lite_constraint)))
+
+        if not log_constraints:
+            return cast(TensorVar, pt.constant(0.0))
+        return cast(TensorVar, pt.sum(pt.stack(log_constraints)))  # type: ignore[no-untyped-call]
+
+    def log_expression(self, context: Context) -> TensorVar:
+        """Log-probability for the channel: summed Poisson log-pmf + log-constraints.
+
+        Overrides :meth:`Distribution.log_expression` to assemble the channel
+        log-probability directly in log space (sum of per-bin Poisson log-pmfs
+        plus summed log-constraint terms), rather than taking ``log`` of the
+        probability-space :meth:`likelihood`/:meth:`extended_likelihood` product.
+        This keeps the result finite where the probability-space product would
+        underflow to ``0.0``.
+
+        Args:
+            context: Mapping of parameter names to PyTensor variables
+
+        Returns:
+            PyTensor expression for the channel log-probability.
+        """
+        return cast(
+            TensorVar,
+            self.log_likelihood(context) + self.log_extended_likelihood(context),
+        )
 
     def to_hist(self) -> Any:
         """

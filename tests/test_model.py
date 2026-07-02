@@ -960,6 +960,30 @@ class TestModelParameterOrdering:
         assert isinstance(param_list, list)
         assert len(param_list) > 0
 
+    def test_log_pars_triggers_compilation(self, simple_workspace):
+        """Test that log_pars() triggers log compilation if not already compiled."""
+        model = simple_workspace.model(0, mode="FAST_RUN")
+
+        # Before calling log_pars, neither cache should be populated
+        assert "gauss" not in model._compiled_log_inputs
+        assert "gauss" not in model._compiled_log_input_names
+
+        # Call log_pars - should trigger compilation of the log function
+        param_list = model.log_pars("gauss")
+
+        # After calling log_pars, both caches should be populated
+        assert "gauss" in model._compiled_log_inputs
+        assert "gauss" in model._compiled_log_input_names
+
+        # log_pars returns the pre-built cached list (mirrors pars())
+        assert param_list is model._compiled_log_input_names["gauss"]
+
+        # Should return valid parameter list
+        assert isinstance(param_list, list)
+        assert "x" in param_list
+        assert "mu" in param_list
+        assert "sigma" in param_list
+
     def test_pars_order_matches_pdf_inputs(self, simple_workspace):
         """Test that pars() order matches what pdf() expects."""
         model = simple_workspace.model(0)

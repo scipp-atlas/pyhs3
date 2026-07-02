@@ -295,6 +295,37 @@ class TestConstraintModifiers:
         val = float(fn(0.0))
         assert abs(val - (-0.5 * math.log(2 * math.pi))) < 1e-9
 
+    def test_log_extended_likelihood_empty_constraints_is_zero(self):
+        """A channel with no constrained modifiers returns exactly 0.0.
+
+        Covers the early-return branch in log_extended_likelihood taken when
+        constraint_specs() yields nothing and BB-lite is not active — e.g. a
+        channel whose only modifier is an unconstrained normfactor. Also checks
+        that log_expression reduces to log_likelihood alone in this case.
+        """
+        dist = HistFactoryDistChannel(
+            **_make_channel(
+                "ch",
+                [10.0, 20.0],
+                [{"name": "mu", "type": "normfactor", "parameter": "mu"}],
+            )
+        )
+        mu = pt.dscalar("mu")
+        observed = pt.constant(np.array([10.0, 20.0]))
+        context = Context({"mu": mu, "ch_observed": observed})
+
+        expr = dist.log_extended_likelihood(context)
+        # expr does not depend on mu (there are no constrained modifiers to
+        # tie mu's value to the graph).
+        fn = pytensor.function([mu], expr, on_unused_input="ignore")
+        assert fn(1.0) == 0.0
+
+        log_lik = dist.log_likelihood(context)
+        log_expr = dist.log_expression(context)
+        fn_expr = pytensor.function([mu], [log_lik, log_expr])
+        lik_val, expr_val = fn_expr(1.0)
+        assert expr_val == pytest.approx(lik_val)
+
 
 # ---------------------------------------------------------------------------
 # Unit tests: Model._try_bake_hfdc_observed

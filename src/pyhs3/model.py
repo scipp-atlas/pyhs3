@@ -659,6 +659,65 @@ class Model:
 
                 progress_bar.advance(task)
 
+    def _compile_expression(
+        self,
+        name: str,
+        expressions: dict[str, TensorVar],
+        compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]],
+        compiled_inputs: dict[str, list[TensorVar]],
+        compiled_input_names: dict[str, list[str]],
+        fn_name: str,
+    ) -> Callable[..., npt.NDArray[np.float64]]:
+        """
+        Get or create a compiled PyTensor function for an expression dict entry.
+
+        Shared by :meth:`_get_compiled_function` and
+        :meth:`_get_compiled_log_function`, which differ only in which
+        expression dict (probability-space or log-space) they compile from
+        and which cache dicts they read and populate.
+
+        Args:
+            name (str): Key into ``expressions`` and the cache dicts.
+            expressions: Distribution expressions to compile from
+                (``self.distributions`` or ``self.log_distributions``).
+            compiled_functions: Cache of compiled functions to read and populate.
+            compiled_inputs: Cache of ordered input variables to populate.
+            compiled_input_names: Cache of ordered input names to populate.
+            fn_name (str): Name to give the compiled PyTensor function.
+
+        Returns:
+            Callable: Compiled PyTensor function.
+        """
+        if name not in compiled_functions:
+            expression = expressions[name]
+
+            inputs = [
+                var
+                for var in explicit_graph_inputs([expression])
+                if var.name is not None
+            ]
+
+            # Cache the inputs list (and their names) for consistent ordering so
+            # pars()/log_pars() and _reorder_params()/_reorder_log_params() don't
+            # rebuild the name list per evaluation.
+            compiled_inputs[name] = cast(list[TensorVar], inputs)
+            compiled_input_names[name] = [
+                var.name for var in inputs if var.name is not None
+            ]
+
+            compiled_functions[name] = cast(
+                Callable[..., npt.NDArray[np.float64]],
+                function(
+                    inputs=inputs,
+                    outputs=expression,
+                    mode=self.mode,
+                    on_unused_input="ignore",
+                    name=fn_name,
+                    trust_input=True,
+                ),
+            )
+        return compiled_functions[name]
+
     def _get_compiled_function(
         self, name: str
     ) -> Callable[..., npt.NDArray[np.float64]]:
@@ -674,38 +733,14 @@ class Model:
         Returns:
             Callable: Compiled PyTensor function.
         """
-        if name not in self._compiled_functions:
-            # Get the distribution expression (already includes extended_likelihood)
-            dist_expression = self.distributions[name]
-
-            inputs = [
-                var
-                for var in explicit_graph_inputs([dist_expression])
-                if var.name is not None
-            ]
-
-            # Cache the inputs list (and their names) for consistent ordering so
-            # pars()/_reorder_params don't rebuild the name list per evaluation.
-            self._compiled_inputs[name] = cast(list[TensorVar], inputs)
-            self._compiled_input_names[name] = [
-                var.name for var in inputs if var.name is not None
-            ]
-
-            # Use the specified PyTensor mode
-            compilation_mode = self.mode
-
-            self._compiled_functions[name] = cast(
-                Callable[..., npt.NDArray[np.float64]],
-                function(
-                    inputs=inputs,
-                    outputs=dist_expression,
-                    mode=compilation_mode,
-                    on_unused_input="ignore",
-                    name=name,
-                    trust_input=True,
-                ),
-            )
-        return self._compiled_functions[name]
+        return self._compile_expression(
+            name,
+            self.distributions,
+            self._compiled_functions,
+            self._compiled_inputs,
+            self._compiled_input_names,
+            name,
+        )
 
     def _get_compiled_log_function(
         self, name: str
@@ -725,34 +760,14 @@ class Model:
         Returns:
             Callable: Compiled PyTensor function returning the log-PDF.
         """
-        if name not in self._compiled_log_functions:
-            log_expression = self.log_distributions[name]
-
-            inputs = [
-                var
-                for var in explicit_graph_inputs([log_expression])
-                if var.name is not None
-            ]
-
-            # Cache the inputs list and their names for consistent ordering so
-            # log_pars()/_reorder_log_params() don't rebuild the name list per call.
-            self._compiled_log_inputs[name] = cast(list[TensorVar], inputs)
-            self._compiled_log_input_names[name] = [
-                var.name for var in inputs if var.name is not None
-            ]
-
-            self._compiled_log_functions[name] = cast(
-                Callable[..., npt.NDArray[np.float64]],
-                function(
-                    inputs=inputs,
-                    outputs=log_expression,
-                    mode=self.mode,
-                    on_unused_input="ignore",
-                    name=f"log_{name}",
-                    trust_input=True,
-                ),
-            )
-        return self._compiled_log_functions[name]
+        return self._compile_expression(
+            name,
+            self.log_distributions,
+            self._compiled_log_functions,
+            self._compiled_log_inputs,
+            self._compiled_log_input_names,
+            f"log_{name}",
+        )
 
     def pdf_unsafe(
         self,
@@ -889,6 +904,34 @@ class Model:
         positional_values = self._reorder_log_params(name, parametervalues)
         return func(*positional_values)
 
+    def _get_pars(
+        self,
+        name: str,
+        compiled_input_names: dict[str, list[str]],
+        compile_fn: Callable[[str], Callable[..., npt.NDArray[np.float64]]],
+    ) -> list[str]:
+        """
+        Get the ordered input parameter names, compiling to populate the cache
+        if needed.
+
+        Shared by :meth:`pars` and :meth:`log_pars`, which differ only in
+        which cache dict and which compilation method populate it.
+
+        Args:
+            name: Distribution name
+            compiled_input_names: Cache of ordered input names to read/populate
+                (``self._compiled_input_names`` or ``self._compiled_log_input_names``).
+            compile_fn: Compilation method to call to populate the cache
+                (:meth:`_get_compiled_function` or :meth:`_get_compiled_log_function`).
+
+        Returns:
+            List of parameter names in the cached order
+        """
+        if name not in compiled_input_names:
+            # Trigger compilation to populate cache
+            compile_fn(name)
+        return compiled_input_names[name]
+
     def pars(self, name: str) -> list[str]:
         """
         Get the ordered list of input parameter names for a distribution.
@@ -907,10 +950,9 @@ class Model:
             >>> model.pars("model_singlechannel") # doctest: +SKIP
             ['uncorr_bkguncrt_1', 'uncorr_bkguncrt_0', 'model_singlechannel_observed', 'mu', 'Lumi']
         """
-        if name not in self._compiled_input_names:
-            # Trigger compilation to populate cache
-            self._get_compiled_function(name)
-        return self._compiled_input_names[name]
+        return self._get_pars(
+            name, self._compiled_input_names, self._get_compiled_function
+        )
 
     def parsort(self, name: str, names: list[str]) -> list[int]:
         """
@@ -930,6 +972,30 @@ class Model:
         """
         return [names.index(par) for par in self.pars(name)]
 
+    def _reorder_by_pars(
+        self,
+        name: str,
+        params: Mapping[str, npt.NDArray[np.float64]],
+        pars_fn: Callable[[str], list[str]],
+    ) -> list[npt.NDArray[np.float64]]:
+        """
+        Reorder parameters to match an input order.
+
+        Shared by :meth:`_reorder_params` and :meth:`_reorder_log_params`,
+        which differ only in which method supplies the input order.
+
+        Args:
+            name: Distribution name
+            params: Dictionary of parameter values (numpy arrays)
+            pars_fn: Method supplying the ordered input names (:meth:`pars`
+                or :meth:`log_pars`).
+
+        Returns:
+            List of values in the order given by ``pars_fn``
+        """
+        input_order = pars_fn(name)
+        return [params[param_name] for param_name in input_order]
+
     def _reorder_params(
         self,
         name: str,
@@ -945,8 +1011,7 @@ class Model:
         Returns:
             List of values in the correct order for the compiled function
         """
-        input_order = self.pars(name)
-        return [params[param_name] for param_name in input_order]
+        return self._reorder_by_pars(name, params, self.pars)
 
     def log_pars(self, name: str) -> list[str]:
         """
@@ -962,10 +1027,9 @@ class Model:
         Returns:
             List of parameter names in the order expected by logpdf()
         """
-        if name not in self._compiled_log_input_names:
-            # Trigger compilation to populate cache
-            self._get_compiled_log_function(name)
-        return self._compiled_log_input_names[name]
+        return self._get_pars(
+            name, self._compiled_log_input_names, self._get_compiled_log_function
+        )
 
     def _reorder_log_params(
         self,
@@ -982,8 +1046,7 @@ class Model:
         Returns:
             List of values in the correct order for the compiled log function
         """
-        input_order = self.log_pars(name)
-        return [params[param_name] for param_name in input_order]
+        return self._reorder_by_pars(name, params, self.log_pars)
 
     def visualize_graph(
         self,

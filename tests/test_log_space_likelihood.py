@@ -21,9 +21,11 @@ import math
 
 import numpy as np
 import pytensor
+import pytensor.tensor as pt
 import pytest
 
 import pyhs3 as hs3
+from pyhs3.context import Context
 from pyhs3.data import BinnedData, Data
 from pyhs3.distributions import Distributions, HistFactoryDistChannel
 from pyhs3.domains import Domains, ProductDomain
@@ -227,3 +229,42 @@ def test_zero_bin_logprob_is_not_nan():
         f"logpdf should be finite (not NaN), got {logpdf_val}"
     )
     assert logpdf_val == pytest.approx(0.0, abs=1e-12)
+
+
+def test_zero_bin_logprob_gradient_is_not_nan():
+    """The gradient of the Poisson log-pmf wrt expected_rates must stay finite
+    at observed==0, expected==0, independent of graph rewrites.
+
+    ``_bin_log_probs`` guards the *value* of ``0 * log(0)`` with a ``pt.switch``
+    on its output, but PyTensor differentiates every branch of a switch,
+    including the one not selected at runtime. The untaken branch still
+    contains ``observed * log(expected_rates)``, whose gradient wrt
+    ``expected_rates`` is ``observed / expected_rates = 0 / 0 = NaN`` at this
+    point; multiplying that NaN by the switch's zero mask does not clear it
+    (``0 * NaN = NaN``). Compiling with ``optimizer=None`` disables the graph
+    rewrites that otherwise happen to simplify this away, so the test exposes
+    the NaN structurally rather than relying on optimizer behavior.
+    """
+    channel = HistFactoryDistChannel(
+        name="grad_probe",
+        axes=[{"name": "x_probe", "min": 0.0, "max": 2.0, "nbins": 2}],
+        samples=[
+            {
+                "name": "signal",
+                "data": {"contents": [1.0, 3.0], "errors": [1.0, 1.0]},
+                "modifiers": [],
+            }
+        ],
+    )
+    observed = pt.constant(np.array([0.0, 2.0]))
+    context = Context(parameters={"grad_probe_observed": observed})
+    expected_rates = pt.vector("expected_rates")
+
+    log_probs = channel._bin_log_probs(context, expected_rates)
+    grad = pt.grad(pt.sum(log_probs), expected_rates)
+
+    mode = pytensor.compile.mode.Mode(linker="py", optimizer=None)
+    fn = pytensor.function([expected_rates], grad, mode=mode)
+
+    grad_val = fn(np.array([0.0, 3.0]))
+    assert np.all(np.isfinite(grad_val)), f"gradient has NaN/Inf: {grad_val}"

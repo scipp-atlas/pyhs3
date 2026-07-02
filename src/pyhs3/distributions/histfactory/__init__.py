@@ -459,8 +459,16 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         # observed == 0 we only need -expected_rates; the full expression is only
         # needed (and safe) when observed > 0.  When observed > 0 and expected == 0
         # the result is correctly -inf (P(k>0 | lambda=0) = 0).
+        #
+        # The log's argument is guarded separately from the switch's output: PyTensor
+        # differentiates both branches of a switch, so the untaken `full` branch still
+        # contributes a gradient of observed/expected_rates = 0/0 = NaN at this point,
+        # and multiplying that NaN by the switch's zero mask does not clear it. Substituting
+        # a nonzero placeholder for expected_rates inside the log (only where observed == 0,
+        # where `full`'s value and gradient are discarded anyway) keeps both finite.
+        safe_rates = pt.switch(pt.eq(observed_data, 0), 1.0, expected_rates)
         full = (
-            observed_data * pt.log(expected_rates)
+            observed_data * pt.log(safe_rates)
             - expected_rates
             - pt.gammaln(observed_data + 1)
         )

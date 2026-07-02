@@ -498,17 +498,18 @@ class Model:
             return dist.expression(context)
 
         # Build the Poisson term and each constraint factor exactly once, then
-        # assemble both the model-level deduped constraint list and the full
-        # per-channel expression from those shared pieces.  This mirrors
-        # Distribution._expression (likelihood -> normalization -> x constraints)
-        # and HistFactoryDistChannel.extended_likelihood without rebuilding the
-        # Poisson subgraph or re-running make_constraint a second time.
+        # assemble the model-level deduped constraint list and both the
+        # probability-space and log-space per-channel expressions from those
+        # shared pieces.  This mirrors Distribution._expression/log_expression
+        # (likelihood -> normalization -> x/+ constraints) and
+        # HistFactoryDistChannel.extended_likelihood/log_extended_likelihood
+        # without rebuilding the Poisson subgraph or re-running make_constraint
+        # a second time.
         poisson = dist.likelihood(context)
         self._hfdc_poisson[node_name] = poisson
         # Log-space Poisson-only term (sum of per-bin Poisson log-pmfs).
-        self._hfdc_log_poisson[node_name] = dist.log_likelihood(context)
-        # Full per-channel log expression (Poisson + constraints) for logpdf().
-        self.log_distributions[node_name] = dist.log_expression(context)
+        log_poisson = dist.log_likelihood(context)
+        self._hfdc_log_poisson[node_name] = log_poisson
 
         # Whether this channel participates in the active likelihood; only then
         # do its constraints feed the joint log_prob.  All channels still build
@@ -546,13 +547,25 @@ class Model:
         raw = dist._apply_normalization(poisson, context)  # pylint: disable=protected-access
         if not channel_constraints:
             extended: TensorVar = cast(TensorVar, pt.constant(1.0))
+            log_extended: TensorVar = cast(TensorVar, pt.constant(0.0))
         else:
             extended = cast(
                 TensorVar,
                 pt.prod(pt.stack(channel_constraints)),  # type: ignore[no-untyped-call]
             )
+            log_extended = cast(
+                TensorVar,
+                pt.sum(pt.stack([pt.log(c) for c in channel_constraints])),  # type: ignore[no-untyped-call]
+            )
         full = cast(TensorVar, raw * extended)
         full.name = dist.name  # Evaluable.expression sets the name
+
+        # Full per-channel log expression (Poisson + constraints) for logpdf(),
+        # assembled from the pieces built above (mirrors
+        # HistFactoryDistChannel.log_expression) instead of calling
+        # dist.log_expression(context), which would rebuild log_poisson and
+        # re-run make_constraint for every spec.
+        self.log_distributions[node_name] = cast(TensorVar, log_poisson + log_extended)
         return full
 
     def _build_dependency_graph(

@@ -9,6 +9,17 @@ Instead of minimising, this script:
   4. Evaluates the pyhs3 NLL at those parameter values.
   5. Reports pyhs3 NLL vs 2*quickFit NLL directly (same units).
 
+The reported difference is written as
+
+    diff = pyhs3_nll - qf_nll + N_total * ln(n_channels)
+
+where the ``N_total * ln(n_channels)`` term corrects for the known
+RooSimultaneous category-normalization offset between the two NLL definitions.
+``N_total`` (sum of dataset event weights) and ``n_channels`` (number of
+distributions in the likelihood) are read from the HS3 workspace JSON passed via
+``--workspace``; without that flag the offset is 0 and ``diff`` is the raw
+``pyhs3_nll - qf_nll`` (the previous behaviour).
+
 Usage:
     # evaluate a single mu point
     python examples/eval_nll_at_quickfit.py --mu 1.0
@@ -20,6 +31,10 @@ Usage:
     # sweep all mu points that appear in nlls.txt
     python examples/eval_nll_at_quickfit.py --all
 
+    # apply the category-normalization offset read from the workspace JSON
+    python examples/eval_nll_at_quickfit.py --all \\
+        --workspace path/to/workspace.json
+
     # use a non-default cache or log directory
     python examples/eval_nll_at_quickfit.py --mu 1.0 \\
         --cache-dir pyhs3/cache/WS-bbyy-non-resonant-non-param-isofix_unbinnedFix_clean \\
@@ -29,6 +44,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import pickle
 import re
 import time
@@ -37,6 +53,9 @@ from pathlib import Path
 import numpy as np
 from matplotlib import pyplot as plt
 
+# Likelihood whose channel count / event weights define the offset term.
+_ANALYSIS = "CombinedPdf_combData"
+
 # ---------------------------------------------------------------------------
 # Default paths (relative to the repo root — parent of the pyhs3/ package dir)
 # ---------------------------------------------------------------------------
@@ -44,6 +63,7 @@ _REPO_ROOT = (
     Path(__file__).resolve().parent.parent.parent
 )  # examples/ -> pyhs3/ -> repo root
 _DEFAULT_LOG_DIR = _REPO_ROOT / "quickFit" / "output__workspace_FINAL_ISOBUGFIX"
+_DEFAULT_WORKSPACE_PATH = Path("/home/mhance/pyhs3/pyhs3/data/WS-bbyy-non-resonant-non-param-isofix_unbinnedFix_withaux_nobounds.json")
 _DEFAULT_CACHE_DIR = (
     _REPO_ROOT
     / "pyhs3"
@@ -91,6 +111,43 @@ def lookup_qf_nll(
         if abs(k - mu) <= tol:
             return v
     return None
+
+
+# ---------------------------------------------------------------------------
+# Workspace offset term
+# ---------------------------------------------------------------------------
+
+
+def workspace_event_counts(ws_json: dict) -> tuple[int, float, int]:
+    """(n_channels, sum-of-weights, raw entry count) for te analysis likelihood.
+
+    ``n_channels`` is the number of distributions in the ``_ANALYSIS``
+    likelihood; ``sum-of-weights`` is the total event weight across its datasets
+    (the ~1e-9 weights are RooFit ghost/padding entries); the raw entry count is
+    also returned for reference.
+    """
+    likelihood = next(lk for lk in ws_json["likelihoods"] if lk["name"] == _ANALYSIS)
+    data = {d["name"]: d for d in ws_json["data"]}
+    n_entries = 0
+    sum_w = 0.0
+    for name in likelihood["data"]:
+        d = data[name]
+        n_entries += len(d["entries"])
+        sum_w += sum(d["weights"])
+    return len(likelihood["distributions"]), sum_w, n_entries
+
+
+def compute_offset(workspace_path: Path) -> float:
+    """N_total * ln(n_channels) from the HS3 workspace JSON at *workspace_path*."""
+    with workspace_path.open() as fh:
+        ws_json = json.load(fh)
+    n_channels, sum_w, n_entries = workspace_event_counts(ws_json)
+    offset = sum_w * np.log(n_channels)
+    print(f"\nOffset from {workspace_path}:")
+    print(f"  n_channels          = {n_channels}")
+    print(f"  N_total (weights)   = {sum_w:.6f}  (raw entries: {n_entries})")
+    print(f"  N_total * ln(C)     = {offset:.6f}")
+    return float(offset)
 
 
 # ---------------------------------------------------------------------------
@@ -278,8 +335,14 @@ def run_one(
     input_names: list[str],
     nominal_params: dict[str, float],
     nlls: dict[float, float],
+    offset: float = 0.0,
 ) -> dict:
-    """Parse one log, evaluate pyhs3 NLL, compare to quickFit NLL from nlls.txt."""
+    """Parse one log, evaluate pyhs3 NLL, compare to quickFit NLL from nlls.txt.
+
+    The reported ``diff`` is ``pyhs3_nll - qf_nll + offset``, where *offset* is
+    the ``N_total * ln(n_channels)`` category-normalization correction (0 when no
+    workspace is supplied).  ``raw_diff`` keeps the uncorrected difference.
+    """
     parsed = parse_quickfit_log(log_path)
     mu = parsed["mu_HH"]
     converged = parsed["converged"]
@@ -293,12 +356,14 @@ def run_one(
     )
     dt = time.perf_counter() - t0
 
-    diff = pyhs3_nll - qf_nll if qf_nll is not None else None
+    raw_diff = pyhs3_nll - qf_nll if qf_nll is not None else None
+    diff = raw_diff + offset if raw_diff is not None else None
 
     return {
         "mu_HH": mu,
         "qf_nll": qf_nll,
         "pyhs3_nll": pyhs3_nll,
+        "raw_diff": raw_diff,
         "diff": diff,
         "converged": converged,
         "eval_time_s": dt,
@@ -404,6 +469,15 @@ def main() -> None:
         "Faster startup; safe only if the qf log covers all pyhs3 free parameters.",
     )
     parser.add_argument(
+        "--workspace",
+        type=Path,
+        default=None,
+        metavar="WS.json",
+        help="HS3 workspace JSON used to compute the offset term\n"
+        "N_total * ln(n_channels) added to every diff.\n"
+        "(default: no offset — diff is the raw pyhs3_nll - qf_nll)",
+    )
+    parser.add_argument(
         "--output",
         "-o",
         type=Path,
@@ -435,6 +509,11 @@ def main() -> None:
     print(f"  {len(nlls)} mu points: {sorted(nlls)[:5]} ...")
 
     # ------------------------------------------------------------------
+    # Offset term: N_total * ln(n_channels) from the workspace (if given)
+    # ------------------------------------------------------------------
+    offset = compute_offset(args.workspace) if args.workspace else compute_offset(_DEFAULT_WORKSPACE_PATH)
+
+    # ------------------------------------------------------------------
     # Collect log files to process
     # ------------------------------------------------------------------
     if args.all:
@@ -458,25 +537,30 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Evaluate and print
     # ------------------------------------------------------------------
-    hdr = f"{'mu':>10}  {'2*qf_NLL':>18}  {'pyhs3_NLL':>18}  {'diff':>10}  conv  time"
+    hdr = (
+        f"{'mu':>10}  {'2*qf_NLL':>18}  {'pyhs3_NLL':>18}  "
+        f"{'raw_diff':>12}  {'diff':>12}  conv  time"
+    )
     print(f"\n{hdr}")
     print("-" * len(hdr))
 
     results = []
     warned_coverage = False
     for log_path in log_files:
-        r = run_one(log_path, log_prob_fn, input_names, nominal_params, nlls)
+        r = run_one(log_path, log_prob_fn, input_names, nominal_params, nlls, offset)
         results.append(r)
 
         conv = "✓" if r["converged"] else "✗"
         qf = f"{r['qf_nll']:.6f}" if r["qf_nll"] is not None else "  (not in nlls.txt)"
-        diff = f"{r['diff']:+.6f}" if r["diff"] is not None else "        —"
+        raw = f"{r['raw_diff']:+.6f}" if r["raw_diff"] is not None else "          —"
+        diff = f"{r['diff']:+.6f}" if r["diff"] is not None else "          —"
 
         print(
             f"{r['mu_HH']:>+10.6g}  "
             f"{qf:>18}  "
             f"{r['pyhs3_nll']:>18.6f}  "
-            f"{diff:>10}  "
+            f"{raw:>12}  "
+            f"{diff:>12}  "
             f"{conv:>4}  "
             f"{r['eval_time_s']:.2f}s"
         )
@@ -512,8 +596,13 @@ def main() -> None:
     if len(results) > 1:
         diffs = [r["diff"] for r in results if r["diff"] is not None]
         if diffs:
+            label = (
+                "pyhs3_NLL - qf_NLL + N_total*ln(n_channels)"
+                if offset
+                else "pyhs3_NLL - qf_NLL"
+            )
             print()
-            print(f"pyhs3_NLL - qf_NLL across {len(diffs)} points:")
+            print(f"{label} across {len(diffs)} points:")
             print(f"  mean = {np.mean(diffs):+.6f}")
             print(f"  std  = {np.std(diffs):.6f}")
             print(

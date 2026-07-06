@@ -686,6 +686,58 @@ class TestHFDCContextGuardedCache:
         assert fresh_lumi in inputs
         assert fresh_observed in inputs
 
+    def test_log_likelihood_reuses_cached_expected_rates_after_bin_log_probs_failure(
+        self, monkeypatch
+    ):
+        """A fresh instance's first ``log_likelihood`` call can populate
+        ``_cached_expected_rates``/``_cached_context`` and then still fail:
+        ``_compute_expected_rates`` only needs ``lumi``, so it succeeds and
+        populates the cache, but ``_bin_log_probs`` then raises because
+        ``SR_observed`` is missing from the context, so ``_cached_bin_log_probs``
+        is never set. A second call for the *same* context object -- once the
+        missing observed data is added in place via ``Context.add_parameter``
+        -- fails the outer cache check (``_cached_bin_log_probs`` is still
+        ``None``) but passes the inner one (``_cached_context is context`` and
+        ``_cached_expected_rates is not None``), so the cached expected rates
+        are reused instead of recomputed.
+        """
+        calls: list[str] = []
+        original = HistFactoryDistChannel._compute_expected_rates
+
+        def counted(
+            self: HistFactoryDistChannel, context: Context, total_bins: int
+        ) -> object:
+            calls.append(self.name)
+            return original(self, context, total_bins)
+
+        monkeypatch.setattr(HistFactoryDistChannel, "_compute_expected_rates", counted)
+
+        ws = _single_channel_normsys_workspace()
+        dist = next(iter(ws.distributions))
+
+        lumi = pt.dscalar("lumi")
+        context = Context({"lumi": lumi})
+
+        # First call: _compute_expected_rates succeeds and populates the cache,
+        # but _bin_log_probs raises because "SR_observed" is missing.
+        with pytest.raises(KeyError, match="SR_observed"):
+            dist.log_likelihood(context)
+        assert calls == ["SR"]
+
+        # Add the missing observed data to the SAME context object in place.
+        observed = pt.dvector("SR_observed")
+        context.add_parameter("SR_observed", observed)
+
+        expr = dist.log_likelihood(context)
+        # _compute_expected_rates was not called again -- the cached expected
+        # rates from the first call were reused.
+        assert calls == ["SR"]
+
+        fn = pytensor.function([lumi, observed], expr)
+        val = float(fn(0.0, np.array([10.0])))
+        expected = 10.0 * math.log(10.0) - 10.0 - math.lgamma(11.0)
+        assert val == pytest.approx(expected, rel=1e-10)
+
 
 # ---------------------------------------------------------------------------
 # Integration tests: constraint deduplication across channels

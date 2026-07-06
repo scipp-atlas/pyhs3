@@ -136,8 +136,15 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     # calling both methods for the same context does not rebuild the
     # interpolation-spline/per-bin-modifier subgraph (_compute_expected_rates)
     # and the Poisson log-pmf subgraph (_bin_log_probs) a second time.  This is
-    # a per-instance cache scoped to a single context, matching the caching
-    # pattern used by MixtureDist; it is not safe across differing contexts.
+    # a per-instance cache, and the same HistFactoryDistChannel instance can be
+    # reused across multiple Model builds (e.g. Workspace.model() called more
+    # than once on the same workspace), each supplying its own Context with
+    # fresh parameter tensors.  _cached_context holds the exact Context object
+    # that populated the other two fields; callers must check
+    # `self._cached_context is context` (object identity, not equality) before
+    # trusting them, and refresh all three fields together whenever the cache
+    # is (re)populated.
+    _cached_context: Context | None = PrivateAttr(default=None)
     _cached_expected_rates: TensorVar | None = PrivateAttr(default=None)
     _cached_bin_log_probs: TensorVar | None = PrivateAttr(default=None)
 
@@ -221,6 +228,7 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         # instead of rebuilding it.
         expected_rates = self._compute_expected_rates(context, total_bins)
         self._cached_expected_rates = expected_rates
+        self._cached_context = context
 
         # Build main Poisson model for observed data
         return self._build_main_model(context, expected_rates)
@@ -507,6 +515,7 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         # context instead of rebuilding the Poisson log-pmf expression.
         log_probs = self._bin_log_probs(context, expected_rates)
         self._cached_bin_log_probs = log_probs
+        self._cached_context = context
         # Convert from log probabilities to probabilities
         probs = pt.exp(log_probs)
         main_prob = pt.prod(probs)  # type: ignore[no-untyped-call]
@@ -530,17 +539,26 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         """
         # Reuse the per-bin log-probabilities cached by likelihood() (via
         # _build_main_model) for the same context, if available, to avoid
-        # rebuilding the expected-rates and Poisson log-pmf subgraphs.
-        if self._cached_bin_log_probs is not None:
+        # rebuilding the expected-rates and Poisson log-pmf subgraphs.  Only
+        # trust the cache when it was populated by this exact context object
+        # (see _cached_context) -- otherwise rebuild and refresh the cache so
+        # a later call for this context can reuse it.
+        if self._cached_context is context and self._cached_bin_log_probs is not None:
             log_probs = self._cached_bin_log_probs
         else:
             total_bins = self._get_total_bins()
-            expected_rates = (
-                self._cached_expected_rates
-                if self._cached_expected_rates is not None
-                else self._compute_expected_rates(context, total_bins)
-            )
+            if (
+                self._cached_context is context
+                and self._cached_expected_rates is not None
+            ):
+                expected_rates = self._cached_expected_rates
+            else:
+                expected_rates = self._compute_expected_rates(context, total_bins)
+                self._cached_expected_rates = expected_rates
+                self._cached_context = context
             log_probs = self._bin_log_probs(context, expected_rates)
+            self._cached_bin_log_probs = log_probs
+            self._cached_context = context
         return cast(TensorVar, pt.sum(log_probs))  # type: ignore[no-untyped-call]
 
     def log_extended_likelihood(self, context: Context) -> TensorVar:

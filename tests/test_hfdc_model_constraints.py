@@ -488,6 +488,33 @@ class TestHFDCLogProb:
 # ---------------------------------------------------------------------------
 
 
+def _single_channel_normsys_workspace() -> Workspace:
+    """Single-channel HFDC workspace with one normsys constraint on ``lumi``.
+
+    Shared setup for the HFDC subgraph-build-count regression tests and the
+    per-instance cache context-guard test below, all of which only need this
+    minimal single-parameter-constraint channel.
+    """
+    return _simple_workspace(
+        channels=[
+            _make_channel(
+                "SR",
+                [10.0],
+                [
+                    {
+                        "name": "lumi",
+                        "type": "normsys",
+                        "parameter": "lumi",
+                        "constraint": "Gauss",
+                        "data": {"hi": 1.05, "lo": 0.95},
+                    }
+                ],
+            )
+        ],
+        params=[{"name": "lumi", "value": 0.0}],
+    )
+
+
 class TestHFDCSubgraphBuildCounts:
     """Model construction must build each HFDC subgraph exactly once.
 
@@ -612,6 +639,103 @@ class TestHFDCSubgraphBuildCounts:
             )
         )
         assert logpdf_val == pytest.approx(math.log(pdf_val), rel=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# Regression tests: per-instance HFDC caches must be tied to their context
+# ---------------------------------------------------------------------------
+
+
+class TestHFDCContextGuardedCache:
+    """``_cached_expected_rates``/``_cached_bin_log_probs`` must only be reused
+    for the exact :class:`Context` object that populated them.
+
+    ``Workspace.model()`` passes the same ``HistFactoryDistChannel`` instances
+    into every ``Model`` built from that workspace (distributions are not
+    copied), and each ``Model`` build supplies its own fresh ``Context`` with
+    new parameter tensors.  ``likelihood()``/``log_likelihood()`` happen to be
+    called back-to-back for the same context during a single ``Model`` build,
+    which masks the problem when driven only through ``Workspace.model()`` +
+    ``Model.logpdf()`` -- both builds still evaluate correctly because each
+    build unconditionally repopulates the cache with its own context right
+    before reading it back.  But ``log_likelihood()`` (and ``log_expression()``,
+    which calls it) are public methods that can be invoked directly for any
+    context, and a shared instance's cache does not know which context it was
+    last built for -- so a direct call for a context that never populated the
+    cache must not silently reuse a previous build's stale graph.
+    """
+
+    def test_two_model_builds_still_evaluate_correctly(self):
+        """Sanity check: both Model builds, and re-evaluating the first after
+        the second is built, must all match the analytic Poisson+Gaussian
+        expectation (the cache-overwrite direction already works)."""
+        ws = _single_channel_normsys_workspace()
+        likelihood = next(iter(ws.likelihoods))
+
+        poisson_lp = 10.0 * math.log(10.0) - 10.0 - math.lgamma(11.0)
+        gauss_lp = -0.5 * math.log(2 * math.pi)
+        expected = poisson_lp + gauss_lp
+
+        model1 = ws.model(likelihood, progress=False)
+        val1 = float(
+            np.asarray(
+                model1.logpdf_unsafe("SR", lumi=0.0, SR_observed=np.array([10.0]))
+            )
+        )
+        assert val1 == pytest.approx(expected, rel=1e-10)
+
+        model2 = ws.model(likelihood, progress=False)
+        val2 = float(
+            np.asarray(
+                model2.logpdf_unsafe("SR", lumi=0.0, SR_observed=np.array([10.0]))
+            )
+        )
+        assert val2 == pytest.approx(expected, rel=1e-10)
+
+        # model1 must still work correctly after model2's build has mutated
+        # the shared distribution instance's cache.
+        val1_again = float(
+            np.asarray(
+                model1.logpdf_unsafe("SR", lumi=0.0, SR_observed=np.array([10.0]))
+            )
+        )
+        assert val1_again == pytest.approx(expected, rel=1e-10)
+
+    def test_log_likelihood_rebuilds_for_a_context_that_never_populated_the_cache(self):
+        """Calling ``log_likelihood`` directly for a fresh, unpaired context must
+        build a graph over *that* context's tensors, not silently reuse a
+        previous build's cached graph.
+
+        Before the context-identity guard, ``log_likelihood`` reused
+        ``_cached_bin_log_probs`` whenever it was non-``None``, regardless of
+        which context built it. Two prior ``Model`` builds leave the shared
+        ``HistFactoryDistChannel`` instance's cache populated with the second
+        build's tensors; calling ``log_likelihood`` for a brand new context
+        that was never passed to ``likelihood()`` must not return a graph
+        wired to those old tensors.
+        """
+        ws = _single_channel_normsys_workspace()
+        likelihood = next(iter(ws.likelihoods))
+        # Two builds share the same HistFactoryDistChannel instance (Workspace.model
+        # does not copy distributions), leaving its per-instance cache primed by
+        # whichever build ran last.
+        ws.model(likelihood, progress=False)
+        ws.model(likelihood, progress=False)
+
+        dist = next(iter(ws.distributions))
+
+        fresh_lumi = pt.dscalar("lumi")
+        fresh_observed = pt.dvector("SR_observed")
+        fresh_context = Context({"lumi": fresh_lumi, "SR_observed": fresh_observed})
+
+        expr = dist.log_likelihood(fresh_context)
+        inputs = set(pytensor.graph.traversal.explicit_graph_inputs([expr]))
+
+        # Before the fix, the returned graph references stale leaves left over
+        # from the second Model build, so neither fresh tensor is even present
+        # as an input.
+        assert fresh_lumi in inputs
+        assert fresh_observed in inputs
 
 
 # ---------------------------------------------------------------------------

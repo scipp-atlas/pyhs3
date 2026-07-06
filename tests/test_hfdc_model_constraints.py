@@ -540,24 +540,7 @@ class TestHFDCSubgraphBuildCounts:
 
         monkeypatch.setattr(HistFactoryDistChannel, "_compute_expected_rates", counted)
 
-        ws = _simple_workspace(
-            channels=[
-                _make_channel(
-                    "SR",
-                    [10.0],
-                    [
-                        {
-                            "name": "lumi",
-                            "type": "normsys",
-                            "parameter": "lumi",
-                            "constraint": "Gauss",
-                            "data": {"hi": 1.05, "lo": 0.95},
-                        }
-                    ],
-                )
-            ],
-            params=[{"name": "lumi", "value": 0.0}],
-        )
+        ws = _single_channel_normsys_workspace()
         likelihood = next(iter(ws.likelihoods))
         ws.model(likelihood, progress=False)
 
@@ -580,24 +563,7 @@ class TestHFDCSubgraphBuildCounts:
 
         monkeypatch.setattr(SingleParamConstraint, "make_constraint", counted)
 
-        ws = _simple_workspace(
-            channels=[
-                _make_channel(
-                    "SR",
-                    [10.0],
-                    [
-                        {
-                            "name": "lumi",
-                            "type": "normsys",
-                            "parameter": "lumi",
-                            "constraint": "Gauss",
-                            "data": {"hi": 1.05, "lo": 0.95},
-                        }
-                    ],
-                )
-            ],
-            params=[{"name": "lumi", "value": 0.0}],
-        )
+        ws = _single_channel_normsys_workspace()
         likelihood = next(iter(ws.likelihoods))
         ws.model(likelihood, progress=False)
 
@@ -609,24 +575,7 @@ class TestHFDCSubgraphBuildCounts:
         """logpdf(channel) must equal log(pdf(channel)) for an HFDC channel with
         a constraint modifier, confirming log_distributions is assembled from
         the same pieces as the probability-space expression."""
-        ws = _simple_workspace(
-            channels=[
-                _make_channel(
-                    "SR",
-                    [10.0],
-                    [
-                        {
-                            "name": "lumi",
-                            "type": "normsys",
-                            "parameter": "lumi",
-                            "constraint": "Gauss",
-                            "data": {"hi": 1.05, "lo": 0.95},
-                        }
-                    ],
-                )
-            ],
-            params=[{"name": "lumi", "value": 0.0}],
-        )
+        ws = _single_channel_normsys_workspace()
         likelihood = next(iter(ws.likelihoods))
         model = ws.model(likelihood, progress=False)
 

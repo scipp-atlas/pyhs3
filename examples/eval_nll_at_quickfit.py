@@ -357,7 +357,7 @@ def run_one(
     dt = time.perf_counter() - t0
 
     raw_diff = pyhs3_nll - qf_nll if qf_nll is not None else None
-    diff = raw_diff + offset if raw_diff is not None else None
+    diff = raw_diff + (2 * offset) if raw_diff is not None else None
 
     return {
         "mu_HH": mu,

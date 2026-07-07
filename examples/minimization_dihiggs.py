@@ -218,11 +218,17 @@ def build_model(ws_path: Path, cache_dir: Path) -> pyhs3.Model:
         "nominalNuis",
         "POI_muhat",
     ]
+    # Dedupe by name — globs/NPs appear in default_values as well, and pyhs3
+    # rejects duplicate names in a ParameterSet (#235).  Later sets override
+    # default_values, matching collect_init_values in eval_nll_bbyy_quickfit.py.
+    collected = {
+        pp.name: pp
+        for pset_name in pset_names
+        for pp in ws.parameter_points[pset_name]
+    }
     param_set = pyhs3.parameter_points.ParameterSet(
         name="collected",
-        parameters=[
-            pp for pset_name in pset_names for pp in ws.parameter_points[pset_name]
-        ],
+        parameters=list(collected.values()),
     )
 
     print("Building symbolic model (this takes ~1 min) ...")

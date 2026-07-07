@@ -3080,6 +3080,142 @@ class TestMixtureDist:
             f"log_expression={log_val}, log(expression)={expected_log}"
         )
 
+    def test_mixture_dist_likelihood_uses_balanced_nary_add(self):
+        """likelihood()'s mixturesum and coeffsum accumulations must each be
+        built as a single balanced n-ary Add over their terms, not a
+        left-deep chain of binary additions.
+        """
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+        )
+        context = Context(
+            {
+                "pdf1": pt.constant(1.0, name="pdf1"),
+                "pdf2": pt.constant(2.0, name="pdf2"),
+                "pdf3": pt.constant(3.0, name="pdf3"),
+                "coeff1": pt.constant(0.2, name="coeff1"),
+                "coeff2": pt.constant(0.3, name="coeff2"),
+                "coeff3": pt.constant(0.5, name="coeff3"),
+            }
+        )
+
+        result = dist.likelihood(context)
+
+        # result = mixturesum / coeffsum
+        mixturesum, coeffsum = result.owner.inputs
+        assert len(mixturesum.owner.inputs) == len(dist.coefficients)
+        assert len(coeffsum.owner.inputs) == len(dist.coefficients)
+
+    def test_mixture_dist_ref_coef_norm_uses_balanced_nary_add(self):
+        """likelihood()'s ref_coef_norm normalisation sum must be built as a
+        single balanced n-ary Add, not a left-deep chain.
+        """
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+            ref_coef_norm=["coeff1", "coeff2", "coeff3"],
+        )
+        context = Context(
+            {
+                "pdf1": pt.constant(1.0, name="pdf1"),
+                "pdf2": pt.constant(2.0, name="pdf2"),
+                "pdf3": pt.constant(3.0, name="pdf3"),
+                "coeff1": pt.constant(0.2, name="coeff1"),
+                "coeff2": pt.constant(0.3, name="coeff2"),
+                "coeff3": pt.constant(0.5, name="coeff3"),
+            }
+        )
+
+        result = dist.likelihood(context)
+
+        _mixturesum, norm_sum = result.owner.inputs
+        assert len(norm_sum.owner.inputs) == len(dist.ref_coef_norm)
+
+    def test_mixture_dist_n_minus_1_likelihood_uses_balanced_nary_add(self):
+        """likelihood()'s N-1 coefficient mixturesum accumulation must be a
+        single balanced n-ary Add over all summand contributions, not a
+        left-deep chain.
+        """
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3", "pdf4"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+        )
+        context = Context(
+            {
+                "pdf1": pt.constant(1.0, name="pdf1"),
+                "pdf2": pt.constant(2.0, name="pdf2"),
+                "pdf3": pt.constant(3.0, name="pdf3"),
+                "pdf4": pt.constant(4.0, name="pdf4"),
+                "coeff1": pt.constant(0.2, name="coeff1"),
+                "coeff2": pt.constant(0.3, name="coeff2"),
+                "coeff3": pt.constant(0.1, name="coeff3"),
+            }
+        )
+
+        result = dist.likelihood(context)
+
+        # 3 pairwise coeff*summand terms plus the final (1 - coeffsum)*f_last
+        # term: 4 summands total.
+        assert len(result.owner.inputs) == len(dist.summands)
+
+    def test_mixture_dist_expected_yield_uses_balanced_nary_add(self):
+        """expected_yield()'s nu accumulation must be a single balanced
+        n-ary Add, not a left-deep chain.
+        """
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+        )
+        context = Context(
+            {
+                "pdf1": pt.constant(1.0, name="pdf1"),
+                "pdf2": pt.constant(2.0, name="pdf2"),
+                "pdf3": pt.constant(3.0, name="pdf3"),
+                "coeff1": pt.constant(0.2, name="coeff1"),
+                "coeff2": pt.constant(0.3, name="coeff2"),
+                "coeff3": pt.constant(0.5, name="coeff3"),
+            }
+        )
+
+        nu = dist.expected_yield(context)
+
+        assert len(nu.owner.inputs) == len(dist.coefficients)
+
+    def test_mixture_dist_unnormalized_expression_uses_balanced_nary_add(self):
+        """unnormalized_expression()'s fallback recompute path must build a
+        single balanced n-ary Add, not a left-deep chain.
+        """
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+        )
+        context = Context(
+            {
+                "pdf1": pt.constant(1.0, name="pdf1"),
+                "pdf2": pt.constant(2.0, name="pdf2"),
+                "pdf3": pt.constant(3.0, name="pdf3"),
+                "coeff1": pt.constant(0.2, name="coeff1"),
+                "coeff2": pt.constant(0.3, name="coeff2"),
+                "coeff3": pt.constant(0.5, name="coeff3"),
+            }
+        )
+
+        # No prior likelihood() call, so this exercises the fallback
+        # recompute path (self._cached_unnorm_expr is None).
+        unnorm = dist.unnormalized_expression(context)
+
+        assert len(unnorm.owner.inputs) == len(dist.coefficients)
+
 
 class TestHistogramDist:
     """Test HistogramDist implementation."""

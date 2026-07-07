@@ -21,6 +21,7 @@ from pydantic import (
 )
 from pytensor.graph.traversal import explicit_graph_inputs
 
+from pyhs3.base import balanced_sum
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution, LogProbTerms
 from pyhs3.typing.aliases import TensorVar
@@ -196,11 +197,13 @@ class MixtureDist(Distribution):
 
         if n_coeffs == n_summands:
             # N coefficients case: direct summation with normalization
-            mixturesum = pt.constant(0.0)
 
             # Calculate the mixture sum (unnormalized: Σ cᵢ fᵢ)
-            for i, coeff in enumerate(self.coefficients):
-                mixturesum += context[coeff] * context[self.summands[i]]
+            mixture_terms = [
+                context[coeff] * context[self.summands[i]]
+                for i, coeff in enumerate(self.coefficients)
+            ]
+            mixturesum = balanced_sum(mixture_terms, pt.constant(0.0))
 
             # Cache the unnormalized Σcᵢfᵢ so that model.log_prob can build
             # the extended log-likelihood as Σⱼ log(Σcᵢfᵢ(xⱼ)) - nu without
@@ -211,9 +214,10 @@ class MixtureDist(Distribution):
             # Handle normalization
             if self.ref_coef_norm is not None:
                 # Custom normalization using specified coefficients
-                norm_sum = pt.constant(0.0)
-                for norm_coeff in self.ref_coef_norm:
-                    norm_sum += context[norm_coeff]
+                norm_sum = balanced_sum(
+                    [context[norm_coeff] for norm_coeff in self.ref_coef_norm],
+                    pt.constant(0.0),
+                )
                 # Cache the normalisation sum so expected_yield() can reuse
                 # the same PyTensor node rather than building a duplicate
                 # summation subgraph that the compiler then has to merge.
@@ -221,29 +225,34 @@ class MixtureDist(Distribution):
                 mixturesum = mixturesum / norm_sum
             else:
                 # Standard normalization: divide by sum of all coefficients
-                coeffsum = pt.constant(0.0)
-                for coeff in self.coefficients:
-                    coeffsum += context[coeff]
+                coeffsum = balanced_sum(
+                    [context[coeff] for coeff in self.coefficients],
+                    pt.constant(0.0),
+                )
                 # Cache so expected_yield() reuses this node.
                 self._cached_nu_expr = coeffsum
                 mixturesum = mixturesum / coeffsum
 
         else:
             # N-1 coefficients case: traditional approach with automatic last term
-            mixturesum = pt.constant(0.0)
-            coeffsum = pt.constant(0.0)
+            coeffsum = balanced_sum(
+                [context[coeff] for coeff in self.coefficients], pt.constant(0.0)
+            )
 
-            # Sum the first N-1 terms
-            for i, coeff in enumerate(self.coefficients):
-                coeffsum += context[coeff]
-                mixturesum += context[coeff] * context[self.summands[i]]
+            # First N-1 terms
+            mixture_terms = [
+                context[coeff] * context[self.summands[i]]
+                for i, coeff in enumerate(self.coefficients)
+            ]
 
             # Add the last term with remaining coefficient
             last_index = len(self.summands) - 1
             f_last = context[self.summands[last_index]]
-            mixturesum += (1 - coeffsum) * f_last
+            mixture_terms.append((1 - coeffsum) * f_last)
 
-        return cast(TensorVar, mixturesum)
+            mixturesum = balanced_sum(mixture_terms, pt.constant(0.0))
+
+        return mixturesum
 
     def expected_yield(self, context: Context) -> TensorVar:
         """
@@ -271,18 +280,10 @@ class MixtureDist(Distribution):
             return self._cached_nu_expr
 
         # Fallback: likelihood() hasn't been called yet, compute fresh.
-        nu = pt.constant(0.0)
-
-        if self.ref_coef_norm is not None:
-            # Use only the coefficients specified in ref_coef_norm
-            for coeff in self.ref_coef_norm:
-                nu += context[coeff]
-        else:
-            # Use all coefficients
-            for coeff in self.coefficients:
-                nu += context[coeff]
-
-        return cast(TensorVar, nu)
+        coeff_names = (
+            self.ref_coef_norm if self.ref_coef_norm is not None else self.coefficients
+        )
+        return balanced_sum([context[coeff] for coeff in coeff_names], pt.constant(0.0))
 
     def unnormalized_expression(self, context: Context) -> TensorVar:
         """Return the unnormalized mixture Σcᵢfᵢ (before dividing by Σcᵢ).
@@ -311,10 +312,11 @@ class MixtureDist(Distribution):
             return self._cached_unnorm_expr
 
         # Fallback: recompute (likelihood() hasn't been called yet).
-        unnorm = pt.constant(0.0)
-        for i, coeff in enumerate(self.coefficients):
-            unnorm += context[coeff] * context[self.summands[i]]
-        return cast(TensorVar, unnorm)
+        unnorm_terms = [
+            context[coeff] * context[self.summands[i]]
+            for i, coeff in enumerate(self.coefficients)
+        ]
+        return balanced_sum(unnorm_terms, pt.constant(0.0))
 
     def log_prob_terms(  # pylint: disable=redefined-outer-name
         self,

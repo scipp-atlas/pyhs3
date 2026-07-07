@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 from __future__ import annotations
 
 import logging
@@ -127,6 +128,20 @@ class Model:
         # Ordered input names cached alongside _compiled_inputs so that pars()
         # and _reorder_params() avoid rebuilding the list on every pdf/logpdf call.
         self._compiled_input_names: dict[str, list[str]] = {}
+        # Log-space distribution expressions (dist.log_expression(context)), built
+        # alongside self.distributions during graph construction.  logpdf and
+        # log_prob use these to evaluate in log space so that log(prod(exp(...)))
+        # stays collapsed and does not underflow to -inf.  Compiled log functions
+        # are cached separately from the probability-space ones.
+        self.log_distributions: dict[str, TensorVar] = {}
+        self._compiled_log_functions: dict[
+            str, Callable[..., npt.NDArray[np.float64]]
+        ] = {}
+        self._compiled_log_inputs: dict[str, list[TensorVar]] = {}
+        # Ordered log-input names cached alongside _compiled_log_inputs, mirroring
+        # _compiled_input_names for the prob-space path so log_pars() avoids
+        # rebuilding the list via a comprehension on every logpdf call.
+        self._compiled_log_input_names: dict[str, list[str]] = {}
         self._likelihood = likelihood
         # Views used internally for broadcasting: leaf[:, None] for observables,
         # leaf[None, :] for non-observable vector overrides.  Distributions see
@@ -142,6 +157,11 @@ class Model:
         # so that logpdf() continues to work; log_prob uses this dict to avoid
         # double-counting constraint terms when multiple channels share a parameter.
         self._hfdc_poisson: dict[str, TensorVar] = {}
+        # Log-space counterpart of self._hfdc_poisson: the summed per-bin Poisson
+        # log-pmf for each HFDC channel.  log_prob uses this instead of
+        # log(self._hfdc_poisson[name]) so the joint NLL stays finite where the
+        # probability-space product would underflow.
+        self._hfdc_log_poisson: dict[str, TensorVar] = {}
         # Build dependency graph with proper entity identification
         self._build_dependency_graph(functions, distributions, progress)
 
@@ -267,8 +287,10 @@ class Model:
                 # tracked in https://github.com/scipp-atlas/pyhs3/issues/242
                 # (spec: hep-statistics-serialization-standard issue #93,
                 # export: root-project/root issue #22598).
-                if dist_name in self._hfdc_poisson:
-                    terms.append(pt.log(self._hfdc_poisson[dist_name]))
+                if dist_name in self._hfdc_log_poisson:
+                    # Log-space Poisson term: sum of per-bin log-pmfs, finite even
+                    # where the probability-space product underflows to 0.0.
+                    terms.append(self._hfdc_log_poisson[dist_name])
                 continue
 
             # Resolve weight tensor once for this datum.
@@ -298,7 +320,9 @@ class Model:
             # the channel-dataset pairing and applies event weights, sums
             # over events, and deduplicates constraints globally.
             contrib = self._distribution_objects[dist_name].log_prob_terms(
-                self.distributions, self._distribution_objects
+                self.distributions,
+                self.log_distributions,
+                self._distribution_objects,
             )
 
             # Sum the per-event log-density over events.  Weighted:
@@ -333,11 +357,9 @@ class Model:
         # onto the parameter-scan axis when non-scalar params are present.
         if self._likelihood.aux_distributions:
             terms.extend(
-                pt.log(
-                    self.distributions[
-                        aux_name if isinstance(aux_name, str) else aux_name.name
-                    ]
-                )
+                self.log_distributions[
+                    aux_name if isinstance(aux_name, str) else aux_name.name
+                ]
                 for aux_name in self._likelihood.aux_distributions
             )
 
@@ -470,16 +492,24 @@ class Model:
         """
         dist = distributions[node_name]
         if not isinstance(dist, HistFactoryDistChannel):
+            # Build the log-space expression once for logpdf/log_prob (collapses
+            # log(prod(exp(...))) so it does not underflow to -inf).
+            self.log_distributions[node_name] = dist.log_expression(context)
             return dist.expression(context)
 
         # Build the Poisson term and each constraint factor exactly once, then
-        # assemble both the model-level deduped constraint list and the full
-        # per-channel expression from those shared pieces.  This mirrors
-        # Distribution._expression (likelihood -> normalization -> x constraints)
-        # and HistFactoryDistChannel.extended_likelihood without rebuilding the
-        # Poisson subgraph or re-running make_constraint a second time.
+        # assemble the model-level deduped constraint list and both the
+        # probability-space and log-space per-channel expressions from those
+        # shared pieces.  This mirrors Distribution._expression/log_expression
+        # (likelihood -> normalization -> x/+ constraints) and
+        # HistFactoryDistChannel.extended_likelihood/log_extended_likelihood
+        # without rebuilding the Poisson subgraph or re-running make_constraint
+        # a second time.
         poisson = dist.likelihood(context)
         self._hfdc_poisson[node_name] = poisson
+        # Log-space Poisson-only term (sum of per-bin Poisson log-pmfs).
+        log_poisson = dist.log_likelihood(context)
+        self._hfdc_log_poisson[node_name] = log_poisson
 
         # Whether this channel participates in the active likelihood; only then
         # do its constraints feed the joint log_prob.  All channels still build
@@ -517,13 +547,25 @@ class Model:
         raw = dist._apply_normalization(poisson, context)  # pylint: disable=protected-access
         if not channel_constraints:
             extended: TensorVar = cast(TensorVar, pt.constant(1.0))
+            log_extended: TensorVar = cast(TensorVar, pt.constant(0.0))
         else:
             extended = cast(
                 TensorVar,
                 pt.prod(pt.stack(channel_constraints)),  # type: ignore[no-untyped-call]
             )
+            log_extended = cast(
+                TensorVar,
+                pt.sum(pt.stack([pt.log(c) for c in channel_constraints])),  # type: ignore[no-untyped-call]
+            )
         full = cast(TensorVar, raw * extended)
         full.name = dist.name  # Evaluable.expression sets the name
+
+        # Full per-channel log expression (Poisson + constraints) for logpdf(),
+        # assembled from the pieces built above (mirrors
+        # HistFactoryDistChannel.log_expression) instead of calling
+        # dist.log_expression(context), which would rebuild log_poisson and
+        # re-run make_constraint for every spec.
+        self.log_distributions[node_name] = cast(TensorVar, log_poisson + log_extended)
         return full
 
     def _build_dependency_graph(
@@ -617,6 +659,65 @@ class Model:
 
                 progress_bar.advance(task)
 
+    def _compile_expression(
+        self,
+        name: str,
+        expressions: dict[str, TensorVar],
+        compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]],
+        compiled_inputs: dict[str, list[TensorVar]],
+        compiled_input_names: dict[str, list[str]],
+        fn_name: str,
+    ) -> Callable[..., npt.NDArray[np.float64]]:
+        """
+        Get or create a compiled PyTensor function for an expression dict entry.
+
+        Shared by :meth:`_get_compiled_function` and
+        :meth:`_get_compiled_log_function`, which differ only in which
+        expression dict (probability-space or log-space) they compile from
+        and which cache dicts they read and populate.
+
+        Args:
+            name (str): Key into ``expressions`` and the cache dicts.
+            expressions: Distribution expressions to compile from
+                (``self.distributions`` or ``self.log_distributions``).
+            compiled_functions: Cache of compiled functions to read and populate.
+            compiled_inputs: Cache of ordered input variables to populate.
+            compiled_input_names: Cache of ordered input names to populate.
+            fn_name (str): Name to give the compiled PyTensor function.
+
+        Returns:
+            Callable: Compiled PyTensor function.
+        """
+        if name not in compiled_functions:
+            expression = expressions[name]
+
+            inputs = [
+                var
+                for var in explicit_graph_inputs([expression])
+                if var.name is not None
+            ]
+
+            # Cache the inputs list (and their names) for consistent ordering so
+            # pars()/log_pars() and _reorder_params()/_reorder_log_params() don't
+            # rebuild the name list per evaluation.
+            compiled_inputs[name] = cast(list[TensorVar], inputs)
+            compiled_input_names[name] = [
+                var.name for var in inputs if var.name is not None
+            ]
+
+            compiled_functions[name] = cast(
+                Callable[..., npt.NDArray[np.float64]],
+                function(
+                    inputs=inputs,
+                    outputs=expression,
+                    mode=self.mode,
+                    on_unused_input="ignore",
+                    name=fn_name,
+                    trust_input=True,
+                ),
+            )
+        return compiled_functions[name]
+
     def _get_compiled_function(
         self, name: str
     ) -> Callable[..., npt.NDArray[np.float64]]:
@@ -632,38 +733,41 @@ class Model:
         Returns:
             Callable: Compiled PyTensor function.
         """
-        if name not in self._compiled_functions:
-            # Get the distribution expression (already includes extended_likelihood)
-            dist_expression = self.distributions[name]
+        return self._compile_expression(
+            name,
+            self.distributions,
+            self._compiled_functions,
+            self._compiled_inputs,
+            self._compiled_input_names,
+            name,
+        )
 
-            inputs = [
-                var
-                for var in explicit_graph_inputs([dist_expression])
-                if var.name is not None
-            ]
+    def _get_compiled_log_function(
+        self, name: str
+    ) -> Callable[..., npt.NDArray[np.float64]]:
+        """
+        Get or create a compiled PyTensor function for a distribution's log-PDF.
 
-            # Cache the inputs list (and their names) for consistent ordering so
-            # pars()/_reorder_params don't rebuild the name list per evaluation.
-            self._compiled_inputs[name] = cast(list[TensorVar], inputs)
-            self._compiled_input_names[name] = [
-                var.name for var in inputs if var.name is not None
-            ]
+        Mirrors :meth:`_get_compiled_function` but compiles the log-space
+        expression (``self.log_distributions[name]``) instead of the
+        probability-space one.  Evaluating in log space keeps
+        ``log(prod(exp(...)))`` collapsed so it does not underflow to ``-inf``
+        for HistFactory channels with many bins or large expected counts.
 
-            # Use the specified PyTensor mode
-            compilation_mode = self.mode
+        Args:
+            name (str): Name of the distribution.
 
-            self._compiled_functions[name] = cast(
-                Callable[..., npt.NDArray[np.float64]],
-                function(
-                    inputs=inputs,
-                    outputs=dist_expression,
-                    mode=compilation_mode,
-                    on_unused_input="ignore",
-                    name=name,
-                    trust_input=True,
-                ),
-            )
-        return self._compiled_functions[name]
+        Returns:
+            Callable: Compiled PyTensor function returning the log-PDF.
+        """
+        return self._compile_expression(
+            name,
+            self.log_distributions,
+            self._compiled_log_functions,
+            self._compiled_log_inputs,
+            self._compiled_log_input_names,
+            f"log_{name}",
+        )
 
     def pdf_unsafe(
         self,
@@ -758,7 +862,11 @@ class Model:
         Example:
             >>> model.logpdf_unsafe("gauss", x=1.5, mu=0.0, sigma=1.0)  # floats ok  # doctest: +SKIP
         """
-        return np.log(self.pdf_unsafe(name, **parametervalues))
+        # Convert all parameter values to numpy arrays
+        converted_params = {
+            key: ensure_array(value) for key, value in parametervalues.items()
+        }
+        return self.logpdf(name, **converted_params)
 
     def logpdf(
         self, name: str, **parametervalues: npt.NDArray[np.float64]
@@ -768,6 +876,11 @@ class Model:
 
         This method requires all parameter values to be numpy arrays with dtype float64.
         For automatic type conversion, use :meth:`logpdf_unsafe` instead.
+
+        The logarithm is evaluated in log space via a compiled log-PDF function
+        (``log(prod(exp(...)))`` stays collapsed), so the result remains finite
+        for HistFactory channels where the probability-space ``pdf`` underflows
+        to ``0.0``.
 
         Args:
             name (str): Name of the distribution to evaluate.
@@ -787,7 +900,37 @@ class Model:
             >>> import numpy as np
             >>> model.logpdf("gauss", x=np.array(1.5), mu=np.array(0.0), sigma=np.array(1.0))  # doctest: +SKIP
         """
-        return np.log(self.pdf(name, **parametervalues))
+        func = self._get_compiled_log_function(name)
+        positional_values = self._reorder_log_params(name, parametervalues)
+        return func(*positional_values)
+
+    def _get_pars(
+        self,
+        name: str,
+        compiled_input_names: dict[str, list[str]],
+        compile_fn: Callable[[str], Callable[..., npt.NDArray[np.float64]]],
+    ) -> list[str]:
+        """
+        Get the ordered input parameter names, compiling to populate the cache
+        if needed.
+
+        Shared by :meth:`pars` and :meth:`log_pars`, which differ only in
+        which cache dict and which compilation method populate it.
+
+        Args:
+            name: Distribution name
+            compiled_input_names: Cache of ordered input names to read/populate
+                (``self._compiled_input_names`` or ``self._compiled_log_input_names``).
+            compile_fn: Compilation method to call to populate the cache
+                (:meth:`_get_compiled_function` or :meth:`_get_compiled_log_function`).
+
+        Returns:
+            List of parameter names in the cached order
+        """
+        if name not in compiled_input_names:
+            # Trigger compilation to populate cache
+            compile_fn(name)
+        return compiled_input_names[name]
 
     def pars(self, name: str) -> list[str]:
         """
@@ -807,10 +950,9 @@ class Model:
             >>> model.pars("model_singlechannel") # doctest: +SKIP
             ['uncorr_bkguncrt_1', 'uncorr_bkguncrt_0', 'model_singlechannel_observed', 'mu', 'Lumi']
         """
-        if name not in self._compiled_input_names:
-            # Trigger compilation to populate cache
-            self._get_compiled_function(name)
-        return self._compiled_input_names[name]
+        return self._get_pars(
+            name, self._compiled_input_names, self._get_compiled_function
+        )
 
     def parsort(self, name: str, names: list[str]) -> list[int]:
         """
@@ -830,6 +972,30 @@ class Model:
         """
         return [names.index(par) for par in self.pars(name)]
 
+    def _reorder_by_pars(
+        self,
+        name: str,
+        params: Mapping[str, npt.NDArray[np.float64]],
+        pars_fn: Callable[[str], list[str]],
+    ) -> list[npt.NDArray[np.float64]]:
+        """
+        Reorder parameters to match an input order.
+
+        Shared by :meth:`_reorder_params` and :meth:`_reorder_log_params`,
+        which differ only in which method supplies the input order.
+
+        Args:
+            name: Distribution name
+            params: Dictionary of parameter values (numpy arrays)
+            pars_fn: Method supplying the ordered input names (:meth:`pars`
+                or :meth:`log_pars`).
+
+        Returns:
+            List of values in the order given by ``pars_fn``
+        """
+        input_order = pars_fn(name)
+        return [params[param_name] for param_name in input_order]
+
     def _reorder_params(
         self,
         name: str,
@@ -845,8 +1011,42 @@ class Model:
         Returns:
             List of values in the correct order for the compiled function
         """
-        input_order = self.pars(name)
-        return [params[param_name] for param_name in input_order]
+        return self._reorder_by_pars(name, params, self.pars)
+
+    def log_pars(self, name: str) -> list[str]:
+        """
+        Get the ordered input parameter names for a distribution's log-PDF.
+
+        Like :meth:`pars`, but for the compiled log-PDF function (:meth:`logpdf`).
+        The log-space expression can have a different set or ordering of inputs
+        than the probability-space one, so it has its own cached ordering.
+
+        Args:
+            name: Distribution name
+
+        Returns:
+            List of parameter names in the order expected by logpdf()
+        """
+        return self._get_pars(
+            name, self._compiled_log_input_names, self._get_compiled_log_function
+        )
+
+    def _reorder_log_params(
+        self,
+        name: str,
+        params: Mapping[str, npt.NDArray[np.float64]],
+    ) -> list[npt.NDArray[np.float64]]:
+        """
+        Reorder parameters to match the input order of a distribution's log-PDF.
+
+        Args:
+            name: Distribution name
+            params: Dictionary of parameter values (numpy arrays)
+
+        Returns:
+            List of values in the correct order for the compiled log function
+        """
+        return self._reorder_by_pars(name, params, self.log_pars)
 
     def visualize_graph(
         self,

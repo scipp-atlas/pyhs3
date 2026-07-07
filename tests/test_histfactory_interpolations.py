@@ -837,3 +837,77 @@ class TestInterpolationPyhfComparison:
             assert vector_vals == pytest.approx(scalar_vals, rel=1e-6), (
                 f"Vector/scalar mismatch for {method_name}"
             )
+
+
+class TestCode2BoundaryDiscontinuity:
+    """Characterization tests pinning interpolate_code2's pyhf-faithful boundary behavior.
+
+    interpolate_code2's linear extrapolation branches (|alpha| > 1) omit the
+    "+ (hi - nom)" / "+ (lo - nom)" offset that interpolate_parabolic includes,
+    which makes it discontinuous at alpha=+-1. This is intentional: it reproduces
+    pyhf's code2 interpolator exactly, including its reference "slow" formula
+    (pyhf/interpolators/code2.py::_slow_code2.summand), which is itself
+    discontinuous there. ROOT's FlexibleInterpVar code 2 does include the offset
+    and is continuous -- see interpolate_parabolic for that behavior instead.
+    These tests pin the numeric values just inside/outside the boundary so any
+    future change to this deliberate behavior is caught explicitly.
+    """
+
+    def test_discontinuity_at_positive_boundary(self):
+        """Pin values approaching alpha=1 from both sides to show the jump."""
+        nom = pt.constant(1.0)
+        hi = pt.constant(2.0)
+        lo = pt.constant(0.5)
+
+        just_below = interpolate_code2(pt.constant(0.999), nom, hi, lo).eval()
+        at_boundary = interpolate_code2(pt.constant(1.0), nom, hi, lo).eval()
+        just_above = interpolate_code2(pt.constant(1.001), nom, hi, lo).eval()
+
+        assert just_below == pytest.approx(1.99875025)
+        assert at_boundary == pytest.approx(2.0)
+        # Discontinuous: the extrapolation branch resets towards `nom` instead
+        # of continuing from `hi` as alpha crosses 1.
+        assert just_above == pytest.approx(1.0012499999999998)
+        assert abs(just_above - at_boundary) > 0.9  # sanity check on the jump
+
+    def test_discontinuity_at_negative_boundary(self):
+        """Pin values approaching alpha=-1 from both sides to show the jump."""
+        nom = pt.constant(1.0)
+        hi = pt.constant(2.0)
+        lo = pt.constant(0.5)
+
+        just_above = interpolate_code2(pt.constant(-0.999), nom, hi, lo).eval()
+        at_boundary = interpolate_code2(pt.constant(-1.0), nom, hi, lo).eval()
+        just_below = interpolate_code2(pt.constant(-1.001), nom, hi, lo).eval()
+
+        assert just_above == pytest.approx(0.50025025)
+        assert at_boundary == pytest.approx(0.5)
+        # Discontinuous: the extrapolation branch resets towards `nom` instead
+        # of continuing from `lo` as alpha crosses -1.
+        assert just_below == pytest.approx(0.99975)
+        assert abs(just_below - at_boundary) > 0.4  # sanity check on the jump
+
+    def test_matches_pyhf_slow_code2_reference(self):
+        """interpolate_code2 must numerically match pyhf's canonical reference formula.
+
+        Values from pyhf.interpolators.code2._slow_code2.summand(down=0.5, nom=1.0,
+        up=2.0, alpha) for alpha in {0.999, 1.0, 1.001, -0.999, -1.0, -1.001}.
+        """
+        nom = pt.constant(1.0)
+        hi = pt.constant(2.0)
+        lo = pt.constant(0.5)
+
+        pyhf_reference = {
+            0.999: 1.99875025,
+            1.0: 2.0,
+            1.001: 1.0012499999999998,
+            -0.999: 0.50025025,
+            -1.0: 0.5,
+            -1.001: 0.99975,
+        }
+
+        for alpha_val, expected in pyhf_reference.items():
+            result = interpolate_code2(pt.constant(alpha_val), nom, hi, lo).eval()
+            assert result == pytest.approx(expected), (
+                f"alpha={alpha_val}: got {result}, pyhf reference={expected}"
+            )

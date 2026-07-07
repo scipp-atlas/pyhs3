@@ -291,6 +291,20 @@ def interpolate_code2(
         \end{cases}
 
     with :math:`a = \frac{1}{2}((I^+ - I^0) + (I^- - I^0))` and :math:`b = \frac{1}{2}((I^+ - I^0) - (I^- - I^0))`.
+
+    .. note::
+
+        This is deliberately discontinuous at :math:`\alpha = \pm 1`: the linear
+        extrapolation branches omit the ``+ (hi - nom)`` / ``+ (lo - nom)`` offset
+        that would make them meet the quadratic branch. This faithfully reproduces
+        pyhf's ``code2`` interpolator, whose reference ("slow") implementation
+        computes exactly the same unshifted extrapolation
+        (``pyhf/interpolators/code2.py::_slow_code2.summand``, scikit-hep/pyhf,
+        e.g. https://github.com/scikit-hep/pyhf/blob/main/src/pyhf/interpolators/code2.py).
+        ROOT's ``FlexibleInterpVar``/``PiecewiseInterpolation`` code 2
+        (``RooFit::Detail::MathFuncs::flexibleInterpSingle``) *does* include the
+        offset and is therefore continuous at the boundary -- see
+        :func:`interpolate_parabolic` for that variant.
     """
     # Calculate quadratic coefficients
     hi_delta = hi - nom
@@ -302,7 +316,10 @@ def interpolate_code2(
     # Quadratic interpolation for |alpha| < 1
     quad_result = nom + a * alpha**2 + b * alpha
 
-    # Linear extrapolation for |alpha| >= 1
+    # Linear extrapolation for |alpha| >= 1.
+    # Intentionally omits the "+ hi_delta" / "+ lo_delta" offset (unlike
+    # interpolate_parabolic): pyhf's code2 extrapolation is discontinuous at
+    # alpha=+-1 by construction, and this mirrors that behavior exactly.
     high_ext = nom + (b + 2 * a) * (alpha - 1)
     low_ext = nom + (b - 2 * a) * (alpha + 1)
 

@@ -10,25 +10,30 @@ The ``diff = pyhs3_nll - qf_nll`` column is expected to be a constant offset
 across the scan; how far it deviates from constant (the max absolute residual
 about its mean) measures how well pyhs3 reproduces quickFit for a workspace.
 
-Usage:
-    # single workspace/scan (detailed table)
-    python eval_simple_muscan.py
-    python eval_simple_muscan.py --workspace ../quickFit/simple_workspace.json \\
-                                  --scan     ../quickFit/muscan.json
+Workspace names are fully-specified by workspace-scripts/workflow.sh: every
+make_workspace.py option is spelled out in the stem, e.g.
+``3ch_bkgRooExp_sigGauss_shapeFloat_npOn_constrGauss_yield1x``. Each scan is
+``scans/<stem>_muscan.json`` and each workspace is ``workspaces/<stem>.json``.
 
-    # compare several workspaces, each with its own scan, and rank by how
-    # all comparisons:
+Usage:
+    # single workspace/scan (detailed table; defaults to the 3ch base variant)
+    python eval_simple_muscan.py
+    python eval_simple_muscan.py \\
+        --workspace ../workspace-scripts/workspaces/3ch_bkgRooExp_sigGauss_shapeFloat_npOn_constrGauss_yield1x.json \\
+        --scan      ../workspace-scripts/scans/3ch_bkgRooExp_sigGauss_shapeFloat_npOn_constrGauss_yield1x_muscan.json
+
+    # compare several workspaces, each with its own scan (run from the pyhs3
+    # repo root, so ../workspace-scripts resolves to the sibling checkout):
     pixi run python examples/eval_simple_muscan.py \
-        --pair ../workspace-scripts/simple_workspace.json ../workspace-scripts/muscan.json \
-        --pair ../workspace-scripts/simple_workspace_generic.json ../workspace-scripts/muscan_generic.json \
-        --pair ../workspace-scripts/simple_workspace_noaux.json ../workspace-scripts/muscan.json \
-        --pair ../workspace-scripts/simple_workspace_nonp.json ../workspace-scripts/muscan_nonp.json \
-        --pair ../workspace-scripts/simple_workspace_generic_fixshape.json ../workspace-scripts/muscan_generic_fixshape.json \
-        --pair ../workspace-scripts/simple_workspace_generic_nonp.json ../workspace-scripts/muscan_generic_nonp.json \
-        --pair ../workspace-scripts/simple_workspace_generic_poly.json ../workspace-scripts/muscan_generic_poly.json \
-        --pair ../workspace-scripts/simple_workspace_gensig.json ../workspace-scripts/muscan_gensig.json \
-        --pair ../workspace-scripts/simple_workspace_poisson.json ../workspace-scripts/muscan_poisson.json \
-        --pair ../workspace-scripts/simple_workspace_noconstr.json ../workspace-scripts/muscan_noconstr.json \
+        --pair ../workspace-scripts/workspaces/3ch_bkgRooExp_sigGauss_shapeFloat_npOn_constrGauss_yield1x.json ../workspace-scripts/scans/3ch_bkgRooExp_sigGauss_shapeFloat_npOn_constrGauss_yield1x_muscan.json \
+        --pair ../workspace-scripts/workspaces/3ch_bkgGenExp_sigGauss_shapeFloat_npOn_constrGauss_yield1x.json ../workspace-scripts/scans/3ch_bkgGenExp_sigGauss_shapeFloat_npOn_constrGauss_yield1x_muscan.json \
+        --pair ../workspace-scripts/workspaces/3ch_bkgRooExp_sigGauss_shapeFloat_npOff_constrGauss_yield1x.json ../workspace-scripts/scans/3ch_bkgRooExp_sigGauss_shapeFloat_npOff_constrGauss_yield1x_muscan.json \
+        --pair ../workspace-scripts/workspaces/3ch_bkgGenExp_sigGauss_shapeFixed_npOn_constrGauss_yield1x.json ../workspace-scripts/scans/3ch_bkgGenExp_sigGauss_shapeFixed_npOn_constrGauss_yield1x_muscan.json \
+        --pair ../workspace-scripts/workspaces/3ch_bkgGenExp_sigGauss_shapeFloat_npOff_constrGauss_yield1x.json ../workspace-scripts/scans/3ch_bkgGenExp_sigGauss_shapeFloat_npOff_constrGauss_yield1x_muscan.json \
+        --pair ../workspace-scripts/workspaces/3ch_bkgGenPoly_sigGauss_shapeFloat_npOn_constrGauss_yield1x.json ../workspace-scripts/scans/3ch_bkgGenPoly_sigGauss_shapeFloat_npOn_constrGauss_yield1x_muscan.json \
+        --pair ../workspace-scripts/workspaces/3ch_bkgRooExp_sigGeneric_shapeFloat_npOn_constrGauss_yield1x.json ../workspace-scripts/scans/3ch_bkgRooExp_sigGeneric_shapeFloat_npOn_constrGauss_yield1x_muscan.json \
+        --pair ../workspace-scripts/workspaces/3ch_bkgRooExp_sigGauss_shapeFloat_npOn_constrPoisson_yield1x.json ../workspace-scripts/scans/3ch_bkgRooExp_sigGauss_shapeFloat_npOn_constrPoisson_yield1x_muscan.json \
+        --pair ../workspace-scripts/workspaces/3ch_bkgRooExp_sigGauss_shapeFloat_npOn_constrNone_yield1x.json ../workspace-scripts/scans/3ch_bkgRooExp_sigGauss_shapeFloat_npOn_constrNone_yield1x_muscan.json \
 """
 
 from __future__ import annotations
@@ -45,22 +50,30 @@ from pytensor.graph.traversal import explicit_graph_inputs
 from pyhs3 import Workspace
 from pyhs3.model import Model
 
+from plot_residuals import FIELDS
+
 _HERE = Path(__file__).resolve().parent
-_DEFAULT_WS = _HERE.parent / "workspace-scripts" / "simple_workspace.json"
-_DEFAULT_SCAN = _HERE.parent / "workspace-scripts" / "muscan.json"
+# workspace-scripts is a sibling of the pyhs3 repo (git-projects/workspace-scripts),
+# so go up two levels from examples/ (examples -> pyhs3 -> git-projects).
+_WS_SCRIPTS = _HERE.parent.parent / "workspace-scripts"
+_DEFAULT_STEM = "3ch_bkgRooExp_sigGauss_shapeFloat_npOn_constrGauss_yield1x"
+_DEFAULT_WS = _WS_SCRIPTS / "workspaces" / f"{_DEFAULT_STEM}.json"
+_DEFAULT_SCAN = _WS_SCRIPTS / "scans" / f"{_DEFAULT_STEM}_muscan.json"
 
 # Sentinel for a bare ``--plot`` flag: the output path is derived from the
 # workspace name in main() (where the workspace is known).
 _PLOT_DEFAULT = object()
 
 
-def _default_plot_path(results: list[dict]) -> Path:
+def _default_nll_plot_path(results: list[dict]) -> Path:
     """Default PDF path: ``<workspace stem>_nlls.pdf`` next to this script.
 
     Uses the first workspace's name when several are plotted together.
     """
-    stem = Path(results[0]["workspace"]).stem
-    return _HERE / f"{stem}_nlls.pdf"
+    return _HERE / f"all_nll_comparisons.pdf"
+
+def _default_resid_plot_path(results: list[dict]) -> Path:
+    return _HERE / f"residual_comparison.pdf"
 
 
 def build_channel_models(ws_path: Path) -> list[tuple[Model, dict]]:
@@ -127,6 +140,11 @@ def run_scan(ws_path: Path, scan_path: Path, *, verbose: bool = True) -> dict:
     for model, _ in channel_models:
         nominal.update(model.free_params)
 
+    num_channels = len(channel_models)
+    num_events = sum(
+        int(np.asarray(arr).size) for model, _ in channel_models for arr in model.data.values()
+    )
+
     if verbose:
         print(f"\nLoading scan points from {scan_path} ...")
     with scan_path.open() as fh:
@@ -160,7 +178,7 @@ def run_scan(ws_path: Path, scan_path: Path, *, verbose: bool = True) -> dict:
             params[name] = val
 
         pyhs3_nll = eval_nll(channel_models, params)
-        diff = pyhs3_nll - qf_nll
+        diff = pyhs3_nll - qf_nll + num_events * np.log(num_channels)
         mus.append(mu)
         qf_nlls.append(qf_nll)
         pyhs3_nlls.append(pyhs3_nll)
@@ -172,7 +190,7 @@ def run_scan(ws_path: Path, scan_path: Path, *, verbose: bool = True) -> dict:
     diff_arr = np.asarray(diffs, dtype=np.float64)
     mean_offset = float(diff_arr.mean())
     resid = diff_arr - mean_offset
-    max_abs_resid = float(np.abs(resid).max())
+    max_abs_resid = float(resid[np.abs(resid).argmax()]) 
 
     if verbose:
         pyhs3_nll_min = min(pyhs3_nlls)
@@ -213,7 +231,7 @@ def main() -> None:
         "constant-offset summary is printed.",
     )
     parser.add_argument(
-        "--plot",
+        "--plot-nll",
         nargs="?",
         const=_PLOT_DEFAULT,
         default=None,
@@ -223,19 +241,54 @@ def main() -> None:
         "panel per workspace. Pass a path to override the default "
         "(<workspace name>_nlls.pdf next to this script).",
     )
+    parser.add_argument(
+        "--plot-resid",
+        nargs="?",
+        const=_PLOT_DEFAULT,
+        default=None,
+        type=Path,
+        metavar="PATH",
+        help="Plot curves of the residuals and mean offsets of all evaluated workspaces",
+    )
+    parser.add_argument(
+        "--plot-resid-field",
+        nargs="+",
+        default=["channels"],
+        choices=FIELDS,
+        metavar="FIELD",
+        help= "specify the field for x labels on data",
+    )
+    parser.add_argument(
+        "--plot-resid-log-x",
+        action="store_true",
+        help="enables log scale for the x-axis in a residual plot",
+    )
+    parser.add_argument(
+        "--plot-resid-log-y",
+        action="store_true",
+        help="enables log scale for the y-axis in a residual plot",
+    )
     args = parser.parse_args()
 
     if not args.pair:
         result = run_scan(args.workspace, args.scan, verbose=True)
-        if args.plot is not None:
+        if args.plot_nll is not None:
             from plot_muscan_nll import plot_nll_curves  # noqa: PLC0415
 
             out = (
-                _default_plot_path([result])
-                if args.plot is _PLOT_DEFAULT
-                else args.plot
+                _default_nll_plot_path([result])
+                if args.plot_nll is _PLOT_DEFAULT
+                else args.plot_nll
             )
             plot_nll_curves([result], out)
+        if args.plot_resid is not None:
+            from plot_residuals.py import plot_residual_and_offset
+
+            out = (
+                _default_resid_plot_path([result])
+                if args.plot_resid is _PLOT_DEFAULT
+                else args.plot_resid
+            )
         return
 
     results = []
@@ -246,23 +299,33 @@ def main() -> None:
         print("=" * 72)
         results.append(run_scan(ws_path, scan_path, verbose=True))
 
-    if args.plot is not None:
+    if args.plot_nll is not None:
         from plot_muscan_nll import plot_nll_curves  # noqa: PLC0415
 
-        out = _default_plot_path(results) if args.plot is _PLOT_DEFAULT else args.plot
+        out = _default_nll_plot_path(results) if args.plot_nll is _PLOT_DEFAULT else args.plot_nll
         plot_nll_curves(results, out)
 
+    if args.plot_resid is not None:
+        from plot_residuals import plot_residual_and_offset 
+
+        out = _default_resid_plot_path(results) if args.plot_resid is _PLOT_DEFAULT else args.plot_resid
+        plot_residual_and_offset(results, out, label_field=args.plot_resid_field, log_x=args.plot_resid_log_x, log_y=args.plot_resid_log_y)
+
     # Rank by how flat the diff is: smaller max |residual| == closer to constant.
-    results.sort(key=lambda r: r["max_abs_resid"])
-    print("\n" + "=" * 72)
+    results.sort(key=lambda r: abs(r["max_abs_resid"]))
+
+    name_width = max(len("workspace"), *(len(r["workspace"].name) for r in results))
+    off_width, res_width = 14, 11
+
+    header = f"{'workspace':<{name_width}}  {'mean offset':>{off_width}}  {'max |resid|':>{res_width}}"
+    print("\n" + "=" * len(header))
     print("CONSTANT-OFFSET SUMMARY  (sorted: flattest diff first)")
-    print("=" * 72)
-    header = f"{'workspace':<40}  {'mean offset':>14}  {'max |resid|':>14}"
+    print("=" * len(header))
     print(header)
     print("-" * len(header))
     for r in results:
         name = r["workspace"].name
-        print(f"{name:<40}  {r['mean_offset']:>14.6f}  {r['max_abs_resid']:>14.3e}")
+        print(f"{name:<{name_width}}  {r['mean_offset']:>{off_width}.3e}  {r['max_abs_resid']:>{res_width}.3e}")
 
 
 if __name__ == "__main__":

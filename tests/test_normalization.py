@@ -11,6 +11,7 @@ import pytest
 from pydantic import (
     ConfigDict,
     Field,
+    PrivateAttr,
 )
 
 from pyhs3.axes import RegularAxis
@@ -242,6 +243,35 @@ class TestDistributionNormalization:
         log_func = function([x_var], log_result)
         assert pytest.approx(log_func(np.array([1.0]))[0]) == np.log(0.02)
         assert pytest.approx(log_func(np.array([10.0]))[0]) == np.log(0.2)
+
+    def test_normalizable_false_skips_log_expression_normalization(self):
+        """_normalizable = False: log_expression() skips normalization entirely,
+        even with a matching observable in context -- it must not evaluate
+        likelihood() a second time or attempt to build a normalization integral."""
+
+        class NonNormalizableDist(Distribution):
+            _parameters: ClassVar = {"x": "x"}
+            _normalizable: bool = PrivateAttr(default=False)
+            model_config = ConfigDict(
+                arbitrary_types_allowed=True, serialize_by_alias=True
+            )
+
+            type: Literal["non_normalizable_dist"] = Field(
+                default="non_normalizable_dist", repr=False
+            )
+
+            def likelihood(self, context: Context) -> TensorVar:
+                return context["x"]
+
+        dist = NonNormalizableDist(name="test", expression="x")
+        x_var = pt.vector("x")
+        # An observable matching "x" is present, but _normalizable=False must
+        # short-circuit before any normalization machinery is invoked.
+        context = Context(parameters={"x": x_var}, observables={"x": (0, 10)})
+
+        log_result = dist.log_expression(context)
+        log_func = function([x_var], log_result)
+        assert pytest.approx(log_func(np.array([2.0]))[0]) == np.log(2.0)
 
     def test_composite_dist_not_normalized(self):
         """MixtureDist uses components but doesn't re-normalize."""

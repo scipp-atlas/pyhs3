@@ -6,8 +6,12 @@ Tests for NamedDiGraph class and dependency graph utilities.
 
 from __future__ import annotations
 
+from typing import Literal
+
 import pytest
 
+from pyhs3.base import Evaluable
+from pyhs3.context import Context
 from pyhs3.distributions import GaussianDist
 from pyhs3.exceptions import DuplicateEntityError
 from pyhs3.functions import GenericFunction, ProductFunction
@@ -19,6 +23,7 @@ from pyhs3.networks import (
     build_entity_mappings,
 )
 from pyhs3.parameter_points import ParameterPoint, ParameterSet
+from pyhs3.typing.aliases import TensorVar
 
 
 class TestNamedDiGraph:
@@ -323,6 +328,41 @@ class TestBuildEntityMappings:
         entity_types, _ = build_entity_mappings(parameterset, [], [dist])
         assert entity_types["mu"] == "parameter"
         assert entity_types["gauss"] == "distribution"
+
+    def test_constant_name_collision_across_entities_raises(self):
+        """Two distinct (entity, field) pairs must not silently map to the
+        same auto-generated constant name.
+
+        ``constant_{name}_{field}`` is ambiguous when names contain
+        underscores: entity "a_b" field "c" and entity "a" field "b_c" both
+        produce "constant_a_b_c". Today this silently overwrites one
+        constant's value with the other's in ``constants_map`` (last-wins);
+        it must instead raise, mirroring how other entity-name collisions
+        are handled by ``_claim``.
+        """
+
+        class EntityWithC(Evaluable):
+            type: Literal["test"] = "test"
+            c: float
+
+            def _expression(self, _: Context) -> TensorVar:
+                """Dummy implementation; not evaluated in this test."""
+                raise NotImplementedError
+
+        class EntityWithBC(Evaluable):
+            type: Literal["test"] = "test"
+            b_c: float
+
+            def _expression(self, _: Context) -> TensorVar:
+                """Dummy implementation; not evaluated in this test."""
+                raise NotImplementedError
+
+        parameterset = ParameterSet(name="params", parameters=[])
+        entity_ab = EntityWithC(name="a_b", c=1.0)
+        entity_a = EntityWithBC(name="a", b_c=2.0)
+
+        with pytest.raises(DuplicateEntityError, match="constant_a_b_c"):
+            build_entity_mappings(parameterset, [entity_ab, entity_a], [])
 
     def test_modifier_shadowing_distribution_raises(self):
         """A modifier whose name collides with a distribution is flagged as duplicate."""

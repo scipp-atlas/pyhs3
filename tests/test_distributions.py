@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+from itertools import pairwise
 
 import numpy as np
 import pytensor.tensor as pt
@@ -445,6 +446,175 @@ class TestAsymmetricCrystalBallDist:
         # Value should be positive and finite
         assert result_val > 0
         assert np.isfinite(result_val)
+
+    @staticmethod
+    def _make_dist_and_context(shape_params, lower, upper, vector_obs=False):
+        """Build an AsymmetricCrystalBallDist with observable m."""
+        dist = AsymmetricCrystalBallDist(
+            name="test_crystal",
+            alpha_L="alpha_L",
+            alpha_R="alpha_R",
+            m="m",
+            m0="m0",
+            n_L="n_L",
+            n_R="n_R",
+            sigma_L="sigma_L",
+            sigma_R="sigma_R",
+        )
+        m_var = (
+            pt.vector("m", dtype="float64")
+            if vector_obs
+            else pt.scalar("m", dtype="float64")
+        )
+        parameters = {"m": m_var}
+        # Force float64: A_L = (n/alpha)^n overflows float32 for large n
+        parameters.update(
+            {
+                name: pt.constant(value, name=name, dtype="float64")
+                for name, value in shape_params.items()
+            }
+        )
+        context = Context(
+            parameters=parameters,
+            observables={
+                "m": (
+                    pt.constant(lower, name="m_lower", dtype="float64"),
+                    pt.constant(upper, name="m_upper", dtype="float64"),
+                )
+            },
+        )
+        return dist, context, m_var
+
+    @pytest.mark.parametrize(
+        "shape_params",
+        [
+            # bbyy-like asymmetric shape with fractional exponents
+            {
+                "alpha_L": 1.2,
+                "alpha_R": 1.7,
+                "m0": 125.0,
+                "n_L": 5.3,
+                "n_R": 9.1,
+                "sigma_L": 1.5,
+                "sigma_R": 2.0,
+            },
+            # logarithmic antiderivative branch on both tails
+            {
+                "alpha_L": 1.0,
+                "alpha_R": 1.5,
+                "m0": 125.0,
+                "n_L": 1.0,
+                "n_R": 1.0,
+                "sigma_L": 1.4,
+                "sigma_R": 1.4,
+            },
+            # heavy tails with small alpha (junctions close to the peak)
+            {
+                "alpha_L": 0.5,
+                "alpha_R": 0.8,
+                "m0": 125.0,
+                "n_L": 30.0,
+                "n_R": 2.5,
+                "sigma_L": 2.5,
+                "sigma_R": 1.1,
+            },
+        ],
+        ids=["asymmetric-fractional-n", "n-equals-one", "small-alpha-heavy-tail"],
+    )
+    def test_asymmetric_crystal_analytic_normalization_matches_quadrature(
+        self, shape_params
+    ):
+        """Analytic antiderivative matches adaptive quadrature of the raw PDF."""
+        scipy_integrate = pytest.importorskip("scipy.integrate")
+
+        lower, upper = 105.0, 160.0
+        dist, context, m_var = self._make_dist_and_context(shape_params, lower, upper)
+
+        raw = dist.likelihood(context)
+        raw_fn = function([m_var], raw)
+
+        antideriv = dist.normalization_expression(context, "m")
+        assert antideriv is not None
+        antideriv_fn = function([m_var], antideriv)
+
+        analytic = antideriv_fn(upper) - antideriv_fn(lower)
+        # Integrate piecewise so quad sees smooth integrands between junctions
+        m0 = shape_params["m0"]
+        junctions = sorted(
+            {
+                lower,
+                m0 - shape_params["alpha_L"] * shape_params["sigma_L"],
+                m0,
+                m0 + shape_params["alpha_R"] * shape_params["sigma_R"],
+                upper,
+            }
+        )
+        numeric = sum(
+            scipy_integrate.quad(raw_fn, a, b, epsabs=1e-13, epsrel=1e-13)[0]
+            for a, b in pairwise(junctions)
+            if lower <= a < b <= upper
+        )
+
+        # The single-interval Gauss-Legendre fallback this replaces was only
+        # accurate to ~1e-4..1e-3 relative; the antiderivative agrees with
+        # adaptive quadrature to quad's own precision.
+        np.testing.assert_allclose(analytic, numeric, rtol=1e-8)
+
+    def test_asymmetric_crystal_normalized_expression_integrates_to_one(self):
+        """Normalized DSCB expression integrates to 1 over the observable domain."""
+        shape_params = {
+            "alpha_L": 1.2,
+            "alpha_R": 1.7,
+            "m0": 125.0,
+            "n_L": 5.3,
+            "n_R": 9.1,
+            "sigma_L": 1.5,
+            "sigma_R": 2.0,
+        }
+        lower, upper = 105.0, 160.0
+        dist, context, m_var = self._make_dist_and_context(
+            shape_params, lower, upper, vector_obs=True
+        )
+
+        normalized = dist.expression(context)
+        fn = function([m_var], normalized)
+
+        xs = np.linspace(lower, upper, 200001)
+        ys = fn(xs)
+        integral = np.trapezoid(ys, xs)
+        # atol limited by trapezoid resolution; still well below the ~1e-4
+        # error of the previous quadrature fallback
+        assert np.isclose(integral, 1.0, atol=1e-6)
+
+    def test_asymmetric_crystal_antiderivative_continuous_at_junctions(self):
+        """Antiderivative is continuous across the core/tail junctions."""
+        shape_params = {
+            "alpha_L": 1.2,
+            "alpha_R": 1.7,
+            "m0": 125.0,
+            "n_L": 5.3,
+            "n_R": 9.1,
+            "sigma_L": 1.5,
+            "sigma_R": 2.0,
+        }
+        dist, context, m_var = self._make_dist_and_context(shape_params, 105.0, 160.0)
+
+        antideriv = dist.normalization_expression(context, "m")
+        antideriv_fn = function([m_var], antideriv)
+
+        m0 = shape_params["m0"]
+        junctions = [
+            m0 - shape_params["alpha_L"] * shape_params["sigma_L"],
+            m0,
+            m0 + shape_params["alpha_R"] * shape_params["sigma_R"],
+        ]
+        # F' = f <= 1, so |F(j+eps) - F(j-eps)| ~ 2*eps from the slope alone;
+        # a jump from a wrong matching constant would be O(1)
+        eps = 1e-9
+        for junction in junctions:
+            below = antideriv_fn(junction - eps)
+            above = antideriv_fn(junction + eps)
+            np.testing.assert_allclose(below, above, rtol=0, atol=1e-8)
 
 
 class TestGenericDist:

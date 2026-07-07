@@ -484,6 +484,315 @@ class TestHFDCLogProb:
 
 
 # ---------------------------------------------------------------------------
+# Regression tests: BB-lite staterror channels build through Model (#255)
+# ---------------------------------------------------------------------------
+
+
+class TestBBLiteStaterrorModelBuild:
+    """Regression tests for issue #255.
+
+    ``Model._build_distribution_node``'s HFDC constraint loop previously
+    called ``modifier.make_constraint()`` unconditionally for every
+    ``constraint_specs()`` entry, including lite-mode ``StatErrorModifier``
+    instances (``data=None`` by design in lite mode -- per-bin errors come
+    from sample data, not modifier data). That raised ``ValueError`` at Model
+    build time for the (default) lite ``barlow_beeston_method``. The loop
+    also never included the channel-level BB-lite constraint that
+    ``HistFactoryDistChannel.extended_likelihood`` adds.
+    """
+
+    def _lite_staterror_channel_dict(self) -> dict:
+        """Two-sample channel with a shared BB-lite staterror modifier.
+
+        Matches the combined-uncertainty numbers exercised in
+        test_histfactory.py::test_lite_combined_uncertainties: total_nominal
+        = [30, 50], total_sigma = [5, sqrt(41)].
+        """
+        staterror = {
+            "name": "stat_error",
+            "type": "staterror",
+            "parameters": ["gamma_bin0", "gamma_bin1"],
+            "constraint": "Gauss",
+        }
+        return {
+            "name": "SR",
+            "axes": [{"name": "x_SR", "min": 0.0, "max": 10.0, "nbins": 2}],
+            "samples": [
+                {
+                    "name": "signal",
+                    "data": {"contents": [10.0, 20.0], "errors": [3.0, 4.0]},
+                    "modifiers": [staterror],
+                },
+                {
+                    "name": "background",
+                    "data": {"contents": [20.0, 30.0], "errors": [4.0, 5.0]},
+                    "modifiers": [staterror],
+                },
+            ],
+        }
+
+    def _lite_staterror_workspace(self) -> Workspace:
+        """Workspace with a single lite-mode (default) staterror channel."""
+        dist = HistFactoryDistChannel(**self._lite_staterror_channel_dict())
+        binned = BinnedData(
+            name="SR_data",
+            axes=[{"name": "x_SR", "min": 0.0, "max": 10.0, "nbins": 2}],
+            contents=[30.0, 50.0],
+        )
+        return Workspace(
+            metadata=Metadata(hs3_version="0.3.0"),
+            distributions=Distributions([dist]),
+            data=Data([binned]),
+            likelihoods=Likelihoods(
+                [Likelihood(name="L", distributions=[dist], data=[binned])]
+            ),
+            domains=Domains([ProductDomain(name="default")]),
+            parameter_points=ParameterPoints(
+                [
+                    ParameterSet(
+                        name="default",
+                        parameters=[
+                            ParameterPoint(name="gamma_bin0", value=1.0),
+                            ParameterPoint(name="gamma_bin1", value=1.0),
+                        ],
+                    )
+                ]
+            ),
+        )
+
+    def test_model_builds_and_log_prob_is_finite(self):
+        """A default (lite-mode) staterror channel must build through ws.model().
+
+        Before the fix this raised ``ValueError`` ("data is required for
+        BB-full mode") because the model-side constraint loop called
+        ``make_constraint()`` on the lite-mode ``StatErrorModifier``, whose
+        ``data`` is ``None`` by design.
+        """
+        ws = self._lite_staterror_workspace()
+        likelihood = next(iter(ws.likelihoods))
+        model = ws.model(likelihood, progress=False)
+
+        lp = model.log_prob
+        inputs = {
+            v.name: v
+            for v in pytensor.graph.traversal.explicit_graph_inputs([lp])
+            if v.name
+        }
+        fn = pytensor.function(list(inputs.values()), lp)
+        val = float(fn(**model.data, **model.nominal_params).item())
+        assert math.isfinite(val)
+
+    def test_log_prob_includes_bblite_constraint(self):
+        """log_prob must include the channel-level BB-lite constraint factor.
+
+        Guards the second half of the bug: even once the crash is fixed by
+        skipping lite-mode ``StatErrorModifier`` specs, the model-side loop
+        must still add
+        ``HistFactoryDistChannel._make_barlow_beeston_lite_constraint()`` --
+        exactly as ``extended_likelihood()`` does -- or the joint ``log_prob``
+        would silently omit the gamma constraint term.
+        """
+        ws = self._lite_staterror_workspace()
+        likelihood = next(iter(ws.likelihoods))
+        model = ws.model(likelihood, progress=False)
+
+        lp = model.log_prob
+        inputs = {
+            v.name: v
+            for v in pytensor.graph.traversal.explicit_graph_inputs([lp])
+            if v.name
+        }
+        fn = pytensor.function(list(inputs.values()), lp)
+        val = float(fn(**model.data, **model.nominal_params).item())
+
+        # Poisson part: obs == exp == [30, 50] at gamma=1.0 (nominal).
+        obs = np.array([30.0, 50.0])
+        poisson_lp = float(
+            np.sum(
+                obs * np.log(obs) - obs - np.array([math.lgamma(o + 1) for o in obs])
+            )
+        )
+
+        # BB-lite Gaussian constraint at gamma=1.0: N(1|1,relerr) per bin,
+        # log-summed. total_nominal=[30,50], total_sigma=[5, sqrt(41)].
+        total_sigma = np.array([5.0, np.sqrt(41.0)])
+        total_nominal = np.array([30.0, 50.0])
+        relerr = total_sigma / total_nominal
+        lite_lp = float(np.sum(-np.log(relerr * np.sqrt(2 * np.pi))))
+
+        expected = poisson_lp + lite_lp
+        assert val == pytest.approx(expected, rel=1e-6)
+
+    def test_model_expression_matches_dist_expression(self):
+        """The model's per-channel expression matches ``dist.expression()`` directly.
+
+        ``dist.expression()`` (``Distribution._expression``) computes
+        ``likelihood() * extended_likelihood()``, which already includes the
+        BB-lite constraint factor. The model-assembled per-channel expression
+        (Poisson term times constraint product) must equal this exactly,
+        confirming the model's constraint set -- including the BB-lite factor
+        -- is identical to the distribution's own.
+        """
+        ws = self._lite_staterror_workspace()
+        likelihood = next(iter(ws.likelihoods))
+        model = ws.model(likelihood, progress=False)
+
+        dist = next(iter(ws.distributions))
+        context = Context(
+            {
+                "gamma_bin0": pt.constant(1.0),
+                "gamma_bin1": pt.constant(1.0),
+                "SR_observed": pt.constant(np.array([30.0, 50.0])),
+            }
+        )
+        expected = float(dist.expression(context).eval())
+
+        model_expr = model.distributions["SR"]
+        inputs = {
+            v.name: v
+            for v in pytensor.graph.traversal.explicit_graph_inputs([model_expr])
+            if v.name
+        }
+        fn = pytensor.function(list(inputs.values()), model_expr)
+        actual = float(fn(**model.data, **model.nominal_params))
+
+        assert actual == pytest.approx(expected, rel=1e-6)
+
+    def test_full_mode_staterror_still_builds_via_model(self):
+        """BB-full mode (explicit ``barlow_beeston_method="full"``) is unaffected
+        by the BB-lite channel-level addition in ``_build_distribution_node``.
+
+        The ordinary ``constraint_specs()`` loop already includes the
+        ``StatErrorModifier``'s own per-bin constraint in full mode (its
+        ``data`` is required and present), so the new
+        ``if dist.barlow_beeston_method == "lite":`` block must be skipped
+        entirely here.
+        """
+        channel = {
+            "name": "SR",
+            "axes": [{"name": "x_SR", "min": 0.0, "max": 10.0, "nbins": 1}],
+            "samples": [
+                {
+                    "name": "signal",
+                    "data": {"contents": [10.0], "errors": [1.0]},
+                    "modifiers": [
+                        {
+                            "name": "stat_error",
+                            "type": "staterror",
+                            "parameters": ["staterror_bin0"],
+                            "constraint": "Gauss",
+                            "data": {"uncertainties": [0.1]},
+                        }
+                    ],
+                }
+            ],
+            "barlow_beeston_method": "full",
+        }
+        dist = HistFactoryDistChannel(**channel)
+        binned = BinnedData(
+            name="SR_data",
+            axes=[{"name": "x_SR", "min": 0.0, "max": 10.0, "nbins": 1}],
+            contents=[10.0],
+        )
+        ws = Workspace(
+            metadata=Metadata(hs3_version="0.3.0"),
+            distributions=Distributions([dist]),
+            data=Data([binned]),
+            likelihoods=Likelihoods(
+                [Likelihood(name="L", distributions=[dist], data=[binned])]
+            ),
+            domains=Domains([ProductDomain(name="default")]),
+            parameter_points=ParameterPoints(
+                [
+                    ParameterSet(
+                        name="default",
+                        parameters=[ParameterPoint(name="staterror_bin0", value=1.0)],
+                    )
+                ]
+            ),
+        )
+        likelihood = next(iter(ws.likelihoods))
+        model = ws.model(likelihood, progress=False)
+
+        lp = model.log_prob
+        inputs = {
+            v.name: v
+            for v in pytensor.graph.traversal.explicit_graph_inputs([lp])
+            if v.name
+        }
+        fn = pytensor.function(list(inputs.values()), lp)
+        val = float(fn(**model.data, **model.nominal_params).item())
+        assert math.isfinite(val)
+
+    def test_inactive_bblite_channel_constraint_excluded_from_log_prob(self):
+        """A BB-lite channel excluded from the active likelihood must not
+        contribute its channel-level constraint (or its Poisson term) to
+        ``log_prob``.
+
+        Mirrors
+        ``TestConstraintDeduplication.test_inactive_channel_constraints_excluded_from_log_prob``
+        for the channel-level BB-lite constraint: ``in_likelihood`` guards
+        both the ordinary per-modifier constraints and the BB-lite addition.
+        """
+        sr_channel = HistFactoryDistChannel(**self._lite_staterror_channel_dict())
+        cr_channel = HistFactoryDistChannel(**_make_channel("CR", [5.0], []))
+        sr_data = BinnedData(
+            name="SR_data",
+            axes=[{"name": "x_SR", "min": 0.0, "max": 10.0, "nbins": 2}],
+            contents=[30.0, 50.0],
+        )
+        cr_data = BinnedData(
+            name="CR_data",
+            axes=[{"name": "x_CR", "min": 0.0, "max": 10.0, "nbins": 1}],
+            contents=[5.0],
+        )
+        ws = Workspace(
+            metadata=Metadata(hs3_version="0.3.0"),
+            distributions=Distributions([sr_channel, cr_channel]),
+            data=Data([sr_data, cr_data]),
+            likelihoods=Likelihoods(
+                [
+                    Likelihood(
+                        name="L",
+                        distributions=[cr_channel],
+                        data=[cr_data],
+                    )
+                ]
+            ),
+            domains=Domains([ProductDomain(name="default")]),
+            parameter_points=ParameterPoints(
+                [
+                    ParameterSet(
+                        name="default",
+                        parameters=[
+                            ParameterPoint(name="gamma_bin0", value=1.0),
+                            ParameterPoint(name="gamma_bin1", value=1.0),
+                        ],
+                    )
+                ]
+            ),
+        )
+        likelihood = next(iter(ws.likelihoods))
+        model = ws.model(likelihood, progress=False)  # SR excluded from L
+
+        lp = model.log_prob
+        inputs = {
+            v.name: v
+            for v in pytensor.graph.traversal.explicit_graph_inputs([lp])
+            if v.name
+        }
+        fn = pytensor.function(list(inputs.values()), lp)
+        # Filter to only the free inputs -- gamma_bin0/gamma_bin1 (SR-only)
+        # are not free inputs of log_prob once SR's constraint is excluded.
+        param_vals = {k: v for k, v in model.nominal_params.items() if k in inputs}
+        val = float(fn(**{**model.data, **param_vals}).item())
+
+        # Only CR's Poisson term should appear.
+        expected = 5.0 * math.log(5.0) - 5.0 - math.lgamma(6.0)
+        assert val == pytest.approx(expected, rel=1e-6)
+
+
+# ---------------------------------------------------------------------------
 # Integration tests: HFDC subgraphs are each built exactly once
 # ---------------------------------------------------------------------------
 

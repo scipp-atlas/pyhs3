@@ -6,6 +6,7 @@ Tests for NamedDiGraph class and dependency graph utilities.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import Literal
 
 import pytest
@@ -525,3 +526,56 @@ class TestBuildDependencyGraph:
         )
 
         assert base_pos < func1_pos < func2_pos < dist_pos
+
+    def test_get_internal_nodes_called_once_per_entity(self):
+        """build_dependency_graph must call get_internal_nodes() exactly once
+        per distribution, not once while building entity mappings and again
+        while building edges.
+        """
+        call_counts: dict[str, int] = defaultdict(int)
+
+        class CountedDist(GaussianDist, HasInternalNodes):
+            """Distribution with no internal nodes that counts how many
+            times get_internal_nodes() is invoked, keyed by distribution name.
+            """
+
+            def get_internal_nodes(self) -> list[object]:
+                """Record a call and report no internal nodes."""
+                call_counts[self.name] += 1
+                return []
+
+        parameterset = ParameterSet(name="params", parameters=[])
+        dist1 = CountedDist(name="dist1", mean="mu", sigma=1.0, x="x")
+        dist2 = CountedDist(name="dist2", mean="mu", sigma=1.0, x="y")
+
+        build_dependency_graph(parameterset, [], [dist1, dist2])
+
+        assert call_counts == {"dist1": 1, "dist2": 1}
+
+
+class TestGetInternalNodesCallCount:
+    """Spy tests ensuring get_internal_nodes() is not called redundantly."""
+
+    def test_build_entity_mappings_calls_once_per_entity(self):
+        """build_entity_mappings() must call get_internal_nodes() exactly
+        once per distribution.
+        """
+        call_counts: dict[str, int] = defaultdict(int)
+
+        class CountedDist(GaussianDist, HasInternalNodes):
+            """Distribution with no internal nodes that counts how many
+            times get_internal_nodes() is invoked, keyed by distribution name.
+            """
+
+            def get_internal_nodes(self) -> list[object]:
+                """Record a call and report no internal nodes."""
+                call_counts[self.name] += 1
+                return []
+
+        parameterset = ParameterSet(name="params", parameters=[])
+        dist1 = CountedDist(name="dist1", mean="mu", sigma=1.0, x="x")
+        dist2 = CountedDist(name="dist2", mean="mu", sigma=1.0, x="y")
+
+        build_entity_mappings(parameterset, [], [dist1, dist2])
+
+        assert call_counts == {"dist1": 1, "dist2": 1}

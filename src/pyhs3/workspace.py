@@ -411,10 +411,24 @@ class Workspace(BaseModel):
         gets bounds from the data axis itself (axis.min/max). Propagates observable
         info through composite distributions (MixtureDist, ProductDist).
 
+        Used by the legacy ``model(int)`` and name-fallback ``model(str)`` paths,
+        which have no single likelihood to scope observables to and therefore merge
+        axes across every likelihood in the workspace. This is unlike the
+        per-likelihood ``model(Likelihood)`` / ``model(Analysis)`` paths, which use
+        :meth:`_extract_observables` and never mix bounds across likelihoods.
+
         Returns:
             Dictionary mapping observable names to (min, max) tuples
+
+        Raises:
+            ValueError: If the same axis name appears in more than one likelihood
+                with different ``(min, max)`` bounds, since merging would silently
+                pick whichever likelihood happened to be processed last.
         """
         observables: dict[str, tuple[float, float]] = {}
+        # Track which likelihood first defined each axis, so a conflict error can
+        # name both sides.
+        sources: dict[str, str] = {}
 
         if not self.likelihoods or not self.data:
             return observables
@@ -439,7 +453,20 @@ class Workspace(BaseModel):
 
                 # For each axis, extract bounds
                 for axis in datum.axes:
-                    observables[axis.name] = (axis.min, axis.max)
+                    bounds = (axis.min, axis.max)
+                    prev_bounds = observables.get(axis.name)
+                    if prev_bounds is not None and prev_bounds != bounds:
+                        msg = (
+                            f"Observable axis '{axis.name}' has conflicting bounds "
+                            f"across likelihoods: {prev_bounds} in likelihood "
+                            f"'{sources[axis.name]}' vs {bounds} in likelihood "
+                            f"'{likelihood.name}'. Each observable axis name must "
+                            "have the same bounds everywhere it is used, or be "
+                            "accessed via its own likelihood (workspace.model(likelihood))."
+                        )
+                        raise ValueError(msg)
+                    observables[axis.name] = bounds
+                    sources[axis.name] = likelihood.name
 
         return observables
 

@@ -11,6 +11,9 @@ import pytest
 
 from pyhs3 import Workspace
 from pyhs3.analyses import Analyses, Analysis
+from pyhs3.data import BinnedData, Data
+from pyhs3.distributions import Distributions
+from pyhs3.distributions.mathematical import GenericDist
 from pyhs3.exceptions import WorkspaceValidationError
 from pyhs3.likelihoods import Likelihood, Likelihoods
 from pyhs3.metadata import Metadata
@@ -219,6 +222,71 @@ class TestWorkspaceFKResolutionWithNoneCollections:
                 distributions=None,
                 data=None,
             )
+
+
+class TestComputeObservablesConflict:
+    """Tests for Workspace._compute_observables() cross-likelihood bound conflicts."""
+
+    @staticmethod
+    def _make_workspace(
+        bounds_a: tuple[float, float], bounds_b: tuple[float, float]
+    ) -> Workspace:
+        """Build a workspace with two likelihoods that each define an 'x' axis."""
+        return Workspace(
+            metadata=Metadata(hs3_version="0.3.0"),
+            distributions=Distributions(
+                [
+                    GenericDist(name="dist_a", expression="exp(-x)"),
+                    GenericDist(name="dist_b", expression="exp(-x)"),
+                ]
+            ),
+            data=Data(
+                [
+                    BinnedData(
+                        name="data_a",
+                        axes=[
+                            {
+                                "name": "x",
+                                "min": bounds_a[0],
+                                "max": bounds_a[1],
+                                "nbins": 10,
+                            }
+                        ],
+                        contents=[1.0] * 10,
+                    ),
+                    BinnedData(
+                        name="data_b",
+                        axes=[
+                            {
+                                "name": "x",
+                                "min": bounds_b[0],
+                                "max": bounds_b[1],
+                                "nbins": 10,
+                            }
+                        ],
+                        contents=[1.0] * 10,
+                    ),
+                ]
+            ),
+            likelihoods=Likelihoods(
+                [
+                    Likelihood(name="lk_a", distributions=["dist_a"], data=["data_a"]),
+                    Likelihood(name="lk_b", distributions=["dist_b"], data=["data_b"]),
+                ]
+            ),
+        )
+
+    def test_conflicting_bounds_raise(self):
+        """Same axis name with different (min, max) across likelihoods must raise."""
+        workspace = self._make_workspace(bounds_a=(0.0, 10.0), bounds_b=(0.0, 20.0))
+        with pytest.raises(ValueError, match="conflicting bounds"):
+            workspace._compute_observables()
+
+    def test_identical_bounds_do_not_raise(self):
+        """Same axis name with identical (min, max) across likelihoods is fine."""
+        workspace = self._make_workspace(bounds_a=(0.0, 10.0), bounds_b=(0.0, 10.0))
+        observables = workspace._compute_observables()
+        assert observables["x"] == (0.0, 10.0)
 
 
 class TestWorkspaceRepr:

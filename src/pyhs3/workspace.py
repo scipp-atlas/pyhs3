@@ -466,7 +466,7 @@ class Workspace(BaseModel):
                         )
                         raise ValueError(msg)
                     observables[axis.name] = bounds
-                    sources[axis.name] = likelihood.name
+                    sources.setdefault(axis.name, likelihood.name)
 
         return observables
 

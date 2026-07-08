@@ -312,10 +312,10 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
                     return modifier
         return None
 
-    def _make_barlow_beeston_lite_constraint(
+    def _build_barlow_beeston_lite_dists(
         self, context: Context
-    ) -> TensorVar | None:
-        """Build BB-lite constraint from combined sample uncertainties.
+    ) -> list[tuple[GaussianDist | PoissonDist, Context]] | None:
+        """Construct the per-bin BB-lite Gauss/Poisson constraint distributions.
 
         BB-lite uses shared gamma parameters across samples with a channel-level
         constraint built from combined MC statistical uncertainties.
@@ -327,6 +327,12 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         Combined uncertainties from samples:
         - total_nominal = sum(sample.data.contents)
         - total_sigma = sqrt(sum(sample.data.errors^2))
+
+        Returns ``None`` when this channel has no staterror modifier (nothing
+        to constrain). Shared by :meth:`_make_barlow_beeston_lite_constraint`
+        (product of per-bin probabilities) and
+        :meth:`_make_barlow_beeston_lite_log_constraint` (sum of per-bin
+        log-probabilities) so the parametrization is defined exactly once.
         """
         total_bins = self._get_total_bins()
 
@@ -392,13 +398,38 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         if not dists:
             return None
 
-        # Evaluate all distributions with augmented context and multiply
-        factors = []
-        for dist in dists:
-            dist_ctx = Context({**augmented_context, **dist.constants})
-            factors.append(dist.expression(dist_ctx))
+        return [
+            (dist, Context({**augmented_context, **dist.constants})) for dist in dists
+        ]
 
+    def _make_barlow_beeston_lite_constraint(
+        self, context: Context
+    ) -> TensorVar | None:
+        """Build BB-lite constraint (product of per-bin probabilities) from
+        combined sample uncertainties, or ``None`` if this channel has no
+        staterror modifier."""
+        pairs = self._build_barlow_beeston_lite_dists(context)
+        if pairs is None:
+            return None
+
+        factors = [dist.expression(ctx) for dist, ctx in pairs]
         return cast(TensorVar, pt.prod(pt.stack(factors), axis=0))  # type: ignore[no-untyped-call]
+
+    def _make_barlow_beeston_lite_log_constraint(
+        self, context: Context
+    ) -> TensorVar | None:
+        """Log-space counterpart of :meth:`_make_barlow_beeston_lite_constraint`.
+
+        Sum of per-bin Gauss/Poisson log-probabilities instead of their
+        product, so the constraint stays finite where the probability-space
+        product would underflow to 0.0.
+        """
+        pairs = self._build_barlow_beeston_lite_dists(context)
+        if pairs is None:
+            return None
+
+        log_terms = [dist.log_expression(ctx) for dist, ctx in pairs]
+        return cast(TensorVar, pt.sum(pt.stack(log_terms), axis=0))  # type: ignore[no-untyped-call]
 
     def _compute_expected_rates(self, context: Context, total_bins: int) -> TensorVar:
         """
@@ -570,9 +601,12 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         """Log-space constraint sum for this channel.
 
         Log-space counterpart of :meth:`extended_likelihood`: returns the sum of
-        ``log(constraint)`` terms (deduped by parameter exactly as in
-        :meth:`extended_likelihood`) instead of their product, avoiding the
-        ``log(prod(...))`` round-trip.
+        each modifier's ``log_constraint(...)`` term (deduped by parameter
+        exactly as in :meth:`extended_likelihood`) instead of the product of
+        ``make_constraint(...)`` terms. ``log_constraint`` evaluates the same
+        constraint distribution(s) via their analytic log-space form, so this
+        never takes ``pt.log`` of a probability-space value that can underflow
+        to 0.0.
 
         Args:
             context: Mapping of parameter names to PyTensor variables
@@ -587,15 +621,13 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
                 if dedup_key in seen:
                     continue
                 seen.add(dedup_key)
-            log_constraints.append(
-                pt.log(modifier.make_constraint(context, sample_data))
-            )
+            log_constraints.append(modifier.log_constraint(context, sample_data))
 
         # Add channel-level BB-lite constraint if in lite mode
         if self.barlow_beeston_method == "lite":
-            lite_constraint = self._make_barlow_beeston_lite_constraint(context)
-            if lite_constraint is not None:
-                log_constraints.append(cast(TensorVar, pt.log(lite_constraint)))
+            lite_log_constraint = self._make_barlow_beeston_lite_log_constraint(context)
+            if lite_log_constraint is not None:
+                log_constraints.append(lite_log_constraint)
 
         if not log_constraints:
             return cast(TensorVar, pt.constant(0.0))

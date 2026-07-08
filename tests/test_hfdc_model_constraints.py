@@ -623,6 +623,29 @@ class TestBBLiteStaterrorModelBuild:
         expected = poisson_lp + lite_lp
         assert val == pytest.approx(expected, rel=1e-6)
 
+    def test_bblite_log_constraint_matches_log_of_constraint(self):
+        """``_make_barlow_beeston_lite_log_constraint`` (#243 Layer 2) must equal
+        ``log(_make_barlow_beeston_lite_constraint(...))`` at ordinary gamma
+        values, for both the Gauss and Poisson BB-lite constraint types."""
+        for constraint_type in ("Gauss", "Poisson"):
+            channel_dict = self._lite_staterror_channel_dict()
+            for sample in channel_dict["samples"]:
+                for modifier in sample["modifiers"]:
+                    modifier["constraint"] = constraint_type
+            dist = HistFactoryDistChannel(**channel_dict)
+
+            context = Context(
+                {
+                    "gamma_bin0": pt.constant(1.02, dtype="float64"),
+                    "gamma_bin1": pt.constant(0.98, dtype="float64"),
+                }
+            )
+            prob = float(dist._make_barlow_beeston_lite_constraint(context).eval())  # pylint: disable=protected-access
+            log_prob = float(
+                dist._make_barlow_beeston_lite_log_constraint(context).eval()  # pylint: disable=protected-access
+            )
+            assert log_prob == pytest.approx(math.log(prob), rel=1e-8), constraint_type
+
     def test_model_expression_matches_dist_expression(self):
         """The model's per-channel expression matches ``dist.expression()`` directly.
 
@@ -878,6 +901,29 @@ class TestHFDCSubgraphBuildCounts:
 
         assert calls == ["lumi"], (
             f"expected exactly one make_constraint call per constraint spec, got {calls}"
+        )
+
+    def test_log_constraint_called_once_per_spec(self, monkeypatch):
+        """``log_constraint`` (#243 Layer 2) must build each log-space constraint
+        factor exactly once during model construction, alongside the single
+        ``make_constraint`` call asserted above."""
+        calls: list[str] = []
+        original = SingleParamConstraint.log_constraint
+
+        def counted(
+            self: SingleParamConstraint, context: Context, sample_data: object
+        ) -> object:
+            calls.append(self.name)
+            return original(self, context, sample_data)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(SingleParamConstraint, "log_constraint", counted)
+
+        ws = _single_channel_normsys_workspace()
+        likelihood = next(iter(ws.likelihoods))
+        ws.model(likelihood, progress=False)
+
+        assert calls == ["lumi"], (
+            f"expected exactly one log_constraint call per constraint spec, got {calls}"
         )
 
     def test_logpdf_matches_log_pdf_for_hfdc_with_constraint(self):

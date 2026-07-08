@@ -60,11 +60,15 @@ class Model:
     main Poisson term; ``log_prob`` uses it to assemble the joint NLL without
     double-counting constraint factors when multiple channels share a nuisance
     parameter.  Constraint expressions are appended to
-    ``self._hfdc_constraints`` exactly once per unique dedup key across all
-    channels: single-parameter modifiers (``normsys``, ``histosys``) are
-    deduped by parameter name using ``self._hfdc_constraint_params_seen``;
-    multi-parameter modifiers (``shapesys``, ``staterror``) are channel-local
-    by workspace validation and always emitted as-is.
+    ``self._hfdc_constraints`` (probability space) and, in lockstep,
+    ``self._hfdc_log_constraints`` (log space) exactly once per unique dedup
+    key across all channels: single-parameter modifiers (``normsys``,
+    ``histosys``) are deduped by parameter name using
+    ``self._hfdc_constraint_params_seen``; multi-parameter modifiers
+    (``shapesys``, ``staterror``) are channel-local by workspace validation
+    and always emitted as-is.  ``log_prob`` sums ``self._hfdc_log_constraints``
+    directly rather than taking ``pt.log`` of ``self._hfdc_constraints``, so it
+    stays finite where the probability-space constraints underflow to 0.0.
 
     HS3 Reference:
         Models are computational representations of :hs3:label:`HS3 workspaces <hs3.file-format>`.
@@ -151,6 +155,11 @@ class Model:
         # ParameterModifier constraints are deduped by parameter name across channels;
         # ParametersModifier constraints (shapesys/staterror) are emitted per-channel.
         self._hfdc_constraints: list[TensorVar] = []
+        # Log-space counterpart of self._hfdc_constraints, built alongside it
+        # (one modifier.log_constraint() call per modifier.make_constraint()
+        # call) so log_prob never has to take pt.log() of a probability-space
+        # constraint that can underflow to 0.0.
+        self._hfdc_log_constraints: list[TensorVar] = []
         self._hfdc_constraint_params_seen: set[str] = set()
         # Poisson-only (no constraint product) expressions for HFDC channels.
         # self.distributions[name] stores the full expression (Poisson x constraints)
@@ -364,10 +373,10 @@ class Model:
             )
 
         # HFDC constraint terms: collected once per unique nuisance parameter
-        # across all channels during graph construction.
-        terms.extend(
-            pt.log(constraint_expr) for constraint_expr in self._hfdc_constraints
-        )
+        # across all channels during graph construction. Log-space terms are
+        # used directly (rather than pt.log(self._hfdc_constraints)) so this
+        # stays finite where the probability-space constraints underflow to 0.0.
+        terms.extend(self._hfdc_log_constraints)
 
         if not terms:
             return pt.constant(np.float64(0.0))
@@ -486,9 +495,9 @@ class Model:
         is returned and stored in ``self.distributions`` so that :meth:`logpdf`
         continues to work as before.  In addition, the Poisson-only term is
         stored in ``self._hfdc_poisson`` and the deduplicated constraint terms
-        are appended to ``self._hfdc_constraints`` so that :attr:`log_prob` can
-        combine them without double-counting when multiple channels share a
-        nuisance parameter.
+        are appended to ``self._hfdc_constraints``/``self._hfdc_log_constraints``
+        so that :attr:`log_prob` can combine them without double-counting when
+        multiple channels share a nuisance parameter.
         """
         dist = distributions[node_name]
         if not isinstance(dist, HistFactoryDistChannel):
@@ -503,8 +512,8 @@ class Model:
         # shared pieces.  This mirrors Distribution._expression/log_expression
         # (likelihood -> normalization -> x/+ constraints) and
         # HistFactoryDistChannel.extended_likelihood/log_extended_likelihood
-        # without rebuilding the Poisson subgraph or re-running make_constraint
-        # a second time.
+        # without rebuilding the Poisson subgraph or re-running
+        # make_constraint/log_constraint a second time.
         poisson = dist.likelihood(context)
         self._hfdc_poisson[node_name] = poisson
         # Log-space Poisson-only term (sum of per-bin Poisson log-pmfs).
@@ -519,19 +528,23 @@ class Model:
             for d in self._likelihood.distributions
         )
 
-        # Single pass over constraint specs builds each constraint factor once.
+        # Single pass over constraint specs builds each constraint factor (both
+        # probability- and log-space) exactly once.
         # - channel_seen dedups by parameter for the per-channel product
         #   (matches extended_likelihood's local dedup),
         # - self._hfdc_constraint_params_seen dedups across channels for log_prob.
         channel_seen: set[str] = set()
         channel_constraints: list[TensorVar] = []
+        channel_log_constraints: list[TensorVar] = []
         for dedup_key, modifier, sample_data in dist.constraint_specs():
             constraint = modifier.make_constraint(context, sample_data)
+            log_constraint = modifier.log_constraint(context, sample_data)
 
             if dedup_key is None or dedup_key not in channel_seen:
                 if dedup_key is not None:
                     channel_seen.add(dedup_key)
                 channel_constraints.append(constraint)
+                channel_log_constraints.append(log_constraint)
 
             if in_likelihood:
                 if dedup_key is not None:
@@ -539,6 +552,7 @@ class Model:
                         continue
                     self._hfdc_constraint_params_seen.add(dedup_key)
                 self._hfdc_constraints.append(constraint)
+                self._hfdc_log_constraints.append(log_constraint)
 
         # BB-lite mode's channel-level constraint (shared gamma parameters
         # combining all samples' statistical uncertainties) is not a
@@ -548,10 +562,17 @@ class Model:
         # so it is always appended, with no cross-channel dedup key.
         if dist.barlow_beeston_method == "lite":
             lite_constraint = dist._make_barlow_beeston_lite_constraint(context)  # pylint: disable=protected-access
+            lite_log_constraint = dist._make_barlow_beeston_lite_log_constraint(  # pylint: disable=protected-access
+                context
+            )
             if lite_constraint is not None:
                 channel_constraints.append(lite_constraint)
+                channel_log_constraints.append(cast(TensorVar, lite_log_constraint))
                 if in_likelihood:
                     self._hfdc_constraints.append(lite_constraint)
+                    self._hfdc_log_constraints.append(
+                        cast(TensorVar, lite_log_constraint)
+                    )
 
         # Assemble the full per-channel expression: normalized Poisson term times
         # the constraint product (extended likelihood).  HFDC is not normalizable
@@ -568,7 +589,7 @@ class Model:
             )
             log_extended = cast(
                 TensorVar,
-                pt.sum(pt.stack([pt.log(c) for c in channel_constraints])),  # type: ignore[no-untyped-call]
+                pt.sum(pt.stack(channel_log_constraints)),  # type: ignore[no-untyped-call]
             )
         full = cast(TensorVar, raw * extended)
         full.name = dist.name  # Evaluable.expression sets the name

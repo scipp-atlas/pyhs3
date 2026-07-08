@@ -11,6 +11,7 @@ import math
 import numpy as np
 import pytensor.tensor as pt
 import pytest
+from scipy.stats import norm as scipy_norm
 
 from pyhs3.context import Context
 from pyhs3.distributions.histfactory.data import SampleData
@@ -701,3 +702,154 @@ class TestModifierEdgeCases:
 
         np.testing.assert_allclose(result1_zero, 100.0, rtol=1e-6)
         np.testing.assert_allclose(result4_zero, 100.0, rtol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Layer 2 of #243: log_constraint() on the modifier hierarchy.
+#
+# log_constraint() must agree with log(make_constraint()) at ordinary
+# parameter values (where make_constraint() is representable in float64) and
+# must stay finite where make_constraint() underflows to 0.0.
+# ---------------------------------------------------------------------------
+
+
+class TestLogConstraintParity:
+    """log_constraint() == log(make_constraint()) at ordinary parameter values."""
+
+    @pytest.mark.parametrize("constraint_type", ["Gauss", "Poisson", "LogNormal"])
+    def test_normsys(self, constraint_type):
+        data = NormSysData(hi=1.1, lo=0.9)
+        modifier = NormSysModifier(
+            name="lumi", parameter="alpha_lumi", data=data, constraint=constraint_type
+        )
+        context = Context({"alpha_lumi": pt.constant(1.0, dtype="float64")})
+        sample_data = SampleData(contents=[10.0, 20.0], errors=[1.0, 2.0])
+
+        prob = float(modifier.make_constraint(context, sample_data).eval())
+        log_prob = float(modifier.log_constraint(context, sample_data).eval())
+        assert log_prob == pytest.approx(math.log(prob), rel=1e-10)
+
+    @pytest.mark.parametrize("constraint_type", ["Gauss", "Poisson", "LogNormal"])
+    def test_histosys(self, constraint_type):
+        hi_contents = HistoSysDataContents(contents=[15.0, 25.0])
+        lo_contents = HistoSysDataContents(contents=[5.0, 15.0])
+        data = HistoSysData(hi=hi_contents, lo=lo_contents, interpolation="code0")
+        modifier = HistoSysModifier(
+            name="shape_unc",
+            parameter="alpha_shape",
+            data=data,
+            constraint=constraint_type,
+        )
+        context = Context({"alpha_shape": pt.constant(1.0, dtype="float64")})
+        sample_data = SampleData(contents=[10.0, 20.0], errors=[1.0, 2.0])
+
+        prob = float(modifier.make_constraint(context, sample_data).eval())
+        log_prob = float(modifier.log_constraint(context, sample_data).eval())
+        assert log_prob == pytest.approx(math.log(prob), rel=1e-10)
+
+    def test_shapesys(self):
+        data = ShapeSysData(vals=[0.06, 0.1346153846153846])
+        modifier = ShapeSysModifier(
+            name="uncorr_bkguncrt",
+            parameters=["uncorr_bkguncrt_0", "uncorr_bkguncrt_1"],
+            data=data,
+        )
+        context = Context(
+            {
+                "uncorr_bkguncrt_0": pt.constant(1.02, dtype="float64"),
+                "uncorr_bkguncrt_1": pt.constant(0.98, dtype="float64"),
+            }
+        )
+        sample_data = SampleData(contents=[50.0, 52.0], errors=[3.0, 3.5])
+
+        prob = float(modifier.make_constraint(context, sample_data).eval())
+        log_prob = float(modifier.log_constraint(context, sample_data).eval())
+        assert log_prob == pytest.approx(math.log(prob), rel=1e-8)
+
+    @pytest.mark.parametrize("constraint_type", ["Gauss", "Poisson"])
+    def test_staterror(self, constraint_type):
+        data = StatErrorData(uncertainties=[2.0, 3.0])
+        modifier = StatErrorModifier(
+            name="stat_unc",
+            parameters=["gamma_stat_bin0", "gamma_stat_bin1"],
+            constraint=constraint_type,
+            data=data,
+        )
+        context = Context(
+            {
+                "gamma_stat_bin0": pt.constant(1.02, dtype="float64"),
+                "gamma_stat_bin1": pt.constant(0.98, dtype="float64"),
+            }
+        )
+        sample_data = SampleData(contents=[50.0, 75.0], errors=[2.0, 3.0])
+
+        prob = float(modifier.make_constraint(context, sample_data).eval())
+        log_prob = float(modifier.log_constraint(context, sample_data).eval())
+        assert log_prob == pytest.approx(math.log(prob), rel=1e-8)
+
+    def test_staterror_poisson_skips_zero_yield_bin(self):
+        """Parity must also hold when a zero-yield bin is skipped (Poisson)."""
+        data = StatErrorData(uncertainties=[1.0, 1.0])
+        modifier = StatErrorModifier(
+            name="stat_unc",
+            parameters=["gamma_stat_bin0", "gamma_stat_bin1"],
+            constraint="Poisson",
+            data=data,
+        )
+        context = Context(
+            {
+                "gamma_stat_bin0": pt.constant(1.0, dtype="float64"),
+                "gamma_stat_bin1": pt.constant(1.0, dtype="float64"),
+            }
+        )
+        sample_data = SampleData(contents=[0.0, 10.0], errors=[0.0, 1.0])
+
+        prob = float(modifier.make_constraint(context, sample_data).eval())
+        log_prob = float(modifier.log_constraint(context, sample_data).eval())
+        assert log_prob == pytest.approx(math.log(prob), rel=1e-8)
+
+    def test_staterror_empty_parameters_edge_case(self):
+        """log_constraint() with no parameters returns log(1.0) == 0.0."""
+        data = StatErrorData(uncertainties=[])
+        modifier = StatErrorModifier(name="stat", parameters=[], data=data)
+        context = Context({})
+        sample_data = SampleData(contents=[], errors=[])
+
+        log_constraint = modifier.log_constraint(context, sample_data)
+        assert float(log_constraint.eval()) == pytest.approx(0.0)
+
+    def test_staterror_log_constraint_requires_data(self):
+        """log_constraint() raises ValueError when data=None (BB-full mode guard),
+        mirroring make_constraint()'s guard."""
+        modifier = StatErrorModifier(
+            name="stat_unc",
+            parameters=["gamma_stat_bin0"],
+            data=None,
+        )
+        context = Context({"gamma_stat_bin0": pt.constant(1.0, dtype="float64")})
+        sample_data = SampleData(contents=[50.0], errors=[2.0])
+
+        with pytest.raises(ValueError, match="data is required for BB-full mode"):
+            modifier.log_constraint(context, sample_data)
+
+
+class TestLogConstraintUnderflow:
+    """log_constraint() stays finite where make_constraint() underflows to 0.0."""
+
+    def test_normsys_gauss_alpha_40_matches_scipy_norm_logpdf(self):
+        """At |alpha|=40 the Gaussian constraint underflows in probability
+        space but log_constraint() must stay finite and match
+        scipy.stats.norm.logpdf(alpha) (the constraint is N(0 | alpha, 1))."""
+        data = NormSysData(hi=1.1, lo=0.9)
+        modifier = NormSysModifier(
+            name="lumi", parameter="alpha_lumi", data=data, constraint="Gauss"
+        )
+        context = Context({"alpha_lumi": pt.constant(40.0, dtype="float64")})
+        sample_data = SampleData(contents=[10.0, 20.0], errors=[1.0, 2.0])
+
+        prob = float(modifier.make_constraint(context, sample_data).eval())
+        assert prob == 0.0  # probability-space underflow
+
+        log_prob = float(modifier.log_constraint(context, sample_data).eval())
+        assert math.isfinite(log_prob)
+        assert log_prob == pytest.approx(float(scipy_norm.logpdf(40.0)), rel=1e-10)

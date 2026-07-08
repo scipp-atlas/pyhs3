@@ -563,3 +563,124 @@ class TestLogExpressionUsesAnalyticLogLikelihood:
         log_expr_val = float(pytensor.function([x_var], log_expr_result)([130.0])[0])
         expr_val = float(pytensor.function([x_var], expr_result)([130.0])[0])
         assert log_expr_val == pytest.approx(math.log(expr_val), rel=1e-10)
+
+
+# --------------------------------------------------------------------------
+# Layer 2 of #243: modifier.log_constraint() and the HistFactoryDistChannel /
+# Model log-space constraint assembly built on top of it, so neither
+# HistFactoryDistChannel.log_extended_likelihood nor Model.log_prob ever
+# takes pt.log() of a probability-space constraint that can underflow to 0.0.
+# --------------------------------------------------------------------------
+
+
+def _normsys_workspace(alpha_value: float) -> Workspace:
+    """Single-channel, single-bin HFDC workspace with one normsys (Gaussian)
+    constraint on ``alpha_lumi``, observed data equal to the nominal yield.
+    """
+    obs_name = "x_SR"
+    channel = HistFactoryDistChannel(
+        name="SR",
+        axes=[{"name": obs_name, "min": 0.0, "max": 10.0, "nbins": 1}],
+        samples=[
+            {
+                "name": "signal",
+                "data": {"contents": [10.0], "errors": [1.0]},
+                "modifiers": [
+                    {
+                        "name": "lumi",
+                        "type": "normsys",
+                        "parameter": "alpha_lumi",
+                        "constraint": "Gauss",
+                        "data": {"hi": 1.1, "lo": 0.9},
+                    }
+                ],
+            }
+        ],
+    )
+    binned = BinnedData(
+        name="SR_data",
+        axes=[{"name": obs_name, "min": 0.0, "max": 10.0, "nbins": 1}],
+        contents=[10.0],
+    )
+    return Workspace(
+        metadata=Metadata(hs3_version="0.3.0"),
+        distributions=Distributions([channel]),
+        data=Data([binned]),
+        likelihoods=Likelihoods(
+            [Likelihood(name="L", distributions=[channel], data=[binned])]
+        ),
+        domains=Domains([ProductDomain(name="default")]),
+        parameter_points=ParameterPoints(
+            [
+                ParameterSet(
+                    name="default",
+                    parameters=[{"name": "alpha_lumi", "value": alpha_value}],
+                )
+            ]
+        ),
+    )
+
+
+def test_log_prob_finite_for_normsys_constraint_at_alpha_40():
+    """model.log_prob stays finite when the normsys nuisance is pushed to
+    |alpha|=40, where the probability-space Gaussian constraint underflows to
+    0.0 (exp(-40**2/2) < 2.2e-308).  See issue #243.
+    """
+    ws = _normsys_workspace(alpha_value=40.0)
+    model = ws.model(next(iter(ws.likelihoods)), progress=False)
+
+    # The probability-space constraint underflows to 0.0 at |alpha|=40.
+    dist = next(iter(ws.distributions))
+    _, modifier, sample_data = next(dist.constraint_specs())
+    prob_constraint = float(
+        np.asarray(
+            modifier.make_constraint(
+                Context({"alpha_lumi": pt.constant(40.0, dtype="float64")}),
+                sample_data,
+            ).eval()
+        )
+    )
+    assert prob_constraint == 0.0
+
+    lp = model.log_prob
+    inputs = {
+        v.name: v
+        for v in pytensor.graph.traversal.explicit_graph_inputs([lp])
+        if v.name
+    }
+    fn = pytensor.function(list(inputs.values()), lp)
+    val = float(np.asarray(fn(**model.data, **model.nominal_params)).item())
+    assert math.isfinite(val)
+
+    # code4 interpolation for alpha >= alpha0=1: factor = hi**alpha (nominal
+    # factor is 1.0), so expected_rate = contents * hi**alpha.
+    expected_rate = 10.0 * (1.1**40.0)
+    expected = float(
+        _poisson_logpmf(np.array([10.0]), np.array([expected_rate])).sum()
+        + _norm_logpdf(np.array([40.0]), np.array([0.0]), np.array([1.0])).sum()
+    )
+    assert val == pytest.approx(expected, rel=1e-8)
+
+
+def test_logpdf_finite_for_normsys_constraint_at_alpha_40():
+    """logpdf() for a single HFDC channel with a normsys constraint at
+    |alpha|=40 stays finite and matches the analytic sum of the Poisson
+    log-pmf term and scipy.stats.norm.logpdf(alpha) for the constraint. See
+    issue #243.
+    """
+    ws = _normsys_workspace(alpha_value=40.0)
+    model = ws.model(next(iter(ws.likelihoods)), progress=False)
+
+    logpdf_val = float(
+        np.asarray(
+            model.logpdf_unsafe("SR", alpha_lumi=40.0, SR_observed=np.array([10.0]))
+        )
+    )
+    assert math.isfinite(logpdf_val)
+
+    expected_rate = 10.0 * (1.1**40.0)
+    expected = float(
+        _poisson_logpmf(np.array([10.0]), np.array([expected_rate])).sum()
+        + _norm_logpdf(np.array([40.0]), np.array([0.0]), np.array([1.0])).sum()
+    )
+    assert logpdf_val == pytest.approx(expected, rel=1e-8)

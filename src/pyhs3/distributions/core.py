@@ -241,9 +241,10 @@ class Distribution(Evaluable, ABC):
         Apply normalization to a raw likelihood expression.
 
         Normalizes a likelihood over observables present in the context.
-        Attempts analytical integration first via _normalization_integral(),
-        then falls back to nested Gauss-Legendre quadrature for
-        multi-dimensional integrals.
+        For a single matching observable, attempts analytical integration
+        first via _normalization_integral(), then falls back to Gauss-Legendre
+        quadrature. Multi-dimensional normalization is not yet supported and
+        raises NotImplementedError.
 
         Args:
             raw: Raw (unnormalized) likelihood expression

@@ -64,6 +64,35 @@ class GaussianDist(Distribution):
         )
         return cast(TensorVar, norm_const * exponent)
 
+    def log_likelihood(self, context: Context) -> TensorVar:
+        r"""
+        Builds a symbolic expression for the Gaussian log-PDF.
+
+        Analytic log form of :meth:`likelihood`:
+
+        .. math::
+
+            \log f(x; \mu, \sigma) = -\frac{1}{2}z^2 - \log\sigma - \frac{1}{2}\log(2\pi),
+            \quad z = \frac{x-\mu}{\sigma}
+
+        Evaluating this directly (rather than ``pt.log(self.likelihood(...))``)
+        avoids computing :math:`\exp(-z^2/2)` and re-logging it, which
+        underflows to 0.0 (and then to ``-inf``) once :math:`|z|` exceeds
+        roughly 38 in float64.
+
+        Args:
+            context (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of the Gaussian log-PDF.
+        """
+        sigma = context[self._parameters["sigma"]]
+        z = (context[self._parameters["x"]] - context[self._parameters["mean"]]) / sigma
+        return cast(
+            TensorVar,
+            -0.5 * z**2 - pt.log(sigma) - 0.5 * math.log(2.0 * math.pi),
+        )
+
 
 class UniformDist(Distribution):
     r"""
@@ -139,19 +168,57 @@ class PoissonDist(Distribution):
         """
         Builds a symbolic expression for the Poisson PMF.
 
+        The analytic log-pmf in :meth:`log_likelihood` is the primary form;
+        the probability-space pmf is its exponential.
+
         Args:
             context (dict): Mapping of names to pytensor variables.
 
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of the Poisson PMF.
         """
+        # Poisson PMF: λ^k * e^(-λ) / k!
+        return cast(TensorVar, pt.exp(self.log_likelihood(context)))
+
+    def log_likelihood(self, context: Context) -> TensorVar:
+        r"""
+        Builds a symbolic expression for the Poisson log-PMF.
+
+        Primary analytic form of the distribution (:meth:`likelihood` is its
+        exponential):
+
+        .. math::
+
+            \log P(k; \lambda) = k \log\lambda - \lambda - \log\Gamma(k+1)
+
+        using pt.gammaln for :math:`\log(k!) = \log\Gamma(k+1)`. Returning the
+        log-pmf directly avoids a ``pt.log(pt.exp(log_pmf))`` round-trip that
+        underflows to ``-inf`` once the true log-pmf is a large negative
+        number (e.g. far into the tail).
+
+        Guards the log's argument (not just the switch's output) against
+        ``0 * log(0) = NaN`` when both ``k == 0`` and ``lambda == 0``: pt.switch
+        differentiates both branches, so the untaken "full" branch would
+        otherwise contribute a NaN gradient at this point (d/dlambda of
+        ``k * log(lambda)`` is ``k/lambda = 0/0``). Poisson(k=0 | lambda=0) = 1,
+        so the switch's true branch (``-lambda = 0``) already gives the correct
+        log-pmf; substituting a nonzero placeholder for lambda inside the
+        untaken branch's log keeps both its value and its gradient finite there,
+        matching the guard pattern used by
+        :meth:`~pyhs3.distributions.histfactory.HistFactoryDistChannel._bin_log_probs`.
+
+        Args:
+            context (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of the Poisson log-PMF.
+        """
         mean = context[self._parameters["mean"]]
         x = context[self._parameters["x"]]
 
-        # Poisson PMF: λ^k * e^(-λ) / k!
-        # Using pt.gammaln for log(k!) = log(Γ(k+1))
-        log_pmf = x * pt.log(mean) - mean - pt.gammaln(x + 1)
-        return cast(TensorVar, pt.exp(log_pmf))
+        safe_mean = pt.switch(pt.eq(x, 0), 1.0, mean)
+        full = x * pt.log(safe_mean) - mean - pt.gammaln(x + 1)
+        return cast(TensorVar, pt.switch(pt.eq(x, 0), -mean, full))
 
 
 class ExponentialDist(Distribution):
@@ -252,6 +319,42 @@ class LogNormalDist(Distribution):
             TensorVar,
             (1.0 / (x * sigma * pt.sqrt(2.0 * math.pi)))
             * pt.exp(-0.5 * normalized_log**2),
+        )
+
+    def log_likelihood(self, context: Context) -> TensorVar:
+        r"""
+        Builds a symbolic expression for the log-normal log-PDF.
+
+        Analytic log form of :meth:`likelihood`:
+
+        .. math::
+
+            \log f(x; \mu, \sigma) = -\log x - \log\sigma - \frac{1}{2}\log(2\pi)
+            - \frac{1}{2}z^2, \quad z = \frac{\ln x - \mu}{\sigma}
+
+        Evaluating this directly (rather than ``pt.log(self.likelihood(...))``)
+        avoids computing :math:`\exp(-z^2/2)` and re-logging it, which
+        underflows to 0.0 (and then to ``-inf``) once :math:`|z|` exceeds
+        roughly 38 in float64.
+
+        Args:
+            context (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of log-normal log-PDF.
+        """
+        x = context[self._parameters["x"]]
+        mu = context[self._parameters["mu"]]
+        sigma = context[self._parameters["sigma"]]
+
+        log_x = pt.log(x)
+        normalized_log = (log_x - mu) / sigma
+        return cast(
+            TensorVar,
+            -log_x
+            - pt.log(sigma)
+            - 0.5 * math.log(2.0 * math.pi)
+            - 0.5 * normalized_log**2,
         )
 
 

@@ -425,8 +425,9 @@ class TestInterpolationComparison:
             result = interpolate_code2(alpha, nom_t, hi_t, lo_t)
             result_val = result.eval()
 
-            # Expected linear extrapolation: nom + (b + 2*a) * (alpha - 1)
-            expected = nom + (b + 2 * a) * (alpha_val - 1)
+            # Expected linear extrapolation, continuous at alpha=1:
+            # nom + (b + 2*a) * (alpha - 1) + (hi - nom)
+            expected = nom + (b + 2 * a) * (alpha_val - 1) + hi_delta
             assert result_val == pytest.approx(expected)
 
         # Test alpha < -1 (negative extrapolation) - note: alpha = -1 uses quadratic
@@ -436,8 +437,9 @@ class TestInterpolationComparison:
             result = interpolate_code2(alpha, nom_t, hi_t, lo_t)
             result_val = result.eval()
 
-            # Expected linear extrapolation: nom + (b - 2*a) * (alpha + 1)
-            expected = nom + (b - 2 * a) * (alpha_val + 1)
+            # Expected linear extrapolation, continuous at alpha=-1:
+            # nom + (b - 2*a) * (alpha + 1) + (lo - nom)
+            expected = nom + (b - 2 * a) * (alpha_val + 1) + lo_delta
             assert result_val == pytest.approx(expected)
 
         # Test boundary case alpha = -1 (should use quadratic)
@@ -517,20 +519,19 @@ class TestInterpolationPyhfComparison:
             )
 
     def test_code2_vs_pyhf_slow_formula(self):
-        """Test that interpolate_code2 matches pyhf's slow (correct) mathematical formula."""
-        # Based on pyhf's _slow_code2.summand implementation which is the reference
-        # Note: We use the slow formula because there's a bug in pyhf's fast implementation
-        # for alpha < -1 case. See: https://github.com/scikit-hep/pyhf/issues/2610
+        """Test that interpolate_code2 matches pyhf's code2 formula within |alpha| <= 1."""
+        # Based on pyhf's _slow_code2.summand implementation which is the reference.
+        # Only the central quadratic region is compared: pyhf's extrapolation for
+        # |alpha| > 1 omits the (a+b)/(a-b) offsets and is discontinuous at
+        # alpha=+-1 (https://github.com/scikit-hep/pyhf/issues/2729), whereas
+        # pyhs3 deliberately uses ROOT's continuous extrapolation instead.
 
-        alpha_vals = [-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0]
+        alpha_vals = [-1.0, -0.5, 0.0, 0.5, 1.0]
         nom = 1.0
         hi = 2.0
         lo = 0.5
 
-        # Commented out: pyhf fast implementation (has bug for alpha < -1)
-        # interpolator = pyhf.interpolators.code2(histogramssets, subscribe=False)
-
-        # pyhf slow formula coefficients (correct reference implementation)
+        # pyhf slow formula coefficients (reference implementation)
         a = 0.5 * (hi + lo) - nom  # 0.25
         b = 0.5 * (hi - lo)  # 0.75
 
@@ -544,21 +545,10 @@ class TestInterpolationPyhfComparison:
             our_result = interpolate_code2(alpha, nom_t, hi_t, lo_t)
             our_val = our_result.eval()
 
-            # Expected result based on pyhf slow formula (correct reference)
-            if alpha_val > 1:
-                delta = (b + 2 * a) * (alpha_val - 1)
-            elif -1 <= alpha_val <= 1:
-                delta = a * alpha_val * alpha_val + b * alpha_val
-            else:  # alpha_val < -1
-                delta = (b - 2 * a) * (alpha_val + 1)
+            # Expected result based on pyhf slow formula, |alpha| <= 1 branch
+            delta = a * alpha_val * alpha_val + b * alpha_val
 
             expected = nom + delta
-
-            # Commented out: comparison with pyhf fast implementation (buggy)
-            # alphasets = pyhf.tensorlib.astensor([[alpha_val]])
-            # pyhf_deltas = interpolator(alphasets)
-            # pyhf_result = nom + pyhf.tensorlib.tolist(pyhf_deltas)[0][0][0][0]
-            # assert our_val == pytest.approx(pyhf_result), f"Fast mismatch at alpha={alpha_val}: our={our_val}, pyhf={pyhf_result}"
 
             assert our_val == pytest.approx(expected), (
                 f"Mismatch at alpha={alpha_val}: our={our_val}, expected={expected}"
@@ -651,11 +641,11 @@ class TestInterpolationPyhfComparison:
                 # Quadratic interpolation
                 expected = nom + a * alpha_val**2 + b * alpha_val
             elif alpha_val > 1.0:
-                # Linear extrapolation beyond +1
-                expected = nom + (b + 2 * a) * (alpha_val - 1)
+                # Linear extrapolation beyond +1, continuous at alpha=1
+                expected = nom + (b + 2 * a) * (alpha_val - 1) + hi_delta
             else:
-                # Linear extrapolation beyond -1
-                expected = nom + (b - 2 * a) * (alpha_val + 1)
+                # Linear extrapolation beyond -1, continuous at alpha=-1
+                expected = nom + (b - 2 * a) * (alpha_val + 1) + lo_delta
 
             assert our_val == pytest.approx(expected), (
                 f"Mismatch at alpha={alpha_val}: our={our_val}, expected={expected}"
@@ -837,3 +827,93 @@ class TestInterpolationPyhfComparison:
             assert vector_vals == pytest.approx(scalar_vals, rel=1e-6), (
                 f"Vector/scalar mismatch for {method_name}"
             )
+
+
+class TestCode2BoundaryContinuity:
+    """Tests pinning interpolate_code2's continuous boundary behavior.
+
+    interpolate_code2's linear extrapolation branches (|alpha| > 1) include the
+    "+ (hi - nom)" / "+ (lo - nom)" offsets so the function is continuous at
+    alpha=+-1, matching ROOT's FlexibleInterpVar code 2
+    (RooFit::Detail::MathFuncs::flexibleInterpSingle, case 2). pyhf's code2
+    interpolator omits these offsets and is discontinuous at the boundary;
+    pyhs3 deliberately diverges from pyhf here in favor of continuity
+    (https://github.com/scikit-hep/pyhf/issues/2729). These tests pin the
+    numeric values just inside/outside the boundary so any regression back to
+    the discontinuous form is caught explicitly.
+    """
+
+    def test_continuity_at_positive_boundary(self):
+        """Pin values approaching alpha=1 from both sides: no jump."""
+        nom = pt.constant(1.0)
+        hi = pt.constant(2.0)
+        lo = pt.constant(0.5)
+
+        just_below = interpolate_code2(pt.constant(0.999), nom, hi, lo).eval()
+        at_boundary = interpolate_code2(pt.constant(1.0), nom, hi, lo).eval()
+        just_above = interpolate_code2(pt.constant(1.001), nom, hi, lo).eval()
+
+        # quadratic: nom + a*alpha^2 + b*alpha with a=0.25, b=0.75
+        assert just_below == pytest.approx(1.99875025)
+        assert at_boundary == pytest.approx(2.0)
+        # linear extrapolation continues from hi: nom + (b+2a)(alpha-1) + (a+b)
+        assert just_above == pytest.approx(2.00125)
+        # adjacent values stay within the expected local slope (~1.25 per unit alpha)
+        assert abs(just_above - at_boundary) < 0.002
+        assert abs(at_boundary - just_below) < 0.002
+
+    def test_continuity_at_negative_boundary(self):
+        """Pin values approaching alpha=-1 from both sides: no jump."""
+        nom = pt.constant(1.0)
+        hi = pt.constant(2.0)
+        lo = pt.constant(0.5)
+
+        just_above = interpolate_code2(pt.constant(-0.999), nom, hi, lo).eval()
+        at_boundary = interpolate_code2(pt.constant(-1.0), nom, hi, lo).eval()
+        just_below = interpolate_code2(pt.constant(-1.001), nom, hi, lo).eval()
+
+        # quadratic: nom + a*alpha^2 + b*alpha with a=0.25, b=0.75
+        assert just_above == pytest.approx(0.50025025)
+        assert at_boundary == pytest.approx(0.5)
+        # linear extrapolation continues from lo: nom + (b-2a)(alpha+1) + (a-b)
+        assert just_below == pytest.approx(0.49975)
+        # adjacent values stay within the expected local slope (~0.25 per unit alpha)
+        assert abs(just_below - at_boundary) < 0.002
+        assert abs(at_boundary - just_above) < 0.002
+
+    def test_central_region_is_pure_quadratic(self):
+        """The |alpha| <= 1 region is exactly nom + a*alpha^2 + b*alpha.
+
+        The continuity fix only touches the extrapolation branches; the central
+        quadratic region matches pyhf's code2 formula exactly.
+        """
+        nom_val, hi_val, lo_val = 1.0, 2.0, 0.5
+        nom = pt.constant(nom_val)
+        hi = pt.constant(hi_val)
+        lo = pt.constant(lo_val)
+
+        a = 0.5 * ((hi_val - nom_val) + (lo_val - nom_val))  # 0.25
+        b = 0.5 * ((hi_val - nom_val) - (lo_val - nom_val))  # 0.75
+
+        for alpha_val in [-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0]:
+            result = interpolate_code2(pt.constant(alpha_val), nom, hi, lo).eval()
+            expected = nom_val + a * alpha_val**2 + b * alpha_val
+            assert result == expected, (
+                f"alpha={alpha_val}: got {result}, expected {expected}"
+            )
+
+    def test_code2_equals_parabolic_everywhere(self):
+        """interpolate_code2 is an alias for interpolate_parabolic: identical on a grid."""
+        alphas = pt.vector("alphas")
+        nom = pt.constant(100.0)
+        hi = pt.constant(120.0)
+        lo = pt.constant(80.0)
+
+        alpha_grid = np.linspace(-3.0, 3.0, 121)
+
+        code2_vals = interpolate_code2(alphas, nom, hi, lo).eval({alphas: alpha_grid})
+        parabolic_vals = interpolate_parabolic(alphas, nom, hi, lo).eval(
+            {alphas: alpha_grid}
+        )
+
+        np.testing.assert_array_equal(code2_vals, parabolic_vals)

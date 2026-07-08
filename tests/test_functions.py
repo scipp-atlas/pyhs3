@@ -228,6 +228,23 @@ class TestSumFunction:
         f = function([], result)
         assert np.isclose(f(), 10.0)
 
+    def test_sum_function_uses_balanced_nary_add(self):
+        """SumFunction must build a single balanced n-ary Add over all
+        summands, not a left-deep chain of binary additions
+        (``((a+b)+c)+d`` has an Add node with only 2 inputs at its root;
+        ``pt.add(a,b,c,d)`` has one Add node with all 4 as direct inputs).
+        """
+        summands = [f"term_{i}" for i in range(5)]
+        func = SumFunction(name="balanced_sum", summands=summands)
+        context = {
+            summand: pt.constant(float(i), name=summand)
+            for i, summand in enumerate(summands)
+        }
+        result = func.expression(context)
+
+        assert result.owner is not None
+        assert len(result.owner.inputs) == len(summands)
+
     def test_sum_function_integration_with_workspace(self):
         """Test SumFunction integration in full Workspace workflow."""
         test_data = {
@@ -984,6 +1001,53 @@ class TestProcessNormalizationFunction:
         # The smooth function uses abs(theta) for the polynomial, but theta itself for the difference term
         assert result_val > 0.0  # Should be positive
         assert np.isfinite(result_val)  # Should be finite
+
+    def test_process_normalization_sym_shift_uses_balanced_nary_add(self):
+        """symShift must be built as a single balanced n-ary Add over all
+        symmetric theta terms, not a left-deep chain of binary additions.
+        """
+        func = ProcessNormalizationFunction(
+            name="sym_test",
+            nominalValue=1.0,
+            thetaList=["t0", "t1", "t2"],
+            logKappa=[0.1, 0.2, 0.3],
+            asymmThetaList=[],
+            otherFactorList=[],
+        )
+        context = {f"t{i}": pt.constant(float(i), name=f"t{i}") for i in range(3)}
+        result = func.expression(context)
+
+        # result = nominalValue * exp(symShift + asymShift)
+        exp_node = next(i for i in result.owner.inputs if i.owner is not None)
+        total_shift = exp_node.owner.inputs[0]
+        sym_shift = total_shift.owner.inputs[0]
+
+        assert sym_shift.owner is not None
+        assert len(sym_shift.owner.inputs) == len(func.thetaList)
+
+    def test_process_normalization_asym_shift_uses_balanced_nary_add(self):
+        """asymShift must be built as a single balanced n-ary Add over all
+        asymmetric interpolation terms, not a left-deep chain of binary
+        additions.
+        """
+        func = ProcessNormalizationFunction(
+            name="asym_test",
+            nominalValue=1.0,
+            thetaList=[],
+            asymmThetaList=["a0", "a1", "a2"],
+            logAsymmKappa=[[-0.1, 0.2], [-0.05, 0.1], [-0.2, 0.3]],
+            otherFactorList=[],
+        )
+        context = {f"a{i}": pt.constant(0.5 + i * 0.1, name=f"a{i}") for i in range(3)}
+        result = func.expression(context)
+
+        # result = nominalValue * exp(symShift + asymShift)
+        exp_node = next(i for i in result.owner.inputs if i.owner is not None)
+        total_shift = exp_node.owner.inputs[0]
+        asym_shift = total_shift.owner.inputs[1]
+
+        assert asym_shift.owner is not None
+        assert len(asym_shift.owner.inputs) == len(func.asymmThetaList)
 
     def test_process_normalization_integration_with_workspace(self):
         """Test ProcessNormalizationFunction integration in full Workspace workflow."""

@@ -164,15 +164,37 @@ class PoissonDist(Distribution):
     mean: str | float | int
     x: str | float | int
 
-    def _log_pmf(self, context: Context) -> TensorVar:
+    def likelihood(self, context: Context) -> TensorVar:
+        """
+        Builds a symbolic expression for the Poisson PMF.
+
+        The analytic log-pmf in :meth:`log_likelihood` is the primary form;
+        the probability-space pmf is its exponential.
+
+        Args:
+            context (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of the Poisson PMF.
+        """
+        # Poisson PMF: λ^k * e^(-λ) / k!
+        return cast(TensorVar, pt.exp(self.log_likelihood(context)))
+
+    def log_likelihood(self, context: Context) -> TensorVar:
         r"""
-        Shared analytic log-PMF construction for :meth:`likelihood` and :meth:`log_likelihood`.
+        Builds a symbolic expression for the Poisson log-PMF.
+
+        Primary analytic form of the distribution (:meth:`likelihood` is its
+        exponential):
 
         .. math::
 
             \log P(k; \lambda) = k \log\lambda - \lambda - \log\Gamma(k+1)
 
-        using pt.gammaln for :math:`\log(k!) = \log\Gamma(k+1)`.
+        using pt.gammaln for :math:`\log(k!) = \log\Gamma(k+1)`. Returning the
+        log-pmf directly avoids a ``pt.log(pt.exp(log_pmf))`` round-trip that
+        underflows to ``-inf`` once the true log-pmf is a large negative
+        number (e.g. far into the tail).
 
         Guards the log's argument (not just the switch's output) against
         ``0 * log(0) = NaN`` when both ``k == 0`` and ``lambda == 0``: pt.switch
@@ -197,36 +219,6 @@ class PoissonDist(Distribution):
         safe_mean = pt.switch(pt.eq(x, 0), 1.0, mean)
         full = x * pt.log(safe_mean) - mean - pt.gammaln(x + 1)
         return cast(TensorVar, pt.switch(pt.eq(x, 0), -mean, full))
-
-    def likelihood(self, context: Context) -> TensorVar:
-        """
-        Builds a symbolic expression for the Poisson PMF.
-
-        Args:
-            context (dict): Mapping of names to pytensor variables.
-
-        Returns:
-            pytensor.tensor.variable.TensorVariable: Symbolic representation of the Poisson PMF.
-        """
-        # Poisson PMF: λ^k * e^(-λ) / k!
-        return cast(TensorVar, pt.exp(self._log_pmf(context)))
-
-    def log_likelihood(self, context: Context) -> TensorVar:
-        """
-        Builds a symbolic expression for the Poisson log-PMF.
-
-        Returns the analytic log-pmf directly (already computed internally by
-        :meth:`likelihood`), avoiding a ``pt.log(pt.exp(log_pmf))`` round-trip
-        that underflows to ``-inf`` once the true log-pmf is a large negative
-        number (e.g. far into the tail).
-
-        Args:
-            context (dict): Mapping of names to pytensor variables.
-
-        Returns:
-            pytensor.tensor.variable.TensorVariable: Symbolic representation of the Poisson log-PMF.
-        """
-        return self._log_pmf(context)
 
 
 class ExponentialDist(Distribution):

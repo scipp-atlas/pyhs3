@@ -53,6 +53,13 @@ class GenericDist(GenericExpressionMixin, Distribution):
         Create a complex mathematical function:
 
         >>> dist = GenericDist(name="complex", expression="sin(x) + log(abs(y) + 1)")
+
+    Log-space drop-down:
+        This distribution implements the probability-space :meth:`likelihood`
+        as its primary form and inherits the base class's logarithmic
+        fallback (``log_likelihood = pt.log(likelihood)``). The expression is
+        an arbitrary user-supplied string with no general analytic log form,
+        so there is no closed-form ``log_likelihood`` to author here.
     """
 
     type: Literal["generic_dist"] = Field(default="generic_dist", repr=False)
@@ -95,6 +102,16 @@ class PolynomialDist(Distribution):
 
     ROOT Reference:
         :root:`RooPolynomial`
+
+    Log-space drop-down:
+        This distribution implements the probability-space :meth:`likelihood`
+        as its primary form and inherits the base class's logarithmic
+        fallback (``log_likelihood = pt.log(likelihood)``). The raw
+        polynomial value is negative or zero over parts of its domain by
+        construction (there is no positivity constraint on the
+        coefficients), so its logarithm is undefined/NaN there regardless of
+        which form computes it — there is no analytic log-space rewrite that
+        avoids this.
     """
 
     type: Literal["polynomial_dist"] = "polynomial_dist"
@@ -145,6 +162,15 @@ class BernsteinPolyDist(Distribution):
 
     ROOT Reference:
         :root:`RooBernstein`
+
+    Log-space drop-down:
+        This distribution implements the probability-space :meth:`likelihood`
+        as its primary form and inherits the base class's logarithmic
+        fallback (``log_likelihood = pt.log(likelihood)``). The Bernstein
+        basis polynomials are individually non-negative on [0, 1], but the
+        coefficients ``c_i`` are unconstrained, so the weighted sum can be
+        negative or zero over parts of the domain — its logarithm is
+        undefined/NaN there regardless of which form computes it.
     """
 
     type: Literal["bernstein_poly_dist"] = "bernstein_poly_dist"

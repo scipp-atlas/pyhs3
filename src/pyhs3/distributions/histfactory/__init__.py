@@ -245,10 +245,20 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         multi-parameter modifiers (``shapesys``, ``staterror``) ``dedup_key``
         is ``None`` — these constraints are channel-local by workspace validation
         and are always emitted as-is.
+
+        In BB-lite mode, ``StatErrorModifier`` specs are skipped entirely: their
+        ``data`` is ``None`` by design (per-bin errors come from sample data
+        instead), so ``modifier.make_constraint()`` would raise. The
+        corresponding constraint is channel-level, not modifier-level — callers
+        get it from :meth:`_make_barlow_beeston_lite_constraint` instead.
         """
         for sample in self.samples:
             for modifier in sample.modifiers:
                 if not isinstance(modifier, HasConstraint):
+                    continue
+                if self.barlow_beeston_method == "lite" and isinstance(
+                    modifier, StatErrorModifier
+                ):
                     continue
                 if isinstance(modifier, ParameterModifier):
                     yield modifier.parameter, modifier, sample.data
@@ -270,11 +280,6 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         seen: set[str] = set()
         constraint_probs: list[TensorVar] = []
         for dedup_key, modifier, sample_data in self.constraint_specs():
-            # Skip StatErrorModifier in lite mode - constraint built at channel level
-            if self.barlow_beeston_method == "lite" and isinstance(
-                modifier, StatErrorModifier
-            ):
-                continue
             if dedup_key is not None:
                 if dedup_key in seen:
                     continue
@@ -578,11 +583,6 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         seen: set[str] = set()
         log_constraints: list[TensorVar] = []
         for dedup_key, modifier, sample_data in self.constraint_specs():
-            # Skip StatErrorModifier in lite mode - constraint built at channel level
-            if self.barlow_beeston_method == "lite" and isinstance(
-                modifier, StatErrorModifier
-            ):
-                continue
             if dedup_key is not None:
                 if dedup_key in seen:
                     continue

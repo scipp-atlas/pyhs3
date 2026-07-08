@@ -540,6 +540,19 @@ class Model:
                     self._hfdc_constraint_params_seen.add(dedup_key)
                 self._hfdc_constraints.append(constraint)
 
+        # BB-lite mode's channel-level constraint (shared gamma parameters
+        # combining all samples' statistical uncertainties) is not a
+        # per-modifier spec, so constraint_specs() cannot yield it -- mirror
+        # extended_likelihood's channel-level addition here.  It is
+        # channel-local (like shapesys/staterror dedup_key=None specs above),
+        # so it is always appended, with no cross-channel dedup key.
+        if dist.barlow_beeston_method == "lite":
+            lite_constraint = dist._make_barlow_beeston_lite_constraint(context)  # pylint: disable=protected-access
+            if lite_constraint is not None:
+                channel_constraints.append(lite_constraint)
+                if in_likelihood:
+                    self._hfdc_constraints.append(lite_constraint)
+
         # Assemble the full per-channel expression: normalized Poisson term times
         # the constraint product (extended likelihood).  HFDC is not normalizable
         # (_normalizable defaults False here), so _apply_normalization is a no-op,

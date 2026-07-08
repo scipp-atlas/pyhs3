@@ -94,6 +94,25 @@ class Distribution(Evaluable, ABC):
             TypeError: Must be implemented by subclasses
         """
 
+    def log_likelihood(self, context: Context) -> TensorVar:
+        """
+        Log-space counterpart of :meth:`likelihood`.
+
+        Default implementation takes the log of the probability-space
+        likelihood. Override with an analytic log-space form wherever one
+        exists (e.g. Gaussian, Poisson, LogNormal): the default round-trips
+        through a probability value that can underflow to 0.0 for parameter
+        points far from the mode, at which point ``pt.log(0.0)`` is ``-inf``
+        even though the true log-density is finite.
+
+        Args:
+            context: Mapping of names to pytensor variables
+
+        Returns:
+            TensorVar: Log of the main probability density
+        """
+        return cast(TensorVar, pt.log(self.likelihood(context)))
+
     def normalization_expression(
         self, _context: Context, _observable_name: str
     ) -> TensorVar | None:
@@ -143,44 +162,60 @@ class Distribution(Evaluable, ABC):
         lower_val = cast(TensorVar, graph_replace(expr, [(leaf, lower_t)]))
         return cast(TensorVar, upper_val - lower_val)
 
-    def _apply_normalization(
-        self,
-        raw: TensorVar,
-        context: Context,
-    ) -> TensorVar:
+    def _matching_observables(
+        self, context: Context
+    ) -> list[tuple[str, TensorVar, TensorVar]]:
         """
-        Apply normalization to a raw likelihood expression.
+        Observable bounds from context that this distribution's parameters reference.
 
-        Normalizes a likelihood over observables present in the context.
-        Attempts analytical integration first via _normalization_integral(),
-        then falls back to nested Gauss-Legendre quadrature for
-        multi-dimensional integrals.
+        Shared by _apply_normalization() and log_expression() so both agree on
+        whether any normalization applies without duplicating the matching logic.
 
         Args:
-            raw: Raw (unnormalized) likelihood expression
             context: Mapping of names to pytensor variables (includes observables)
 
         Returns:
-            Normalized likelihood expression
+            List of (name, lower, upper) for each observable this distribution depends on.
         """
-        # Explicit opt-out for distributions that should not be normalized
-        if not self._normalizable:
-            return raw
-
-        matching = [
+        return [
             (name, lower, upper)
             for name, (lower, upper) in context.observables.items()
             if name in self.parameters
         ]
-        if not matching:
-            return raw
 
+    def _normalization_integral_for(
+        self,
+        raw: TensorVar,
+        context: Context,
+        matching: list[tuple[str, TensorVar, TensorVar]],
+    ) -> TensorVar:
+        """
+        Compute the normalization integral for a non-empty set of matching observables.
+
+        Attempts analytical integration first via _normalization_integral(),
+        then falls back to nested Gauss-Legendre quadrature.
+
+        Args:
+            raw: Raw (unnormalized) likelihood expression, used only by the
+                Gauss-Legendre quadrature fallback (the analytical branch
+                integrates the antiderivative directly and does not need it).
+            context: Mapping of names to pytensor variables (includes observables)
+            matching: Non-empty list of (name, lower, upper), as returned by
+                _matching_observables().
+
+        Returns:
+            Symbolic normalization integral.
+
+        Raises:
+            NotImplementedError: If more than one observable matches (multi-dimensional
+                normalization is not yet supported).
+        """
         # Single observable: try analytical integral first
         if len(matching) == 1:
             obs_name, lower, upper = matching[0]
             integral = self._normalization_integral(context, obs_name, lower, upper)
             if integral is not None:
-                return cast(TensorVar, raw / integral)
+                return integral
 
         if len(matching) > 1:
             obs_names = [name for name, _, _ in matching]
@@ -195,10 +230,39 @@ class Distribution(Evaluable, ABC):
         # Pass the leaf (not the view) so graph_replace substitutes through
         # every ExpandDims(leaf) view inside the integrand.
         obs_name, lower, upper = matching[0]
-        integral_expr = gauss_legendre_integral(
-            raw, context.parameters[obs_name], lower, upper
-        )
-        return cast(TensorVar, raw / integral_expr)
+        return gauss_legendre_integral(raw, context.parameters[obs_name], lower, upper)
+
+    def _apply_normalization(
+        self,
+        raw: TensorVar,
+        context: Context,
+    ) -> TensorVar:
+        """
+        Apply normalization to a raw likelihood expression.
+
+        Normalizes a likelihood over observables present in the context.
+        For a single matching observable, attempts analytical integration
+        first via _normalization_integral(), then falls back to Gauss-Legendre
+        quadrature. Multi-dimensional normalization is not yet supported and
+        raises NotImplementedError.
+
+        Args:
+            raw: Raw (unnormalized) likelihood expression
+            context: Mapping of names to pytensor variables (includes observables)
+
+        Returns:
+            Normalized likelihood expression
+        """
+        # Explicit opt-out for distributions that should not be normalized
+        if not self._normalizable:
+            return raw
+
+        matching = self._matching_observables(context)
+        if not matching:
+            return raw
+
+        integral = self._normalization_integral_for(raw, context, matching)
+        return cast(TensorVar, raw / integral)
 
     def _expression(self, context: Context) -> TensorVar:
         """
@@ -230,9 +294,18 @@ class Distribution(Evaluable, ABC):
         """
         Log-probability combining main likelihood with extended terms.
 
-        Returns the sum of log(likelihood()) and log(extended_likelihood()).
-        This is mathematically equivalent to log(likelihood * extended_likelihood)
-        but can be more numerically stable.
+        Returns log_likelihood() plus log(extended_likelihood()), minus the log
+        of the normalization integral where normalization applies. This is
+        mathematically equivalent to log(likelihood * extended_likelihood) but
+        starts from log_likelihood() so that a distribution's analytic log form
+        (e.g. Gaussian, Poisson, LogNormal) is used directly instead of round-
+        tripping through a probability value that can underflow to 0.0.
+
+        Normalization itself stays probability-space: the normalization
+        integral (whether analytic or Gauss-Legendre quadrature) is a sum of
+        positive terms and is far less underflow-prone than the raw density,
+        so log(integral) is subtracted rather than computed as its own
+        analytic log form.
 
         All distributions are automatically normalized over observables present
         in the context, unless explicitly opted out via _normalizable = False.
@@ -245,14 +318,21 @@ class Distribution(Evaluable, ABC):
         Returns:
             TensorVar: Log-probability density
         """
-        raw = self.likelihood(context)
+        log_raw = self.log_likelihood(context)
 
-        # Apply normalization (respects _normalizable flag internally)
-        raw = self._apply_normalization(raw, context)
+        # Apply normalization (respects _normalizable flag internally). Only
+        # compute the raw (probability-space) likelihood when normalization
+        # actually applies -- it's needed for the Gauss-Legendre fallback.
+        if self._normalizable:
+            matching = self._matching_observables(context)
+            if matching:
+                raw = self.likelihood(context)
+                integral = self._normalization_integral_for(raw, context, matching)
+                log_raw = log_raw - pt.log(integral)
 
         return cast(
             TensorVar,
-            pt.log(raw) + pt.log(self.extended_likelihood(context)),
+            log_raw + pt.log(self.extended_likelihood(context)),
         )
 
     def extended_likelihood(

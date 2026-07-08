@@ -37,6 +37,12 @@ from pyhs3.distributions.basic import (
     PoissonDist,
     UniformDist,
 )
+from pyhs3.distributions.cms import (
+    FastVerticalInterpHistPdf2D2Dist,
+    FastVerticalInterpHistPdf2Dist,
+    GGZZBackgroundDist,
+    QQZZBackgroundDist,
+)
 from pyhs3.distributions.core import Distribution
 from pyhs3.distributions.mathematical import (
     BernsteinPolyDist,
@@ -949,3 +955,130 @@ class TestBernsteinPolyDistLogLikelihood:
 
         assert prob_val < 0.0
         assert math.isnan(log_val)
+
+
+# --------------------------------------------------------------------------
+# Phase 3.5 of #254: analytic log_likelihood() on the CMS ggZZ/qqZZ background
+# distributions (products of a power-law and an exponential decay, so the log
+# is a clean sum). The CMS FastVerticalInterp placeholders stay on the base
+# pt.log(likelihood()) fallback (see class docstrings for why).
+# --------------------------------------------------------------------------
+
+
+class TestGGZZBackgroundLogLikelihood:
+    """GGZZBackgroundDist.log_likelihood is the analytic log form of likelihood().
+
+    likelihood() = a1 * m4l**a2 * exp(-a3 * m4l), so the analytic log is
+    log(a1) + a2 * log(m4l) - a3 * m4l.
+    """
+
+    @pytest.mark.parametrize(
+        ("a1", "a2", "a3", "m4l"),
+        [
+            pytest.param(1.0, 2.0, 0.05, 200.0, id="typical"),
+            pytest.param(0.5, 1.5, 0.02, 150.0, id="smaller_norm"),
+            pytest.param(2.0, -1.0, 0.03, 300.0, id="negative_power"),
+        ],
+    )
+    def test_matches_log_of_likelihood(self, a1, a2, a3, m4l):
+        """log_likelihood equals log(likelihood) at ordinary parameter points."""
+        dist = GGZZBackgroundDist(name="ggzz", m4l="m4l", a1="a1", a2="a2", a3="a3")
+        context = Context({"m4l": _c(m4l), "a1": _c(a1), "a2": _c(a2), "a3": _c(a3)})
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        np.testing.assert_allclose(log_val, np.log(prob_val), rtol=1e-12)
+
+    def test_finite_at_large_mass_while_likelihood_underflows(self):
+        """a3 * m4l = 800: exp(-800) underflows likelihood to 0.0, log stays finite."""
+        a1, a2, a3, m4l = 1.0, 2.0, 1.0, 800.0
+        dist = GGZZBackgroundDist(name="ggzz", m4l="m4l", a1="a1", a2="a2", a3="a3")
+        context = Context({"m4l": _c(m4l), "a1": _c(a1), "a2": _c(a2), "a3": _c(a3)})
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+
+        assert prob_val == 0.0
+        assert math.isfinite(log_val)
+        expected = math.log(a1) + a2 * math.log(m4l) - a3 * m4l
+        assert log_val == pytest.approx(expected, rel=1e-10)
+
+
+class TestQQZZBackgroundLogLikelihood:
+    """QQZZBackgroundDist.log_likelihood is the analytic log form of likelihood().
+
+    likelihood() = a1 * (m4l + a2)**a3 * exp(-a4 * m4l), so the analytic log is
+    log(a1) + a3 * log(m4l + a2) - a4 * m4l.
+    """
+
+    @pytest.mark.parametrize(
+        ("a1", "a2", "a3", "a4", "m4l"),
+        [
+            pytest.param(1.0, 10.0, 2.0, 0.05, 200.0, id="typical"),
+            pytest.param(0.3, 5.0, 1.2, 0.02, 150.0, id="smaller_norm"),
+            pytest.param(2.0, -50.0, 1.5, 0.03, 300.0, id="negative_shift"),
+        ],
+    )
+    def test_matches_log_of_likelihood(self, a1, a2, a3, a4, m4l):
+        """log_likelihood equals log(likelihood) at ordinary parameter points."""
+        dist = QQZZBackgroundDist(
+            name="qqzz", m4l="m4l", a1="a1", a2="a2", a3="a3", a4="a4"
+        )
+        context = Context(
+            {
+                "m4l": _c(m4l),
+                "a1": _c(a1),
+                "a2": _c(a2),
+                "a3": _c(a3),
+                "a4": _c(a4),
+            }
+        )
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        np.testing.assert_allclose(log_val, np.log(prob_val), rtol=1e-12)
+
+    def test_finite_at_large_mass_while_likelihood_underflows(self):
+        """a4 * m4l = 800: exp(-800) underflows likelihood to 0.0, log stays finite."""
+        a1, a2, a3, a4, m4l = 1.0, 10.0, 2.0, 1.0, 800.0
+        dist = QQZZBackgroundDist(
+            name="qqzz", m4l="m4l", a1="a1", a2="a2", a3="a3", a4="a4"
+        )
+        context = Context(
+            {
+                "m4l": _c(m4l),
+                "a1": _c(a1),
+                "a2": _c(a2),
+                "a3": _c(a3),
+                "a4": _c(a4),
+            }
+        )
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+
+        assert prob_val == 0.0
+        assert math.isfinite(log_val)
+        expected = math.log(a1) + a3 * math.log(m4l + a2) - a4 * m4l
+        assert log_val == pytest.approx(expected, rel=1e-10)
+
+
+class TestFastVerticalInterpPlaceholdersUseBaseDefault:
+    """The FastVerticalInterp morphs are simplified placeholders (per their
+    docstrings) with no analytic log form; both stay on the base
+    pt.log(likelihood()) fallback until a real morphing implementation lands.
+    """
+
+    def test_fastverticalinterphistpdf2_matches_base_default(self):
+        dist = FastVerticalInterpHistPdf2Dist(
+            name="fvh2", x="x", coefList=["coef0", "coef1"]
+        )
+        context = Context({"x": _c(1.0), "coef0": _c(0.2), "coef1": _c(-0.3)})
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        assert log_val == pytest.approx(np.log(prob_val), rel=1e-12)
+
+    def test_fastverticalinterphistpdf2d2_matches_base_default(self):
+        dist = FastVerticalInterpHistPdf2D2Dist(
+            name="fvh2d2", x="x", y="y", coefList=["coef0"]
+        )
+        context = Context({"x": _c(1.0), "y": _c(2.0), "coef0": _c(0.4)})
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        assert log_val == pytest.approx(np.log(prob_val), rel=1e-12)

@@ -24,7 +24,7 @@ hatch-vcs = ">=0.4"
 [package.run-dependencies]
 rich = "*"
 rustworkx = "*"
-pytensor = ">=2.33.0"
+pytensor = ">=3.0.0"
 numpy = "*"
 sympy = "*"
 pydantic = ">=2.12"
@@ -147,28 +147,16 @@ codeflash = "*"
 [feature.codeflash.tasks]
 codeflash = { cmd = "codeflash", description = "Run codeflash to identify optimizations" }
 
-[feature.pytensor2.dependencies]
-pytensor = ">=2.33.0,<3"
-
-[feature.pytensor3.dependencies]
-pytensor = "==3.0.0"
-
 [environments]
 docs = ["docs", "jax"]
 dev = ["dev", "jax"]
 codeflash = ["test", "codeflash"]
-py312 = ["test", "py312", "pytensor3"]
-py313 = ["test", "py313", "pytensor3"]  # pytensor3 not available for py313 on osx-64
-py314 = ["test", "py314", "pytensor3"]
-py312-jax = ["test", "py312", "pytensor3", "jax"]
-py313-jax = ["test", "py313", "pytensor3", "jax"]  # pytensor3 not available for py313 on osx-64
-py314-jax = ["test", "py314", "pytensor3", "jax"]
-py312-pytensor2 = ["test", "py312", "pytensor2"]
-py313-pytensor2 = ["test", "py313", "pytensor2"]
-py314-pytensor2 = ["test", "py314", "pytensor2"]
-py312-pytensor2-jax = ["test", "py312", "pytensor2", "jax"]
-py313-pytensor2-jax = ["test", "py313", "pytensor2", "jax"]
-py314-pytensor2-jax = ["test", "py314", "pytensor2", "jax"]
+py312 = ["test", "py312"]
+py313 = ["test", "py313"]
+py314 = ["test", "py314"]
+py312-jax = ["test", "py312", "jax"]
+py313-jax = ["test", "py313", "jax"]
+py314-jax = ["test", "py314", "jax"]
 
 
 [tasks]

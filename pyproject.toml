@@ -156,6 +156,7 @@ module = [
   "jax.*",
   "pytensor.link.jax.*",
   "pytensor.compile.function",  # removed in pytensor >= 3; replaced by pytensor.compile.maker
+  "pytensor_distributions.*",  # https://github.com/pymc-devs/pytensor-distributions/issues/62
 ]
 ignore_missing_imports = true
 

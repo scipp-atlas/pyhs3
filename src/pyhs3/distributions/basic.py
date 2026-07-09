@@ -53,11 +53,13 @@ class GaussianDist(Distribution):
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of the Gaussian PDF.
         """
-        # log.info("parameters: ", parameters)
-        return Normal.pdf(
-            context[self._parameters["x"]],
-            context[self._parameters["mean"]],
-            context[self._parameters["sigma"]],
+        return cast(
+            TensorVar,
+            Normal.pdf(
+                context[self._parameters["x"]],
+                context[self._parameters["mean"]],
+                context[self._parameters["sigma"]],
+            ),
         )
 
     def log_likelihood(self, context: Context) -> TensorVar:

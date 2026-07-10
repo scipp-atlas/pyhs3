@@ -617,6 +617,34 @@ class TestAsymmetricCrystalBallDist:
             above = antideriv_fn(junction + eps)
             np.testing.assert_allclose(below, above, rtol=0, atol=1e-8)
 
+    def test_asymmetric_crystal_normalization_expression_wrong_observable_returns_none(
+        self,
+    ):
+        """normalization_expression() only applies to this distribution's own
+        observable (self.m); for any other observable name it must return
+        None so callers fall back to Gauss-Legendre quadrature, matching the
+        base class's documented contract (see
+        test_normalization.TestNormalization.test_normalization_expression_default_returns_none)."""
+        shape_params = {
+            "alpha_L": 1.2,
+            "alpha_R": 1.7,
+            "m0": 125.0,
+            "n_L": 5.3,
+            "n_R": 9.1,
+            "sigma_L": 1.5,
+            "sigma_R": 2.0,
+        }
+        dist, context, _m_var = self._make_dist_and_context(shape_params, 105.0, 160.0)
+
+        assert dist.normalization_expression(context, "not_m") is None
+
+        # _normalization_integral() calls normalization_expression()
+        # internally and only reaches the Gauss-Legendre fallback once it
+        # returns None; confirm it short-circuits to None here rather than
+        # attempting to substitute bounds into a nonexistent antiderivative.
+        integral = dist._normalization_integral(context, "not_m", 105.0, 160.0)
+        assert integral is None
+
     def test_asymmetric_crystal_antiderivative_gradient_is_not_nan(self):
         """Gradient of the antiderivative wrt shape params stays finite
         everywhere, including where a tail's own antiderivative branch is

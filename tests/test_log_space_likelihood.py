@@ -38,6 +38,11 @@ from pyhs3.distributions.basic import (
     UniformDist,
 )
 from pyhs3.distributions.core import Distribution
+from pyhs3.distributions.mathematical import (
+    BernsteinPolyDist,
+    GenericDist,
+    PolynomialDist,
+)
 from pyhs3.domains import Domains, ProductDomain
 from pyhs3.likelihoods import Likelihood, Likelihoods
 from pyhs3.metadata import Metadata
@@ -811,3 +816,136 @@ def test_logpdf_finite_for_normsys_constraint_at_alpha_40():
         + _norm_logpdf(np.array([40.0]), np.array([0.0]), np.array([1.0])).sum()
     )
     assert logpdf_val == pytest.approx(expected, rel=1e-8)
+
+
+# --------------------------------------------------------------------------
+# Phase 3 of #254: GenericDist, PolynomialDist, and BernsteinPolyDist are
+# explicit drop-downs — they implement only likelihood() and inherit the base
+# class's log_likelihood = pt.log(likelihood). These tests characterize that
+# behavior (including the NaN consequence for signed polynomials) rather than
+# asserting an analytic log form, since none exists for these classes.
+# --------------------------------------------------------------------------
+
+
+class TestGenericDistLogLikelihood:
+    """GenericDist has no log_likelihood override: it uses the base default.
+
+    The expression is an arbitrary user-supplied string with no general
+    analytic log form, so the drop-down to pt.log(likelihood) is permanent
+    rather than a placeholder awaiting a Phase 3 conversion.
+    """
+
+    @pytest.mark.parametrize(
+        ("expression", "params"),
+        [
+            pytest.param("x**2 + 1", {"x": 2.0}, id="polynomial_positive"),
+            pytest.param(
+                "exp(-x**2/2)", {"x": 1.5}, id="gaussian_kernel_always_positive"
+            ),
+            pytest.param("sin(x) + 2", {"x": 0.7}, id="shifted_sine_always_positive"),
+        ],
+    )
+    def test_matches_log_of_likelihood(self, expression, params):
+        """log_likelihood equals log(likelihood) wherever the expression is positive.
+
+        sympy_to_pytensor keys its variable substitution off each PyTensor
+        variable's own ``.name`` (not the context dict key), so the constants
+        here must be named to match the free symbols in the expression.
+        """
+        dist = GenericDist(name="g", expression=expression)
+        context = Context(
+            {
+                name: cast(TensorVar, pt.constant(value, dtype="float64", name=name))
+                for name, value in params.items()
+            }
+        )
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        np.testing.assert_allclose(log_val, np.log(prob_val), rtol=1e-12)
+
+
+class TestPolynomialDistLogLikelihood:
+    """PolynomialDist has no log_likelihood override: it uses the base default.
+
+    Unlike Gaussian/Poisson/LogNormal, the raw polynomial value has no
+    positivity constraint on its coefficients, so there is no analytic log
+    form to author — the drop-down documented on the class is permanent.
+    """
+
+    @pytest.mark.parametrize(
+        ("x", "coeffs"),
+        [
+            pytest.param(0.0, (1.0, 2.0, 3.0), id="quadratic_at_zero"),
+            pytest.param(1.0, (1.0, 2.0, 3.0), id="quadratic_at_one"),
+            pytest.param(2.0, (5.0, 3.0), id="linear_positive_slope"),
+        ],
+    )
+    def test_matches_log_of_likelihood(self, x, coeffs):
+        """log_likelihood equals log(likelihood) where the polynomial is positive."""
+        coeff_names = [f"a{i}" for i in range(len(coeffs))]
+        dist = PolynomialDist(name="p", x="x", coefficients=coeff_names)
+        context = Context(
+            {"x": _c(x)}
+            | {name: _c(value) for name, value in zip(coeff_names, coeffs, strict=True)}
+        )
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        np.testing.assert_allclose(log_val, np.log(prob_val), rtol=1e-12)
+
+    def test_negative_polynomial_gives_nan_log_likelihood(self):
+        """Documented drop-down consequence: a signed polynomial can go negative,
+        and pt.log() of a negative value is NaN by construction (not a bug to
+        fix — PolynomialDist places no positivity constraint on coefficients).
+        """
+        # 1 - 3x is negative for x > 1/3.
+        dist = PolynomialDist(name="p", x="x", coefficients=["a0", "a1"])
+        context = Context({"x": _c(1.0), "a0": _c(1.0), "a1": _c(-3.0)})
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+
+        assert prob_val < 0.0
+        assert math.isnan(log_val)
+
+
+class TestBernsteinPolyDistLogLikelihood:
+    """BernsteinPolyDist has no log_likelihood override: it uses the base default.
+
+    The Bernstein basis polynomials are individually non-negative on [0, 1],
+    but the coefficients are unconstrained, so the weighted sum can still go
+    negative — there is no analytic log form to author here either.
+    """
+
+    @pytest.mark.parametrize(
+        ("x", "coeffs"),
+        [
+            pytest.param(0.5, (2.0,), id="degree_zero_constant"),
+            pytest.param(0.3, (1.0, 3.0), id="degree_one_linear"),
+            pytest.param(0.6, (1.0, 4.0, 2.0), id="degree_two_quadratic"),
+        ],
+    )
+    def test_matches_log_of_likelihood(self, x, coeffs):
+        """log_likelihood equals log(likelihood) where the basis sum is positive."""
+        coeff_names = [f"c{i}" for i in range(len(coeffs))]
+        dist = BernsteinPolyDist(name="b", x="x", coefficients=coeff_names)
+        context = Context(
+            {"x": _c(x)}
+            | {name: _c(value) for name, value in zip(coeff_names, coeffs, strict=True)}
+        )
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        np.testing.assert_allclose(log_val, np.log(prob_val), rtol=1e-12)
+
+    def test_negative_bernstein_sum_gives_nan_log_likelihood(self):
+        """Documented drop-down consequence: unconstrained coefficients can make
+        the weighted basis sum negative, and pt.log() of a negative value is
+        NaN by construction (not a bug to fix).
+        """
+        # B_0,1(0.9) = 0.1, B_1,1(0.9) = 0.9 -> -5*0.1 + 1*0.9 = 0.4 > 0 doesn't
+        # go negative; use a stronger negative weight on the dominant basis term.
+        dist = BernsteinPolyDist(name="b", x="x", coefficients=["c0", "c1"])
+        context = Context({"x": _c(0.9), "c0": _c(1.0), "c1": _c(-5.0)})
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+
+        assert prob_val < 0.0
+        assert math.isnan(log_val)

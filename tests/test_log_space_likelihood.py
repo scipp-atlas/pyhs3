@@ -18,7 +18,7 @@ These tests assert that:
 from __future__ import annotations
 
 import math
-from typing import Literal, cast
+from typing import ClassVar, Literal, cast
 
 import numpy as np
 import pytensor
@@ -49,6 +49,11 @@ from pyhs3.distributions.mathematical import (
     GenericDist,
     PolynomialDist,
 )
+from pyhs3.distributions.physics import (
+    ArgusDist,
+    AsymmetricCrystalBallDist,
+    CrystalBallDist,
+)
 from pyhs3.domains import Domains, ProductDomain
 from pyhs3.likelihoods import Likelihood, Likelihoods
 from pyhs3.metadata import Metadata
@@ -59,6 +64,8 @@ from pyhs3.workspace import Workspace
 # scipy.stats is preferred for analytic references; fall back to closed forms
 # built from stdlib math if scipy is unavailable in the test environment.
 try:
+    from scipy.stats import argus as _scipy_argus
+    from scipy.stats import crystalball as _scipy_crystalball
     from scipy.stats import expon as _scipy_expon
     from scipy.stats import lognorm as _scipy_lognorm
     from scipy.stats import norm as _scipy_norm
@@ -82,6 +89,38 @@ try:
         # scipy's loc/scale form as scale = 1/c.
         return np.asarray(_scipy_expon.logpdf(x, scale=1.0 / c), dtype=np.float64)
 
+    def _crystalball_raw_logpdf(t: float, alpha: float, n: float) -> float:
+        """log of CrystalBallDist.likelihood()'s *unnormalized* shape at t=(m-m0)/sigma.
+
+        scipy.stats.crystalball.pdf(t, beta=alpha, m=n) is normalized to
+        integrate to 1; CrystalBallDist.likelihood() is not (normalization is
+        applied separately, see log_expression()). Per scipy's docs the
+        normalization constant is
+        ``N = 1 / (n/alpha/(n-1)*exp(-alpha**2/2) + sqrt(pi/2)*(1+erf(alpha/sqrt(2))))``,
+        so ``log(shape) = scipy_logpdf + log(1/N)``.
+        """
+        denom = (n / alpha) / (n - 1) * math.exp(-(alpha**2) / 2.0) + math.sqrt(
+            math.pi / 2
+        ) * (1 + math.erf(alpha / math.sqrt(2)))
+        return float(_scipy_crystalball.logpdf(t, beta=alpha, m=n)) + math.log(denom)
+
+    def _argus_raw_logpdf(x: float, chi: float) -> float:
+        """log of ArgusDist.likelihood()'s *unnormalized* shape at r=m/m0, for the
+        canonical p=0.5 case where ArgusDist's ``c`` maps onto scipy's ``chi``
+        as ``c = -chi**2/2``.
+
+        scipy.stats.argus.pdf(x, chi) is normalized; ArgusDist.likelihood() is
+        not. scipy's normalization constant is
+        ``chi**3 / (sqrt(2*pi) * Psi(chi))`` with
+        ``Psi(chi) = Phi(chi) - chi*phi(chi) - 0.5`` (standard normal CDF/PDF),
+        so ``log(shape) = scipy_logpdf - log(norm_const)``.
+        """
+        phi = math.exp(-(chi**2) / 2.0) / math.sqrt(2.0 * math.pi)
+        cdf = 0.5 * (1.0 + math.erf(chi / math.sqrt(2.0)))
+        psi = cdf - chi * phi - 0.5
+        norm_const = chi**3 / (math.sqrt(2.0 * math.pi) * psi)
+        return float(_scipy_argus.logpdf(x, chi=chi)) - math.log(norm_const)
+
 except ModuleNotFoundError:  # pragma: no cover - scipy is in the dev deps
 
     def _poisson_logpmf(counts: np.ndarray, rates: np.ndarray) -> np.ndarray:
@@ -99,6 +138,16 @@ except ModuleNotFoundError:  # pragma: no cover - scipy is in the dev deps
 
     def _expon_logpdf(x: np.ndarray, c: np.ndarray) -> np.ndarray:
         return np.log(c) - c * x
+
+    def _crystalball_raw_logpdf(
+        _t: float, _alpha: float, _n: float
+    ) -> float:  # pragma: no cover
+        msg = "scipy is required for this reference implementation"
+        raise ModuleNotFoundError(msg)
+
+    def _argus_raw_logpdf(_x: float, _chi: float) -> float:  # pragma: no cover
+        msg = "scipy is required for this reference implementation"
+        raise ModuleNotFoundError(msg)
 
 
 def _underflow_workspace() -> tuple[Workspace, np.ndarray]:
@@ -1082,3 +1131,434 @@ class TestFastVerticalInterpPlaceholdersUseBaseDefault:
         log_val = float(pytensor.function([], dist.log_likelihood(context))())
         prob_val = float(pytensor.function([], dist.likelihood(context))())
         assert log_val == pytest.approx(np.log(prob_val), rel=1e-12)
+
+
+# --------------------------------------------------------------------------
+# Phase 3 (final family) of #254: analytic log_likelihood() on CrystalBallDist,
+# AsymmetricCrystalBallDist (double-sided), and ArgusDist. Both Crystal Ball
+# classes are piecewise (Gaussian core / power-law tail(s)); both tails share
+# the _crystalball_log_tail helper. ArgusDist's log form is restricted to the
+# kinematic domain (1 - r**2 > 0): outside it the density is 0 by definition,
+# so -inf is the physically correct log-density rather than a numerical
+# artifact, and this intentionally diverges from pt.log(likelihood()) there
+# since likelihood() itself returns NaN outside the bound for non-integer p.
+# --------------------------------------------------------------------------
+
+
+class TestCrystalBallLogLikelihood:
+    """CrystalBallDist.log_likelihood is the analytic log form of likelihood(),
+    piecewise over the Gaussian core / power-law tail split.
+    """
+
+    @pytest.mark.parametrize(
+        "m_val",
+        [
+            pytest.param(-10.0, id="deep_tail"),
+            pytest.param(-1.5, id="tail_junction"),  # t == -alpha
+            pytest.param(-1.0, id="core_near_junction"),
+            pytest.param(0.0, id="core_at_mode"),
+            pytest.param(3.0, id="core_far_from_mode"),
+        ],
+    )
+    def test_matches_log_of_likelihood(self, m_val):
+        """log_likelihood equals log(likelihood) in every piecewise region."""
+        dist = CrystalBallDist(
+            name="cb", alpha="alpha", m="m", m0="m0", n="n", sigma="sigma"
+        )
+        context = Context(
+            {
+                "alpha": _c(1.5),
+                "m": _c(m_val),
+                "m0": _c(0.0),
+                "n": _c(3.0),
+                "sigma": _c(1.0),
+            }
+        )
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        np.testing.assert_allclose(log_val, np.log(prob_val), rtol=1e-12)
+
+    @pytest.mark.parametrize(
+        ("t", "alpha", "n"),
+        [
+            pytest.param(-8.0, 1.5, 3.0, id="deep_tail"),
+            pytest.param(-1.5, 1.5, 3.0, id="tail_junction"),
+            pytest.param(-1.0, 1.5, 3.0, id="core_near_junction"),
+            pytest.param(0.0, 1.5, 3.0, id="core_at_mode"),
+            pytest.param(3.0, 1.5, 3.0, id="core_far_from_mode"),
+        ],
+    )
+    def test_matches_scipy_crystalball_shape(self, t, alpha, n):
+        """likelihood() is scipy.stats.crystalball's *unnormalized* shape
+        (beta=alpha, m=n); see _crystalball_raw_logpdf for the mapping."""
+        dist = CrystalBallDist(
+            name="cb", alpha="alpha", m="m", m0="m0", n="n", sigma="sigma"
+        )
+        context = Context(
+            {
+                "alpha": _c(alpha),
+                "m": _c(t),  # m0=0, sigma=1, so m == t directly
+                "m0": _c(0.0),
+                "n": _c(n),
+                "sigma": _c(1.0),
+            }
+        )
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+        expected = _crystalball_raw_logpdf(t, alpha, n)
+        assert log_val == pytest.approx(expected, rel=1e-8)
+
+    def test_finite_deep_in_tail_while_likelihood_underflows(self):
+        """The power-law tail decays much more slowly than an exponential, so
+        underflowing likelihood() to exactly 0.0 needs t on the order of
+        -1e108 (A*(B-t)**(-n) with n=3 crosses float64's minimum subnormal
+        there); log_likelihood must stay finite regardless."""
+        dist = CrystalBallDist(
+            name="cb", alpha="alpha", m="m", m0="m0", n="n", sigma="sigma"
+        )
+        context = Context(
+            {
+                "alpha": _c(1.5),
+                "m": _c(-1e110),
+                "m0": _c(0.0),
+                "n": _c(3.0),
+                "sigma": _c(1.0),
+            }
+        )
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+
+        assert prob_val == 0.0
+        assert math.isfinite(log_val)
+
+    def test_finite_deep_in_core_while_likelihood_underflows(self):
+        """t = 45 is deep enough into the Gaussian core that likelihood()
+        underflows to 0.0; log_likelihood must stay finite."""
+        dist = CrystalBallDist(
+            name="cb", alpha="alpha", m="m", m0="m0", n="n", sigma="sigma"
+        )
+        context = Context(
+            {
+                "alpha": _c(1.5),
+                "m": _c(45.0),
+                "m0": _c(0.0),
+                "n": _c(3.0),
+                "sigma": _c(1.0),
+            }
+        )
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+
+        assert prob_val == 0.0
+        assert math.isfinite(log_val)
+
+    def test_gradient_finite_in_core_where_tail_argument_invalid(self):
+        """m=0.5 puts t=0.5 in the core region (t >= -alpha=-1.5), exactly
+        where the tail's own argument u = B - t = 0.5 - 0.5 = 0 (B = n/alpha -
+        alpha = 3/1.5 - 1.5 = 0.5). ``d(log(u))/du = 1/u`` is only singular
+        exactly at u=0 -- not merely negative -- so this boundary point is the
+        one that actually exercises the failure mode: without
+        _crystalball_log_tail's safe_u clamp, the (masked-out) tail branch's
+        local derivative is 1/0 = inf there, and multiplying by the switch's
+        zero mask gives 0 * inf = NaN. Mode(linker="py", optimizer=None)
+        disables rewrites that could hide this.
+        """
+        dist = CrystalBallDist(
+            name="cb", alpha="alpha", m="m", m0="m0", n="n", sigma="sigma"
+        )
+        m_var = pt.scalar("m")
+        context = Context(
+            {
+                "alpha": _c(1.5),
+                "m": m_var,
+                "m0": _c(0.0),
+                "n": _c(3.0),
+                "sigma": _c(1.0),
+            }
+        )
+        grad = pt.grad(dist.log_likelihood(context), m_var)
+
+        mode = pytensor.compile.mode.Mode(linker="py", optimizer=None)
+        fn = pytensor.function([m_var], grad, mode=mode)
+        grad_val = fn(0.5)
+        assert np.isfinite(grad_val), f"gradient has NaN/Inf: {grad_val}"
+
+
+class TestAsymmetricCrystalBallLogLikelihood:
+    """AsymmetricCrystalBallDist.log_likelihood is the analytic log form of
+    likelihood(), piecewise over the four regions: left tail, left core,
+    right core, right tail.
+    """
+
+    _PARAMS: ClassVar[dict[str, float]] = {
+        "alpha_L": 1.2,
+        "alpha_R": 1.8,
+        "m0": 0.0,
+        "n_L": 2.5,
+        "n_R": 4.0,
+        "sigma_L": 1.0,
+        "sigma_R": 1.2,
+    }
+
+    def _context(self, m_val: float) -> Context:
+        return Context(
+            {
+                "alpha_L": _c(self._PARAMS["alpha_L"]),
+                "alpha_R": _c(self._PARAMS["alpha_R"]),
+                "m": _c(m_val),
+                "m0": _c(self._PARAMS["m0"]),
+                "n_L": _c(self._PARAMS["n_L"]),
+                "n_R": _c(self._PARAMS["n_R"]),
+                "sigma_L": _c(self._PARAMS["sigma_L"]),
+                "sigma_R": _c(self._PARAMS["sigma_R"]),
+            }
+        )
+
+    @pytest.mark.parametrize(
+        "m_val",
+        [
+            pytest.param(-10.0, id="left_deep_tail"),
+            pytest.param(-1.2, id="left_tail_junction"),
+            pytest.param(-0.5, id="left_core"),
+            pytest.param(0.0, id="at_mode"),
+            pytest.param(1.0, id="right_core"),
+            pytest.param(1.8 * 1.2, id="right_tail_junction"),
+            pytest.param(10.0, id="right_deep_tail"),
+        ],
+    )
+    def test_matches_log_of_likelihood(self, m_val):
+        """log_likelihood equals log(likelihood) in every piecewise region."""
+        dist = AsymmetricCrystalBallDist(
+            name="dscb",
+            alpha_L="alpha_L",
+            alpha_R="alpha_R",
+            m="m",
+            m0="m0",
+            n_L="n_L",
+            n_R="n_R",
+            sigma_L="sigma_L",
+            sigma_R="sigma_R",
+        )
+        context = self._context(m_val)
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        np.testing.assert_allclose(log_val, np.log(prob_val), rtol=1e-10)
+
+    def test_finite_deep_in_left_tail_while_likelihood_underflows(self):
+        """The power-law tail decays much more slowly than an exponential, so
+        underflowing likelihood() to exactly 0.0 needs m on the order of
+        -1e130 here; log_likelihood must stay finite regardless."""
+        dist = AsymmetricCrystalBallDist(
+            name="dscb",
+            alpha_L="alpha_L",
+            alpha_R="alpha_R",
+            m="m",
+            m0="m0",
+            n_L="n_L",
+            n_R="n_R",
+            sigma_L="sigma_L",
+            sigma_R="sigma_R",
+        )
+        context = self._context(-1e130)
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+
+        assert prob_val == 0.0
+        assert math.isfinite(log_val)
+
+    def test_finite_deep_in_right_tail_while_likelihood_underflows(self):
+        """See test_finite_deep_in_left_tail_while_likelihood_underflows for
+        why the magnitude needs to be this large for a power-law tail."""
+        dist = AsymmetricCrystalBallDist(
+            name="dscb",
+            alpha_L="alpha_L",
+            alpha_R="alpha_R",
+            m="m",
+            m0="m0",
+            n_L="n_L",
+            n_R="n_R",
+            sigma_L="sigma_L",
+            sigma_R="sigma_R",
+        )
+        context = self._context(1e100)
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+
+        assert prob_val == 0.0
+        assert math.isfinite(log_val)
+
+    def test_gradient_finite_where_left_tail_argument_invalid(self):
+        """m=B_L=0.8833... (m0=0, sigma_L=1) puts t_L=B_L, exactly where the
+        left tail's own argument u_L = B_L - t_L = 0. As in CrystalBallDist's
+        equivalent test, ``d(log(u))/du = 1/u`` is only singular exactly at
+        u=0, so this boundary point is the one that actually exercises the
+        failure mode: without the shared _crystalball_log_tail helper's
+        safe_u clamp, the masked-out left-tail branch's local derivative is
+        1/0 = inf there, and multiplying by the switch's zero mask gives
+        0 * inf = NaN.
+        """
+        dist = AsymmetricCrystalBallDist(
+            name="dscb",
+            alpha_L="alpha_L",
+            alpha_R="alpha_R",
+            m="m",
+            m0="m0",
+            n_L="n_L",
+            n_R="n_R",
+            sigma_L="sigma_L",
+            sigma_R="sigma_R",
+        )
+        m_var = pt.scalar("m")
+        context = Context(
+            {
+                "alpha_L": _c(self._PARAMS["alpha_L"]),
+                "alpha_R": _c(self._PARAMS["alpha_R"]),
+                "m": m_var,
+                "m0": _c(self._PARAMS["m0"]),
+                "n_L": _c(self._PARAMS["n_L"]),
+                "n_R": _c(self._PARAMS["n_R"]),
+                "sigma_L": _c(self._PARAMS["sigma_L"]),
+                "sigma_R": _c(self._PARAMS["sigma_R"]),
+            }
+        )
+        grad = pt.grad(dist.log_likelihood(context), m_var)
+
+        mode = pytensor.compile.mode.Mode(linker="py", optimizer=None)
+        fn = pytensor.function([m_var], grad, mode=mode)
+        grad_val = fn(2.5 / 1.2 - 1.2)  # B_L = n_L/alpha_L - alpha_L
+        assert np.isfinite(grad_val), f"gradient has NaN/Inf: {grad_val}"
+
+    def test_gradient_finite_where_right_tail_argument_invalid(self):
+        """m=-B_R*sigma_R (t_R=-B_R) is exactly where the right tail's own
+        argument u_R = B_R + t_R = 0. As above, this boundary point (not a
+        merely-negative one) is what actually exercises the failure mode:
+        without the shared _crystalball_log_tail helper's safe_u clamp, the
+        masked-out right-tail branch's local derivative is 1/0 = inf there,
+        and multiplying by the switch's zero mask gives 0 * inf = NaN.
+        """
+        dist = AsymmetricCrystalBallDist(
+            name="dscb",
+            alpha_L="alpha_L",
+            alpha_R="alpha_R",
+            m="m",
+            m0="m0",
+            n_L="n_L",
+            n_R="n_R",
+            sigma_L="sigma_L",
+            sigma_R="sigma_R",
+        )
+        m_var = pt.scalar("m")
+        context = Context(
+            {
+                "alpha_L": _c(self._PARAMS["alpha_L"]),
+                "alpha_R": _c(self._PARAMS["alpha_R"]),
+                "m": m_var,
+                "m0": _c(self._PARAMS["m0"]),
+                "n_L": _c(self._PARAMS["n_L"]),
+                "n_R": _c(self._PARAMS["n_R"]),
+                "sigma_L": _c(self._PARAMS["sigma_L"]),
+                "sigma_R": _c(self._PARAMS["sigma_R"]),
+            }
+        )
+        grad = pt.grad(dist.log_likelihood(context), m_var)
+
+        mode = pytensor.compile.mode.Mode(linker="py", optimizer=None)
+        fn = pytensor.function([m_var], grad, mode=mode)
+        B_R = 4.0 / 1.8 - 1.8
+        grad_val = fn(-B_R * 1.2)  # t_R = m/sigma_R = -B_R
+        assert np.isfinite(grad_val), f"gradient has NaN/Inf: {grad_val}"
+
+
+class TestArgusLogLikelihood:
+    """ArgusDist.log_likelihood is the analytic log form of likelihood()
+    inside the kinematic bound (1 - r**2 > 0); outside it, -inf is the
+    physically correct log-density (the ARGUS density has no support there),
+    diverging intentionally from pt.log(likelihood()), which is NaN there for
+    non-integer p (see the class's log_likelihood docstring).
+    """
+
+    @pytest.mark.parametrize(
+        "m_val",
+        [
+            pytest.param(0.1, id="near_zero"),
+            pytest.param(0.5, id="mid_range"),
+            pytest.param(0.9, id="near_bound"),
+            pytest.param(0.999, id="very_near_bound"),
+        ],
+    )
+    def test_matches_log_of_likelihood(self, m_val):
+        """log_likelihood equals log(likelihood) throughout the kinematic domain."""
+        dist = ArgusDist(name="argus", mass="m", resonance="m0", slope="c", power="p")
+        context = Context({"m": _c(m_val), "m0": _c(1.0), "c": _c(-2.0), "p": _c(0.5)})
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        np.testing.assert_allclose(log_val, np.log(prob_val), rtol=1e-12)
+
+    @pytest.mark.parametrize(
+        ("m_val", "chi"),
+        [
+            pytest.param(0.1, 2.0, id="near_zero"),
+            pytest.param(0.5, 2.0, id="mid_range"),
+            pytest.param(0.9, 2.0, id="near_bound"),
+        ],
+    )
+    def test_matches_scipy_argus_shape(self, m_val, chi):
+        """likelihood() is scipy.stats.argus's *unnormalized* shape for the
+        canonical p=0.5 case, with c = -chi**2/2; see _argus_raw_logpdf."""
+        c_val = -(chi**2) / 2.0
+        dist = ArgusDist(name="argus", mass="m", resonance="m0", slope="c", power="p")
+        context = Context({"m": _c(m_val), "m0": _c(1.0), "c": _c(c_val), "p": _c(0.5)})
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+        expected = _argus_raw_logpdf(m_val, chi)
+        assert log_val == pytest.approx(expected, rel=1e-8)
+
+    def test_zero_at_and_beyond_kinematic_bound(self):
+        """At and beyond m0 (bracket_term <= 0), the ARGUS density has no
+        support: log_likelihood must be exactly -inf, matching the definition
+        of a PDF restricted to m < m0."""
+        dist = ArgusDist(name="argus", mass="m", resonance="m0", slope="c", power="p")
+        for m_val in (1.0, 1.5, 10.0):
+            context = Context(
+                {"m": _c(m_val), "m0": _c(1.0), "c": _c(-2.0), "p": _c(0.5)}
+            )
+            log_val = float(pytensor.function([], dist.log_likelihood(context))())
+            assert log_val == -math.inf
+
+    def test_diverges_from_log_of_likelihood_beyond_kinematic_bound(self):
+        """Beyond the bound, likelihood() itself is NaN (bracket_term**p for
+        non-integer p and negative bracket_term), so log(likelihood()) is NaN
+        too -- log_likelihood's -inf is a deliberate departure from that,
+        not a parity violation."""
+        dist = ArgusDist(name="argus", mass="m", resonance="m0", slope="c", power="p")
+        context = Context({"m": _c(1.5), "m0": _c(1.0), "c": _c(-2.0), "p": _c(0.5)})
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+
+        assert math.isnan(prob_val)
+        assert log_val == -math.inf
+
+    def test_finite_near_zero_mass_while_likelihood_underflows(self):
+        """m -> 0 makes likelihood()'s leading m factor underflow toward 0.0
+        for a large enough resonance scale; log_likelihood must stay finite."""
+        dist = ArgusDist(name="argus", mass="m", resonance="m0", slope="c", power="p")
+        context = Context({"m": _c(1e-300), "m0": _c(1.0), "c": _c(-2.0), "p": _c(0.5)})
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+        assert math.isfinite(log_val)
+
+    def test_gradient_finite_at_kinematic_boundary(self):
+        """m == m0 (bracket_term == 0) is exactly the kinematic boundary.
+        PyTensor differentiates both switch branches: without clamping
+        bracket_term before either pt.log() call, the in-range branch's
+        local derivative 1/bracket_term is 1/0 = inf there, and multiplying
+        by the switch's zero mask gives 0 * inf = NaN. With the clamp
+        (pt.switch(bracket_term > 0, bracket_term, 1.0)), the local
+        derivative is finite everywhere.
+        """
+        dist = ArgusDist(name="argus", mass="m", resonance="m0", slope="c", power="p")
+        m_var = pt.scalar("m")
+        context = Context({"m": m_var, "m0": _c(1.0), "c": _c(-2.0), "p": _c(0.5)})
+        grad = pt.grad(dist.log_likelihood(context), m_var)
+
+        mode = pytensor.compile.mode.Mode(linker="py", optimizer=None)
+        fn = pytensor.function([m_var], grad, mode=mode)
+        grad_val = fn(1.0)
+        assert np.isfinite(grad_val), f"gradient has NaN/Inf: {grad_val}"

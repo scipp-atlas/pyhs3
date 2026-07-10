@@ -139,6 +139,23 @@ class UniformDist(Distribution):
         # The variables in self.x define the domain but don't change the constant density
         return cast(TensorVar, pt.constant(1.0))
 
+    def log_likelihood(self, _context: Context) -> TensorVar:
+        """
+        Builds a symbolic expression for the uniform log-PDF.
+
+        Analytic log form of :meth:`likelihood`: ``log(1.0) == 0.0``, a
+        constant independent of any parameter, so there is no underflow
+        concern to guard against here.
+
+        Args:
+            _context (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Constant value (0.0) representing
+            the uniform log-density.
+        """
+        return cast(TensorVar, pt.constant(0.0))
+
 
 class PoissonDist(Distribution):
     r"""
@@ -264,6 +281,32 @@ class ExponentialDist(Distribution):
 
         # Exponential PDF: exp(-c * x)
         return cast(TensorVar, (c) * pt.exp(-c * x))
+
+    def log_likelihood(self, context: Context) -> TensorVar:
+        r"""
+        Builds a symbolic expression for the exponential log-PDF.
+
+        Analytic log form of :meth:`likelihood`:
+
+        .. math::
+
+            \log f(x; c) = \log c - c x
+
+        Evaluating this directly (rather than ``pt.log(self.likelihood(...))``)
+        avoids computing :math:`\exp(-cx)` and re-logging it, which underflows
+        to 0.0 (and then to ``-inf``) once :math:`cx` exceeds roughly 745 in
+        float64.
+
+        Args:
+            context (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of exponential log-PDF.
+        """
+        x = context[self._parameters["x"]]
+        c = context[self._parameters["c"]]
+
+        return cast(TensorVar, pt.log(c) - c * x)
 
 
 class LogNormalDist(Distribution):
@@ -430,6 +473,59 @@ class LandauDist(Distribution):
         return cast(
             TensorVar,
             (1.0 / normalization) * (1.0 / sigma) * gaussian_core * asymmetric_factor,
+        )
+
+    def log_likelihood(self, context: Context) -> TensorVar:
+        r"""
+        Builds a symbolic expression for the Landau approximation log-PDF.
+
+        Analytic log form of :meth:`likelihood`. The raw density there is a
+        product of two exponentials and a constant normalization factor
+        (``gaussian_core * asymmetric_factor / (sigma * normalization)``), so
+        its log is a plain sum -- no product term can partially cancel another:
+
+        .. math::
+
+            \log f(x; \mu, \sigma) = -\log\sigma - \frac{1}{2}z^2
+            - \frac{1}{10}\max(0, z-1)^2 - \log(\mathcal{N}),
+            \quad z = \frac{x-\mu}{\sigma}
+
+        where :math:`\mathcal{N}` is the same constant (parameter-independent)
+        normalization computed in :meth:`likelihood`. Evaluating this directly
+        avoids computing the two exponentials and re-logging their product,
+        which underflows to 0.0 (and then to ``-inf``) for large :math:`|z|`.
+
+        Args:
+            context (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of the Landau
+            approximation log-PDF.
+        """
+        x = context[self._parameters["x"]]
+        mean = context[self._parameters["mean"]]
+        sigma = context[self._parameters["sigma"]]
+
+        # Normalized variable
+        z = (x - mean) / sigma
+
+        # Log of the same Gaussian-core / asymmetric-tail approximation used in likelihood()
+        gaussian_log_term = -0.5 * z**2
+        asymmetric_log_term = -0.1 * pt.maximum(0.0, z - 1) ** 2
+        gaussian_term_integral = pt.sqrt(math.pi / 2) * (1 + pt.erf(1 / pt.sqrt(2.0)))
+        asymmetric_factor_integral = (
+            pt.exp(-1 / 12)
+            * (pt.sqrt(5 * math.pi / 3) / 2)
+            * pt.erfc((5 / 6) * pt.sqrt(3 / 5))
+        )
+        normalization = gaussian_term_integral + asymmetric_factor_integral
+
+        return cast(
+            TensorVar,
+            -pt.log(sigma)
+            - pt.log(normalization)
+            + gaussian_log_term
+            + asymmetric_log_term,
         )
 
 

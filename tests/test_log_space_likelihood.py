@@ -18,7 +18,7 @@ These tests assert that:
 from __future__ import annotations
 
 import math
-from typing import cast
+from typing import Literal, cast
 
 import numpy as np
 import pytensor
@@ -32,9 +32,12 @@ from pyhs3.distributions import Distributions, HistFactoryDistChannel
 from pyhs3.distributions.basic import (
     ExponentialDist,
     GaussianDist,
+    LandauDist,
     LogNormalDist,
     PoissonDist,
+    UniformDist,
 )
+from pyhs3.distributions.core import Distribution
 from pyhs3.domains import Domains, ProductDomain
 from pyhs3.likelihoods import Likelihood, Likelihoods
 from pyhs3.metadata import Metadata
@@ -45,6 +48,7 @@ from pyhs3.workspace import Workspace
 # scipy.stats is preferred for analytic references; fall back to closed forms
 # built from stdlib math if scipy is unavailable in the test environment.
 try:
+    from scipy.stats import expon as _scipy_expon
     from scipy.stats import lognorm as _scipy_lognorm
     from scipy.stats import norm as _scipy_norm
     from scipy.stats import poisson as _scipy_poisson
@@ -62,6 +66,11 @@ try:
             _scipy_lognorm.logpdf(x, s=sigma, scale=np.exp(mu)), dtype=np.float64
         )
 
+    def _expon_logpdf(x: np.ndarray, c: np.ndarray) -> np.ndarray:
+        # ExponentialDist's rate parametrization (pdf = c * exp(-c*x)) maps onto
+        # scipy's loc/scale form as scale = 1/c.
+        return np.asarray(_scipy_expon.logpdf(x, scale=1.0 / c), dtype=np.float64)
+
 except ModuleNotFoundError:  # pragma: no cover - scipy is in the dev deps
 
     def _poisson_logpmf(counts: np.ndarray, rates: np.ndarray) -> np.ndarray:
@@ -76,6 +85,9 @@ except ModuleNotFoundError:  # pragma: no cover - scipy is in the dev deps
     def _lognorm_logpdf(x: np.ndarray, mu: np.ndarray, sigma: np.ndarray) -> np.ndarray:
         z = (np.log(x) - mu) / sigma
         return -np.log(x) - np.log(sigma) - 0.5 * math.log(2.0 * math.pi) - 0.5 * z**2
+
+    def _expon_logpdf(x: np.ndarray, c: np.ndarray) -> np.ndarray:
+        return np.log(c) - c * x
 
 
 def _underflow_workspace() -> tuple[Workspace, np.ndarray]:
@@ -504,6 +516,25 @@ class TestLogNormalLogLikelihood:
         assert log_val == pytest.approx(expected, rel=1e-10)
 
 
+class _NoLogOverrideDist(Distribution):
+    """Minimal Distribution subclass with no ``log_likelihood`` override.
+
+    As of Phase 3 of #254, every basic.py distribution has an analytic
+    ``log_likelihood`` override, so none of them exercise the base class's
+    ``pt.log(likelihood())`` default directly anymore. This standalone class
+    keeps that fallback path covered.
+    """
+
+    type: Literal["_no_log_override_dist"] = "_no_log_override_dist"
+    x: str | float | int
+    c: str | float | int
+
+    def likelihood(self, context: Context) -> TensorVar:
+        x = context[self._parameters["x"]]
+        c = context[self._parameters["c"]]
+        return cast(TensorVar, c * pt.exp(-c * x))
+
+
 class TestBaseDistributionLogLikelihoodDefault:
     """A distribution with no analytic override falls back to pt.log(likelihood())."""
 
@@ -514,13 +545,109 @@ class TestBaseDistributionLogLikelihoodDefault:
             pytest.param(3.0, 2.0, id="larger_rate"),
         ],
     )
-    def test_exponential_dist_default_log_likelihood(self, x, c):
-        """ExponentialDist has no log_likelihood override, so it uses the base default."""
-        dist = ExponentialDist(name="e", x="x", c="c")
+    def test_default_log_likelihood_matches_log_of_likelihood(self, x, c):
+        """With no log_likelihood override, log_likelihood() falls back to log(likelihood())."""
+        dist = _NoLogOverrideDist(name="e", x="x", c="c")
         context = Context({"x": _c(x), "c": _c(c)})
         log_val = float(pytensor.function([], dist.log_likelihood(context))())
         prob_val = float(pytensor.function([], dist.likelihood(context))())
         assert log_val == pytest.approx(np.log(prob_val), rel=1e-12)
+
+
+class TestExponentialLogLikelihood:
+    """ExponentialDist.log_likelihood is the analytic log form of likelihood()."""
+
+    @pytest.mark.parametrize(
+        ("x", "c"),
+        [
+            pytest.param(1.0, 0.5, id="ordinary_point"),
+            pytest.param(3.0, 2.0, id="larger_rate"),
+            pytest.param(0.0, 1.0, id="at_origin"),
+        ],
+    )
+    def test_matches_log_of_likelihood(self, x, c):
+        """log_likelihood equals log(likelihood) at ordinary parameter points."""
+        dist = ExponentialDist(name="e", x="x", c="c")
+        context = Context({"x": _c(x), "c": _c(c)})
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        np.testing.assert_allclose(log_val, np.log(prob_val), rtol=1e-12)
+
+    @pytest.mark.parametrize(
+        ("x", "c"),
+        [
+            pytest.param(1.0, 0.5, id="ordinary_point"),
+            pytest.param(3.0, 2.0, id="larger_rate"),
+        ],
+    )
+    def test_matches_scipy_expon_logpdf(self, x, c):
+        """likelihood() is scipy's expon pdf with scale=1/c, matching exactly."""
+        dist = ExponentialDist(name="e", x="x", c="c")
+        context = Context({"x": _c(x), "c": _c(c)})
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+        expected = float(_expon_logpdf(np.array(x), np.array(c)))
+        assert log_val == pytest.approx(expected, rel=1e-10)
+
+    def test_finite_deep_in_tail_while_likelihood_underflows(self):
+        """c*x = 800: likelihood underflows to 0.0, log_likelihood stays finite (~-800)."""
+        dist = ExponentialDist(name="e", x="x", c="c")
+        context = Context({"x": _c(800.0), "c": _c(1.0)})
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+
+        assert prob_val == 0.0
+        assert math.isfinite(log_val)
+        assert log_val == pytest.approx(-800.0, rel=1e-10)
+
+
+class TestUniformLogLikelihood:
+    """UniformDist.log_likelihood is the analytic log form of likelihood()."""
+
+    def test_matches_log_of_likelihood(self):
+        """log_likelihood equals log(likelihood): both are parameter-independent constants."""
+        dist = UniformDist(name="u", x=["x"])
+        context = Context({"x": _c(1.23)})
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        np.testing.assert_allclose(log_val, np.log(prob_val), rtol=1e-12)
+        assert log_val == pytest.approx(0.0, abs=1e-12)
+
+
+class TestLandauLogLikelihood:
+    """LandauDist.log_likelihood is the analytic log form of likelihood().
+
+    The raw density is a product of two exponentials divided by a constant
+    normalization, so its log is a plain sum -- no product/sum term can
+    partially cancel another, unlike e.g. a piecewise density built from a
+    difference of two comparable-magnitude terms.
+    """
+
+    @pytest.mark.parametrize(
+        ("x", "mean", "sigma"),
+        [
+            pytest.param(0.0, 0.0, 1.0, id="at_mode"),
+            pytest.param(2.0, 0.0, 1.0, id="right_tail"),
+            pytest.param(-1.5, 0.0, 1.0, id="left_of_mode"),
+            pytest.param(130.0, 125.0, 10.0, id="hep_scale"),
+        ],
+    )
+    def test_matches_log_of_likelihood(self, x, mean, sigma):
+        """log_likelihood equals log(likelihood) at ordinary parameter points."""
+        dist = LandauDist(name="landau", x="x", mean="mean", sigma="sigma")
+        context = Context({"x": _c(x), "mean": _c(mean), "sigma": _c(sigma)})
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        np.testing.assert_allclose(log_val, np.log(prob_val), rtol=1e-10)
+
+    def test_finite_deep_in_tail_while_likelihood_underflows(self):
+        """z = (x-mean)/sigma = 100 deep in the tail: likelihood underflows, log_likelihood stays finite."""
+        dist = LandauDist(name="landau", x="x", mean="mean", sigma="sigma")
+        context = Context({"x": _c(100.0), "mean": _c(0.0), "sigma": _c(1.0)})
+        prob_val = float(pytensor.function([], dist.likelihood(context))())
+        log_val = float(pytensor.function([], dist.log_likelihood(context))())
+
+        assert prob_val == 0.0
+        assert math.isfinite(log_val)
 
 
 class TestLogExpressionUsesAnalyticLogLikelihood:

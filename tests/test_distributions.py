@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 import math
+from itertools import pairwise
 
 import numpy as np
+import pytensor
 import pytensor.tensor as pt
 import pytest
 from pydantic import ValidationError
@@ -42,6 +44,7 @@ from pyhs3.distributions import (
     QQZZBackgroundDist,
     UniformDist,
 )
+from pyhs3.normalization import gauss_legendre_integral
 from pyhs3.tensorutils import create_bounded_tensor
 
 
@@ -445,6 +448,354 @@ class TestAsymmetricCrystalBallDist:
         # Value should be positive and finite
         assert result_val > 0
         assert np.isfinite(result_val)
+
+    @staticmethod
+    def _make_dist_and_context(shape_params, lower, upper, vector_obs=False):
+        """Build an AsymmetricCrystalBallDist with observable m."""
+        dist = AsymmetricCrystalBallDist(
+            name="test_crystal",
+            alpha_L="alpha_L",
+            alpha_R="alpha_R",
+            m="m",
+            m0="m0",
+            n_L="n_L",
+            n_R="n_R",
+            sigma_L="sigma_L",
+            sigma_R="sigma_R",
+        )
+        m_var = (
+            pt.vector("m", dtype="float64")
+            if vector_obs
+            else pt.scalar("m", dtype="float64")
+        )
+        parameters = {"m": m_var}
+        # Force float64: A_L = (n/alpha)^n overflows float32 for large n
+        parameters.update(
+            {
+                name: pt.constant(value, name=name, dtype="float64")
+                for name, value in shape_params.items()
+            }
+        )
+        context = Context(
+            parameters=parameters,
+            observables={
+                "m": (
+                    pt.constant(lower, name="m_lower", dtype="float64"),
+                    pt.constant(upper, name="m_upper", dtype="float64"),
+                )
+            },
+        )
+        return dist, context, m_var
+
+    @pytest.mark.parametrize(
+        "shape_params",
+        [
+            # bbyy-like asymmetric shape with fractional exponents
+            {
+                "alpha_L": 1.2,
+                "alpha_R": 1.7,
+                "m0": 125.0,
+                "n_L": 5.3,
+                "n_R": 9.1,
+                "sigma_L": 1.5,
+                "sigma_R": 2.0,
+            },
+            # logarithmic antiderivative branch on both tails
+            {
+                "alpha_L": 1.0,
+                "alpha_R": 1.5,
+                "m0": 125.0,
+                "n_L": 1.0,
+                "n_R": 1.0,
+                "sigma_L": 1.4,
+                "sigma_R": 1.4,
+            },
+            # heavy tails with small alpha (junctions close to the peak)
+            {
+                "alpha_L": 0.5,
+                "alpha_R": 0.8,
+                "m0": 125.0,
+                "n_L": 30.0,
+                "n_R": 2.5,
+                "sigma_L": 2.5,
+                "sigma_R": 1.1,
+            },
+        ],
+        ids=["asymmetric-fractional-n", "n-equals-one", "small-alpha-heavy-tail"],
+    )
+    def test_asymmetric_crystal_analytic_normalization_matches_quadrature(
+        self, shape_params
+    ):
+        """Analytic antiderivative matches adaptive quadrature of the raw PDF."""
+        scipy_integrate = pytest.importorskip("scipy.integrate")
+
+        lower, upper = 105.0, 160.0
+        dist, context, m_var = self._make_dist_and_context(shape_params, lower, upper)
+
+        raw = dist.likelihood(context)
+        raw_fn = function([m_var], raw)
+
+        antideriv = dist.normalization_expression(context, "m")
+        assert antideriv is not None
+        antideriv_fn = function([m_var], antideriv)
+
+        analytic = antideriv_fn(upper) - antideriv_fn(lower)
+        # Integrate piecewise so quad sees smooth integrands between junctions
+        m0 = shape_params["m0"]
+        junctions = sorted(
+            {
+                lower,
+                m0 - shape_params["alpha_L"] * shape_params["sigma_L"],
+                m0,
+                m0 + shape_params["alpha_R"] * shape_params["sigma_R"],
+                upper,
+            }
+        )
+        numeric = sum(
+            scipy_integrate.quad(raw_fn, a, b, epsabs=1e-13, epsrel=1e-13)[0]
+            for a, b in pairwise(junctions)
+            if lower <= a < b <= upper
+        )
+
+        # The single-interval Gauss-Legendre fallback this replaces was only
+        # accurate to ~1e-4..1e-3 relative; the antiderivative agrees with
+        # adaptive quadrature to quad's own precision.
+        np.testing.assert_allclose(analytic, numeric, rtol=1e-8)
+
+    def test_asymmetric_crystal_analytic_normalization_beats_gauss_legendre_fallback(
+        self,
+    ):
+        """The analytic antiderivative is dramatically more accurate than the
+        single-interval 64-point Gauss-Legendre quadrature it replaces, for a
+        bbyy-like asymmetric shape -- substantiating the PR's motivating claim
+        that the generic fallback carries ~1e-4..1e-3 relative error for the
+        piecewise-smooth DSCB. Also confirms ``_apply_normalization()`` (via
+        ``_normalization_integral_for()``) actually takes the analytic path
+        now that ``normalization_expression()`` is implemented, rather than
+        silently falling back to Gauss-Legendre.
+        """
+        scipy_integrate = pytest.importorskip("scipy.integrate")
+
+        shape_params = {
+            "alpha_L": 1.2,
+            "alpha_R": 1.7,
+            "m0": 125.0,
+            "n_L": 5.3,
+            "n_R": 9.1,
+            "sigma_L": 1.5,
+            "sigma_R": 2.0,
+        }
+        lower, upper = 105.0, 160.0
+
+        # Scalar-m context: raw_fn is called at individual scalar points by
+        # scipy.integrate.quad, giving the truth value.
+        scalar_dist, scalar_context, scalar_m = self._make_dist_and_context(
+            shape_params, lower, upper, vector_obs=False
+        )
+        raw_fn = function([scalar_m], scalar_dist.likelihood(scalar_context))
+
+        m0 = shape_params["m0"]
+        junctions = sorted(
+            {
+                lower,
+                m0 - shape_params["alpha_L"] * shape_params["sigma_L"],
+                m0,
+                m0 + shape_params["alpha_R"] * shape_params["sigma_R"],
+                upper,
+            }
+        )
+        truth = sum(
+            scipy_integrate.quad(raw_fn, a, b, epsabs=1e-13, epsrel=1e-13)[0]
+            for a, b in pairwise(junctions)
+        )
+
+        # Vector-m context: matches how the model builder actually feeds
+        # observables (reshaped to (N, 1)), which _normalization_integral()'s
+        # bounds-substitution and gauss_legendre_integral()'s quadrature-node
+        # substitution both require.
+        dist, context, _vector_m = self._make_dist_and_context(
+            shape_params, lower, upper, vector_obs=True
+        )
+        raw = dist.likelihood(context)
+
+        # Analytic path: what _apply_normalization() now uses. graph_replace
+        # substitutes the m leaf with the integration bounds, so the result
+        # has no remaining dependence on m.
+        matching = dist._matching_observables(context)
+        analytic_integral = dist._normalization_integral_for(raw, context, matching)
+        analytic_val = function([], analytic_integral)()
+
+        # Gauss-Legendre fallback: what _apply_normalization() used before
+        # normalization_expression() existed, and what still runs for any
+        # distribution that doesn't override it. Likewise substitutes m with
+        # quadrature nodes, leaving no free m dependence.
+        gl_integral = gauss_legendre_integral(
+            raw, context.parameters["m"], context.observables["m"][0], upper
+        )
+        gl_val = function([], gl_integral)()
+
+        analytic_rel_err = abs(analytic_val - truth) / truth
+        gl_rel_err = abs(gl_val - truth) / truth
+
+        assert analytic_rel_err < 1e-8
+        assert gl_rel_err > 1e-5
+        assert analytic_rel_err < gl_rel_err
+
+    def test_asymmetric_crystal_normalized_expression_integrates_to_one(self):
+        """Normalized DSCB expression integrates to 1 over the observable domain."""
+        shape_params = {
+            "alpha_L": 1.2,
+            "alpha_R": 1.7,
+            "m0": 125.0,
+            "n_L": 5.3,
+            "n_R": 9.1,
+            "sigma_L": 1.5,
+            "sigma_R": 2.0,
+        }
+        lower, upper = 105.0, 160.0
+        dist, context, m_var = self._make_dist_and_context(
+            shape_params, lower, upper, vector_obs=True
+        )
+
+        normalized = dist.expression(context)
+        fn = function([m_var], normalized)
+
+        xs = np.linspace(lower, upper, 200001)
+        ys = fn(xs)
+        integral = np.trapezoid(ys, xs)
+        # atol limited by trapezoid resolution; still well below the ~1e-4
+        # error of the previous quadrature fallback
+        assert np.isclose(integral, 1.0, atol=1e-6)
+
+    def test_asymmetric_crystal_antiderivative_continuous_at_junctions(self):
+        """Antiderivative is continuous across the core/tail junctions."""
+        shape_params = {
+            "alpha_L": 1.2,
+            "alpha_R": 1.7,
+            "m0": 125.0,
+            "n_L": 5.3,
+            "n_R": 9.1,
+            "sigma_L": 1.5,
+            "sigma_R": 2.0,
+        }
+        dist, context, m_var = self._make_dist_and_context(shape_params, 105.0, 160.0)
+
+        antideriv = dist.normalization_expression(context, "m")
+        antideriv_fn = function([m_var], antideriv)
+
+        m0 = shape_params["m0"]
+        junctions = [
+            m0 - shape_params["alpha_L"] * shape_params["sigma_L"],
+            m0,
+            m0 + shape_params["alpha_R"] * shape_params["sigma_R"],
+        ]
+        # F' = f <= 1, so |F(j+eps) - F(j-eps)| ~ 2*eps from the slope alone;
+        # a jump from a wrong matching constant would be O(1)
+        eps = 1e-9
+        for junction in junctions:
+            below = antideriv_fn(junction - eps)
+            above = antideriv_fn(junction + eps)
+            np.testing.assert_allclose(below, above, rtol=0, atol=1e-8)
+
+    def test_asymmetric_crystal_normalization_expression_wrong_observable_returns_none(
+        self,
+    ):
+        """normalization_expression() only applies to this distribution's own
+        observable (self.m); for any other observable name it must return
+        None so callers fall back to Gauss-Legendre quadrature, matching the
+        base class's documented contract (see
+        test_normalization.TestNormalization.test_normalization_expression_default_returns_none)."""
+        shape_params = {
+            "alpha_L": 1.2,
+            "alpha_R": 1.7,
+            "m0": 125.0,
+            "n_L": 5.3,
+            "n_R": 9.1,
+            "sigma_L": 1.5,
+            "sigma_R": 2.0,
+        }
+        dist, context, _m_var = self._make_dist_and_context(shape_params, 105.0, 160.0)
+
+        assert dist.normalization_expression(context, "not_m") is None
+
+        # _normalization_integral() calls normalization_expression()
+        # internally and only reaches the Gauss-Legendre fallback once it
+        # returns None; confirm it short-circuits to None here rather than
+        # attempting to substitute bounds into a nonexistent antiderivative.
+        integral = dist._normalization_integral(context, "not_m", 105.0, 160.0)
+        assert integral is None
+
+    def test_asymmetric_crystal_antiderivative_gradient_is_not_nan(self):
+        """Gradient of the antiderivative wrt shape params stays finite
+        everywhere, including where a tail's own antiderivative branch is
+        not the one selected by the outer switch.
+
+        ``tail_left(u)`` is evaluated (and differentiated) unconditionally
+        for every ``m``, even deep in the right tail where ``u = B_L - t_L``
+        is negative there and ``pt.log(u)`` / ``u ** (1 - n_L)`` are only
+        finite-valued because the outer switch never selects that branch.
+        PyTensor differentiates every branch of a switch, including the one
+        not selected at runtime (see
+        :func:`test_log_space_likelihood.test_zero_bin_logprob_gradient_is_not_nan`),
+        so the untaken branch's gradient wrt n_L is NaN at this negative-u
+        point and multiplying by the switch's zero mask does not clear it
+        (``0 * NaN = NaN``). Compiling with ``optimizer=None`` disables the
+        graph rewrites that otherwise happen to simplify this away, so the
+        test exposes the NaN structurally rather than relying on optimizer
+        behavior.
+        """
+        shape_params = {
+            "alpha_L": 1.2,
+            "alpha_R": 1.7,
+            "m0": 125.0,
+            "n_L": 5.3,
+            "n_R": 9.1,
+            "sigma_L": 1.5,
+            "sigma_R": 2.0,
+        }
+        dist = AsymmetricCrystalBallDist(
+            name="test_crystal",
+            alpha_L="alpha_L",
+            alpha_R="alpha_R",
+            m="m",
+            m0="m0",
+            n_L="n_L",
+            n_R="n_R",
+            sigma_L="sigma_L",
+            sigma_R="sigma_R",
+        )
+        m_var = pt.scalar("m", dtype="float64")
+        n_L_var = pt.scalar("n_L", dtype="float64")
+        parameters = {"m": m_var, "n_L": n_L_var}
+        parameters.update(
+            {
+                name: pt.constant(value, name=name, dtype="float64")
+                for name, value in shape_params.items()
+                if name != "n_L"
+            }
+        )
+        context = Context(
+            parameters=parameters,
+            observables={
+                "m": (
+                    pt.constant(105.0, name="m_lower", dtype="float64"),
+                    pt.constant(160.0, name="m_upper", dtype="float64"),
+                )
+            },
+        )
+
+        antideriv = dist.normalization_expression(context, "m")
+        assert antideriv is not None
+        grad = pt.grad(antideriv, n_L_var)
+
+        mode = pytensor.compile.mode.Mode(linker="py", optimizer=None)
+        fn = pytensor.function([m_var, n_L_var], grad, mode=mode)
+
+        # m = 160 is deep in the right tail (junction at m0 + alpha_R*sigma_R
+        # = 128.4), where t_L = (m - m0) / sigma_L is large and positive, so
+        # the left tail's own argument u = B_L - t_L is negative there.
+        grad_val = fn(160.0, shape_params["n_L"])
+        assert np.isfinite(grad_val), f"gradient has NaN/Inf: {grad_val}"
 
 
 class TestGenericDist:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Literal, cast
 
+import numpy as np
 import pytensor.tensor as pt
 
 from pyhs3.context import Context
@@ -200,6 +201,125 @@ class AsymmetricCrystalBallDist(Distribution):
                     t_L <= 0,
                     core_left,
                     pt.switch(t_R <= alpha_R, core_right, right_tail),
+                ),
+            ),
+        )
+
+    def normalization_expression(
+        self, context: Context, observable_name: str
+    ) -> TensorVar | None:
+        r"""
+        Analytic antiderivative of the double-sided Crystal Ball.
+
+        The DSCB is only piecewise-smooth (its second derivative is
+        discontinuous at the core/tail junctions), which degrades the
+        single-interval Gauss-Legendre fallback to ~1e-4..1e-3 relative
+        error that shifts with the shape parameters.  The antiderivative is
+        exact: Gaussian error functions in the core and closed-form power-law
+        integrals in the tails, with matching constants at the junctions so
+        that F is continuous and ``F(b) - F(a)`` is the integral for any
+        bounds.  This matches ROOT's ``RooCrystalBall::analyticalIntegral``.
+
+        The ``n == 1`` tails use the logarithmic antiderivative; the power
+        form's denominator is masked to 1 in that branch so the unused branch
+        stays finite.
+        """
+        if observable_name != self.m:
+            return None
+
+        alpha_L = context[self.alpha_L]
+        alpha_R = context[self.alpha_R]
+        m = context[self.m]
+        m0 = context[self.m0]
+        n_L = context[self.n_L]
+        n_R = context[self.n_R]
+        sigma_L = context[self.sigma_L]
+        sigma_R = context[self.sigma_R]
+
+        # Same A_i and B_i as likelihood(); alpha, n, sigma assumed positive.
+        A_L = (n_L / alpha_L) ** n_L * pt.exp(-(alpha_L**2) / 2)
+        A_R = (n_R / alpha_R) ** n_R * pt.exp(-(alpha_R**2) / 2)
+        B_L = (n_L / alpha_L) - alpha_L
+        B_R = (n_R / alpha_R) - alpha_R
+
+        t_L = (m - m0) / sigma_L
+        t_R = (m - m0) / sigma_R
+
+        sqrt_half_pi = np.sqrt(np.pi / 2.0)
+        sqrt_two = np.sqrt(2.0)
+
+        # Antiderivative of A (B - t)^(-n) w.r.t. m on the left tail, with the
+        # n == 1 logarithmic special case.  ``u`` is B_L - t_L, which equals
+        # n_L/alpha_L at the junction t_L = -alpha_L and stays positive on the
+        # tail; the power-branch denominator is masked to 1 when n == 1 so the
+        # unused branch never divides by zero.
+        denom_L = pt.switch(pt.eq(n_L, 1.0), 1.0, n_L - 1.0)
+        denom_R = pt.switch(pt.eq(n_R, 1.0), 1.0, n_R - 1.0)
+
+        def tail_left(u: TensorVar) -> TensorVar:
+            # Guard the argument (not just the caller's switch output): u is
+            # only positive within the left tail region (t_L < -alpha_L); the
+            # outer switch below evaluates tail_left(B_L - t_L) unconditionally
+            # for every m, including the core/right regions where B_L - t_L is
+            # zero or negative. PyTensor differentiates every branch of a
+            # switch, so log(u) / u ** (1 - n_L) at a non-positive u would
+            # otherwise contribute a NaN gradient there that survives
+            # multiplication by the switch's zero mask (0 * NaN = NaN).
+            # Substituting a safe positive placeholder keeps both the value
+            # and the gradient finite; the outer switch discards this
+            # branch's result wherever u would have been invalid.
+            safe_u = pt.switch(u > 0, u, 1.0)
+            return cast(
+                TensorVar,
+                sigma_L
+                * A_L
+                * pt.switch(
+                    pt.eq(n_L, 1.0), -pt.log(safe_u), safe_u ** (1.0 - n_L) / denom_L
+                ),
+            )
+
+        def tail_right(u: TensorVar) -> TensorVar:
+            # See tail_left's guard above: tail_right(B_R + t_R) is likewise
+            # evaluated unconditionally for every m by the outer switch below,
+            # including the left/core regions where B_R + t_R is non-positive.
+            safe_u = pt.switch(u > 0, u, 1.0)
+            return cast(
+                TensorVar,
+                sigma_R
+                * A_R
+                * pt.switch(
+                    pt.eq(n_R, 1.0), pt.log(safe_u), -(safe_u ** (1.0 - n_R)) / denom_R
+                ),
+            )
+
+        core_left = sigma_L * sqrt_half_pi * pt.erf(t_L / sqrt_two)
+        core_right = sigma_R * sqrt_half_pi * pt.erf(t_R / sqrt_two)
+
+        # Matching constants: shift the core so it continues the left tail at
+        # t_L = -alpha_L (continuity at t = 0 is automatic, erf(0) = 0), then
+        # shift the right tail so it continues the core at t_R = alpha_R.
+        core_offset = tail_left(n_L / alpha_L) - sigma_L * sqrt_half_pi * pt.erf(
+            -alpha_L / sqrt_two
+        )
+        tail_right_offset = (
+            sigma_R * sqrt_half_pi * pt.erf(alpha_R / sqrt_two)
+            + core_offset
+            - tail_right(n_R / alpha_R)
+        )
+
+        return cast(
+            TensorVar,
+            pt.switch(
+                t_L < -alpha_L,
+                tail_left(B_L - t_L),
+                pt.switch(
+                    t_L <= 0,
+                    core_left + core_offset,
+                    pt.switch(
+                        t_R <= alpha_R,
+                        core_right + core_offset,
+                        tail_right(B_R + t_R) + tail_right_offset,
+                    ),
                 ),
             ),
         )

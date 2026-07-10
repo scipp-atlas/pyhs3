@@ -73,7 +73,7 @@ jobs:
         runs-on: [ubuntu-latest, windows-latest, macos-14]
         variant: [default]
         include:
-          # Default / PyTensor 3
+          # Default
           - python-version: "3.12"
             variant: default
             pixi-environment: py312
@@ -84,39 +84,11 @@ jobs:
             variant: default
             pixi-environment: py314
 
-          # JAX / PyTensor 3
+          # JAX
           - python-version: "3.14"
             runs-on: ubuntu-latest
             variant: jax
             pixi-environment: py314-jax
-
-          # PyTensor 2 (Linux only)
-          - python-version: "3.12"
-            runs-on: ubuntu-latest
-            variant: pytensor2
-            pixi-environment: py312-pytensor2
-          - python-version: "3.13"
-            runs-on: ubuntu-latest
-            variant: pytensor2
-            pixi-environment: py313-pytensor2
-          - python-version: "3.14"
-            runs-on: ubuntu-latest
-            variant: pytensor2
-            pixi-environment: py314-pytensor2
-
-          # JAX / PyTensor 2
-          - python-version: "3.13"
-            runs-on: ubuntu-latest
-            variant: pytensor2-jax
-            pixi-environment: py313-pytensor2-jax
-          - python-version: "3.13"
-            runs-on: macos-14
-            variant: pytensor2-jax
-            pixi-environment: py313-pytensor2-jax
-          - python-version: "3.14"
-            runs-on: ubuntu-latest
-            variant: pytensor2-jax
-            pixi-environment: py314-pytensor2-jax
 
     steps:
       - uses: actions/checkout@v7

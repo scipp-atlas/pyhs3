@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import numpy as np
 import numpy.typing as npt
 import pytensor.tensor as pt
+from pytensor.compile.maker import function
 from pytensor.graph.traversal import applys_between, explicit_graph_inputs
 from rich.progress import (
     BarColumn,
@@ -22,7 +23,6 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from pyhs3.compile import function
 from pyhs3.context import Context
 from pyhs3.data import BinnedData
 from pyhs3.distributions import Distributions, HistFactoryDistChannel

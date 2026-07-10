@@ -66,7 +66,8 @@ class GaussianDist(Distribution):
         r"""
         Builds a symbolic expression for the Gaussian log-PDF.
 
-        Analytic log form of :meth:`likelihood`:
+        Delegates to pytensor-distributions' analytic log form of
+        :meth:`likelihood`:
 
         .. math::
 
@@ -84,11 +85,13 @@ class GaussianDist(Distribution):
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of the Gaussian log-PDF.
         """
-        sigma = context[self._parameters["sigma"]]
-        z = (context[self._parameters["x"]] - context[self._parameters["mean"]]) / sigma
         return cast(
             TensorVar,
-            -0.5 * z**2 - pt.log(sigma) - 0.5 * math.log(2.0 * math.pi),
+            Normal.logpdf(
+                context[self._parameters["x"]],
+                context[self._parameters["mean"]],
+                context[self._parameters["sigma"]],
+            ),
         )
 
 

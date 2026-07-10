@@ -55,6 +55,16 @@ class MixtureDist(Distribution):
 
         f(x) = \frac{\sum_{i=1}^{n} c_i \cdot f_i(x)}{\sum_{j \in \text{ref\_coef\_norm}} c_j}
 
+    :meth:`log_prob_terms` is the log-space-safe path for an extended mixture:
+    it builds log(Σcᵢfᵢ) via logsumexp over each summand's own log-space
+    expression rather than pt.log of the probability-space sum, so it stays
+    finite even when every component underflows to 0.0.  The base-class
+    :meth:`~pyhs3.distributions.core.Distribution.log_expression` (used for
+    non-extended mixtures and standalone evaluation) still round-trips
+    through probability-space component tensors and cannot be converted
+    until composite distributions receive log-space component context (see
+    https://github.com/scipp-atlas/pyhs3/issues/254, phase 4).
+
     Parameters:
         coefficients (list[str]): Names of coefficient parameters.
         summands (list[str]): Names of component distributions.
@@ -81,6 +91,13 @@ class MixtureDist(Distribution):
     # then has to merge (a measurable compile-time cost on large workspaces).
     _cached_unnorm_expr: TensorVar | None = PrivateAttr(default=None)
     _cached_nu_expr: TensorVar | None = PrivateAttr(default=None)
+
+    # Per-summand coefficient nodes (context[coeff] for each entry in
+    # self.coefficients, N==N case only), cached alongside _cached_unnorm_expr
+    # so that log_prob_terms can build the log-space logsumexp directly from
+    # the same coefficient tensors used in the probability-space sum, rather
+    # than re-resolving them from a context it is not given.
+    _cached_coeffs: list[TensorVar] | None = PrivateAttr(default=None)
 
     @model_serializer(mode="wrap")
     def serialize_model(self, handler: Callable[[Any], Any]) -> Any:
@@ -199,9 +216,12 @@ class MixtureDist(Distribution):
             # N coefficients case: direct summation with normalization
 
             # Calculate the mixture sum (unnormalized: Σ cᵢ fᵢ)
+            coeff_tensors = [context[coeff] for coeff in self.coefficients]
             mixture_terms = [
-                context[coeff] * context[self.summands[i]]
-                for i, coeff in enumerate(self.coefficients)
+                coeff_tensor * context[summand]
+                for coeff_tensor, summand in zip(
+                    coeff_tensors, self.summands, strict=True
+                )
             ]
             mixturesum = balanced_sum(mixture_terms, pt.constant(0.0))
 
@@ -210,6 +230,11 @@ class MixtureDist(Distribution):
             # introducing a separate pt.log(nu) node that triggers costly
             # optimizer rewrites when combined with log(Σcᵢfᵢ/nu).
             self._cached_unnorm_expr = mixturesum
+            # Cache the per-summand coefficient nodes (same order as
+            # self.summands) so log_prob_terms can build the log-space
+            # equivalent Σᵢ cᵢfᵢ = logsumexp(log cᵢ + log fᵢ) directly, which
+            # stays finite where the probability-space fᵢ underflow to 0.0.
+            self._cached_coeffs = coeff_tensors
 
             # Handle normalization
             if self.ref_coef_norm is not None:
@@ -289,17 +314,13 @@ class MixtureDist(Distribution):
         """Return the unnormalized mixture Σcᵢfᵢ (before dividing by Σcᵢ).
 
         After :meth:`likelihood` has been called this just returns the cached
-        intermediate result; it is used by :meth:`pyhs3.model.Model.log_prob`
-        to build the extended log-likelihood as
-
-            Σⱼ log(Σcᵢfᵢ(xⱼ)) - nu
-
-        which is algebraically equivalent to
-
-            Σⱼ log(Σcᵢfᵢ(xⱼ)/nu)  +  N·log(nu)  -  nu
-
-        but avoids introducing a separate ``pt.log(nu)`` node that can trigger
-        expensive rewrite cascades in the PyTensor graph optimiser.
+        intermediate result.  This is a probability-space quantity: for the
+        per-event log-likelihood, :meth:`log_prob_terms` builds
+        log(Σcᵢfᵢ(xⱼ)) directly from each summand's own log-space expression
+        via logsumexp instead of taking ``pt.log`` of this sum, so that the
+        result stays finite where the probability-space fᵢ(xⱼ) underflow to
+        0.0.  This method remains available for callers wanting the raw
+        probability-space value itself.
 
         The Poisson yield term enters the likelihood once per channel and
         involves the observed event count, so it is assembled by
@@ -330,15 +351,33 @@ class MixtureDist(Distribution):
         For an extended mixture the per-channel log-likelihood is built from
         the unnormalized mixture and the expected yield:
 
-            Σⱼ log(Σcᵢfᵢ(xⱼ))  -  nu
+            Σⱼ log(Σᵢcᵢfᵢ(xⱼ))  -  nu
 
-        which simplifies from Σⱼ log(Σcᵢfᵢ(xⱼ)/nu) + N·log(nu) - nu (the
+        which simplifies from Σⱼ log(Σᵢcᵢfᵢ(xⱼ)/nu) + N·log(nu) - nu (the
         log(nu) terms cancel).  This is algebraically identical to the full
         extended likelihood but avoids introducing pt.log(nu) into the graph,
         preventing costly optimizer rewrite cascades triggered by
         log(a/b) + N·log(b).  For weighted data this form also reproduces
-        RooFit's sum-of-weights convention: weighting the log(Σcᵢfᵢ) term
+        RooFit's sum-of-weights convention: weighting the log(Σᵢcᵢfᵢ) term
         gives Σⱼwⱼ·log(PDF) + (Σwⱼ)·log(nu) - nu.
+
+        log(Σᵢcᵢfᵢ(xⱼ)) is evaluated as logsumexp(log cᵢ + log fᵢ(xⱼ)) using
+        each summand's own log-space expression (``log_expressions``) rather
+        than ``pt.log`` of the probability-space sum
+        (:attr:`_cached_unnorm_expr`).  fᵢ(xⱼ) can underflow to 0.0 in
+        float64 for xⱼ far in a component's tail, which would make every
+        cᵢfᵢ(xⱼ) — and hence their sum — exactly 0.0 and ``pt.log`` of it
+        ``-inf``, even though log fᵢ(xⱼ) itself is finite.  Building the sum
+        in log space keeps it finite in that regime.  The log cᵢ + log fᵢ(xⱼ)
+        terms are stacked on a new leading axis (shape ``(n_summands, N, M)``
+        for ``N`` events and parameter-batch size ``M``, matching the
+        per-event shape documented on :class:`LogProbTerms`) and reduced with
+        ``pt.logsumexp`` over that axis, giving the ``(N, M)`` per-event term.
+        This assumes cᵢ ≥ 0, matching the probabilistic meaning of a mixture
+        weight; :class:`MixtureDist` does not validate coefficient sign, so a
+        negative cᵢ produces NaN here (``pt.log`` of a negative number) just
+        as ``pt.log(Σᵢcᵢfᵢ)`` would if the probability-space sum itself were
+        negative.
 
         The data-only -log(N!) constant is omitted and N_eff = Σwⱼ is used
         for weighted data; both are RooFit conventions adopted because HS3
@@ -351,7 +390,11 @@ class MixtureDist(Distribution):
         if not self.extended:
             return super().log_prob_terms(expressions, log_expressions, distributions)
 
-        if self._cached_unnorm_expr is None or self._cached_nu_expr is None:
+        if (
+            self._cached_unnorm_expr is None
+            or self._cached_nu_expr is None
+            or self._cached_coeffs is None
+        ):
             msg = (
                 f"log_prob_terms for extended mixture '{self.name}' requires "
                 f"likelihood() to have been called (the model graph build does "
@@ -359,8 +402,17 @@ class MixtureDist(Distribution):
             )
             raise RuntimeError(msg)
 
+        log_terms = [
+            pt.log(coeff) + log_expressions[summand]
+            for coeff, summand in zip(self._cached_coeffs, self.summands, strict=True)
+        ]
+        per_event_term = cast(
+            TensorVar,
+            pt.logsumexp(pt.stack(log_terms, axis=0), axis=0),  # type: ignore[no-untyped-call]
+        )
+
         return LogProbTerms(
-            per_event=[pt.log(self._cached_unnorm_expr)],
+            per_event=[per_event_term],
             channel=[-self._cached_nu_expr],
         )
 

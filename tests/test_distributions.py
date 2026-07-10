@@ -15,6 +15,7 @@ import pytensor.tensor as pt
 import pytest
 from pydantic import ValidationError
 from pytensor import function
+from scipy.special import logsumexp
 
 from pyhs3 import Workspace
 from pyhs3.context import Context
@@ -175,6 +176,8 @@ class TestProductDist:
         }
         log_expressions = {
             "mix": pt.log(mix_expr),
+            "s1": -x,
+            "s2": -0.5 * x,
             "constr": -(alpha**2),
         }
         distributions = Distributions(
@@ -2968,6 +2971,90 @@ class TestMixtureDist:
         assert np.isclose(unnorm_val, 10.0)
         assert np.isclose(nu_val, 30.0)
 
+    def test_mixture_dist_log_prob_terms_extended_logsumexp_stability(self):
+        """Per-event term stays finite via logsumexp even when every
+        component's probability-space value underflows to 0.0.
+
+        Mirrors evaluating a Gaussian mixture component ~40 sigma into its
+        tail: exp(-800) and exp(-810) both round to exactly 0.0 in float64,
+        so the probability-space sum Σc_i f_i is exactly 0.0 and the old
+        pt.log(_cached_unnorm_expr) path returned -inf.  log_prob_terms must
+        instead build the sum in log space from each summand's own log-space
+        expression, which stays finite.
+
+        The log-value inputs are genuine symbolic pytensor scalars (not
+        pt.constant literals): PyTensor's constant-folding rewrite would
+        otherwise collapse pt.exp(pt.constant(-800.0)) to the Python float
+        0.0 before the log-sum-exp stabilization rewrite can pattern-match
+        log(sum(exp(...))), masking the exact failure mode this test targets
+        (and not representative of real usage, where components always
+        depend on a symbolic observable).
+        """
+        dist = MixtureDist(
+            name="mix",
+            summands=["pdf1", "pdf2"],
+            coefficients=["coeff1", "coeff2"],
+            extended=True,
+        )
+        coeff1 = pt.dscalar("coeff1")
+        coeff2 = pt.dscalar("coeff2")
+        logv1 = pt.dscalar("logv1")
+        logv2 = pt.dscalar("logv2")
+        context = {
+            "coeff1": coeff1,
+            "coeff2": coeff2,
+            "pdf1": pt.exp(logv1),
+            "pdf2": pt.exp(logv2),
+        }
+        dist.likelihood(context)
+
+        log_expressions = {"pdf1": logv1, "pdf2": logv2}
+        terms = dist.log_prob_terms({}, log_expressions, Distributions([]))
+
+        f = function(
+            [coeff1, coeff2, logv1, logv2],
+            [terms.per_event[0], terms.channel[0], dist._cached_unnorm_expr],
+        )
+        per_event_val, channel_val, raw_val = f(10.0, 20.0, -800.0, -810.0)
+
+        # The probability-space sum underflows to exactly 0.0 -- this is the
+        # condition that made the old pt.log(...) path return -inf.
+        assert raw_val == 0.0
+
+        expected_per_event = logsumexp([np.log(10.0) - 800.0, np.log(20.0) - 810.0])
+        assert np.isfinite(per_event_val)
+        np.testing.assert_allclose(per_event_val, expected_per_event, rtol=1e-12)
+        assert np.isclose(channel_val, -30.0)
+
+    def test_mixture_dist_log_prob_terms_extended_zero_coefficient(self):
+        """A coefficient of exactly 0 drops that component (log(0) = -inf
+        contributes nothing to logsumexp), leaving a finite result equal to
+        the remaining component alone."""
+        dist = MixtureDist(
+            name="mix",
+            summands=["pdf1", "pdf2"],
+            coefficients=["coeff1", "coeff2"],
+            extended=True,
+        )
+        context = {
+            "coeff1": pt.constant(0.0),
+            "coeff2": pt.constant(20.0),
+            "pdf1": pt.constant(0.5),
+            "pdf2": pt.constant(0.25),
+        }
+        dist.likelihood(context)
+
+        log_expressions = {
+            "pdf1": pt.log(pt.constant(0.5)),
+            "pdf2": pt.log(pt.constant(0.25)),
+        }
+        terms = dist.log_prob_terms({}, log_expressions, Distributions([]))
+
+        per_event_val = function([], terms.per_event[0])()
+        assert np.isfinite(per_event_val)
+        # Only the coeff2/pdf2 component survives: log(20 * 0.25) = log(5)
+        np.testing.assert_allclose(per_event_val, np.log(5.0), rtol=1e-6)
+
     def test_mixture_dist_log_prob_terms_extended(self):
         """Extended mixture contributes log(sum c_i f_i) per event and -nu per channel."""
         dist = MixtureDist(
@@ -2984,7 +3071,11 @@ class TestMixtureDist:
         }
         dist.likelihood(context)
 
-        terms = dist.log_prob_terms({}, {}, Distributions([]))
+        log_expressions = {
+            "pdf1": pt.log(pt.constant(0.5)),
+            "pdf2": pt.log(pt.constant(0.25)),
+        }
+        terms = dist.log_prob_terms({}, log_expressions, Distributions([]))
 
         assert len(terms.per_event) == 1
         assert len(terms.channel) == 1

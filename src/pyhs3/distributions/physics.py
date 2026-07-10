@@ -257,19 +257,39 @@ class AsymmetricCrystalBallDist(Distribution):
         denom_R = pt.switch(pt.eq(n_R, 1.0), 1.0, n_R - 1.0)
 
         def tail_left(u: TensorVar) -> TensorVar:
+            # Guard the argument (not just the caller's switch output): u is
+            # only positive within the left tail region (t_L < -alpha_L); the
+            # outer switch below evaluates tail_left(B_L - t_L) unconditionally
+            # for every m, including the core/right regions where B_L - t_L is
+            # zero or negative. PyTensor differentiates every branch of a
+            # switch, so log(u) / u ** (1 - n_L) at a non-positive u would
+            # otherwise contribute a NaN gradient there that survives
+            # multiplication by the switch's zero mask (0 * NaN = NaN).
+            # Substituting a safe positive placeholder keeps both the value
+            # and the gradient finite; the outer switch discards this
+            # branch's result wherever u would have been invalid.
+            safe_u = pt.switch(u > 0, u, 1.0)
             return cast(
                 TensorVar,
                 sigma_L
                 * A_L
-                * pt.switch(pt.eq(n_L, 1.0), -pt.log(u), u ** (1.0 - n_L) / denom_L),
+                * pt.switch(
+                    pt.eq(n_L, 1.0), -pt.log(safe_u), safe_u ** (1.0 - n_L) / denom_L
+                ),
             )
 
         def tail_right(u: TensorVar) -> TensorVar:
+            # See tail_left's guard above: tail_right(B_R + t_R) is likewise
+            # evaluated unconditionally for every m by the outer switch below,
+            # including the left/core regions where B_R + t_R is non-positive.
+            safe_u = pt.switch(u > 0, u, 1.0)
             return cast(
                 TensorVar,
                 sigma_R
                 * A_R
-                * pt.switch(pt.eq(n_R, 1.0), pt.log(u), -(u ** (1.0 - n_R)) / denom_R),
+                * pt.switch(
+                    pt.eq(n_R, 1.0), pt.log(safe_u), -(safe_u ** (1.0 - n_R)) / denom_R
+                ),
             )
 
         core_left = sigma_L * sqrt_half_pi * pt.erf(t_L / sqrt_two)

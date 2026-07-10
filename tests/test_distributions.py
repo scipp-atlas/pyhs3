@@ -12,6 +12,7 @@ import math
 from itertools import pairwise
 
 import numpy as np
+import pytensor
 import pytensor.tensor as pt
 import pytest
 from pydantic import ValidationError
@@ -615,6 +616,78 @@ class TestAsymmetricCrystalBallDist:
             below = antideriv_fn(junction - eps)
             above = antideriv_fn(junction + eps)
             np.testing.assert_allclose(below, above, rtol=0, atol=1e-8)
+
+    def test_asymmetric_crystal_antiderivative_gradient_is_not_nan(self):
+        """Gradient of the antiderivative wrt shape params stays finite
+        everywhere, including where a tail's own antiderivative branch is
+        not the one selected by the outer switch.
+
+        ``tail_left(u)`` is evaluated (and differentiated) unconditionally
+        for every ``m``, even deep in the right tail where ``u = B_L - t_L``
+        is negative there and ``pt.log(u)`` / ``u ** (1 - n_L)`` are only
+        finite-valued because the outer switch never selects that branch.
+        PyTensor differentiates every branch of a switch, including the one
+        not selected at runtime (see
+        :func:`test_log_space_likelihood.test_zero_bin_logprob_gradient_is_not_nan`),
+        so the untaken branch's gradient wrt n_L is NaN at this negative-u
+        point and multiplying by the switch's zero mask does not clear it
+        (``0 * NaN = NaN``). Compiling with ``optimizer=None`` disables the
+        graph rewrites that otherwise happen to simplify this away, so the
+        test exposes the NaN structurally rather than relying on optimizer
+        behavior.
+        """
+        shape_params = {
+            "alpha_L": 1.2,
+            "alpha_R": 1.7,
+            "m0": 125.0,
+            "n_L": 5.3,
+            "n_R": 9.1,
+            "sigma_L": 1.5,
+            "sigma_R": 2.0,
+        }
+        dist = AsymmetricCrystalBallDist(
+            name="test_crystal",
+            alpha_L="alpha_L",
+            alpha_R="alpha_R",
+            m="m",
+            m0="m0",
+            n_L="n_L",
+            n_R="n_R",
+            sigma_L="sigma_L",
+            sigma_R="sigma_R",
+        )
+        m_var = pt.scalar("m", dtype="float64")
+        n_L_var = pt.scalar("n_L", dtype="float64")
+        parameters = {"m": m_var, "n_L": n_L_var}
+        parameters.update(
+            {
+                name: pt.constant(value, name=name, dtype="float64")
+                for name, value in shape_params.items()
+                if name != "n_L"
+            }
+        )
+        context = Context(
+            parameters=parameters,
+            observables={
+                "m": (
+                    pt.constant(105.0, name="m_lower", dtype="float64"),
+                    pt.constant(160.0, name="m_upper", dtype="float64"),
+                )
+            },
+        )
+
+        antideriv = dist.normalization_expression(context, "m")
+        assert antideriv is not None
+        grad = pt.grad(antideriv, n_L_var)
+
+        mode = pytensor.compile.mode.Mode(linker="py", optimizer=None)
+        fn = pytensor.function([m_var, n_L_var], grad, mode=mode)
+
+        # m = 160 is deep in the right tail (junction at m0 + alpha_R*sigma_R
+        # = 128.4), where t_L = (m - m0) / sigma_L is large and positive, so
+        # the left tail's own argument u = B_L - t_L is negative there.
+        grad_val = fn(160.0, shape_params["n_L"])
+        assert np.isfinite(grad_val), f"gradient has NaN/Inf: {grad_val}"
 
 
 class TestGenericDist:

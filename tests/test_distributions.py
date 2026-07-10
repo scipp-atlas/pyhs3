@@ -44,6 +44,7 @@ from pyhs3.distributions import (
     QQZZBackgroundDist,
     UniformDist,
 )
+from pyhs3.normalization import gauss_legendre_integral
 from pyhs3.tensorutils import create_bounded_tensor
 
 
@@ -560,6 +561,85 @@ class TestAsymmetricCrystalBallDist:
         # accurate to ~1e-4..1e-3 relative; the antiderivative agrees with
         # adaptive quadrature to quad's own precision.
         np.testing.assert_allclose(analytic, numeric, rtol=1e-8)
+
+    def test_asymmetric_crystal_analytic_normalization_beats_gauss_legendre_fallback(
+        self,
+    ):
+        """The analytic antiderivative is dramatically more accurate than the
+        single-interval 64-point Gauss-Legendre quadrature it replaces, for a
+        bbyy-like asymmetric shape -- substantiating the PR's motivating claim
+        that the generic fallback carries ~1e-4..1e-3 relative error for the
+        piecewise-smooth DSCB. Also confirms ``_apply_normalization()`` (via
+        ``_normalization_integral_for()``) actually takes the analytic path
+        now that ``normalization_expression()`` is implemented, rather than
+        silently falling back to Gauss-Legendre.
+        """
+        scipy_integrate = pytest.importorskip("scipy.integrate")
+
+        shape_params = {
+            "alpha_L": 1.2,
+            "alpha_R": 1.7,
+            "m0": 125.0,
+            "n_L": 5.3,
+            "n_R": 9.1,
+            "sigma_L": 1.5,
+            "sigma_R": 2.0,
+        }
+        lower, upper = 105.0, 160.0
+
+        # Scalar-m context: raw_fn is called at individual scalar points by
+        # scipy.integrate.quad, giving the truth value.
+        scalar_dist, scalar_context, scalar_m = self._make_dist_and_context(
+            shape_params, lower, upper, vector_obs=False
+        )
+        raw_fn = function([scalar_m], scalar_dist.likelihood(scalar_context))
+
+        m0 = shape_params["m0"]
+        junctions = sorted(
+            {
+                lower,
+                m0 - shape_params["alpha_L"] * shape_params["sigma_L"],
+                m0,
+                m0 + shape_params["alpha_R"] * shape_params["sigma_R"],
+                upper,
+            }
+        )
+        truth = sum(
+            scipy_integrate.quad(raw_fn, a, b, epsabs=1e-13, epsrel=1e-13)[0]
+            for a, b in pairwise(junctions)
+        )
+
+        # Vector-m context: matches how the model builder actually feeds
+        # observables (reshaped to (N, 1)), which _normalization_integral()'s
+        # bounds-substitution and gauss_legendre_integral()'s quadrature-node
+        # substitution both require.
+        dist, context, _vector_m = self._make_dist_and_context(
+            shape_params, lower, upper, vector_obs=True
+        )
+        raw = dist.likelihood(context)
+
+        # Analytic path: what _apply_normalization() now uses. graph_replace
+        # substitutes the m leaf with the integration bounds, so the result
+        # has no remaining dependence on m.
+        matching = dist._matching_observables(context)
+        analytic_integral = dist._normalization_integral_for(raw, context, matching)
+        analytic_val = function([], analytic_integral)()
+
+        # Gauss-Legendre fallback: what _apply_normalization() used before
+        # normalization_expression() existed, and what still runs for any
+        # distribution that doesn't override it. Likewise substitutes m with
+        # quadrature nodes, leaving no free m dependence.
+        gl_integral = gauss_legendre_integral(
+            raw, context.parameters["m"], context.observables["m"][0], upper
+        )
+        gl_val = function([], gl_integral)()
+
+        analytic_rel_err = abs(analytic_val - truth) / truth
+        gl_rel_err = abs(gl_val - truth) / truth
+
+        assert analytic_rel_err < 1e-8
+        assert gl_rel_err > 1e-5
+        assert analytic_rel_err < gl_rel_err
 
     def test_asymmetric_crystal_normalized_expression_integrates_to_one(self):
         """Normalized DSCB expression integrates to 1 over the observable domain."""

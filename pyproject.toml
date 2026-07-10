@@ -37,6 +37,7 @@ dependencies = [
     'sympy',
     'pydantic>=2.12',
     'hist >= 2.7.0',
+    'pytensor-distributions >= 0.2.0',
 ]
 
 [project.optional-dependencies]
@@ -155,6 +156,7 @@ module = [
   "jax.*",
   "pytensor.link.jax.*",
   "pytensor.compile.function",  # removed in pytensor >= 3; replaced by pytensor.compile.maker
+  "pytensor_distributions.*",  # https://github.com/pymc-devs/pytensor-distributions/issues/62
 ]
 ignore_missing_imports = true
 

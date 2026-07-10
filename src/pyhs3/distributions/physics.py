@@ -18,6 +18,45 @@ from pyhs3.distributions.core import Distribution
 from pyhs3.typing.aliases import TensorVar
 
 
+def _crystalball_log_tail(n: TensorVar, alpha: TensorVar, u: TensorVar) -> TensorVar:
+    r"""
+    Analytic log of a Crystal Ball power-law tail :math:`A \cdot u^{-n}`.
+
+    ``u`` is ``B - t`` (left tail) or ``B + t`` (right tail); ``n``/``alpha``
+    are that tail's own shape parameters (assumed positive, as throughout
+    this module). :math:`\log A = n \log(n/\alpha) - \alpha^2/2` is computed
+    directly rather than as ``pt.log(A)``, since :math:`A` is itself an
+    exponential (:math:`\exp(-\alpha^2/2)`) that underflows to 0.0 for large
+    :math:`\alpha`, which would turn ``pt.log(A)`` into ``-inf`` even though
+    the true value is finite.
+
+    Shared by :class:`CrystalBallDist` and :class:`AsymmetricCrystalBallDist`
+    since both use the same power-law tail form on each side.
+
+    Guards the argument of ``pt.log(u)`` (not just the caller's switch
+    output): both callers evaluate this helper for every ``m``, including
+    core/other-tail regions where ``u`` is zero or negative. PyTensor
+    differentiates every branch of a switch, so ``pt.log(u)`` at a
+    non-positive ``u`` would otherwise contribute a NaN gradient there that
+    survives multiplication by the switch's zero mask (``0 * NaN = NaN``) --
+    the same guard idiom as :class:`AsymmetricCrystalBallDist`'s
+    ``normalization_expression`` ``tail_left``/``tail_right`` helpers.
+
+    Args:
+        n: Power-law exponent (assumed > 0).
+        alpha: Transition point (assumed > 0).
+        u: ``B - t`` (left tail) or ``B + t`` (right tail); positive within
+            this tail's own region, but evaluated for every ``m`` by the
+            caller's outer switch.
+
+    Returns:
+        Symbolic log of the tail value, safe to evaluate for any real ``u``.
+    """
+    safe_u = pt.switch(u > 0, u, 1.0)
+    log_A = n * pt.log(n / alpha) - (alpha**2) / 2.0
+    return cast(TensorVar, log_A - n * pt.log(safe_u))
+
+
 class CrystalBallDist(Distribution):
     r"""
     Single-sided Crystal Ball distribution implementation.
@@ -100,6 +139,48 @@ class CrystalBallDist(Distribution):
                 core,
             ),
         )
+
+    def log_likelihood(self, context: Context) -> TensorVar:
+        r"""
+        Builds a symbolic expression for the single-sided Crystal Ball log-PDF.
+
+        Analytic log form of :meth:`likelihood`, piecewise over the same
+        core/tail split:
+
+        .. math::
+
+            \log f(m) = \begin{cases}
+            \log A - n \log(B - t), & t < -\alpha \\
+            -\frac{1}{2} t^2, & \text{otherwise}
+            \end{cases}
+
+        via :func:`_crystalball_log_tail` for the tail branch. Evaluating
+        this directly (rather than ``pt.log(self.likelihood(...))``) avoids
+        computing the power-law tail :math:`A(B-t)^{-n}` and re-logging it,
+        which underflows to 0.0 (and then to ``-inf``) once the tail decays
+        far enough, and avoids computing :math:`\exp(-t^2/2)` in the core and
+        re-logging that, which underflows for large :math:`|t|`.
+
+        Args:
+            context (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation
+            of the single-sided Crystal Ball log-PDF.
+        """
+        alpha = context[self.alpha]
+        m = context[self.m]
+        m0 = context[self.m0]
+        n = context[self.n]
+        sigma = context[self.sigma]
+
+        B = (n / alpha) - alpha
+        t = (m - m0) / sigma
+
+        log_tail = _crystalball_log_tail(n, alpha, B - t)
+        log_core = -(t**2) / 2
+
+        return cast(TensorVar, pt.switch(t < -alpha, log_tail, log_core))
 
 
 class AsymmetricCrystalBallDist(Distribution):
@@ -201,6 +282,69 @@ class AsymmetricCrystalBallDist(Distribution):
                     t_L <= 0,
                     core_left,
                     pt.switch(t_R <= alpha_R, core_right, right_tail),
+                ),
+            ),
+        )
+
+    def log_likelihood(self, context: Context) -> TensorVar:
+        r"""
+        Builds a symbolic expression for the double-sided Crystal Ball log-PDF.
+
+        Analytic log form of :meth:`likelihood`, piecewise over the same
+        four regions (left tail, left core, right core, right tail):
+
+        .. math::
+
+            \log f(m) = \begin{cases}
+            \log A_L - n_L \log(B_L - t_L), & t_L < -\alpha_L \\
+            -\frac{1}{2} t_L^2, & -\alpha_L \leq t_L \leq 0 \\
+            -\frac{1}{2} t_R^2, & 0 < t_L,\ t_R \leq \alpha_R \\
+            \log A_R - n_R \log(B_R + t_R), & \text{otherwise}
+            \end{cases}
+
+        via :func:`_crystalball_log_tail` for both tail branches (shared with
+        :class:`CrystalBallDist`, which uses the same power-law tail form on
+        its single tail). Evaluating this directly (rather than
+        ``pt.log(self.likelihood(...))``) avoids computing each region's
+        probability-space value and re-logging it, which underflows to 0.0
+        (and then to ``-inf``) far enough into either tail or core.
+
+        Args:
+            context (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation
+            of the double-sided Crystal Ball log-PDF.
+        """
+        alpha_L = context[self.alpha_L]
+        alpha_R = context[self.alpha_R]
+        m = context[self.m]
+        m0 = context[self.m0]
+        n_L = context[self.n_L]
+        n_R = context[self.n_R]
+        sigma_L = context[self.sigma_L]
+        sigma_R = context[self.sigma_R]
+
+        B_L = (n_L / alpha_L) - alpha_L
+        B_R = (n_R / alpha_R) - alpha_R
+
+        t_L = (m - m0) / sigma_L
+        t_R = (m - m0) / sigma_R
+
+        log_left_tail = _crystalball_log_tail(n_L, alpha_L, B_L - t_L)
+        log_core_left = -(t_L**2) / 2
+        log_core_right = -(t_R**2) / 2
+        log_right_tail = _crystalball_log_tail(n_R, alpha_R, B_R + t_R)
+
+        return cast(
+            TensorVar,
+            pt.switch(
+                t_L < -alpha_L,
+                log_left_tail,
+                pt.switch(
+                    t_L <= 0,
+                    log_core_left,
+                    pt.switch(t_R <= alpha_R, log_core_right, log_right_tail),
                 ),
             ),
         )
@@ -380,6 +524,58 @@ class ArgusDist(Distribution):
         exp_term = pt.exp(c * bracket_term)
 
         return cast(TensorVar, m * power_term * exp_term)
+
+    def log_likelihood(self, context: Context) -> TensorVar:
+        r"""
+        Builds a symbolic expression for the ARGUS log-PDF.
+
+        Analytic log form of :meth:`likelihood`, restricted to the ARGUS
+        kinematic domain :math:`1 - r^2 > 0` (i.e. :math:`m < m_0`), where
+        :math:`r = m/m_0`:
+
+        .. math::
+
+            \log f(m) = \log m + p \log(1 - r^2) + c (1 - r^2)
+
+        Outside the kinematic bound the ARGUS density is 0 by definition
+        (ROOT's ``RooArgusBG`` restricts support to ``m < m0``), so ``-inf``
+        is the correct log-density there -- not merely a numerical artifact
+        to suppress. This is why this method intentionally diverges from
+        ``pt.log(self.likelihood(...))`` outside the bound: :meth:`likelihood`
+        computes ``bracket_term**p`` unconditionally, which is NaN there for
+        the non-integer ``p`` values ARGUS normally uses (a real, non-integer
+        power of a negative base), rather than 0. Inside the bound the two
+        agree exactly.
+
+        Guards the argument of both logs (not just the switch's output): the
+        bracket term is clamped to a safe positive placeholder before either
+        ``pt.log`` call, so the in-range branch's gradient stays finite when
+        PyTensor differentiates it at points where that branch is not
+        selected (bracket_term <= 0) -- the same guard idiom as
+        :class:`CrystalBallDist`'s tail guard (:func:`_crystalball_log_tail`).
+        Without the clamp, the in-range branch's un-selected-branch gradient
+        would multiply an infinite/NaN local derivative of ``pt.log`` at a
+        non-positive argument by the switch's zero mask (``0 * NaN = NaN``).
+
+        Args:
+            context (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation
+            of the ARGUS log-PDF.
+        """
+        m = context[self._parameters["mass"]]
+        m0 = context[self._parameters["resonance"]]
+        c = context[self._parameters["slope"]]
+        p = context[self._parameters["power"]]
+
+        ratio_squared = (m / m0) ** 2
+        bracket_term = 1.0 - ratio_squared
+
+        safe_bracket = pt.switch(bracket_term > 0, bracket_term, 1.0)
+        log_valid = pt.log(m) + p * pt.log(safe_bracket) + c * safe_bracket
+
+        return cast(TensorVar, pt.switch(bracket_term > 0, log_valid, -np.inf))
 
 
 # Export list of physics distribution classes

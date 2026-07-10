@@ -14,6 +14,7 @@ import pytest
 from scipy.stats import norm as scipy_norm
 
 from pyhs3.context import Context
+from pyhs3.distributions.basic import GaussianDist, PoissonDist
 from pyhs3.distributions.histfactory.data import SampleData
 from pyhs3.distributions.histfactory.modifiers import (
     HistoSysData,
@@ -549,6 +550,29 @@ class TestStatErrorModifier:
         expected = float(np.exp(log_factor))
         np.testing.assert_allclose(constraint_val, expected, rtol=1e-4)
 
+    def test_make_constraint_poisson_all_bins_skipped(self):
+        """make_constraint()/log_constraint() with Poisson return the
+        no-constraint constant (1.0 / 0.0) when every bin has
+        nominal_yield <= 0 and is therefore skipped, even though
+        ``self.parameters`` is non-empty."""
+        data = StatErrorData(uncertainties=[1.0, 1.0])
+        modifier = StatErrorModifier(
+            name="stat_unc",
+            parameters=["gamma_stat_bin0", "gamma_stat_bin1"],
+            constraint="Poisson",
+            data=data,
+        )
+        context = Context(
+            {"gamma_stat_bin0": pt.constant(1.0), "gamma_stat_bin1": pt.constant(1.0)}
+        )
+        sample_data = SampleData(contents=[0.0, 0.0], errors=[0.0, 0.0])
+
+        constraint_val = float(modifier.make_constraint(context, sample_data).eval())
+        assert constraint_val == pytest.approx(1.0)
+
+        log_constraint_val = float(modifier.log_constraint(context, sample_data).eval())
+        assert log_constraint_val == pytest.approx(0.0)
+
 
 class TestModifierConstraintTypes:
     """Test different constraint types for modifiers."""
@@ -853,3 +877,79 @@ class TestLogConstraintUnderflow:
         log_prob = float(modifier.log_constraint(context, sample_data).eval())
         assert math.isfinite(log_prob)
         assert log_prob == pytest.approx(float(scipy_norm.logpdf(40.0)), rel=1e-10)
+
+
+def _spy_init_calls(monkeypatch, cls):
+    """Wrap ``cls.__init__`` to count constructions, returning a mutable counter.
+
+    Used to assert that per-bin constraint helpers build ONE vectorized
+    GaussianDist/PoissonDist per modifier call instead of one scalar
+    distribution object per bin (#230 review perf item).
+    """
+    calls = {"count": 0}
+    original_init = cls.__init__
+
+    def wrapped(self, *args, **kwargs):
+        calls["count"] += 1
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(cls, "__init__", wrapped)
+    return calls
+
+
+class TestVectorizedBinConstraints:
+    """Per-bin constraint helpers build ONE constraint distribution per modifier
+    call (vectorized over bins), not one scalar distribution per bin.
+
+    Structural regression test for the #230 review perf item: constructing a
+    GaussianDist/PoissonDist per bin inflates Python-side graph construction,
+    PyTensor compile time, and JAX traces for wide (many-bin) channels.
+    """
+
+    N_BINS = 8
+
+    def test_shapesys_builds_one_poisson_per_call(self, monkeypatch):
+        calls = _spy_init_calls(monkeypatch, PoissonDist)
+
+        params = [f"gamma_{i}" for i in range(self.N_BINS)]
+        vals = [0.1 + 0.01 * i for i in range(self.N_BINS)]
+        modifier = ShapeSysModifier(
+            name="uncorr_bkguncrt", parameters=params, data=ShapeSysData(vals=vals)
+        )
+        context = Context({p: pt.constant(1.0, dtype="float64") for p in params})
+        sample_data = SampleData(
+            contents=[100.0 + i for i in range(self.N_BINS)], errors=[5.0] * self.N_BINS
+        )
+
+        modifier.make_constraint(context, sample_data)
+        assert calls["count"] == 1
+
+        calls["count"] = 0
+        modifier.log_constraint(context, sample_data)
+        assert calls["count"] == 1
+
+    @pytest.mark.parametrize("constraint_type", ["Gauss", "Poisson"])
+    def test_staterror_bbfull_builds_one_dist_per_call(
+        self, monkeypatch, constraint_type
+    ):
+        dist_cls = GaussianDist if constraint_type == "Gauss" else PoissonDist
+        calls = _spy_init_calls(monkeypatch, dist_cls)
+
+        params = [f"gamma_{i}" for i in range(self.N_BINS)]
+        modifier = StatErrorModifier(
+            name="stat_unc",
+            parameters=params,
+            constraint=constraint_type,
+            data=StatErrorData(uncertainties=[2.0] * self.N_BINS),
+        )
+        context = Context({p: pt.constant(1.0, dtype="float64") for p in params})
+        sample_data = SampleData(
+            contents=[100.0 + i for i in range(self.N_BINS)], errors=[5.0] * self.N_BINS
+        )
+
+        modifier.make_constraint(context, sample_data)
+        assert calls["count"] == 1
+
+        calls["count"] = 0
+        modifier.log_constraint(context, sample_data)
+        assert calls["count"] == 1

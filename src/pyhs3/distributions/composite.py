@@ -30,6 +30,47 @@ if TYPE_CHECKING:
     from pyhs3.distributions import Distributions
 
 
+def _stable_logsumexp(x: TensorVar, axis: int) -> TensorVar:
+    """Numerically stable log-sum-exp, built explicitly instead of via ``pt.logsumexp``.
+
+    ``pt.logsumexp`` lowers to the literal ``log(sum(exp(x)))`` graph; the
+    protection against overflow/underflow is not part of that graph but is
+    instead an emergent property of the ``local_log_sum_exp`` graph rewrite,
+    which only runs in the stabilize/specialize passes under ``FAST_RUN``.
+    Any mode that skips those passes (e.g. ``FAST_COMPILE``, which
+    ``Model``/``Workspace.model()`` expose to callers via ``mode=``) silently
+    loses the protection. Building the max-shifted form here makes the
+    stability structural rather than rewrite-dependent. See
+    https://github.com/scipp-atlas/pyhs3/issues/277 for the failure mode and
+    https://github.com/pymc-devs/pytensor/issues/2288 for the tracked
+    upstream request for a stable-by-construction ``logsumexp``.
+
+    Args:
+        x: Tensor to reduce.
+        axis: Axis to reduce over.
+
+    Returns:
+        log(sum(exp(x), axis=axis)), stable against underflow (large
+        negative x, the case relevant to :class:`MixtureDist`) and overflow
+        (large positive x). Reduces to -inf (not NaN) when every entry along
+        axis is -inf: the ``pt.isinf`` guard below substitutes 0.0 for the
+        max in that slice so the subsequent subtraction is ``-inf - 0.0``
+        rather than ``-inf - -inf`` (NaN). The *value* is finite there, but
+        its gradient is not: d/ds log(s) diverges as s = sum(exp(x - safe_m))
+        approaches 0, so the gradient at an all-(-inf) point is NaN. That is
+        a genuine singularity of log at its domain boundary -- present in
+        any logsumexp implementation, not an artifact of the guard above
+        (whose own gradient contribution stays finite; see the
+        ``_stable_logsumexp`` tests in ``tests/test_distributions.py``).
+    """
+    m = pt.max(x, axis=axis, keepdims=True)  # type: ignore[no-untyped-call]
+    safe_m = pt.switch(pt.isinf(m), 0.0, m)
+    result = safe_m + pt.log(
+        pt.sum(pt.exp(x - safe_m), axis=axis, keepdims=True)  # type: ignore[no-untyped-call]
+    )
+    return cast(TensorVar, pt.squeeze(result, axis=axis))  # type: ignore[no-untyped-call]
+
+
 class MixtureDist(Distribution):
     r"""
     Mixture of probability distributions.
@@ -372,8 +413,12 @@ class MixtureDist(Distribution):
         terms are stacked on a new leading axis (shape ``(n_summands, N, M)``
         for ``N`` events and parameter-batch size ``M``, matching the
         per-event shape documented on :class:`LogProbTerms`) and reduced with
-        ``pt.logsumexp`` over that axis, giving the ``(N, M)`` per-event term.
-        This assumes cᵢ ≥ 0, matching the probabilistic meaning of a mixture
+        :func:`_stable_logsumexp` over that axis, giving the ``(N, M)``
+        per-event term.  :func:`_stable_logsumexp` is used instead of
+        ``pt.logsumexp`` because the latter's stability is an emergent
+        property of a graph rewrite that only runs under ``FAST_RUN`` (see
+        :func:`_stable_logsumexp`'s docstring and
+        https://github.com/scipp-atlas/pyhs3/issues/277).  This assumes cᵢ ≥ 0, matching the probabilistic meaning of a mixture
         weight; :class:`MixtureDist` does not validate coefficient sign, so a
         negative cᵢ produces NaN here (``pt.log`` of a negative number) just
         as ``pt.log(Σᵢcᵢfᵢ)`` would if the probability-space sum itself were
@@ -406,10 +451,7 @@ class MixtureDist(Distribution):
             pt.log(coeff) + log_expressions[summand]
             for coeff, summand in zip(self._cached_coeffs, self.summands, strict=True)
         ]
-        per_event_term = cast(
-            TensorVar,
-            pt.logsumexp(pt.stack(log_terms, axis=0), axis=0),  # type: ignore[no-untyped-call]
-        )
+        per_event_term = _stable_logsumexp(pt.stack(log_terms, axis=0), axis=0)
 
         return LogProbTerms(
             per_event=[per_event_term],

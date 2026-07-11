@@ -44,6 +44,7 @@ from pyhs3.distributions import (
     QQZZBackgroundDist,
     UniformDist,
 )
+from pyhs3.distributions.composite import _stable_logsumexp
 from pyhs3.normalization import gauss_legendre_integral
 from pyhs3.tensorutils import create_bounded_tensor
 
@@ -2982,6 +2983,112 @@ class TestCMSDistributions:
         np.testing.assert_allclose(result_val, expected, rtol=1e-6)
 
 
+class TestStableLogSumExp:
+    """Test the ``_stable_logsumexp`` helper used by MixtureDist.log_prob_terms.
+
+    See https://github.com/scipp-atlas/pyhs3/issues/277: pt.logsumexp's
+    stability is a rewrite-dependent property (only applied under FAST_RUN),
+    so MixtureDist builds the max-shifted form explicitly instead. These
+    tests exercise the helper directly at the edge cases the rewrite would
+    otherwise have masked: an all-(-inf) input and the gradient through the
+    switch that guards it.
+    """
+
+    def test_all_neg_inf_gives_neg_inf_not_nan(self):
+        """Every entry -inf (all mixture components underflow) must reduce
+        to -inf, the correct limit, not NaN from -inf - -inf inside the
+        max-shift."""
+        x = pt.dvector("x")
+        result = _stable_logsumexp(x, axis=0)
+        mode = pytensor.compile.mode.Mode(linker="py", optimizer=None)
+        f = pytensor.function([x], result, mode=mode)
+
+        value = f(np.array([-np.inf, -np.inf, -np.inf]))
+        assert value == -np.inf
+        assert not np.isnan(value)
+
+    def test_mixed_finite_and_neg_inf_matches_scipy(self):
+        """A -inf entry alongside finite entries must not perturb the
+        result: it contributes exp(-inf) = 0 to the sum, same as scipy's
+        reference implementation."""
+        x = pt.dvector("x")
+        result = _stable_logsumexp(x, axis=0)
+        f = pytensor.function([x], result)
+
+        inputs = np.array([-np.inf, -5.0, -5.5])
+        value = f(inputs)
+        assert np.isfinite(value)
+        np.testing.assert_allclose(value, logsumexp(inputs), rtol=1e-12)
+
+    def test_switch_guard_gradient_finite_at_all_neg_inf(self):
+        """The pt.isinf/pt.switch guard itself must not introduce NaN into
+        the gradient at the all-(-inf) point, isolated from the outer log's
+        own (expected) singularity there.
+
+        pt.switch differentiates both branches and combines them with the
+        condition mask; if the untaken branch's local gradient were NaN
+        (e.g. from a 0/0-shaped subexpression), the NaN would survive the
+        multiply-by-zero mask and poison the result. Here the switch's two
+        branches are the constant 0.0 (gradient identically 0, no
+        dependence on x) and m = max(x) (a finite indicator-based gradient,
+        even for the tied all-(-inf) case since -inf == -inf is well-defined
+        under IEEE 754) -- neither branch has a division or log that could
+        produce NaN, so the guard is safe. This checks the gradient of
+        exp(x - safe_m) (the term the guard directly protects), not the
+        full log(sum(...)) result: see
+        test_full_gradient_has_expected_singularity_at_all_neg_inf below for
+        why the full result's gradient is *not* expected to be finite there.
+        """
+        x = pt.dvector("x")
+        m = pt.max(x, axis=0, keepdims=True)
+        safe_m = pt.switch(pt.isinf(m), 0.0, m)
+        exp_term = pt.sum(pt.exp(x - safe_m))
+        grad = pt.grad(exp_term, x)
+
+        mode = pytensor.compile.mode.Mode(linker="py", optimizer=None)
+        f = pytensor.function([x], grad, mode=mode)
+
+        grad_val = f(np.array([-np.inf, -np.inf, -np.inf]))
+        assert np.all(np.isfinite(grad_val)), f"gradient has NaN/Inf: {grad_val}"
+
+    def test_full_gradient_has_expected_singularity_at_all_neg_inf(self):
+        """The full _stable_logsumexp gradient at the all-(-inf) point is
+        NaN, and that is expected rather than a regression to fix here.
+
+        d/ds log(s) = 1/s diverges at s = sum(exp(x - safe_m)) = 0, which
+        happens exactly when every entry is -inf; multiplying that infinite
+        derivative by the (correctly finite, per the test above) 0-valued
+        derivative of exp(x - safe_m) gives the indeterminate 0 * inf = NaN.
+        This is a genuine mathematical singularity of log at its domain
+        boundary -- present in any logsumexp implementation, including
+        scipy's -- not an artifact of the switch guard or of this
+        construction, so it is documented here rather than papered over.
+        """
+        x = pt.dvector("x")
+        result = _stable_logsumexp(x, axis=0)
+        grad = pt.grad(pt.sum(result), x)
+
+        mode = pytensor.compile.mode.Mode(linker="py", optimizer=None)
+        f = pytensor.function([x], grad, mode=mode)
+
+        grad_val = f(np.array([-np.inf, -np.inf, -np.inf]))
+        assert np.all(np.isnan(grad_val))
+
+    def test_gradient_finite_at_mixed_finite_and_neg_inf(self):
+        """Gradient stays finite when only some entries underflow to -inf,
+        the more common mixture case (one component in its tail, another
+        not)."""
+        x = pt.dvector("x")
+        result = _stable_logsumexp(x, axis=0)
+        grad = pt.grad(pt.sum(result), x)
+
+        mode = pytensor.compile.mode.Mode(linker="py", optimizer=None)
+        f = pytensor.function([x], grad, mode=mode)
+
+        grad_val = f(np.array([-np.inf, -5.0, -5.5]))
+        assert np.all(np.isfinite(grad_val)), f"gradient has NaN/Inf: {grad_val}"
+
+
 class TestMixtureDist:
     """Test MixtureDist implementation with various coefficient scenarios."""
 
@@ -3376,6 +3483,58 @@ class TestMixtureDist:
         assert np.isfinite(per_event_val)
         np.testing.assert_allclose(per_event_val, expected_per_event, rtol=1e-12)
         assert np.isclose(channel_val, -30.0)
+
+    def test_mixture_dist_log_prob_terms_extended_logsumexp_stability_fast_compile(
+        self,
+    ):
+        """Per-event term stays finite under mode="FAST_COMPILE", not just the
+        default FAST_RUN mode.
+
+        pt.logsumexp lowers to the naive log(sum(exp(x))) graph; the
+        underflow protection comes entirely from the local_log_sum_exp graph
+        rewrite, which only runs in the stabilize/specialize passes under
+        FAST_RUN. Workspace.model()/Model expose mode= to callers, so
+        FAST_COMPILE (which skips those passes) is a reachable configuration
+        that must not silently lose the protection. See
+        https://github.com/scipp-atlas/pyhs3/issues/277 and the tracked
+        upstream request for a stable-by-construction logsumexp,
+        https://github.com/pymc-devs/pytensor/issues/2288.
+
+        Same construction as the FAST_RUN stability test above: genuine
+        symbolic pytensor scalars (not pt.constant literals) so the
+        underflow isn't masked by constant folding.
+        """
+        dist = MixtureDist(
+            name="mix",
+            summands=["pdf1", "pdf2"],
+            coefficients=["coeff1", "coeff2"],
+            extended=True,
+        )
+        coeff1 = pt.dscalar("coeff1")
+        coeff2 = pt.dscalar("coeff2")
+        logv1 = pt.dscalar("logv1")
+        logv2 = pt.dscalar("logv2")
+        context = {
+            "coeff1": coeff1,
+            "coeff2": coeff2,
+            "pdf1": pt.exp(logv1),
+            "pdf2": pt.exp(logv2),
+        }
+        dist.likelihood(context)
+
+        log_expressions = {"pdf1": logv1, "pdf2": logv2}
+        terms = dist.log_prob_terms({}, log_expressions, Distributions([]))
+
+        f = function(
+            [coeff1, coeff2, logv1, logv2],
+            terms.per_event[0],
+            mode="FAST_COMPILE",
+        )
+        per_event_val = f(10.0, 20.0, -800.0, -810.0)
+
+        expected_per_event = logsumexp([np.log(10.0) - 800.0, np.log(20.0) - 810.0])
+        assert np.isfinite(per_event_val)
+        np.testing.assert_allclose(per_event_val, expected_per_event, rtol=1e-12)
 
     def test_mixture_dist_log_prob_terms_extended_zero_coefficient(self):
         """A coefficient of exactly 0 drops that component (log(0) = -inf

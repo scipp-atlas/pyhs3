@@ -38,6 +38,25 @@ def _gaussian_pytensor_expr() -> tuple[
     return x, mu, sigma, pdf_expr
 
 
+def _gaussian_log_pytensor_expr() -> tuple[
+    pt.TensorVariable, pt.TensorVariable, pt.TensorVariable, pt.TensorVariable
+]:
+    """Return (x, mu, sigma, log_pdf_expr) as pytensor scalars.
+
+    Built directly in log-space (no ``pt.log`` of a probability-space pdf),
+    mirroring how ``Model.log_prob`` is constructed to avoid underflow.
+    """
+    x = pt.scalar("x")
+    mu = pt.scalar("mu")
+    sigma = pt.scalar("sigma")
+    log_pdf_expr = (
+        -0.5 * ((x - mu) / sigma) ** 2
+        - pt.log(sigma)
+        - 0.5 * pt.log(pt.constant(2 * math.pi, dtype="float64"))
+    )
+    return x, mu, sigma, log_pdf_expr
+
+
 # ---------------------------------------------------------------------------
 # jaxify — basic smoke tests
 # ---------------------------------------------------------------------------
@@ -149,15 +168,21 @@ class TestJaxifiedGraphCall:
             jaxify(pdf_expr)
 
     def test_pytree_dict_usage(self):
-        """Typical everwillow/optimistix pattern: nll takes a dict pytree."""
-        _, _, _, pdf_expr = _gaussian_pytensor_expr()
-        jg = jaxify(pdf_expr)
+        """Typical everwillow/optimistix pattern: nll takes a dict pytree.
+
+        Jaxifies the log-space expression directly (as ``model.log_prob``
+        does) rather than jaxifying a probability-space pdf and taking
+        ``jnp.log`` of the result, which underflows for realistic
+        HistFactory channels.
+        """
+        _, _, _, log_pdf_expr = _gaussian_log_pytensor_expr()
+        jg = jaxify(log_pdf_expr)
         fixed_x = jnp.float64(0.0)
 
         @jax.jit
         def nll(free_params: dict) -> object:
             all_params = {**free_params, "x": fixed_x}
-            return -2 * jnp.log(jg(**all_params)[0])
+            return -2 * jg(**all_params)[0]
 
         free = {"mu": jnp.float64(0.0), "sigma": jnp.float64(1.0)}
         result = nll(free)

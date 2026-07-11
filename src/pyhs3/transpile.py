@@ -55,12 +55,19 @@ class JaxifiedGraph:
         original PyTensor variable names, so kwargs are forwarded directly.
         Python itself raises ``TypeError`` for missing or unexpected names.
 
-        The typical usage pattern with optimistix or everwillow is::
+        The typical usage pattern with optimistix or everwillow is to jaxify
+        the log-space graph directly (e.g. ``model.log_prob``) rather than
+        jaxifying a probability-space pdf and taking ``jnp.log`` of the
+        result — the latter underflows to ``-inf`` for realistic HistFactory
+        channels, where the probability-space product can be smaller than
+        the smallest representable float::
+
+            jg = jaxify(model.log_prob)
 
             @jax.jit
             def nll(free_params):          # free_params is a dict pytree
                 all_params = {**free_params, **fixed_params}
-                return -2 * jnp.log(jg(**all_params)[0])
+                return -2 * jg(**all_params)[0]
 
         Parameters
         ----------

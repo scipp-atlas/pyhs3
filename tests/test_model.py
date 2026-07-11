@@ -960,29 +960,47 @@ class TestModelParameterOrdering:
         assert isinstance(param_list, list)
         assert len(param_list) > 0
 
-    def test_log_pars_triggers_compilation(self, simple_workspace):
-        """Test that log_pars() triggers log compilation if not already compiled."""
+    def test_logpdf_populates_shared_pars_cache(self, simple_workspace):
+        """Compiling the log-space function alone (without ever calling pdf())
+        must populate the same shared input-name cache that pars() reads,
+        since the probability- and log-space expressions share identical free
+        inputs by construction (pdf() evaluates pt.exp() of exactly what
+        logpdf() evaluates)."""
         model = simple_workspace.model(0, mode="FAST_RUN")
 
-        # Before calling log_pars, neither cache should be populated
-        assert "gauss" not in model._compiled_log_inputs
-        assert "gauss" not in model._compiled_log_input_names
+        # Before calling logpdf, neither compiled-function cache is populated.
+        assert "gauss" not in model._compiled_functions
+        assert "gauss" not in model._compiled_log_functions
+        assert "gauss" not in model._compiled_input_names
 
-        # Call log_pars - should trigger compilation of the log function
-        param_list = model.log_pars("gauss")
+        model.logpdf_unsafe("gauss", x=0.0, mu=0.0, sigma=1.0)
 
-        # After calling log_pars, both caches should be populated
-        assert "gauss" in model._compiled_log_inputs
-        assert "gauss" in model._compiled_log_input_names
-
-        # log_pars returns the pre-built cached list (mirrors pars())
-        assert param_list is model._compiled_log_input_names["gauss"]
-
-        # Should return valid parameter list
-        assert isinstance(param_list, list)
+        # logpdf() compiled only the log-space function...
+        assert "gauss" in model._compiled_log_functions
+        assert "gauss" not in model._compiled_functions
+        # ...but the shared pars() cache is already populated from it.
+        assert "gauss" in model._compiled_input_names
+        param_list = model.pars("gauss")
         assert "x" in param_list
         assert "mu" in param_list
         assert "sigma" in param_list
+        # pars() must not have triggered a redundant probability-space compile.
+        assert "gauss" not in model._compiled_functions
+
+    def test_pars_ordering_identical_for_pdf_and_logpdf(self, simple_workspace):
+        """pars(name) must return the same ordering whether the probability-
+        space or the log-space compiled function is built first (issue #276
+        acceptance criterion: a single shared ordering is valid for both
+        pdf() and logpdf())."""
+        model_pdf_first = simple_workspace.model(0, mode="FAST_RUN")
+        model_pdf_first.pdf_unsafe("gauss", x=0.0, mu=0.0, sigma=1.0)
+        pars_from_pdf = model_pdf_first.pars("gauss")
+
+        model_logpdf_first = simple_workspace.model(0, mode="FAST_RUN")
+        model_logpdf_first.logpdf_unsafe("gauss", x=0.0, mu=0.0, sigma=1.0)
+        pars_from_logpdf = model_logpdf_first.pars("gauss")
+
+        assert pars_from_pdf == pars_from_logpdf
 
     def test_pars_order_matches_pdf_inputs(self, simple_workspace):
         """Test that pars() order matches what pdf() expects."""
@@ -1121,6 +1139,33 @@ class TestModelParameterOrdering:
         # Should raise an error when distribution doesn't exist
         with pytest.raises(KeyError):
             model.parsort("nonexistent_dist", ["x", "mu"])
+
+    def test_compile_expression_raises_on_input_mismatch(
+        self, simple_workspace, monkeypatch
+    ):
+        """_compile_expression() must raise RuntimeError if the second compile
+        path (pdf or logpdf, whichever runs second) ever finds different free
+        inputs than the first -- this would violate the invariant that the
+        probability- and log-space expressions share identical free inputs by
+        construction (one is pt.exp() of the other)."""
+        model = simple_workspace.model(0, mode="FAST_RUN")
+
+        # Compile the log-space function first to populate the shared cache.
+        model._get_compiled_log_function("gauss")
+        assert "gauss" in model._compiled_input_names
+
+        # Simulate a divergent input list for the probability-space compile.
+        original = hs3.model.explicit_graph_inputs
+
+        def fake_explicit_graph_inputs(exprs):
+            return [var for var in original(exprs) if var.name != "sigma"]
+
+        monkeypatch.setattr(
+            hs3.model, "explicit_graph_inputs", fake_explicit_graph_inputs
+        )
+
+        with pytest.raises(RuntimeError, match="input mismatch"):
+            model._get_compiled_function("gauss")
 
 
 class TestConstParameters:

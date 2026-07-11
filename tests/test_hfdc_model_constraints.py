@@ -850,12 +850,14 @@ def _single_channel_normsys_workspace() -> Workspace:
 class TestHFDCSubgraphBuildCounts:
     """Model construction must build each HFDC subgraph exactly once.
 
-    ``_build_distribution_node`` previously called ``dist.likelihood(context)``,
-    ``dist.log_likelihood(context)``, and ``dist.log_expression(context)`` for
-    the same context; the last call internally re-ran ``log_likelihood`` (which
-    recomputes expected_rates) and ``log_extended_likelihood`` (which reruns
-    ``make_constraint`` for every constraint spec), duplicating work already
-    done for the probability-space expression and the constraint loop below it.
+    ``_build_distribution_node`` builds only the log-space expression for a
+    channel (summed Poisson log-pmf plus summed log-constraints); the
+    probability-space expression is derived as ``pt.exp()`` of it rather than
+    built independently, so ``dist.likelihood(context)`` and
+    ``modifier.make_constraint(...)`` (the probability-space counterparts) are
+    never called during model construction -- only their log-space
+    counterparts, ``dist.log_likelihood(context)`` and
+    ``modifier.log_constraint(...)``, are.
     """
 
     def test_compute_expected_rates_called_once_per_channel(self, monkeypatch):
@@ -880,10 +882,11 @@ class TestHFDCSubgraphBuildCounts:
             f"expected exactly one _compute_expected_rates call per channel, got {calls}"
         )
 
-    def test_make_constraint_called_once_per_spec(self, monkeypatch):
-        """``make_constraint`` must build each constraint factor exactly once
-        during model construction, regardless of how many places (probability-space
-        expression, log-space expression, joint log_prob) reuse the result."""
+    def test_make_constraint_not_called(self, monkeypatch):
+        """``make_constraint`` (the probability-space constraint term) must
+        never be called during model construction: the probability-space
+        per-channel expression is derived as ``pt.exp()`` of the log-space
+        one (built from ``log_constraint`` below), not built independently."""
         calls: list[str] = []
         original = SingleParamConstraint.make_constraint
 
@@ -899,14 +902,11 @@ class TestHFDCSubgraphBuildCounts:
         likelihood = next(iter(ws.likelihoods))
         ws.model(likelihood, progress=False)
 
-        assert calls == ["lumi"], (
-            f"expected exactly one make_constraint call per constraint spec, got {calls}"
-        )
+        assert calls == [], f"expected make_constraint to never be called, got {calls}"
 
     def test_log_constraint_called_once_per_spec(self, monkeypatch):
         """``log_constraint`` (#243 Layer 2) must build each log-space constraint
-        factor exactly once during model construction, alongside the single
-        ``make_constraint`` call asserted above."""
+        factor exactly once during model construction."""
         calls: list[str] = []
         original = SingleParamConstraint.log_constraint
 
@@ -928,8 +928,8 @@ class TestHFDCSubgraphBuildCounts:
 
     def test_logpdf_matches_log_pdf_for_hfdc_with_constraint(self):
         """logpdf(channel) must equal log(pdf(channel)) for an HFDC channel with
-        a constraint modifier, confirming log_distributions is assembled from
-        the same pieces as the probability-space expression."""
+        a constraint modifier, confirming the probability-space expression
+        (pt.exp() of the log-space one) is numerically consistent."""
         ws = _single_channel_normsys_workspace()
         likelihood = next(iter(ws.likelihoods))
         model = ws.model(likelihood, progress=False)

@@ -65,6 +65,7 @@ mplhep = "*"
 pytest = ">=9"
 pytest-cov = ">=3"
 pytest-xdist = ">=3"
+jsonschema = ">=4"
 pyhf = ">=0.7.6"
 scikit-hep-testdata = ">=0.6.2"
 pydot = "*"
@@ -96,6 +97,7 @@ test-docs = { cmd = "pytest README.rst docs", description = "Run doctests in doc
 test-slow = { cmd = "pytest --runslow", description = "Run tests including slow tests" }
 test-pydot = { cmd = "pytest --runpydot", description = "Run tests including pydot tests" }
 test-all = { cmd = "pytest -n auto --runslow --runpydot --cov=pyhs3", description = "Run all tests with coverage (slow + pydot)" }
+test-hs3suite = { cmd = "pytest tests/test_hs3testsuite.py -ra", description = "Run the pinned HS3TestSuite conformance tests" }
 
 [feature.docs.dependencies]
 sphinx = ">=7.0"

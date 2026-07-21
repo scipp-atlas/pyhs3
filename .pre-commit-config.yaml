@@ -26,7 +26,7 @@ repos:
       - id: mixed-line-ending
       - id: name-tests-test
         args: ["--pytest-test-first"]
-        exclude: ^tests/test_pdf/rf501_simultaneouspdf.py$
+        exclude: ^tests/(hs3testsuite_pyhs3_backend|test_pdf/rf501_simultaneouspdf)\.py$
       - id: trailing-whitespace
 
   - repo: https://github.com/pre-commit/pygrep-hooks

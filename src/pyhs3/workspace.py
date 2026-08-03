@@ -8,11 +8,12 @@ from collections import Counter
 from collections.abc import Iterable
 from functools import singledispatchmethod
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from pyhs3.analyses import Analyses, Analysis
+from pyhs3.compiled import compile_analyses
 from pyhs3.data import Data, DataType
 from pyhs3.distributions import Distributions, DistributionType, HistFactoryDistChannel
 from pyhs3.distributions.histfactory.modifiers import (
@@ -26,6 +27,9 @@ from pyhs3.likelihoods import Likelihood, Likelihoods
 from pyhs3.metadata import Metadata
 from pyhs3.model import Model
 from pyhs3.parameter_points import ParameterPoints, ParameterSet
+
+if TYPE_CHECKING:
+    from pyhs3.compiled import CompiledAnalyses
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +83,30 @@ class Workspace(BaseModel):
     def model_post_init(self, __context: Any, /) -> None:
         """Resolve foreign key references after workspace construction."""
         self._resolve_foreign_keys()
+
+    def compile_analyses(
+        self,
+        analyses: list[str | Analysis] | None = None,
+        *,
+        parameter_set: str | None = None,
+        progress: bool = False,
+        mode: str = "FAST_RUN",
+    ) -> CompiledAnalyses:
+        """Compile analysis log-probabilities with safe template sharing.
+
+        This opt-in API groups analyses only when their pre-rewrite graph
+        topology and types match. Channel-specific floating constants become
+        runtime inputs; incompatible graphs fall back to independent
+        compilation.
+        """
+
+        return compile_analyses(
+            self,
+            analyses,
+            parameter_set=parameter_set,
+            progress=progress,
+            mode=mode,
+        )
 
     def _resolve_foreign_keys(self) -> None:
         """Resolve string references to actual objects with referential integrity checking."""

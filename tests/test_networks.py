@@ -185,6 +185,38 @@ class TestNamedDiGraph:
         with pytest.raises(ValueError, match="Circular dependency detected in graph"):
             graph.topological_sort()
 
+    def test_ancestor_closure_includes_only_transitive_dependencies(self):
+        """Ancestor closure excludes unrelated branches of the graph."""
+        graph = NamedDiGraph()
+        for name in ("parameter", "function", "distribution", "unrelated"):
+            graph.add_named_node(name, {"name": name})
+        graph.add_named_edge("parameter", "function")
+        graph.add_named_edge("function", "distribution")
+
+        closure = graph.ancestor_closure(["distribution"])
+
+        assert closure == {
+            graph.get_node_index("parameter"),
+            graph.get_node_index("function"),
+            graph.get_node_index("distribution"),
+        }
+
+    def test_ancestor_closure_combines_multiple_roots(self):
+        """All roots and their shared dependencies are retained."""
+        graph = NamedDiGraph()
+        for name in ("shared", "main", "aux"):
+            graph.add_named_node(name, {"name": name})
+        graph.add_named_edge("shared", "main")
+        graph.add_named_edge("shared", "aux")
+
+        closure = graph.ancestor_closure(["main", "aux"])
+
+        assert closure == {
+            graph.get_node_index("shared"),
+            graph.get_node_index("main"),
+            graph.get_node_index("aux"),
+        }
+
     def test_contains(self):
         """Test __contains__ method."""
         graph = NamedDiGraph()

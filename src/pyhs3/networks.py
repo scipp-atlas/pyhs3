@@ -8,6 +8,7 @@ between parameters, functions, and distributions in HS3 models.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from typing import Any, TypeVar, cast
 
 import rustworkx as rx
@@ -183,6 +184,21 @@ class NamedDiGraph:
         except rx.DAGHasCycle as e:
             msg = "Circular dependency detected in graph"
             raise ValueError(msg) from e
+
+    def ancestor_closure(self, names: Iterable[str]) -> set[int]:
+        """Return named nodes and every dependency reachable upstream.
+
+        Dependency graph edges point from a dependency to the entity that
+        consumes it.  The ancestors of a root entity are therefore exactly
+        the parameters, constants, functions, modifiers, and component
+        distributions required to build that entity.
+        """
+        closure: set[int] = set()
+        for name in names:
+            node_idx = self.get_node_index(name)
+            closure.add(node_idx)
+            closure.update(rx.ancestors(self.graph, node_idx))
+        return closure
 
     def __contains__(self, name: str) -> bool:
         """Check if a named node exists."""

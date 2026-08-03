@@ -531,15 +531,18 @@ class Workspace(BaseModel):
         - :class:`~pyhs3.analyses.Analysis` — all context (domain, parameter
           set, observables) is derived from the analysis; gains access to
           :attr:`~pyhs3.model.Model.log_prob`, :attr:`~pyhs3.model.Model.data`,
-          and :attr:`~pyhs3.model.Model.free_params`.
+          and :attr:`~pyhs3.model.Model.free_params`. Only the likelihood's
+          distributions and their transitive dependencies are built.
         - :class:`~pyhs3.likelihoods.Likelihood` — observable bounds are derived
           from the likelihood's data; ``domain`` falls back to ``default_domain``
           then index 0, and ``parameter_set`` falls back to workspace defaults
-          unless overridden.
+          unless overridden. Only the likelihood's distributions and their
+          transitive dependencies are built.
         - ``str`` — searches analyses then likelihoods by name; delegates to the
           appropriate registered path.  Falls back to legacy domain indexing if
           the name is not found in either.
-        - ``int`` — legacy path: ``target`` indexes into workspace domains.
+        - ``int`` — legacy path: ``target`` indexes into workspace domains and
+          the complete workspace graph is built.
 
         Args:
             target: Dispatch key.  Pass an

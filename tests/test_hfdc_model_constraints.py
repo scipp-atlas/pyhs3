@@ -369,6 +369,29 @@ class TestTryBakeHFDCObserved:
         assert result is not None
         np.testing.assert_array_equal(result.data, [10.0, 20.0])
 
+    def test_nonmatching_binned_distribution_returns_none(self):
+        """Binned data from another distribution is not baked into the parameter."""
+        ws = _simple_workspace(
+            channels=[_make_channel("SR", [10.0, 20.0], [])],
+            params=[],
+        )
+        model = ws.model(next(iter(ws.likelihoods)), progress=False)
+
+        sr_channel = next(iter(ws.distributions))
+        binned = BinnedData(
+            name="SR_data",
+            axes=[{"name": "x_SR", "min": 0.0, "max": 10.0, "nbins": 2}],
+            contents=[10.0, 20.0],
+        )
+        model._likelihood = types.SimpleNamespace(
+            distributions=[sr_channel],
+            data=[binned],
+        )
+
+        result = model._try_bake_hfdc_observed("other_observed")
+
+        assert result is None
+
 
 # ---------------------------------------------------------------------------
 # Integration tests: log_prob includes HFDC Poisson term

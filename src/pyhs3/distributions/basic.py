@@ -16,7 +16,7 @@ import pytensor.tensor as pt
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
 from pyhs3.typing.aliases import TensorVar
-import pytensor_distributions.poisson import Poisson
+import pytensor_distributions.poisson as Poisson
 
 class GaussianDist(Distribution):
     r"""

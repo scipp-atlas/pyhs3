@@ -11,6 +11,7 @@ from pytensor.compile.maker import function
 from pytensor.graph.traversal import explicit_graph_inputs
 
 from pyhs3 import Model, Workspace
+from pyhs3.context import Context
 from pyhs3.data import BinnedData, Data
 from pyhs3.distributions import Distributions
 from pyhs3.distributions.basic import GaussianDist
@@ -390,37 +391,30 @@ class TestNormalizationRegression:
     """Regression tests ensuring normalization correctness."""
 
     def test_normalization_substitutes_integration_variable(self):
-        """The integration variable (leaf) must not leak into the normalized expression.
+        """The integration variable (leaf) must not leak into the normalization integral.
 
-        After normalization, the denominator subgraph must be fully substituted
-        to a constant — the observable leaf should not appear as a free input
-        to the denominator.
+        ``_normalization_integral_for()`` substitutes the observable leaf with
+        the upper/lower bounds via ``graph_replace``; the resulting integral
+        subgraph must not retain the leaf as a free input.  Tested directly
+        against the ``Distribution`` normalization hook rather than through
+        ``Model.distributions[name]``, since that expression is now
+        ``pt.exp(log_expression)`` and no longer exposes the raw/integral
+        division as its top-level Apply node.
         """
         generic_dist = GenericDist(name="test_dist", expression="exp(c*x)")
 
-        parameterset = ParameterSet(
-            name="default",
-            parameters=[ParameterPoint(name="c", value=-0.5)],
+        context = Context(
+            parameters={"c": pt.constant(-0.5, name="c"), "x": pt.vector("x")},
+            observables={"x": (pt.constant(0.0), pt.constant(10.0))},
         )
-        model = Model(
-            parameterset=parameterset,
-            distributions=Distributions([generic_dist]),
-            domain=ProductDomain(name="default"),
-            functions=Functions([]),
-            progress=False,
-            observables={"x": (0.0, 10.0)},
-        )
+        raw = generic_dist.likelihood(context)
+        matching = generic_dist._matching_observables(context)
+        integral = generic_dist._normalization_integral_for(raw, context, matching)
 
-        dist_expr = model.distributions["test_dist"]
-
-        # dist_expr is raw / integral (a True_div Apply node)
-        assert dist_expr.owner is not None
-        denominator = dist_expr.owner.inputs[1]
-
-        # The integration variable must be fully substituted out of the denominator.
+        # The integration variable must be fully substituted out of the integral.
         # Only non-observable parameters (like "c") may remain as free inputs.
-        denom_input_names = {
-            v.name for v in explicit_graph_inputs([denominator]) if v.name
+        integral_input_names = {
+            v.name for v in explicit_graph_inputs([integral]) if v.name
         }
-        assert "x" not in denom_input_names
-        assert denom_input_names <= {"c"}
+        assert "x" not in integral_input_names
+        assert integral_input_names <= {"c"}

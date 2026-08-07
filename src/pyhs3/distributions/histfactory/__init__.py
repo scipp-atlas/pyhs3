@@ -312,13 +312,17 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
                     return modifier
         return None
 
-    def _build_barlow_beeston_lite_dists(
+    def _build_barlow_beeston_lite_dist(
         self, context: Context
-    ) -> list[tuple[GaussianDist | PoissonDist, Context]] | None:
-        """Construct the per-bin BB-lite Gauss/Poisson constraint distributions.
+    ) -> tuple[GaussianDist | PoissonDist, Context] | None:
+        """Construct a single vectorized BB-lite Gauss/Poisson constraint distribution.
 
         BB-lite uses shared gamma parameters across samples with a channel-level
-        constraint built from combined MC statistical uncertainties.
+        constraint built from combined MC statistical uncertainties. Stacks
+        the per-bin gamma parameters into one length-B tensor and builds ONE
+        GaussianDist/PoissonDist over vector-valued inputs, instead of one
+        scalar distribution per bin (mirroring
+        :meth:`~pyhs3.distributions.histfactory.modifiers.ShapeSysModifier._build_bin_constraint`).
 
         The constraint can be either Poisson or Gaussian:
         - Poisson: Poisson(tau | gamma * tau) where tau = (nu/sigma)^2
@@ -328,11 +332,20 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         - total_nominal = sum(sample.data.contents)
         - total_sigma = sqrt(sum(sample.data.errors^2))
 
-        Returns ``None`` when this channel has no staterror modifier (nothing
-        to constrain). Shared by :meth:`_make_barlow_beeston_lite_constraint`
-        (product of per-bin probabilities) and
-        :meth:`_make_barlow_beeston_lite_log_constraint` (sum of per-bin
-        log-probabilities) so the parametrization is defined exactly once.
+        Bins with zero (or negative) combined nominal yield are excluded
+        from the vector entirely -- for BOTH Poisson and Gauss, unlike
+        :meth:`~pyhs3.distributions.histfactory.modifiers.StatErrorModifier._build_bin_constraint`
+        (BB-full), which only skips Poisson bins and falls back to
+        ``sigma_value = 1.0`` for Gauss. This is a genuine semantic
+        difference between the two code paths, not an oversight -- preserved
+        exactly from the pre-vectorization implementation.
+
+        Returns ``None`` when this channel has no staterror modifier, or
+        when every bin was excluded. Shared by
+        :meth:`_make_barlow_beeston_lite_constraint` (product of per-bin
+        probabilities) and :meth:`_make_barlow_beeston_lite_log_constraint`
+        (sum of per-bin log-probabilities) so the parametrization is defined
+        exactly once.
         """
         total_bins = self._get_total_bins()
 
@@ -359,48 +372,39 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
 
         total_sigma = np.sqrt(total_variance)
 
-        augmented_context = dict(context)
-        dists: list[GaussianDist | PoissonDist] = []
-
-        for i, param_name in enumerate(gamma_params):
-            nu, sigma = total_nominal[i], total_sigma[i]
-
-            # Skip bins with zero nominal yield; sigma=0 is caught by the parsing layer
-            if nu <= 0:
-                continue
-
-            if constraint_type == "Poisson":
-                # Poisson: Poisson(tau | gamma * tau) where tau = (nu/sigma)^2
-                tau = (nu / sigma) ** 2
-                scaled_name = f"{param_name}_scaled"
-                augmented_context[scaled_name] = context[param_name] * tau
-                dists.append(
-                    PoissonDist(
-                        name=f"constraint_bblite_{self.name}_{i}",
-                        x=float(tau),
-                        mean=scaled_name,
-                    )
-                )
-            else:  # "Gauss"
-                # Gaussian: N(1.0 | gamma, relerr) where relerr = sigma / nu
-                relerr = sigma / nu
-                sigma_name = f"{param_name}_sigma"
-                augmented_context[sigma_name] = pt.constant(relerr)
-                dists.append(
-                    GaussianDist(
-                        name=f"constraint_bblite_{self.name}_{i}",
-                        x=1.0,
-                        mean=param_name,
-                        sigma=sigma_name,
-                    )
-                )
-
-        if not dists:
+        # Skip bins with zero nominal yield; sigma=0 is caught by the parsing layer.
+        keep = total_nominal > 0
+        params = [p for p, k in zip(gamma_params, keep, strict=True) if k]
+        if not params:
             return None
 
-        return [
-            (dist, Context({**augmented_context, **dist.constants})) for dist in dists
-        ]
+        # (B',) concrete combined yields/sigmas for the surviving bins.
+        nu = total_nominal[keep]
+        sigma = total_sigma[keep]
+        gamma = pt.stack([context[param_name] for param_name in params])
+
+        name = f"constraint_bblite_{self.name}"
+        augmented_context = dict(context)
+
+        dist: GaussianDist | PoissonDist
+        if constraint_type == "Poisson":
+            # Poisson: Poisson(tau | gamma * tau) where tau = (nu/sigma)^2
+            tau = (nu / sigma) ** 2
+            scaled_name = f"{name}_scaled"
+            x_name = f"{name}_x"
+            augmented_context[x_name] = pt.constant(tau)
+            augmented_context[scaled_name] = gamma * pt.constant(tau)
+            dist = PoissonDist(name=name, x=x_name, mean=scaled_name)
+        else:  # "Gauss"
+            # Gaussian: N(1.0 | gamma, relerr) where relerr = sigma / nu
+            relerr = sigma / nu
+            mean_name = f"{name}_mean"
+            sigma_name = f"{name}_sigma"
+            augmented_context[mean_name] = gamma
+            augmented_context[sigma_name] = pt.constant(relerr)
+            dist = GaussianDist(name=name, x=1.0, mean=mean_name, sigma=sigma_name)
+
+        return dist, Context({**augmented_context, **dist.constants})
 
     def _make_barlow_beeston_lite_constraint(
         self, context: Context
@@ -408,12 +412,12 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         """Build BB-lite constraint (product of per-bin probabilities) from
         combined sample uncertainties, or ``None`` if this channel has no
         staterror modifier."""
-        pairs = self._build_barlow_beeston_lite_dists(context)
-        if pairs is None:
+        pair = self._build_barlow_beeston_lite_dist(context)
+        if pair is None:
             return None
 
-        factors = [dist.expression(ctx) for dist, ctx in pairs]
-        return cast(TensorVar, pt.prod(pt.stack(factors), axis=0))  # type: ignore[no-untyped-call]
+        dist, augmented_context = pair
+        return cast(TensorVar, pt.prod(dist.expression(augmented_context)))  # type: ignore[no-untyped-call]
 
     def _make_barlow_beeston_lite_log_constraint(
         self, context: Context
@@ -424,12 +428,12 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         product, so the constraint stays finite where the probability-space
         product would underflow to 0.0.
         """
-        pairs = self._build_barlow_beeston_lite_dists(context)
-        if pairs is None:
+        pair = self._build_barlow_beeston_lite_dist(context)
+        if pair is None:
             return None
 
-        log_terms = [dist.log_expression(ctx) for dist, ctx in pairs]
-        return cast(TensorVar, pt.sum(pt.stack(log_terms), axis=0))  # type: ignore[no-untyped-call]
+        dist, augmented_context = pair
+        return cast(TensorVar, pt.sum(dist.log_expression(augmented_context)))  # type: ignore[no-untyped-call]
 
     def _compute_expected_rates(self, context: Context, total_bins: int) -> TensorVar:
         """

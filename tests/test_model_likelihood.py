@@ -7,6 +7,7 @@ from __future__ import annotations
 import numpy as np
 import pytensor
 import pytest
+from scipy.special import logsumexp
 from scipy.stats import norm, truncnorm
 
 try:
@@ -1107,3 +1108,113 @@ def test_log_prob_product_extended_mixture_with_constraint():
         [1.0, 2.0, 3.0, 4.0, 5.0], mean=2.0, c_sig=30.0, c_bkg=20.0
     ) + float(norm.logpdf(0.5, loc=0.0, scale=1.0))
     assert val == pytest.approx(expected, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Extended MixtureDist: log-sum-exp stability when every component
+# underflows to 0.0 in probability space (far into both tails).
+# ---------------------------------------------------------------------------
+
+_WS_EXTENDED_MIXTURE_FAR_TAILS: dict = {
+    "metadata": {"hs3_version": "0.2"},
+    "distributions": [
+        {
+            "name": "sig",
+            "type": "gaussian_dist",
+            "x": "x_obs",
+            "mean": -40.0,
+            "sigma": 1.0,
+        },
+        {
+            "name": "bkg",
+            "type": "gaussian_dist",
+            "x": "x_obs",
+            "mean": 40.0,
+            "sigma": 1.0,
+        },
+        {
+            "name": "mix",
+            "type": "mixture_dist",
+            "summands": ["sig", "bkg"],
+            "coefficients": ["c_sig", "c_bkg"],
+            "extended": True,
+        },
+    ],
+    "domains": [
+        {
+            "name": "main",
+            "type": "product_domain",
+            "axes": [
+                {"name": "c_sig", "min": 0.0, "max": 100.0},
+                {"name": "c_bkg", "min": 0.0, "max": 100.0},
+            ],
+        }
+    ],
+    "data": [
+        {
+            "name": "data1",
+            "type": "unbinned",
+            # A single event at x=0: exactly 40 sigma from both means (each
+            # sigma=1), so exp(-0.5*40**2) = exp(-800) underflows to exactly
+            # 0.0 in float64 for both components.
+            "axes": [{"name": "x_obs", "min": -100.0, "max": 100.0}],
+            "entries": [[0.0]],
+        },
+    ],
+    "likelihoods": [{"name": "L", "distributions": ["mix"], "data": ["data1"]}],
+    "analyses": [
+        {"name": "A", "likelihood": "L", "domains": ["main"], "init": "params"}
+    ],
+    "parameter_points": [
+        {
+            "name": "params",
+            "parameters": [
+                {"name": "c_sig", "value": 30.0},
+                {"name": "c_bkg", "value": 20.0},
+            ],
+        }
+    ],
+}
+
+
+def test_log_prob_extended_mixture_far_tails_stays_finite():
+    """model.log_prob stays finite when both mixture components underflow.
+
+    At x=0, both 'sig' (mean=-40) and 'bkg' (mean=40) are 40 sigma away, so
+    their probability-space densities underflow to exactly 0.0 in float64:
+    the old pt.log(Σc_i f_i) path would see log(0.0) = -inf here even though
+    each component's analytic log-density is finite.  log_prob_terms instead
+    builds the per-event term as logsumexp(log c_i + log f_i) directly from
+    each summand's log-space expression, which stays finite.
+
+    The reference combines each summand's own (independently compiled)
+    logpdf via scipy.special.logsumexp in plain Python -- an evaluation path
+    entirely independent of the PyTensor-graph-level logsumexp built inside
+    log_prob_terms, so agreement is a genuine cross-check rather than a
+    tautology.
+    """
+    ws = Workspace(**_WS_EXTENDED_MIXTURE_FAR_TAILS)
+    model = ws.model(ws.analyses["A"], progress=False)
+
+    # Each component's raw probability-space density underflows to exactly
+    # 0.0 -- the condition that made the old pt.log(...) path return -inf.
+    x_obs = np.array([0.0])
+    assert model.pdf("sig", x_obs=x_obs) == 0.0
+    assert model.pdf("bkg", x_obs=x_obs) == 0.0
+
+    lp_expr = model.log_prob
+    inputs_map = {
+        v.name: v for v in explicit_graph_inputs([lp_expr]) if v.name is not None
+    }
+    fn = pytensor.function(list(inputs_map.values()), lp_expr)
+    val = float(fn(**model.data, **model.nominal_params).item())
+    assert np.isfinite(val)
+
+    log_sig = float(model.logpdf("sig", x_obs=x_obs).item())
+    log_bkg = float(model.logpdf("bkg", x_obs=x_obs).item())
+    assert np.isfinite(log_sig)
+    assert np.isfinite(log_bkg)
+
+    nu = 30.0 + 20.0
+    expected = logsumexp([np.log(30.0) + log_sig, np.log(20.0) + log_bkg]) - nu
+    assert val == pytest.approx(expected, rel=1e-9)

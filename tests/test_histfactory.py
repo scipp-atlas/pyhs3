@@ -29,6 +29,7 @@ import pyhs3
 from pyhs3.axes import BinnedAxes
 from pyhs3.context import Context
 from pyhs3.distributions import HistFactoryDistChannel
+from pyhs3.distributions.basic import GaussianDist, PoissonDist
 from pyhs3.distributions.histfactory.modifiers import (
     HistoSysModifier,
     NormFactorModifier,
@@ -2751,3 +2752,59 @@ class TestBarlowBeestonLite:
             for mod in sample.modifiers:
                 if isinstance(mod, StatErrorModifier):
                     assert mod.parameters == expected
+
+
+class TestBarlowBeestonLiteVectorizedConstraint:
+    """The channel-level BB-lite constraint builds ONE constraint distribution
+    per channel call (vectorized over bins), not one scalar distribution per
+    bin.  Structural regression test for the #230 review perf item."""
+
+    N_BINS = 8
+
+    @pytest.mark.parametrize("constraint_type", ["Gauss", "Poisson"])
+    def test_builds_one_dist_per_call(self, monkeypatch, constraint_type):
+        dist_cls = GaussianDist if constraint_type == "Gauss" else PoissonDist
+        calls = {"count": 0}
+        original_init = dist_cls.__init__
+
+        def wrapped(self, *args, **kwargs):
+            calls["count"] += 1
+            original_init(self, *args, **kwargs)
+
+        monkeypatch.setattr(dist_cls, "__init__", wrapped)
+
+        params = [f"gamma_bin{i}" for i in range(self.N_BINS)]
+        axes = [
+            {"name": "x", "min": 0.0, "max": float(self.N_BINS), "nbins": self.N_BINS}
+        ]
+        samples = [
+            {
+                "name": "signal",
+                "data": {
+                    "contents": [10.0 + i for i in range(self.N_BINS)],
+                    "errors": [1.0 + 0.1 * i for i in range(self.N_BINS)],
+                },
+                "modifiers": [
+                    {
+                        "name": "stat_error",
+                        "type": "staterror",
+                        "parameters": params,
+                        "constraint": constraint_type,
+                    }
+                ],
+            }
+        ]
+        channel = HistFactoryDistChannel(
+            name="test_channel",
+            axes=axes,
+            samples=samples,
+            barlow_beeston_method="lite",
+        )
+        context = Context({p: pt.constant(1.0, dtype="float64") for p in params})
+
+        channel._make_barlow_beeston_lite_constraint(context)
+        assert calls["count"] == 1
+
+        calls["count"] = 0
+        channel._make_barlow_beeston_lite_log_constraint(context)
+        assert calls["count"] == 1

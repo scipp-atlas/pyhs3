@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 from __future__ import annotations
 
 import logging
@@ -10,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import numpy as np
 import numpy.typing as npt
 import pytensor.tensor as pt
+from pytensor.compile.maker import function
 from pytensor.graph.traversal import applys_between, explicit_graph_inputs
 from rich.progress import (
     BarColumn,
@@ -21,7 +23,6 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from pyhs3.compile import function
 from pyhs3.context import Context
 from pyhs3.data import BinnedData
 from pyhs3.distributions import Distributions, HistFactoryDistChannel
@@ -51,19 +52,30 @@ class Model:
     and distributions, ensuring proper evaluation order through topological
     sorting of the computation graph.
 
+    **Single log-space pipeline.** Every distribution node is built exactly
+    once, in log space, as ``self.log_distributions[name]``; the
+    probability-space counterpart ``self.distributions[name]`` is always
+    derived as ``pt.exp(self.log_distributions[name])`` rather than built
+    independently, so the two can never disagree on normalization or on their
+    free inputs -- :meth:`pars` is therefore valid for both :meth:`pdf` and
+    :meth:`logpdf` by construction.
+
     **HFDC constraint storage.** For ``HistFactoryDistChannel`` distributions,
-    ``self.distributions[name]`` stores the full per-channel expression
-    (main Poisson x constraint product) so that ``logpdf(name, **params)``
-    matches pyhf/cabinetry semantics for callers asking about a single
-    channel's probability.  ``self._hfdc_poisson[name]`` stores only the
-    main Poisson term; ``log_prob`` uses it to assemble the joint NLL without
-    double-counting constraint factors when multiple channels share a nuisance
-    parameter.  Constraint expressions are appended to
-    ``self._hfdc_constraints`` exactly once per unique dedup key across all
-    channels: single-parameter modifiers (``normsys``, ``histosys``) are
+    ``self.log_distributions[name]`` stores the full per-channel log
+    expression (summed Poisson log-pmf plus summed log-constraints) so that
+    ``logpdf(name, **params)`` matches pyhf/cabinetry semantics for callers
+    asking about a single channel's probability; ``self.distributions[name]``
+    is ``pt.exp`` of that.  ``self._hfdc_log_poisson[name]`` stores only the
+    log-space Poisson term; ``log_prob`` uses it to assemble the joint NLL
+    without double-counting constraint factors when multiple channels share a
+    nuisance parameter.  Log-space constraint expressions are appended to
+    ``self._hfdc_log_constraints`` exactly once per unique dedup key across
+    all channels: single-parameter modifiers (``normsys``, ``histosys``) are
     deduped by parameter name using ``self._hfdc_constraint_params_seen``;
     multi-parameter modifiers (``shapesys``, ``staterror``) are channel-local
-    by workspace validation and always emitted as-is.
+    by workspace validation and always emitted as-is.  ``log_prob`` sums
+    ``self._hfdc_log_constraints`` directly, so it stays finite where a
+    probability-space constraint would underflow to 0.0.
 
     HS3 Reference:
         Models are computational representations of :hs3:label:`HS3 workspaces <hs3.file-format>`.
@@ -122,26 +134,46 @@ class Model:
         self.distributions: dict[str, TensorVar] = {}
         self.modifiers: dict[str, TensorVar] = {}
         self.mode = mode
+        # Compiled-function caches: one per output (probability-space vs
+        # log-space), since each compiles a different expression down to its
+        # own Callable.  But the two expressions differ only by the trailing
+        # pt.exp() wrapper (self.distributions[name] is always
+        # pt.exp(self.log_distributions[name])), so their free inputs are
+        # identical by construction -- _compiled_inputs/_compiled_input_names
+        # are therefore a single cache shared by both compile paths (see
+        # _compile_expression), populated by whichever of pdf()/logpdf()/
+        # pars() compiles first.
         self._compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]] = {}
+        self._compiled_log_functions: dict[
+            str, Callable[..., npt.NDArray[np.float64]]
+        ] = {}
         self._compiled_inputs: dict[str, list[TensorVar]] = {}
         # Ordered input names cached alongside _compiled_inputs so that pars()
         # and _reorder_params() avoid rebuilding the list on every pdf/logpdf call.
         self._compiled_input_names: dict[str, list[str]] = {}
+        # Log-space distribution expressions (dist.log_expression(context)), the
+        # only expression built per distribution node.  self.distributions is
+        # always pt.exp() of the corresponding entry here (see
+        # _build_distribution_node).  logpdf and log_prob use these to
+        # evaluate in log space so that log(prod(exp(...))) stays collapsed
+        # and does not underflow to -inf.
+        self.log_distributions: dict[str, TensorVar] = {}
         self._likelihood = likelihood
         # Views used internally for broadcasting: leaf[:, None] for observables,
         # leaf[None, :] for non-observable vector overrides.  Distributions see
         # these via Context; model.parameters[name] always holds the leaf.
         self._views: dict[str, TensorVar] = {}
-        # Pre-built HFDC constraint expressions, collected during graph construction.
-        # ParameterModifier constraints are deduped by parameter name across channels;
-        # ParametersModifier constraints (shapesys/staterror) are emitted per-channel.
-        self._hfdc_constraints: list[TensorVar] = []
+        # Pre-built HFDC log-space constraint expressions, collected during
+        # graph construction. ParameterModifier constraints are deduped by
+        # parameter name across channels; ParametersModifier constraints
+        # (shapesys/staterror) are emitted per-channel.
+        self._hfdc_log_constraints: list[TensorVar] = []
         self._hfdc_constraint_params_seen: set[str] = set()
-        # Poisson-only (no constraint product) expressions for HFDC channels.
-        # self.distributions[name] stores the full expression (Poisson x constraints)
-        # so that logpdf() continues to work; log_prob uses this dict to avoid
-        # double-counting constraint terms when multiple channels share a parameter.
-        self._hfdc_poisson: dict[str, TensorVar] = {}
+        # Log-space Poisson-only (no constraint sum) expression for each HFDC
+        # channel: the summed per-bin Poisson log-pmf. log_prob uses this
+        # instead of log(exp(...)) so the joint NLL stays finite where the
+        # probability-space product would underflow.
+        self._hfdc_log_poisson: dict[str, TensorVar] = {}
         # Build dependency graph with proper entity identification
         self._build_dependency_graph(functions, distributions, progress)
 
@@ -267,8 +299,10 @@ class Model:
                 # tracked in https://github.com/scipp-atlas/pyhs3/issues/242
                 # (spec: hep-statistics-serialization-standard issue #93,
                 # export: root-project/root issue #22598).
-                if dist_name in self._hfdc_poisson:
-                    terms.append(pt.log(self._hfdc_poisson[dist_name]))
+                if dist_name in self._hfdc_log_poisson:
+                    # Log-space Poisson term: sum of per-bin log-pmfs, finite even
+                    # where the probability-space product underflows to 0.0.
+                    terms.append(self._hfdc_log_poisson[dist_name])
                 continue
 
             # Resolve weight tensor once for this datum.
@@ -298,7 +332,9 @@ class Model:
             # the channel-dataset pairing and applies event weights, sums
             # over events, and deduplicates constraints globally.
             contrib = self._distribution_objects[dist_name].log_prob_terms(
-                self.distributions, self._distribution_objects
+                self.distributions,
+                self.log_distributions,
+                self._distribution_objects,
             )
 
             # Sum the per-event log-density over events.  Weighted:
@@ -333,19 +369,18 @@ class Model:
         # onto the parameter-scan axis when non-scalar params are present.
         if self._likelihood.aux_distributions:
             terms.extend(
-                pt.log(
-                    self.distributions[
-                        aux_name if isinstance(aux_name, str) else aux_name.name
-                    ]
-                )
+                self.log_distributions[
+                    aux_name if isinstance(aux_name, str) else aux_name.name
+                ]
                 for aux_name in self._likelihood.aux_distributions
             )
 
         # HFDC constraint terms: collected once per unique nuisance parameter
-        # across all channels during graph construction.
-        terms.extend(
-            pt.log(constraint_expr) for constraint_expr in self._hfdc_constraints
-        )
+        # across all channels during graph construction. These are log-space
+        # terms built directly (not pt.log() of a probability-space product),
+        # so this stays finite where a probability-space constraint would
+        # underflow to 0.0.
+        terms.extend(self._hfdc_log_constraints)
 
         if not terms:
             return pt.constant(np.float64(0.0))
@@ -458,28 +493,42 @@ class Model:
     def _build_distribution_node(
         self, node_name: str, distributions: Distributions, context: Context
     ) -> TensorVar:
-        """Build a distribution node by evaluating its symbolic expression.
+        """Build a distribution node from its log-space expression.
 
-        For HistFactoryDistChannel the full expression (Poisson x constraints)
-        is returned and stored in ``self.distributions`` so that :meth:`logpdf`
-        continues to work as before.  In addition, the Poisson-only term is
-        stored in ``self._hfdc_poisson`` and the deduplicated constraint terms
-        are appended to ``self._hfdc_constraints`` so that :attr:`log_prob` can
-        combine them without double-counting when multiple channels share a
-        nuisance parameter.
+        Only the log-space expression is built per node; the probability-
+        space counterpart stored in ``self.distributions`` is always
+        ``pt.exp()`` of it, so the two agree by construction (no separate
+        probability-space graph to keep in sync, and identical free inputs
+        for :meth:`pars`).
+
+        For HistFactoryDistChannel, the full expression is assembled directly
+        in log space and stored in ``self.log_distributions`` so that
+        :meth:`logpdf` continues to work as before.  In addition, the
+        Poisson-only log term is stored in ``self._hfdc_log_poisson`` and the
+        deduplicated log-constraint terms are appended to
+        ``self._hfdc_log_constraints`` so that :attr:`log_prob` can combine
+        them without double-counting when multiple channels share a nuisance
+        parameter.
         """
         dist = distributions[node_name]
         if not isinstance(dist, HistFactoryDistChannel):
-            return dist.expression(context)
+            log_expr = dist.log_expression(context)
+            self.log_distributions[node_name] = log_expr
+            full = cast(TensorVar, pt.exp(log_expr))
+            full.name = dist.name  # Evaluable.expression sets the name
+            return full
 
-        # Build the Poisson term and each constraint factor exactly once, then
-        # assemble both the model-level deduped constraint list and the full
-        # per-channel expression from those shared pieces.  This mirrors
-        # Distribution._expression (likelihood -> normalization -> x constraints)
-        # and HistFactoryDistChannel.extended_likelihood without rebuilding the
-        # Poisson subgraph or re-running make_constraint a second time.
-        poisson = dist.likelihood(context)
-        self._hfdc_poisson[node_name] = poisson
+        # Build the log-space Poisson term and each log-space constraint
+        # factor exactly once, then assemble the model-level deduped
+        # constraint list and the full per-channel log expression from those
+        # shared pieces.  This mirrors HistFactoryDistChannel.log_expression/
+        # log_extended_likelihood without rebuilding the Poisson subgraph or
+        # re-running log_constraint a second time.  The probability-space
+        # Poisson term and per-modifier make_constraint() are never called
+        # here: the probability-space channel expression is derived below as
+        # pt.exp() of the log expression instead.
+        log_poisson = dist.log_likelihood(context)
+        self._hfdc_log_poisson[node_name] = log_poisson
 
         # Whether this channel participates in the active likelihood; only then
         # do its constraints feed the joint log_prob.  All channels still build
@@ -489,40 +538,61 @@ class Model:
             for d in self._likelihood.distributions
         )
 
-        # Single pass over constraint specs builds each constraint factor once.
-        # - channel_seen dedups by parameter for the per-channel product
-        #   (matches extended_likelihood's local dedup),
+        # Single pass over constraint specs builds each log-constraint factor
+        # exactly once.
+        # - channel_seen dedups by parameter for the per-channel sum (matches
+        #   log_extended_likelihood's local dedup),
         # - self._hfdc_constraint_params_seen dedups across channels for log_prob.
         channel_seen: set[str] = set()
-        channel_constraints: list[TensorVar] = []
+        channel_log_constraints: list[TensorVar] = []
         for dedup_key, modifier, sample_data in dist.constraint_specs():
-            constraint = modifier.make_constraint(context, sample_data)
+            log_constraint = modifier.log_constraint(context, sample_data)
 
             if dedup_key is None or dedup_key not in channel_seen:
                 if dedup_key is not None:
                     channel_seen.add(dedup_key)
-                channel_constraints.append(constraint)
+                channel_log_constraints.append(log_constraint)
 
             if in_likelihood:
                 if dedup_key is not None:
                     if dedup_key in self._hfdc_constraint_params_seen:
                         continue
                     self._hfdc_constraint_params_seen.add(dedup_key)
-                self._hfdc_constraints.append(constraint)
+                self._hfdc_log_constraints.append(log_constraint)
 
-        # Assemble the full per-channel expression: normalized Poisson term times
-        # the constraint product (extended likelihood).  HFDC is not normalizable
-        # (_normalizable defaults False here), so _apply_normalization is a no-op,
-        # but call it to stay faithful to Distribution._expression.
-        raw = dist._apply_normalization(poisson, context)  # pylint: disable=protected-access
-        if not channel_constraints:
-            extended: TensorVar = cast(TensorVar, pt.constant(1.0))
-        else:
-            extended = cast(
-                TensorVar,
-                pt.prod(pt.stack(channel_constraints)),  # type: ignore[no-untyped-call]
+        # BB-lite mode's channel-level constraint (shared gamma parameters
+        # combining all samples' statistical uncertainties) is not a
+        # per-modifier spec, so constraint_specs() cannot yield it -- mirror
+        # log_extended_likelihood's channel-level addition here.  It is
+        # channel-local (like shapesys/staterror dedup_key=None specs above),
+        # so it is always appended, with no cross-channel dedup key.
+        if dist.barlow_beeston_method == "lite":
+            lite_log_constraint = dist._make_barlow_beeston_lite_log_constraint(  # pylint: disable=protected-access
+                context
             )
-        full = cast(TensorVar, raw * extended)
+            if lite_log_constraint is not None:
+                channel_log_constraints.append(lite_log_constraint)
+                if in_likelihood:
+                    self._hfdc_log_constraints.append(lite_log_constraint)
+
+        # Assemble the full per-channel log expression: summed Poisson log-pmf
+        # plus summed log-constraints (mirrors HistFactoryDistChannel.log_expression
+        # and log_extended_likelihood, reusing the pieces built above instead of
+        # calling dist.log_expression(context), which would rebuild log_poisson
+        # and re-run log_constraint for every spec).
+        if not channel_log_constraints:
+            log_extended: TensorVar = cast(TensorVar, pt.constant(0.0))
+        else:
+            log_extended = cast(
+                TensorVar,
+                pt.sum(pt.stack(channel_log_constraints)),  # type: ignore[no-untyped-call]
+            )
+        log_full = cast(TensorVar, log_poisson + log_extended)
+        self.log_distributions[node_name] = log_full
+
+        # Probability-space per-channel expression, derived rather than
+        # rebuilt from the (unused) probability-space Poisson/constraint terms.
+        full = cast(TensorVar, pt.exp(log_full))
         full.name = dist.name  # Evaluable.expression sets the name
         return full
 
@@ -617,6 +687,83 @@ class Model:
 
                 progress_bar.advance(task)
 
+    def _compile_expression(
+        self,
+        name: str,
+        expression: TensorVar,
+        compiled_functions: dict[str, Callable[..., npt.NDArray[np.float64]]],
+        fn_name: str,
+    ) -> Callable[..., npt.NDArray[np.float64]]:
+        """
+        Get or create a compiled PyTensor function for a single expression.
+
+        Shared by :meth:`_get_compiled_function` and
+        :meth:`_get_compiled_log_function`, which differ only in which
+        expression (probability-space ``self.distributions[name]`` or
+        log-space ``self.log_distributions[name]``) they compile and which
+        function cache they populate.
+
+        The probability-space expression is always ``pt.exp()`` of the
+        log-space one (see :meth:`_build_distribution_node`), so the two
+        graphs share identical free inputs by construction.
+        ``self._compiled_inputs``/``self._compiled_input_names`` are therefore
+        a single cache shared by both compile paths, populated by whichever
+        one compiles first; the second path validates (rather than
+        recomputes) the ordering against that shared cache.
+
+        Args:
+            name (str): Key into ``compiled_functions`` and the shared input caches.
+            expression: The distribution expression to compile.
+            compiled_functions: Cache of compiled functions to read and populate
+                (``self._compiled_functions`` or ``self._compiled_log_functions``).
+            fn_name (str): Name to give the compiled PyTensor function.
+
+        Returns:
+            Callable: Compiled PyTensor function.
+
+        Raises:
+            RuntimeError: If this expression's free inputs do not match the
+                already-cached ordering from the other compile path -- this
+                would violate the pt.exp()-derivation invariant above.
+        """
+        if name not in compiled_functions:
+            inputs = [
+                var
+                for var in explicit_graph_inputs([expression])
+                if var.name is not None
+            ]
+            input_names = [var.name for var in inputs if var.name is not None]
+
+            if name in self._compiled_input_names:
+                cached_names = self._compiled_input_names[name]
+                if input_names != cached_names:
+                    msg = (
+                        f"pdf/logpdf input mismatch for distribution '{name}': "
+                        f"{input_names} vs already-cached {cached_names}. "
+                        "The probability- and log-space expressions are expected "
+                        "to share identical free inputs by construction."
+                    )
+                    raise RuntimeError(msg)
+            else:
+                # Cache the inputs list (and their names) for consistent ordering
+                # so pars() and _reorder_params() don't rebuild the name list per
+                # evaluation, and so the other compile path can validate against it.
+                self._compiled_inputs[name] = cast(list[TensorVar], inputs)
+                self._compiled_input_names[name] = input_names
+
+            compiled_functions[name] = cast(
+                Callable[..., npt.NDArray[np.float64]],
+                function(
+                    inputs=inputs,
+                    outputs=expression,
+                    mode=self.mode,
+                    on_unused_input="ignore",
+                    name=fn_name,
+                    trust_input=True,
+                ),
+            )
+        return compiled_functions[name]
+
     def _get_compiled_function(
         self, name: str
     ) -> Callable[..., npt.NDArray[np.float64]]:
@@ -632,38 +779,37 @@ class Model:
         Returns:
             Callable: Compiled PyTensor function.
         """
-        if name not in self._compiled_functions:
-            # Get the distribution expression (already includes extended_likelihood)
-            dist_expression = self.distributions[name]
+        return self._compile_expression(
+            name,
+            self.distributions[name],
+            self._compiled_functions,
+            name,
+        )
 
-            inputs = [
-                var
-                for var in explicit_graph_inputs([dist_expression])
-                if var.name is not None
-            ]
+    def _get_compiled_log_function(
+        self, name: str
+    ) -> Callable[..., npt.NDArray[np.float64]]:
+        """
+        Get or create a compiled PyTensor function for a distribution's log-PDF.
 
-            # Cache the inputs list (and their names) for consistent ordering so
-            # pars()/_reorder_params don't rebuild the name list per evaluation.
-            self._compiled_inputs[name] = cast(list[TensorVar], inputs)
-            self._compiled_input_names[name] = [
-                var.name for var in inputs if var.name is not None
-            ]
+        Mirrors :meth:`_get_compiled_function` but compiles the log-space
+        expression (``self.log_distributions[name]``) instead of the
+        probability-space one.  Evaluating in log space keeps
+        ``log(prod(exp(...)))`` collapsed so it does not underflow to ``-inf``
+        for HistFactory channels with many bins or large expected counts.
 
-            # Use the specified PyTensor mode
-            compilation_mode = self.mode
+        Args:
+            name (str): Name of the distribution.
 
-            self._compiled_functions[name] = cast(
-                Callable[..., npt.NDArray[np.float64]],
-                function(
-                    inputs=inputs,
-                    outputs=dist_expression,
-                    mode=compilation_mode,
-                    on_unused_input="ignore",
-                    name=name,
-                    trust_input=True,
-                ),
-            )
-        return self._compiled_functions[name]
+        Returns:
+            Callable: Compiled PyTensor function returning the log-PDF.
+        """
+        return self._compile_expression(
+            name,
+            self.log_distributions[name],
+            self._compiled_log_functions,
+            f"log_{name}",
+        )
 
     def pdf_unsafe(
         self,
@@ -758,7 +904,11 @@ class Model:
         Example:
             >>> model.logpdf_unsafe("gauss", x=1.5, mu=0.0, sigma=1.0)  # floats ok  # doctest: +SKIP
         """
-        return np.log(self.pdf_unsafe(name, **parametervalues))
+        # Convert all parameter values to numpy arrays
+        converted_params = {
+            key: ensure_array(value) for key, value in parametervalues.items()
+        }
+        return self.logpdf(name, **converted_params)
 
     def logpdf(
         self, name: str, **parametervalues: npt.NDArray[np.float64]
@@ -768,6 +918,11 @@ class Model:
 
         This method requires all parameter values to be numpy arrays with dtype float64.
         For automatic type conversion, use :meth:`logpdf_unsafe` instead.
+
+        The logarithm is evaluated in log space via a compiled log-PDF function
+        (``log(prod(exp(...)))`` stays collapsed), so the result remains finite
+        for HistFactory channels where the probability-space ``pdf`` underflows
+        to ``0.0``.
 
         Args:
             name (str): Name of the distribution to evaluate.
@@ -787,28 +942,33 @@ class Model:
             >>> import numpy as np
             >>> model.logpdf("gauss", x=np.array(1.5), mu=np.array(0.0), sigma=np.array(1.0))  # doctest: +SKIP
         """
-        return np.log(self.pdf(name, **parametervalues))
+        func = self._get_compiled_log_function(name)
+        positional_values = self._reorder_params(name, parametervalues)
+        return func(*positional_values)
 
     def pars(self, name: str) -> list[str]:
         """
         Get the ordered list of input parameter names for a distribution.
 
         This method returns the parameter names in the exact order expected
-        by the compiled PDF function. This is useful when you need to know
-        the order of parameters for programmatic access.
+        by the compiled PDF function. Since the probability- and log-space
+        expressions for a distribution share identical free inputs by
+        construction (:meth:`pdf` evaluates ``pt.exp()`` of exactly what
+        :meth:`logpdf` evaluates), this same ordering is valid for both
+        :meth:`pdf` and :meth:`logpdf`.
 
         Args:
             name: Distribution name
 
         Returns:
-            List of parameter names in the order expected by pdf()
+            List of parameter names in the order expected by pdf() and logpdf()
 
         Example:
             >>> model.pars("model_singlechannel") # doctest: +SKIP
             ['uncorr_bkguncrt_1', 'uncorr_bkguncrt_0', 'model_singlechannel_observed', 'mu', 'Lumi']
         """
         if name not in self._compiled_input_names:
-            # Trigger compilation to populate cache
+            # Trigger compilation to populate the shared cache.
             self._get_compiled_function(name)
         return self._compiled_input_names[name]
 
@@ -837,6 +997,9 @@ class Model:
     ) -> list[npt.NDArray[np.float64]]:
         """
         Reorder parameters to match the expected input order for a distribution.
+
+        Used by both :meth:`pdf` and :meth:`logpdf`: :meth:`pars` returns the
+        same ordering for either compiled function.
 
         Args:
             name: Distribution name

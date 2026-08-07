@@ -19,6 +19,22 @@ from pyhs3.context import Context
 from pyhs3.typing.aliases import TensorVar
 
 
+def balanced_sum(terms: list[TensorVar], default: TensorVar) -> TensorVar:
+    """Sum ``terms`` as a single balanced n-ary ``pt.add`` rather than a
+    left-deep chain of binary additions (``((a+b)+c)+d`` vs
+    ``pt.add(a,b,c,d)``), so the pytensor graph exposes all summands as
+    direct siblings instead of nesting them through N-1 intermediate Add
+    nodes. Falls back to ``default`` when ``terms`` is empty, and returns
+    the lone term unwrapped when there is exactly one (avoiding a
+    needless Add node).
+    """
+    if not terms:
+        return default
+    if len(terms) == 1:
+        return terms[0]
+    return cast(TensorVar, pt.add(*terms))
+
+
 def find_field_definition_line(cls: type, field_name: str) -> str | None:
     """Find the source file and line number where a field is defined.
 

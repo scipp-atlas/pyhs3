@@ -35,6 +35,12 @@ class FastVerticalInterpHistPdf2Dist(Distribution):
     Note:
         This is a simplified implementation. The actual CMS implementation uses
         sophisticated interpolation algorithms and caching for performance.
+        Because the morphing here is a placeholder rather than the real
+        interpolation algorithm, there is no analytic log form to derive yet:
+        this class uses the probability-space :meth:`likelihood` as primary
+        and inherits the base class's ``pt.log(likelihood())`` fallback for
+        :meth:`~pyhs3.distributions.core.Distribution.log_likelihood`, pending
+        a real morphing implementation.
     """
 
     type: Literal["CMS::fastverticalinterphistpdf2"] = "CMS::fastverticalinterphistpdf2"
@@ -117,6 +123,36 @@ class GGZZBackgroundDist(Distribution):
 
         return cast(TensorVar, a1 * power_term * exp_term)
 
+    def log_likelihood(self, context: Context) -> TensorVar:
+        r"""
+        Builds a symbolic expression for the ggZZ background log-PDF.
+
+        Analytic log form of :meth:`likelihood`, which is a pure product of a
+        power law and an exponential decay (no summed terms), so the log is a
+        clean sum:
+
+        .. math::
+
+            \log f(m_{4\ell}; a_1, a_2, a_3) = \log a_1 + a_2 \log m_{4\ell} - a_3 m_{4\ell}
+
+        Evaluating this directly (rather than ``pt.log(self.likelihood(...))``)
+        avoids computing :math:`\exp(-a_3 m_{4\ell})` and re-logging it, which
+        underflows to 0.0 (and then to ``-inf``) once :math:`a_3 m_{4\ell}`
+        exceeds roughly 745 in float64.
+
+        Args:
+            context (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of the ggZZ background log-PDF.
+        """
+        m4l = context[self._parameters["m4l"]]
+        a1 = context[self._parameters["a1"]]
+        a2 = context[self._parameters["a2"]]
+        a3 = context[self._parameters["a3"]]
+
+        return cast(TensorVar, pt.log(a1) + a2 * pt.log(m4l) - a3 * m4l)
+
 
 class QQZZBackgroundDist(Distribution):
     r"""
@@ -170,6 +206,38 @@ class QQZZBackgroundDist(Distribution):
 
         return cast(TensorVar, a1 * power_term * exp_term)
 
+    def log_likelihood(self, context: Context) -> TensorVar:
+        r"""
+        Builds a symbolic expression for the qqZZ background log-PDF.
+
+        Analytic log form of :meth:`likelihood`, which is a pure product of a
+        power law and an exponential decay (no summed terms), so the log is a
+        clean sum:
+
+        .. math::
+
+            \log f(m_{4\ell}; a_1, a_2, a_3, a_4) = \log a_1 + a_3 \log(m_{4\ell} + a_2) - a_4 m_{4\ell}
+
+        Evaluating this directly (rather than ``pt.log(self.likelihood(...))``)
+        avoids computing :math:`\exp(-a_4 m_{4\ell})` and re-logging it, which
+        underflows to 0.0 (and then to ``-inf``) once :math:`a_4 m_{4\ell}`
+        exceeds roughly 745 in float64.
+
+        Args:
+            context (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of the qqZZ background log-PDF.
+        """
+        m4l = context[self._parameters["m4l"]]
+        a1 = context[self._parameters["a1"]]
+        a2 = context[self._parameters["a2"]]
+        a3 = context[self._parameters["a3"]]
+        a4 = context[self._parameters["a4"]]
+
+        shifted_mass = m4l + a2
+        return cast(TensorVar, pt.log(a1) + a3 * pt.log(shifted_mass) - a4 * m4l)
+
 
 class FastVerticalInterpHistPdf2D2Dist(Distribution):
     r"""
@@ -186,6 +254,12 @@ class FastVerticalInterpHistPdf2D2Dist(Distribution):
 
     Note:
         This is a simplified implementation for 2D histogram morphing.
+        Because the morphing here is a placeholder rather than the real
+        interpolation algorithm, there is no analytic log form to derive yet:
+        this class uses the probability-space :meth:`likelihood` as primary
+        and inherits the base class's ``pt.log(likelihood())`` fallback for
+        :meth:`~pyhs3.distributions.core.Distribution.log_likelihood`, pending
+        a real morphing implementation.
     """
 
     type: Literal["CMS::FastVerticalInterpHistPdf2D2"] = (

@@ -405,42 +405,44 @@ class Workspace(BaseModel):
 
     def _compute_observables(self) -> dict[str, tuple[float, float]]:
         """
-        Extract observable names and bounds from likelihoods + data + domain.
+        Resolve observables for model paths built without an explicit likelihood.
 
-        Walks likelihoods to find distribution-data pairings. For each dataset axis,
-        gets bounds from the data axis itself (axis.min/max). Propagates observable
-        info through composite distributions (MixtureDist, ProductDist).
+        Observables are a per-likelihood concept: an axis is only an observable
+        of the data actually loaded by a given likelihood, and every analysis
+        references exactly one likelihood, so axes from different likelihoods
+        are never combined in one calculation. The legacy ``model(int)`` and
+        name-fallback ``model(str)`` paths have no likelihood to scope to, so
+        observables are resolved from each likelihood independently (via
+        :meth:`_extract_observables`, the same resolution the per-likelihood
+        ``model(Likelihood)`` / ``model(Analysis)`` paths use) and only used
+        when every likelihood implies the same result.
 
         Returns:
-            Dictionary mapping observable names to (min, max) tuples
+            Dictionary mapping observable names to (min, max) tuples; empty
+            when the workspace has no likelihoods.
+
+        Raises:
+            ValueError: If the workspace's likelihoods imply different
+                observables, since a model built without a likelihood has no
+                principled way to choose between them.
         """
-        observables: dict[str, tuple[float, float]] = {}
+        if not self.likelihoods:
+            return {}
 
-        if not self.likelihoods or not self.data:
-            return observables
-
-        # For each likelihood, extract observable axes from paired data
+        first = self.likelihoods[0]
+        observables = self._extract_observables(first)
         for likelihood in self.likelihoods:
-            for data_item in likelihood.data:
-                # FK resolution guarantees data items are resolved objects
-                datum = (
-                    data_item
-                    if not isinstance(data_item, str)
-                    else self.data[data_item]
+            candidate = self._extract_observables(likelihood)
+            if candidate != observables:
+                msg = (
+                    f"Cannot determine observables for a model built without a "
+                    f"likelihood: likelihood '{first.name}' implies {observables} "
+                    f"but likelihood '{likelihood.name}' implies {candidate}. "
+                    f"Observables are resolved per likelihood; build the model "
+                    f"from a specific likelihood instead, e.g. "
+                    f"workspace.model(workspace.likelihoods[{likelihood.name!r}])."
                 )
-
-                if datum.axes is None:
-                    log.warning(
-                        "The likelihood '%s' references data '%s' without axes. This cannot be used to normalize any distribution.",
-                        likelihood.name,
-                        datum.name,
-                    )
-                    continue
-
-                # For each axis, extract bounds
-                for axis in datum.axes:
-                    observables[axis.name] = (axis.min, axis.max)
-
+                raise ValueError(msg)
         return observables
 
     @staticmethod

@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import json
 import math
+from itertools import pairwise
 
 import numpy as np
+import pytensor
 import pytensor.tensor as pt
 import pytest
 from pydantic import ValidationError
 from pytensor import function
+from scipy.special import logsumexp
 
 from pyhs3 import Workspace
 from pyhs3.context import Context
@@ -41,6 +44,8 @@ from pyhs3.distributions import (
     QQZZBackgroundDist,
     UniformDist,
 )
+from pyhs3.distributions.composite import _stable_logsumexp
+from pyhs3.normalization import gauss_legendre_integral
 from pyhs3.tensorutils import create_bounded_tensor
 
 
@@ -88,7 +93,11 @@ class TestDistribution:
                 return pt.constant(0.5)
 
         dist = TestDist(name="test", type="test")
-        terms = dist.log_prob_terms({"test": pt.constant(0.5)}, Distributions([]))
+        terms = dist.log_prob_terms(
+            {"test": pt.constant(0.5)},
+            {"test": pt.constant(np.log(0.5))},
+            Distributions([]),
+        )
 
         assert len(terms.per_event) == 1
         assert terms.channel == []
@@ -124,6 +133,10 @@ class TestProductDist:
             "shape": pt.exp(-x),
             "constr": pt.exp(-(alpha**2)),
         }
+        log_expressions = {
+            "shape": -x,
+            "constr": -(alpha**2),
+        }
         distributions = Distributions(
             [
                 GaussianDist(name="shape", x="x", mean=0.0, sigma=1.0),
@@ -131,7 +144,7 @@ class TestProductDist:
             ]
         )
 
-        terms = dist.log_prob_terms(expressions, distributions)
+        terms = dist.log_prob_terms(expressions, log_expressions, distributions)
 
         assert len(terms.per_event) == 1
         assert terms.channel == []
@@ -165,11 +178,17 @@ class TestProductDist:
             "mix": mix_expr,
             "constr": pt.exp(-(alpha**2)),
         }
+        log_expressions = {
+            "mix": pt.log(mix_expr),
+            "s1": -x,
+            "s2": -0.5 * x,
+            "constr": -(alpha**2),
+        }
         distributions = Distributions(
             [mix, GaussianDist(name="constr", x="alpha", mean=0.0, sigma=1.0)]
         )
 
-        terms = dist.log_prob_terms(expressions, distributions)
+        terms = dist.log_prob_terms(expressions, log_expressions, distributions)
 
         assert len(terms.per_event) == 1
         assert len(terms.channel) == 1
@@ -430,6 +449,354 @@ class TestAsymmetricCrystalBallDist:
         # Value should be positive and finite
         assert result_val > 0
         assert np.isfinite(result_val)
+
+    @staticmethod
+    def _make_dist_and_context(shape_params, lower, upper, vector_obs=False):
+        """Build an AsymmetricCrystalBallDist with observable m."""
+        dist = AsymmetricCrystalBallDist(
+            name="test_crystal",
+            alpha_L="alpha_L",
+            alpha_R="alpha_R",
+            m="m",
+            m0="m0",
+            n_L="n_L",
+            n_R="n_R",
+            sigma_L="sigma_L",
+            sigma_R="sigma_R",
+        )
+        m_var = (
+            pt.vector("m", dtype="float64")
+            if vector_obs
+            else pt.scalar("m", dtype="float64")
+        )
+        parameters = {"m": m_var}
+        # Force float64: A_L = (n/alpha)^n overflows float32 for large n
+        parameters.update(
+            {
+                name: pt.constant(value, name=name, dtype="float64")
+                for name, value in shape_params.items()
+            }
+        )
+        context = Context(
+            parameters=parameters,
+            observables={
+                "m": (
+                    pt.constant(lower, name="m_lower", dtype="float64"),
+                    pt.constant(upper, name="m_upper", dtype="float64"),
+                )
+            },
+        )
+        return dist, context, m_var
+
+    @pytest.mark.parametrize(
+        "shape_params",
+        [
+            # bbyy-like asymmetric shape with fractional exponents
+            {
+                "alpha_L": 1.2,
+                "alpha_R": 1.7,
+                "m0": 125.0,
+                "n_L": 5.3,
+                "n_R": 9.1,
+                "sigma_L": 1.5,
+                "sigma_R": 2.0,
+            },
+            # logarithmic antiderivative branch on both tails
+            {
+                "alpha_L": 1.0,
+                "alpha_R": 1.5,
+                "m0": 125.0,
+                "n_L": 1.0,
+                "n_R": 1.0,
+                "sigma_L": 1.4,
+                "sigma_R": 1.4,
+            },
+            # heavy tails with small alpha (junctions close to the peak)
+            {
+                "alpha_L": 0.5,
+                "alpha_R": 0.8,
+                "m0": 125.0,
+                "n_L": 30.0,
+                "n_R": 2.5,
+                "sigma_L": 2.5,
+                "sigma_R": 1.1,
+            },
+        ],
+        ids=["asymmetric-fractional-n", "n-equals-one", "small-alpha-heavy-tail"],
+    )
+    def test_asymmetric_crystal_analytic_normalization_matches_quadrature(
+        self, shape_params
+    ):
+        """Analytic antiderivative matches adaptive quadrature of the raw PDF."""
+        scipy_integrate = pytest.importorskip("scipy.integrate")
+
+        lower, upper = 105.0, 160.0
+        dist, context, m_var = self._make_dist_and_context(shape_params, lower, upper)
+
+        raw = dist.likelihood(context)
+        raw_fn = function([m_var], raw)
+
+        antideriv = dist.normalization_expression(context, "m")
+        assert antideriv is not None
+        antideriv_fn = function([m_var], antideriv)
+
+        analytic = antideriv_fn(upper) - antideriv_fn(lower)
+        # Integrate piecewise so quad sees smooth integrands between junctions
+        m0 = shape_params["m0"]
+        junctions = sorted(
+            {
+                lower,
+                m0 - shape_params["alpha_L"] * shape_params["sigma_L"],
+                m0,
+                m0 + shape_params["alpha_R"] * shape_params["sigma_R"],
+                upper,
+            }
+        )
+        numeric = sum(
+            scipy_integrate.quad(raw_fn, a, b, epsabs=1e-13, epsrel=1e-13)[0]
+            for a, b in pairwise(junctions)
+            if lower <= a < b <= upper
+        )
+
+        # The single-interval Gauss-Legendre fallback this replaces was only
+        # accurate to ~1e-4..1e-3 relative; the antiderivative agrees with
+        # adaptive quadrature to quad's own precision.
+        np.testing.assert_allclose(analytic, numeric, rtol=1e-8)
+
+    def test_asymmetric_crystal_analytic_normalization_beats_gauss_legendre_fallback(
+        self,
+    ):
+        """The analytic antiderivative is dramatically more accurate than the
+        single-interval 64-point Gauss-Legendre quadrature it replaces, for a
+        bbyy-like asymmetric shape -- substantiating the PR's motivating claim
+        that the generic fallback carries ~1e-4..1e-3 relative error for the
+        piecewise-smooth DSCB. Also confirms ``_apply_normalization()`` (via
+        ``_normalization_integral_for()``) actually takes the analytic path
+        now that ``normalization_expression()`` is implemented, rather than
+        silently falling back to Gauss-Legendre.
+        """
+        scipy_integrate = pytest.importorskip("scipy.integrate")
+
+        shape_params = {
+            "alpha_L": 1.2,
+            "alpha_R": 1.7,
+            "m0": 125.0,
+            "n_L": 5.3,
+            "n_R": 9.1,
+            "sigma_L": 1.5,
+            "sigma_R": 2.0,
+        }
+        lower, upper = 105.0, 160.0
+
+        # Scalar-m context: raw_fn is called at individual scalar points by
+        # scipy.integrate.quad, giving the truth value.
+        scalar_dist, scalar_context, scalar_m = self._make_dist_and_context(
+            shape_params, lower, upper, vector_obs=False
+        )
+        raw_fn = function([scalar_m], scalar_dist.likelihood(scalar_context))
+
+        m0 = shape_params["m0"]
+        junctions = sorted(
+            {
+                lower,
+                m0 - shape_params["alpha_L"] * shape_params["sigma_L"],
+                m0,
+                m0 + shape_params["alpha_R"] * shape_params["sigma_R"],
+                upper,
+            }
+        )
+        truth = sum(
+            scipy_integrate.quad(raw_fn, a, b, epsabs=1e-13, epsrel=1e-13)[0]
+            for a, b in pairwise(junctions)
+        )
+
+        # Vector-m context: matches how the model builder actually feeds
+        # observables (reshaped to (N, 1)), which _normalization_integral()'s
+        # bounds-substitution and gauss_legendre_integral()'s quadrature-node
+        # substitution both require.
+        dist, context, _vector_m = self._make_dist_and_context(
+            shape_params, lower, upper, vector_obs=True
+        )
+        raw = dist.likelihood(context)
+
+        # Analytic path: what _apply_normalization() now uses. graph_replace
+        # substitutes the m leaf with the integration bounds, so the result
+        # has no remaining dependence on m.
+        matching = dist._matching_observables(context)
+        analytic_integral = dist._normalization_integral_for(raw, context, matching)
+        analytic_val = function([], analytic_integral)()
+
+        # Gauss-Legendre fallback: what _apply_normalization() used before
+        # normalization_expression() existed, and what still runs for any
+        # distribution that doesn't override it. Likewise substitutes m with
+        # quadrature nodes, leaving no free m dependence.
+        gl_integral = gauss_legendre_integral(
+            raw, context.parameters["m"], context.observables["m"][0], upper
+        )
+        gl_val = function([], gl_integral)()
+
+        analytic_rel_err = abs(analytic_val - truth) / truth
+        gl_rel_err = abs(gl_val - truth) / truth
+
+        assert analytic_rel_err < 1e-8
+        assert gl_rel_err > 1e-5
+        assert analytic_rel_err < gl_rel_err
+
+    def test_asymmetric_crystal_normalized_expression_integrates_to_one(self):
+        """Normalized DSCB expression integrates to 1 over the observable domain."""
+        shape_params = {
+            "alpha_L": 1.2,
+            "alpha_R": 1.7,
+            "m0": 125.0,
+            "n_L": 5.3,
+            "n_R": 9.1,
+            "sigma_L": 1.5,
+            "sigma_R": 2.0,
+        }
+        lower, upper = 105.0, 160.0
+        dist, context, m_var = self._make_dist_and_context(
+            shape_params, lower, upper, vector_obs=True
+        )
+
+        normalized = dist.expression(context)
+        fn = function([m_var], normalized)
+
+        xs = np.linspace(lower, upper, 200001)
+        ys = fn(xs)
+        integral = np.trapezoid(ys, xs)
+        # atol limited by trapezoid resolution; still well below the ~1e-4
+        # error of the previous quadrature fallback
+        assert np.isclose(integral, 1.0, atol=1e-6)
+
+    def test_asymmetric_crystal_antiderivative_continuous_at_junctions(self):
+        """Antiderivative is continuous across the core/tail junctions."""
+        shape_params = {
+            "alpha_L": 1.2,
+            "alpha_R": 1.7,
+            "m0": 125.0,
+            "n_L": 5.3,
+            "n_R": 9.1,
+            "sigma_L": 1.5,
+            "sigma_R": 2.0,
+        }
+        dist, context, m_var = self._make_dist_and_context(shape_params, 105.0, 160.0)
+
+        antideriv = dist.normalization_expression(context, "m")
+        antideriv_fn = function([m_var], antideriv)
+
+        m0 = shape_params["m0"]
+        junctions = [
+            m0 - shape_params["alpha_L"] * shape_params["sigma_L"],
+            m0,
+            m0 + shape_params["alpha_R"] * shape_params["sigma_R"],
+        ]
+        # F' = f <= 1, so |F(j+eps) - F(j-eps)| ~ 2*eps from the slope alone;
+        # a jump from a wrong matching constant would be O(1)
+        eps = 1e-9
+        for junction in junctions:
+            below = antideriv_fn(junction - eps)
+            above = antideriv_fn(junction + eps)
+            np.testing.assert_allclose(below, above, rtol=0, atol=1e-8)
+
+    def test_asymmetric_crystal_normalization_expression_wrong_observable_returns_none(
+        self,
+    ):
+        """normalization_expression() only applies to this distribution's own
+        observable (self.m); for any other observable name it must return
+        None so callers fall back to Gauss-Legendre quadrature, matching the
+        base class's documented contract (see
+        test_normalization.TestNormalization.test_normalization_expression_default_returns_none)."""
+        shape_params = {
+            "alpha_L": 1.2,
+            "alpha_R": 1.7,
+            "m0": 125.0,
+            "n_L": 5.3,
+            "n_R": 9.1,
+            "sigma_L": 1.5,
+            "sigma_R": 2.0,
+        }
+        dist, context, _m_var = self._make_dist_and_context(shape_params, 105.0, 160.0)
+
+        assert dist.normalization_expression(context, "not_m") is None
+
+        # _normalization_integral() calls normalization_expression()
+        # internally and only reaches the Gauss-Legendre fallback once it
+        # returns None; confirm it short-circuits to None here rather than
+        # attempting to substitute bounds into a nonexistent antiderivative.
+        integral = dist._normalization_integral(context, "not_m", 105.0, 160.0)
+        assert integral is None
+
+    def test_asymmetric_crystal_antiderivative_gradient_is_not_nan(self):
+        """Gradient of the antiderivative wrt shape params stays finite
+        everywhere, including where a tail's own antiderivative branch is
+        not the one selected by the outer switch.
+
+        ``tail_left(u)`` is evaluated (and differentiated) unconditionally
+        for every ``m``, even deep in the right tail where ``u = B_L - t_L``
+        is negative there and ``pt.log(u)`` / ``u ** (1 - n_L)`` are only
+        finite-valued because the outer switch never selects that branch.
+        PyTensor differentiates every branch of a switch, including the one
+        not selected at runtime (see
+        :func:`test_log_space_likelihood.test_zero_bin_logprob_gradient_is_not_nan`),
+        so the untaken branch's gradient wrt n_L is NaN at this negative-u
+        point and multiplying by the switch's zero mask does not clear it
+        (``0 * NaN = NaN``). Compiling with ``optimizer=None`` disables the
+        graph rewrites that otherwise happen to simplify this away, so the
+        test exposes the NaN structurally rather than relying on optimizer
+        behavior.
+        """
+        shape_params = {
+            "alpha_L": 1.2,
+            "alpha_R": 1.7,
+            "m0": 125.0,
+            "n_L": 5.3,
+            "n_R": 9.1,
+            "sigma_L": 1.5,
+            "sigma_R": 2.0,
+        }
+        dist = AsymmetricCrystalBallDist(
+            name="test_crystal",
+            alpha_L="alpha_L",
+            alpha_R="alpha_R",
+            m="m",
+            m0="m0",
+            n_L="n_L",
+            n_R="n_R",
+            sigma_L="sigma_L",
+            sigma_R="sigma_R",
+        )
+        m_var = pt.scalar("m", dtype="float64")
+        n_L_var = pt.scalar("n_L", dtype="float64")
+        parameters = {"m": m_var, "n_L": n_L_var}
+        parameters.update(
+            {
+                name: pt.constant(value, name=name, dtype="float64")
+                for name, value in shape_params.items()
+                if name != "n_L"
+            }
+        )
+        context = Context(
+            parameters=parameters,
+            observables={
+                "m": (
+                    pt.constant(105.0, name="m_lower", dtype="float64"),
+                    pt.constant(160.0, name="m_upper", dtype="float64"),
+                )
+            },
+        )
+
+        antideriv = dist.normalization_expression(context, "m")
+        assert antideriv is not None
+        grad = pt.grad(antideriv, n_L_var)
+
+        mode = pytensor.compile.mode.Mode(linker="py", optimizer=None)
+        fn = pytensor.function([m_var, n_L_var], grad, mode=mode)
+
+        # m = 160 is deep in the right tail (junction at m0 + alpha_R*sigma_R
+        # = 128.4), where t_L = (m - m0) / sigma_L is large and positive, so
+        # the left tail's own argument u = B_L - t_L is negative there.
+        grad_val = fn(160.0, shape_params["n_L"])
+        assert np.isfinite(grad_val), f"gradient has NaN/Inf: {grad_val}"
 
 
 class TestGenericDist:
@@ -2616,6 +2983,112 @@ class TestCMSDistributions:
         np.testing.assert_allclose(result_val, expected, rtol=1e-6)
 
 
+class TestStableLogSumExp:
+    """Test the ``_stable_logsumexp`` helper used by MixtureDist.log_prob_terms.
+
+    See https://github.com/scipp-atlas/pyhs3/issues/277: pt.logsumexp's
+    stability is a rewrite-dependent property (only applied under FAST_RUN),
+    so MixtureDist builds the max-shifted form explicitly instead. These
+    tests exercise the helper directly at the edge cases the rewrite would
+    otherwise have masked: an all-(-inf) input and the gradient through the
+    switch that guards it.
+    """
+
+    def test_all_neg_inf_gives_neg_inf_not_nan(self):
+        """Every entry -inf (all mixture components underflow) must reduce
+        to -inf, the correct limit, not NaN from -inf - -inf inside the
+        max-shift."""
+        x = pt.dvector("x")
+        result = _stable_logsumexp(x, axis=0)
+        mode = pytensor.compile.mode.Mode(linker="py", optimizer=None)
+        f = pytensor.function([x], result, mode=mode)
+
+        value = f(np.array([-np.inf, -np.inf, -np.inf]))
+        assert value == -np.inf
+        assert not np.isnan(value)
+
+    def test_mixed_finite_and_neg_inf_matches_scipy(self):
+        """A -inf entry alongside finite entries must not perturb the
+        result: it contributes exp(-inf) = 0 to the sum, same as scipy's
+        reference implementation."""
+        x = pt.dvector("x")
+        result = _stable_logsumexp(x, axis=0)
+        f = pytensor.function([x], result)
+
+        inputs = np.array([-np.inf, -5.0, -5.5])
+        value = f(inputs)
+        assert np.isfinite(value)
+        np.testing.assert_allclose(value, logsumexp(inputs), rtol=1e-12)
+
+    def test_switch_guard_gradient_finite_at_all_neg_inf(self):
+        """The pt.isinf/pt.switch guard itself must not introduce NaN into
+        the gradient at the all-(-inf) point, isolated from the outer log's
+        own (expected) singularity there.
+
+        pt.switch differentiates both branches and combines them with the
+        condition mask; if the untaken branch's local gradient were NaN
+        (e.g. from a 0/0-shaped subexpression), the NaN would survive the
+        multiply-by-zero mask and poison the result. Here the switch's two
+        branches are the constant 0.0 (gradient identically 0, no
+        dependence on x) and m = max(x) (a finite indicator-based gradient,
+        even for the tied all-(-inf) case since -inf == -inf is well-defined
+        under IEEE 754) -- neither branch has a division or log that could
+        produce NaN, so the guard is safe. This checks the gradient of
+        exp(x - safe_m) (the term the guard directly protects), not the
+        full log(sum(...)) result: see
+        test_full_gradient_has_expected_singularity_at_all_neg_inf below for
+        why the full result's gradient is *not* expected to be finite there.
+        """
+        x = pt.dvector("x")
+        m = pt.max(x, axis=0, keepdims=True)
+        safe_m = pt.switch(pt.isinf(m), 0.0, m)
+        exp_term = pt.sum(pt.exp(x - safe_m))
+        grad = pt.grad(exp_term, x)
+
+        mode = pytensor.compile.mode.Mode(linker="py", optimizer=None)
+        f = pytensor.function([x], grad, mode=mode)
+
+        grad_val = f(np.array([-np.inf, -np.inf, -np.inf]))
+        assert np.all(np.isfinite(grad_val)), f"gradient has NaN/Inf: {grad_val}"
+
+    def test_full_gradient_has_expected_singularity_at_all_neg_inf(self):
+        """The full _stable_logsumexp gradient at the all-(-inf) point is
+        NaN, and that is expected rather than a regression to fix here.
+
+        d/ds log(s) = 1/s diverges at s = sum(exp(x - safe_m)) = 0, which
+        happens exactly when every entry is -inf; multiplying that infinite
+        derivative by the (correctly finite, per the test above) 0-valued
+        derivative of exp(x - safe_m) gives the indeterminate 0 * inf = NaN.
+        This is a genuine mathematical singularity of log at its domain
+        boundary -- present in any logsumexp implementation, including
+        scipy's -- not an artifact of the switch guard or of this
+        construction, so it is documented here rather than papered over.
+        """
+        x = pt.dvector("x")
+        result = _stable_logsumexp(x, axis=0)
+        grad = pt.grad(pt.sum(result), x)
+
+        mode = pytensor.compile.mode.Mode(linker="py", optimizer=None)
+        f = pytensor.function([x], grad, mode=mode)
+
+        grad_val = f(np.array([-np.inf, -np.inf, -np.inf]))
+        assert np.all(np.isnan(grad_val))
+
+    def test_gradient_finite_at_mixed_finite_and_neg_inf(self):
+        """Gradient stays finite when only some entries underflow to -inf,
+        the more common mixture case (one component in its tail, another
+        not)."""
+        x = pt.dvector("x")
+        result = _stable_logsumexp(x, axis=0)
+        grad = pt.grad(pt.sum(result), x)
+
+        mode = pytensor.compile.mode.Mode(linker="py", optimizer=None)
+        f = pytensor.function([x], grad, mode=mode)
+
+        grad_val = f(np.array([-np.inf, -5.0, -5.5]))
+        assert np.all(np.isfinite(grad_val)), f"gradient has NaN/Inf: {grad_val}"
+
+
 class TestMixtureDist:
     """Test MixtureDist implementation with various coefficient scenarios."""
 
@@ -2956,6 +3429,142 @@ class TestMixtureDist:
         assert np.isclose(unnorm_val, 10.0)
         assert np.isclose(nu_val, 30.0)
 
+    def test_mixture_dist_log_prob_terms_extended_logsumexp_stability(self):
+        """Per-event term stays finite via logsumexp even when every
+        component's probability-space value underflows to 0.0.
+
+        Mirrors evaluating a Gaussian mixture component ~40 sigma into its
+        tail: exp(-800) and exp(-810) both round to exactly 0.0 in float64,
+        so the probability-space sum Σc_i f_i is exactly 0.0 and the old
+        pt.log(_cached_unnorm_expr) path returned -inf.  log_prob_terms must
+        instead build the sum in log space from each summand's own log-space
+        expression, which stays finite.
+
+        The log-value inputs are genuine symbolic pytensor scalars (not
+        pt.constant literals): PyTensor's constant-folding rewrite would
+        otherwise collapse pt.exp(pt.constant(-800.0)) to the Python float
+        0.0 before the log-sum-exp stabilization rewrite can pattern-match
+        log(sum(exp(...))), masking the exact failure mode this test targets
+        (and not representative of real usage, where components always
+        depend on a symbolic observable).
+        """
+        dist = MixtureDist(
+            name="mix",
+            summands=["pdf1", "pdf2"],
+            coefficients=["coeff1", "coeff2"],
+            extended=True,
+        )
+        coeff1 = pt.dscalar("coeff1")
+        coeff2 = pt.dscalar("coeff2")
+        logv1 = pt.dscalar("logv1")
+        logv2 = pt.dscalar("logv2")
+        context = {
+            "coeff1": coeff1,
+            "coeff2": coeff2,
+            "pdf1": pt.exp(logv1),
+            "pdf2": pt.exp(logv2),
+        }
+        dist.likelihood(context)
+
+        log_expressions = {"pdf1": logv1, "pdf2": logv2}
+        terms = dist.log_prob_terms({}, log_expressions, Distributions([]))
+
+        f = function(
+            [coeff1, coeff2, logv1, logv2],
+            [terms.per_event[0], terms.channel[0], dist._cached_unnorm_expr],
+        )
+        per_event_val, channel_val, raw_val = f(10.0, 20.0, -800.0, -810.0)
+
+        # The probability-space sum underflows to exactly 0.0 -- this is the
+        # condition that made the old pt.log(...) path return -inf.
+        assert raw_val == 0.0
+
+        expected_per_event = logsumexp([np.log(10.0) - 800.0, np.log(20.0) - 810.0])
+        assert np.isfinite(per_event_val)
+        np.testing.assert_allclose(per_event_val, expected_per_event, rtol=1e-12)
+        assert np.isclose(channel_val, -30.0)
+
+    def test_mixture_dist_log_prob_terms_extended_logsumexp_stability_fast_compile(
+        self,
+    ):
+        """Per-event term stays finite under mode="FAST_COMPILE", not just the
+        default FAST_RUN mode.
+
+        pt.logsumexp lowers to the naive log(sum(exp(x))) graph; the
+        underflow protection comes entirely from the local_log_sum_exp graph
+        rewrite, which only runs in the stabilize/specialize passes under
+        FAST_RUN. Workspace.model()/Model expose mode= to callers, so
+        FAST_COMPILE (which skips those passes) is a reachable configuration
+        that must not silently lose the protection. See
+        https://github.com/scipp-atlas/pyhs3/issues/277 and the tracked
+        upstream request for a stable-by-construction logsumexp,
+        https://github.com/pymc-devs/pytensor/issues/2288.
+
+        Same construction as the FAST_RUN stability test above: genuine
+        symbolic pytensor scalars (not pt.constant literals) so the
+        underflow isn't masked by constant folding.
+        """
+        dist = MixtureDist(
+            name="mix",
+            summands=["pdf1", "pdf2"],
+            coefficients=["coeff1", "coeff2"],
+            extended=True,
+        )
+        coeff1 = pt.dscalar("coeff1")
+        coeff2 = pt.dscalar("coeff2")
+        logv1 = pt.dscalar("logv1")
+        logv2 = pt.dscalar("logv2")
+        context = {
+            "coeff1": coeff1,
+            "coeff2": coeff2,
+            "pdf1": pt.exp(logv1),
+            "pdf2": pt.exp(logv2),
+        }
+        dist.likelihood(context)
+
+        log_expressions = {"pdf1": logv1, "pdf2": logv2}
+        terms = dist.log_prob_terms({}, log_expressions, Distributions([]))
+
+        f = function(
+            [coeff1, coeff2, logv1, logv2],
+            terms.per_event[0],
+            mode="FAST_COMPILE",
+        )
+        per_event_val = f(10.0, 20.0, -800.0, -810.0)
+
+        expected_per_event = logsumexp([np.log(10.0) - 800.0, np.log(20.0) - 810.0])
+        assert np.isfinite(per_event_val)
+        np.testing.assert_allclose(per_event_val, expected_per_event, rtol=1e-12)
+
+    def test_mixture_dist_log_prob_terms_extended_zero_coefficient(self):
+        """A coefficient of exactly 0 drops that component (log(0) = -inf
+        contributes nothing to logsumexp), leaving a finite result equal to
+        the remaining component alone."""
+        dist = MixtureDist(
+            name="mix",
+            summands=["pdf1", "pdf2"],
+            coefficients=["coeff1", "coeff2"],
+            extended=True,
+        )
+        context = {
+            "coeff1": pt.constant(0.0),
+            "coeff2": pt.constant(20.0),
+            "pdf1": pt.constant(0.5),
+            "pdf2": pt.constant(0.25),
+        }
+        dist.likelihood(context)
+
+        log_expressions = {
+            "pdf1": pt.log(pt.constant(0.5)),
+            "pdf2": pt.log(pt.constant(0.25)),
+        }
+        terms = dist.log_prob_terms({}, log_expressions, Distributions([]))
+
+        per_event_val = function([], terms.per_event[0])()
+        assert np.isfinite(per_event_val)
+        # Only the coeff2/pdf2 component survives: log(20 * 0.25) = log(5)
+        np.testing.assert_allclose(per_event_val, np.log(5.0), rtol=1e-6)
+
     def test_mixture_dist_log_prob_terms_extended(self):
         """Extended mixture contributes log(sum c_i f_i) per event and -nu per channel."""
         dist = MixtureDist(
@@ -2972,7 +3581,11 @@ class TestMixtureDist:
         }
         dist.likelihood(context)
 
-        terms = dist.log_prob_terms({}, Distributions([]))
+        log_expressions = {
+            "pdf1": pt.log(pt.constant(0.5)),
+            "pdf2": pt.log(pt.constant(0.25)),
+        }
+        terms = dist.log_prob_terms({}, log_expressions, Distributions([]))
 
         assert len(terms.per_event) == 1
         assert len(terms.channel) == 1
@@ -2992,7 +3605,7 @@ class TestMixtureDist:
             extended=True,
         )
         with pytest.raises(RuntimeError, match="likelihood"):
-            dist.log_prob_terms({}, Distributions([]))
+            dist.log_prob_terms({}, {}, Distributions([]))
 
     def test_mixture_dist_log_prob_terms_non_extended_uses_default(self):
         """Non-extended mixture falls back to the base log(PDF) contribution."""
@@ -3002,7 +3615,11 @@ class TestMixtureDist:
             coefficients=["coeff1"],
             extended=False,
         )
-        terms = dist.log_prob_terms({"mix": pt.constant(0.7)}, Distributions([]))
+        terms = dist.log_prob_terms(
+            {"mix": pt.constant(0.7)},
+            {"mix": pt.constant(np.log(0.7))},
+            Distributions([]),
+        )
 
         assert len(terms.per_event) == 1
         assert terms.channel == []
@@ -3063,6 +3680,142 @@ class TestMixtureDist:
         assert np.isclose(log_val, expected_log), (
             f"log_expression={log_val}, log(expression)={expected_log}"
         )
+
+    def test_mixture_dist_likelihood_uses_balanced_nary_add(self):
+        """likelihood()'s mixturesum and coeffsum accumulations must each be
+        built as a single balanced n-ary Add over their terms, not a
+        left-deep chain of binary additions.
+        """
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+        )
+        context = Context(
+            {
+                "pdf1": pt.constant(1.0, name="pdf1"),
+                "pdf2": pt.constant(2.0, name="pdf2"),
+                "pdf3": pt.constant(3.0, name="pdf3"),
+                "coeff1": pt.constant(0.2, name="coeff1"),
+                "coeff2": pt.constant(0.3, name="coeff2"),
+                "coeff3": pt.constant(0.5, name="coeff3"),
+            }
+        )
+
+        result = dist.likelihood(context)
+
+        # result = mixturesum / coeffsum
+        mixturesum, coeffsum = result.owner.inputs
+        assert len(mixturesum.owner.inputs) == len(dist.coefficients)
+        assert len(coeffsum.owner.inputs) == len(dist.coefficients)
+
+    def test_mixture_dist_ref_coef_norm_uses_balanced_nary_add(self):
+        """likelihood()'s ref_coef_norm normalisation sum must be built as a
+        single balanced n-ary Add, not a left-deep chain.
+        """
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+            ref_coef_norm=["coeff1", "coeff2", "coeff3"],
+        )
+        context = Context(
+            {
+                "pdf1": pt.constant(1.0, name="pdf1"),
+                "pdf2": pt.constant(2.0, name="pdf2"),
+                "pdf3": pt.constant(3.0, name="pdf3"),
+                "coeff1": pt.constant(0.2, name="coeff1"),
+                "coeff2": pt.constant(0.3, name="coeff2"),
+                "coeff3": pt.constant(0.5, name="coeff3"),
+            }
+        )
+
+        result = dist.likelihood(context)
+
+        _mixturesum, norm_sum = result.owner.inputs
+        assert len(norm_sum.owner.inputs) == len(dist.ref_coef_norm)
+
+    def test_mixture_dist_n_minus_1_likelihood_uses_balanced_nary_add(self):
+        """likelihood()'s N-1 coefficient mixturesum accumulation must be a
+        single balanced n-ary Add over all summand contributions, not a
+        left-deep chain.
+        """
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3", "pdf4"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+        )
+        context = Context(
+            {
+                "pdf1": pt.constant(1.0, name="pdf1"),
+                "pdf2": pt.constant(2.0, name="pdf2"),
+                "pdf3": pt.constant(3.0, name="pdf3"),
+                "pdf4": pt.constant(4.0, name="pdf4"),
+                "coeff1": pt.constant(0.2, name="coeff1"),
+                "coeff2": pt.constant(0.3, name="coeff2"),
+                "coeff3": pt.constant(0.1, name="coeff3"),
+            }
+        )
+
+        result = dist.likelihood(context)
+
+        # 3 pairwise coeff*summand terms plus the final (1 - coeffsum)*f_last
+        # term: 4 summands total.
+        assert len(result.owner.inputs) == len(dist.summands)
+
+    def test_mixture_dist_expected_yield_uses_balanced_nary_add(self):
+        """expected_yield()'s nu accumulation must be a single balanced
+        n-ary Add, not a left-deep chain.
+        """
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+        )
+        context = Context(
+            {
+                "pdf1": pt.constant(1.0, name="pdf1"),
+                "pdf2": pt.constant(2.0, name="pdf2"),
+                "pdf3": pt.constant(3.0, name="pdf3"),
+                "coeff1": pt.constant(0.2, name="coeff1"),
+                "coeff2": pt.constant(0.3, name="coeff2"),
+                "coeff3": pt.constant(0.5, name="coeff3"),
+            }
+        )
+
+        nu = dist.expected_yield(context)
+
+        assert len(nu.owner.inputs) == len(dist.coefficients)
+
+    def test_mixture_dist_unnormalized_expression_uses_balanced_nary_add(self):
+        """unnormalized_expression()'s fallback recompute path must build a
+        single balanced n-ary Add, not a left-deep chain.
+        """
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2", "pdf3"],
+            coefficients=["coeff1", "coeff2", "coeff3"],
+            extended=True,
+        )
+        context = Context(
+            {
+                "pdf1": pt.constant(1.0, name="pdf1"),
+                "pdf2": pt.constant(2.0, name="pdf2"),
+                "pdf3": pt.constant(3.0, name="pdf3"),
+                "coeff1": pt.constant(0.2, name="coeff1"),
+                "coeff2": pt.constant(0.3, name="coeff2"),
+                "coeff3": pt.constant(0.5, name="coeff3"),
+            }
+        )
+
+        # No prior likelihood() call, so this exercises the fallback
+        # recompute path (self._cached_unnorm_expr is None).
+        unnorm = dist.unnormalized_expression(context)
+
+        assert len(unnorm.owner.inputs) == len(dist.coefficients)
 
 
 class TestHistogramDist:

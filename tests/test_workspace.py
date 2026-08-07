@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import pytest
 
-from pyhs3 import Workspace
+from pyhs3 import Model, Workspace
 from pyhs3.analyses import Analyses, Analysis
+from pyhs3.data import BinnedData, Data
+from pyhs3.distributions import Distributions
+from pyhs3.distributions.mathematical import GenericDist
 from pyhs3.exceptions import WorkspaceValidationError
 from pyhs3.likelihoods import Likelihood, Likelihoods
 from pyhs3.metadata import Metadata
@@ -219,6 +222,83 @@ class TestWorkspaceFKResolutionWithNoneCollections:
                 distributions=None,
                 data=None,
             )
+
+
+class TestPerLikelihoodObservables:
+    """Observables are resolved per likelihood, never merged across likelihoods."""
+
+    @staticmethod
+    def _make_workspace(
+        likelihood_bounds: dict[str, tuple[float, float]],
+    ) -> Workspace:
+        """Build a workspace with one likelihood per entry, each with an 'x' axis."""
+        return Workspace(
+            metadata=Metadata(hs3_version="0.3.0"),
+            distributions=Distributions(
+                [
+                    GenericDist(name=f"dist_{name}", expression="exp(-x)")
+                    for name in likelihood_bounds
+                ]
+            ),
+            data=Data(
+                [
+                    BinnedData(
+                        name=f"data_{name}",
+                        axes=[{"name": "x", "min": lo, "max": hi, "nbins": 10}],
+                        contents=[1.0] * 10,
+                    )
+                    for name, (lo, hi) in likelihood_bounds.items()
+                ]
+            ),
+            likelihoods=Likelihoods(
+                [
+                    Likelihood(
+                        name=name,
+                        distributions=[f"dist_{name}"],
+                        data=[f"data_{name}"],
+                    )
+                    for name in likelihood_bounds
+                ]
+            ),
+        )
+
+    @staticmethod
+    def _bounds(model: Model, name: str) -> tuple[float, float]:
+        """Evaluate a model observable's (min, max) tensor constants to floats."""
+        lower, upper = model._observables[name]
+        return (float(lower.data), float(upper.data))
+
+    def test_different_bounds_across_likelihoods_are_valid(self):
+        """Same axis name with different bounds across likelihoods is legitimate:
+        the workspace loads and each likelihood's model gets its own bounds."""
+        ws = self._make_workspace({"lk_a": (0.0, 10.0), "lk_b": (0.0, 20.0)})
+        model_a = ws.model(ws.likelihoods["lk_a"], progress=False)
+        model_b = ws.model(ws.likelihoods["lk_b"], progress=False)
+        assert self._bounds(model_a, "x") == pytest.approx((0.0, 10.0))
+        assert self._bounds(model_b, "x") == pytest.approx((0.0, 20.0))
+
+    def test_legacy_model_single_likelihood_uses_its_observables(self):
+        """Legacy ws.model(0) on a single-likelihood workspace resolves that
+        likelihood's observables."""
+        ws = self._make_workspace({"lk_a": (0.0, 10.0)})
+        assert ws._compute_observables() == {"x": (0.0, 10.0)}
+        model = ws.model(0, progress=False)
+        assert self._bounds(model, "x") == pytest.approx((0.0, 10.0))
+
+    def test_legacy_model_agreeing_likelihoods_share_observables(self):
+        """Legacy ws.model(0) still works when every likelihood implies the same
+        observables (e.g. asimov and observed data over identical axes)."""
+        ws = self._make_workspace({"lk_a": (0.0, 10.0), "lk_b": (0.0, 10.0)})
+        assert ws._compute_observables() == {"x": (0.0, 10.0)}
+        model = ws.model(0, progress=False)
+        assert self._bounds(model, "x") == pytest.approx((0.0, 10.0))
+
+    def test_legacy_model_disagreeing_likelihoods_raises(self):
+        """Legacy ws.model(0) has no principled observable choice when the
+        likelihoods disagree — the user must select a likelihood explicitly."""
+        ws = self._make_workspace({"lk_a": (0.0, 10.0), "lk_b": (0.0, 20.0)})
+        with pytest.raises(ValueError, match="Cannot determine observables"):
+            ws.model(0, progress=False)
 
 
 class TestWorkspaceRepr:

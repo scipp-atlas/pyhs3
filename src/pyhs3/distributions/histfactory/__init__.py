@@ -131,6 +131,23 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     )
     _normalizable: bool = PrivateAttr(default=False)
 
+    # Per-bin Poisson log-probabilities built by likelihood() (via
+    # _build_main_model), reused by log_likelihood() so that a model build
+    # calling both methods for the same context does not rebuild the
+    # interpolation-spline/per-bin-modifier subgraph (_compute_expected_rates)
+    # and the Poisson log-pmf subgraph (_bin_log_probs) a second time.  This is
+    # a per-instance cache, and the same HistFactoryDistChannel instance can be
+    # reused across multiple Model builds (e.g. Workspace.model() called more
+    # than once on the same workspace), each supplying its own Context with
+    # fresh parameter tensors.  _cached_context holds the exact Context object
+    # that populated the other two fields; callers must check
+    # `self._cached_context is context` (object identity, not equality) before
+    # trusting them, and refresh all three fields together whenever the cache
+    # is (re)populated.
+    _cached_context: Context | None = PrivateAttr(default=None)
+    _cached_expected_rates: TensorVar | None = PrivateAttr(default=None)
+    _cached_bin_log_probs: TensorVar | None = PrivateAttr(default=None)
+
     @model_validator(mode="after")
     def _validate_staterror(self) -> HistFactoryDistChannel:
         total_bins = self.axes.get_total_bins()
@@ -206,8 +223,12 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         # Extract binning information
         total_bins = self._get_total_bins()
 
-        # Process all samples and compute expected rates
+        # Process all samples and compute expected rates.  Cached so
+        # log_likelihood() can reuse this subgraph for the same context
+        # instead of rebuilding it.
         expected_rates = self._compute_expected_rates(context, total_bins)
+        self._cached_expected_rates = expected_rates
+        self._cached_context = context
 
         # Build main Poisson model for observed data
         return self._build_main_model(context, expected_rates)
@@ -224,10 +245,20 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         multi-parameter modifiers (``shapesys``, ``staterror``) ``dedup_key``
         is ``None`` — these constraints are channel-local by workspace validation
         and are always emitted as-is.
+
+        In BB-lite mode, ``StatErrorModifier`` specs are skipped entirely: their
+        ``data`` is ``None`` by design (per-bin errors come from sample data
+        instead), so ``modifier.make_constraint()`` would raise. The
+        corresponding constraint is channel-level, not modifier-level — callers
+        get it from :meth:`_make_barlow_beeston_lite_constraint` instead.
         """
         for sample in self.samples:
             for modifier in sample.modifiers:
                 if not isinstance(modifier, HasConstraint):
+                    continue
+                if self.barlow_beeston_method == "lite" and isinstance(
+                    modifier, StatErrorModifier
+                ):
                     continue
                 if isinstance(modifier, ParameterModifier):
                     yield modifier.parameter, modifier, sample.data
@@ -249,11 +280,6 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         seen: set[str] = set()
         constraint_probs: list[TensorVar] = []
         for dedup_key, modifier, sample_data in self.constraint_specs():
-            # Skip StatErrorModifier in lite mode - constraint built at channel level
-            if self.barlow_beeston_method == "lite" and isinstance(
-                modifier, StatErrorModifier
-            ):
-                continue
             if dedup_key is not None:
                 if dedup_key in seen:
                     continue
@@ -286,13 +312,17 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
                     return modifier
         return None
 
-    def _make_barlow_beeston_lite_constraint(
+    def _build_barlow_beeston_lite_dist(
         self, context: Context
-    ) -> TensorVar | None:
-        """Build BB-lite constraint from combined sample uncertainties.
+    ) -> tuple[GaussianDist | PoissonDist, Context] | None:
+        """Construct a single vectorized BB-lite Gauss/Poisson constraint distribution.
 
         BB-lite uses shared gamma parameters across samples with a channel-level
-        constraint built from combined MC statistical uncertainties.
+        constraint built from combined MC statistical uncertainties. Stacks
+        the per-bin gamma parameters into one length-B tensor and builds ONE
+        GaussianDist/PoissonDist over vector-valued inputs, instead of one
+        scalar distribution per bin (mirroring
+        :meth:`~pyhs3.distributions.histfactory.modifiers.ShapeSysModifier._build_bin_constraint`).
 
         The constraint can be either Poisson or Gaussian:
         - Poisson: Poisson(tau | gamma * tau) where tau = (nu/sigma)^2
@@ -301,6 +331,21 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         Combined uncertainties from samples:
         - total_nominal = sum(sample.data.contents)
         - total_sigma = sqrt(sum(sample.data.errors^2))
+
+        Bins with zero (or negative) combined nominal yield are excluded
+        from the vector entirely -- for BOTH Poisson and Gauss, unlike
+        :meth:`~pyhs3.distributions.histfactory.modifiers.StatErrorModifier._build_bin_constraint`
+        (BB-full), which only skips Poisson bins and falls back to
+        ``sigma_value = 1.0`` for Gauss. This is a genuine semantic
+        difference between the two code paths, not an oversight -- preserved
+        exactly from the pre-vectorization implementation.
+
+        Returns ``None`` when this channel has no staterror modifier, or
+        when every bin was excluded. Shared by
+        :meth:`_make_barlow_beeston_lite_constraint` (product of per-bin
+        probabilities) and :meth:`_make_barlow_beeston_lite_log_constraint`
+        (sum of per-bin log-probabilities) so the parametrization is defined
+        exactly once.
         """
         total_bins = self._get_total_bins()
 
@@ -327,52 +372,68 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
 
         total_sigma = np.sqrt(total_variance)
 
-        augmented_context = dict(context)
-        dists: list[GaussianDist | PoissonDist] = []
-
-        for i, param_name in enumerate(gamma_params):
-            nu, sigma = total_nominal[i], total_sigma[i]
-
-            # Skip bins with zero nominal yield; sigma=0 is caught by the parsing layer
-            if nu <= 0:
-                continue
-
-            if constraint_type == "Poisson":
-                # Poisson: Poisson(tau | gamma * tau) where tau = (nu/sigma)^2
-                tau = (nu / sigma) ** 2
-                scaled_name = f"{param_name}_scaled"
-                augmented_context[scaled_name] = context[param_name] * tau
-                dists.append(
-                    PoissonDist(
-                        name=f"constraint_bblite_{self.name}_{i}",
-                        x=float(tau),
-                        mean=scaled_name,
-                    )
-                )
-            else:  # "Gauss"
-                # Gaussian: N(1.0 | gamma, relerr) where relerr = sigma / nu
-                relerr = sigma / nu
-                sigma_name = f"{param_name}_sigma"
-                augmented_context[sigma_name] = pt.constant(relerr)
-                dists.append(
-                    GaussianDist(
-                        name=f"constraint_bblite_{self.name}_{i}",
-                        x=1.0,
-                        mean=param_name,
-                        sigma=sigma_name,
-                    )
-                )
-
-        if not dists:
+        # Skip bins with zero nominal yield; sigma=0 is caught by the parsing layer.
+        keep = total_nominal > 0
+        params = [p for p, k in zip(gamma_params, keep, strict=True) if k]
+        if not params:
             return None
 
-        # Evaluate all distributions with augmented context and multiply
-        factors = []
-        for dist in dists:
-            dist_ctx = Context({**augmented_context, **dist.constants})
-            factors.append(dist.expression(dist_ctx))
+        # (B',) concrete combined yields/sigmas for the surviving bins.
+        nu = total_nominal[keep]
+        sigma = total_sigma[keep]
+        gamma = pt.stack([context[param_name] for param_name in params])
 
-        return cast(TensorVar, pt.prod(pt.stack(factors), axis=0))  # type: ignore[no-untyped-call]
+        name = f"constraint_bblite_{self.name}"
+        augmented_context = dict(context)
+
+        dist: GaussianDist | PoissonDist
+        if constraint_type == "Poisson":
+            # Poisson: Poisson(tau | gamma * tau) where tau = (nu/sigma)^2
+            tau = (nu / sigma) ** 2
+            scaled_name = f"{name}_scaled"
+            x_name = f"{name}_x"
+            augmented_context[x_name] = pt.constant(tau)
+            augmented_context[scaled_name] = gamma * pt.constant(tau)
+            dist = PoissonDist(name=name, x=x_name, mean=scaled_name)
+        else:  # "Gauss"
+            # Gaussian: N(1.0 | gamma, relerr) where relerr = sigma / nu
+            relerr = sigma / nu
+            mean_name = f"{name}_mean"
+            sigma_name = f"{name}_sigma"
+            augmented_context[mean_name] = gamma
+            augmented_context[sigma_name] = pt.constant(relerr)
+            dist = GaussianDist(name=name, x=1.0, mean=mean_name, sigma=sigma_name)
+
+        return dist, Context({**augmented_context, **dist.constants})
+
+    def _make_barlow_beeston_lite_constraint(
+        self, context: Context
+    ) -> TensorVar | None:
+        """Build BB-lite constraint (product of per-bin probabilities) from
+        combined sample uncertainties, or ``None`` if this channel has no
+        staterror modifier."""
+        pair = self._build_barlow_beeston_lite_dist(context)
+        if pair is None:
+            return None
+
+        dist, augmented_context = pair
+        return cast(TensorVar, pt.prod(dist.expression(augmented_context)))  # type: ignore[no-untyped-call]
+
+    def _make_barlow_beeston_lite_log_constraint(
+        self, context: Context
+    ) -> TensorVar | None:
+        """Log-space counterpart of :meth:`_make_barlow_beeston_lite_constraint`.
+
+        Sum of per-bin Gauss/Poisson log-probabilities instead of their
+        product, so the constraint stays finite where the probability-space
+        product would underflow to 0.0.
+        """
+        pair = self._build_barlow_beeston_lite_dist(context)
+        if pair is None:
+            return None
+
+        dist, augmented_context = pair
+        return cast(TensorVar, pt.sum(dist.log_expression(augmented_context)))  # type: ignore[no-untyped-call]
 
     def _compute_expected_rates(self, context: Context, total_bins: int) -> TensorVar:
         """
@@ -431,6 +492,52 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
 
         return cast(TensorVar, rates)
 
+    def _bin_log_probs(self, context: Context, expected_rates: TensorVar) -> TensorVar:
+        r"""Per-bin Poisson log-probabilities for the observed bin counts.
+
+        Observed data must be provided in the context as '{name}_observed' where
+        name is the HistFactory distribution name. This is a required parameter
+        for likelihood evaluation.
+
+        Returns:
+            PyTensor expression for the per-bin Poisson log-probabilities,
+            :math:`\log P(observed_i \mid expected_i)`.
+        """
+        # Observed data is required - no defensive programming needed
+        observed_data_param = f"{self.name}_observed"
+        observed_data = context[observed_data_param]
+
+        # Observables are reshaped to (N, 1) by the model builder for broadcasting.
+        # Flatten to 1-D here so element-wise Poisson matches the (N,) expected_rates.
+        if observed_data.ndim == 2:
+            observed_data = observed_data[:, 0]
+
+        # Per-bin Poisson log-probability:
+        # log P(observed_i | expected_i) = observed_i * log(expected_i) - expected_i - log(observed_i!)
+        #
+        # Guard against 0 * log(0) = NaN when observed_i == 0 and expected_i == 0.
+        # The Poisson log-pmf for k=0 is just -lambda (since log(0!) = 0), so when
+        # observed == 0 we only need -expected_rates; the full expression is only
+        # needed (and safe) when observed > 0.  When observed > 0 and expected == 0
+        # the result is correctly -inf (P(k>0 | lambda=0) = 0).
+        #
+        # The log's argument is guarded separately from the switch's output: PyTensor
+        # differentiates both branches of a switch, so the untaken `full` branch still
+        # contributes a gradient of observed/expected_rates = 0/0 = NaN at this point,
+        # and multiplying that NaN by the switch's zero mask does not clear it. Substituting
+        # a nonzero placeholder for expected_rates inside the log (only where observed == 0,
+        # where `full`'s value and gradient are discarded anyway) keeps both finite.
+        safe_rates = pt.switch(pt.eq(observed_data, 0), 1.0, expected_rates)
+        full = (
+            observed_data * pt.log(safe_rates)
+            - expected_rates
+            - pt.gammaln(observed_data + 1)
+        )
+        return cast(
+            TensorVar,
+            pt.switch(pt.eq(observed_data, 0), -expected_rates, full),
+        )
+
     def _build_main_model(
         self, context: Context, expected_rates: TensorVar
     ) -> TensorVar:
@@ -444,28 +551,112 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         Returns:
             PyTensor expression for the Poisson probability (not log probability)
         """
-        # Create a Poisson likelihood for the observed bin counts
-        # Observed data is required - no defensive programming needed
-        observed_data_param = f"{self.name}_observed"
-        observed_data = context[observed_data_param]
-
-        # Observables are reshaped to (N, 1) by the model builder for broadcasting.
-        # Flatten to 1-D here so element-wise Poisson matches the (N,) expected_rates.
-        if observed_data.ndim == 2:
-            observed_data = observed_data[:, 0]
-
-        # Build product of individual Poisson probabilities for each bin
-        # P(observed_i | expected_i) = exp(observed_i * log(expected_i) - expected_i - log(observed_i!))
-        log_probs = (
-            observed_data * pt.log(expected_rates)
-            - expected_rates
-            - pt.gammaln(observed_data + 1)
-        )
+        # Cached so log_likelihood() can reuse this subgraph for the same
+        # context instead of rebuilding the Poisson log-pmf expression.
+        log_probs = self._bin_log_probs(context, expected_rates)
+        self._cached_bin_log_probs = log_probs
+        self._cached_context = context
         # Convert from log probabilities to probabilities
         probs = pt.exp(log_probs)
         main_prob = pt.prod(probs)  # type: ignore[no-untyped-call]
 
         return cast(TensorVar, main_prob)
+
+    def log_likelihood(self, context: Context) -> TensorVar:
+        """Log-space main Poisson likelihood: sum of per-bin Poisson log-pmfs.
+
+        This is the log-space counterpart of :meth:`likelihood`.  Returning the
+        sum of per-bin log-probabilities directly avoids the
+        ``log(prod(exp(log_probs)))`` round-trip, whose intermediate product
+        underflows float64 to ``0.0`` for channels with many bins or large
+        expected counts (turning ``log_prob`` into ``-inf``).
+
+        Args:
+            context: Mapping of parameter names to PyTensor variables
+
+        Returns:
+            PyTensor expression for the summed Poisson log-probability.
+        """
+        # Reuse the per-bin log-probabilities cached by likelihood() (via
+        # _build_main_model) for the same context, if available, to avoid
+        # rebuilding the expected-rates and Poisson log-pmf subgraphs.  Only
+        # trust the cache when it was populated by this exact context object
+        # (see _cached_context) -- otherwise rebuild and refresh the cache so
+        # a later call for this context can reuse it.
+        if self._cached_context is context and self._cached_bin_log_probs is not None:
+            log_probs = self._cached_bin_log_probs
+        else:
+            total_bins = self._get_total_bins()
+            if (
+                self._cached_context is context
+                and self._cached_expected_rates is not None
+            ):
+                expected_rates = self._cached_expected_rates
+            else:
+                expected_rates = self._compute_expected_rates(context, total_bins)
+                self._cached_expected_rates = expected_rates
+                self._cached_context = context
+            log_probs = self._bin_log_probs(context, expected_rates)
+            self._cached_bin_log_probs = log_probs
+            self._cached_context = context
+        return cast(TensorVar, pt.sum(log_probs))  # type: ignore[no-untyped-call]
+
+    def log_extended_likelihood(self, context: Context) -> TensorVar:
+        """Log-space constraint sum for this channel.
+
+        Log-space counterpart of :meth:`extended_likelihood`: returns the sum of
+        each modifier's ``log_constraint(...)`` term (deduped by parameter
+        exactly as in :meth:`extended_likelihood`) instead of the product of
+        ``make_constraint(...)`` terms. ``log_constraint`` evaluates the same
+        constraint distribution(s) via their analytic log-space form, so this
+        never takes ``pt.log`` of a probability-space value that can underflow
+        to 0.0.
+
+        Args:
+            context: Mapping of parameter names to PyTensor variables
+
+        Returns:
+            PyTensor expression for the summed log-constraint contribution.
+        """
+        seen: set[str] = set()
+        log_constraints: list[TensorVar] = []
+        for dedup_key, modifier, sample_data in self.constraint_specs():
+            if dedup_key is not None:
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
+            log_constraints.append(modifier.log_constraint(context, sample_data))
+
+        # Add channel-level BB-lite constraint if in lite mode
+        if self.barlow_beeston_method == "lite":
+            lite_log_constraint = self._make_barlow_beeston_lite_log_constraint(context)
+            if lite_log_constraint is not None:
+                log_constraints.append(lite_log_constraint)
+
+        if not log_constraints:
+            return cast(TensorVar, pt.constant(0.0))
+        return cast(TensorVar, pt.sum(pt.stack(log_constraints)))  # type: ignore[no-untyped-call]
+
+    def log_expression(self, context: Context) -> TensorVar:
+        """Log-probability for the channel: summed Poisson log-pmf + log-constraints.
+
+        Overrides :meth:`Distribution.log_expression` to assemble the channel
+        log-probability directly in log space (sum of per-bin Poisson log-pmfs
+        plus summed log-constraint terms), rather than taking ``log`` of the
+        probability-space :meth:`likelihood`/:meth:`extended_likelihood` product.
+        This keeps the result finite where the probability-space product would
+        underflow to ``0.0``.
+
+        Args:
+            context: Mapping of parameter names to PyTensor variables
+
+        Returns:
+            PyTensor expression for the channel log-probability.
+        """
+        return cast(
+            TensorVar,
+            self.log_likelihood(context) + self.log_extended_likelihood(context),
+        )
 
     def to_hist(self) -> Any:
         """

@@ -17,6 +17,7 @@ from pydantic import (
     Field,
 )
 
+from pyhs3.base import balanced_sum
 from pyhs3.context import Context
 from pyhs3.distributions.histfactory.interpolations import (
     interpolate_code0,
@@ -117,14 +118,8 @@ class SumFunction(Function):
         Returns:
             TensorVar: PyTensor expression representing the sum of all summands.
         """
-        if not self.summands:
-            return pt.constant(0.0)
-
-        result = context[self.summands[0]]
-        for summand in self.summands[1:]:
-            result = result + context[summand]
-
-        return result
+        terms = [context[summand] for summand in self.summands]
+        return balanced_sum(terms, pt.constant(0.0))
 
 
 class ProductFunction(Function):
@@ -506,21 +501,21 @@ class ProcessNormalizationFunction(Function):
         result = pt.constant(self.nominalValue)
 
         # Symmetric variations: symShift = sum(logKappa[i] * theta[i])
-        symShift = pt.constant(0.0)
-        for i, theta_name in enumerate(self.thetaList):
-            theta = context[theta_name]
-            # Use provided logKappa value if available, otherwise assume 0.0 (no effect)
-            log_kappa = self.logKappa[i] if i < len(self.logKappa) else 0.0
-            symShift = symShift + log_kappa * theta
+        sym_terms = [
+            (self.logKappa[i] if i < len(self.logKappa) else 0.0) * context[theta_name]
+            for i, theta_name in enumerate(self.thetaList)
+        ]
+        symShift = balanced_sum(sym_terms, pt.constant(0.0))
 
         # Asymmetric variations: use asymmetric interpolation
-        asymShift = pt.constant(0.0)
+        asym_terms = []
         for i, theta_name in enumerate(self.asymmThetaList):
             theta = context[theta_name]
             log_kappa_lo, log_kappa_hi = self.logAsymmKappa[i]
             kappa_sum = log_kappa_hi + log_kappa_lo
             kappa_diff = log_kappa_hi - log_kappa_lo
-            asymShift = asymShift + _asym_interpolation(theta, kappa_sum, kappa_diff)
+            asym_terms.append(_asym_interpolation(theta, kappa_sum, kappa_diff))
+        asymShift = balanced_sum(asym_terms, pt.constant(0.0))
 
         # Apply exponential scaling: nominal * exp(symShift + asymShift)
         result = result * pt.exp(symShift + asymShift)

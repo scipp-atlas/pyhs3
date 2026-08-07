@@ -149,6 +149,15 @@ class PoissonDist(Distribution):
         # Using pt.gammaln for log(k!) = log(Γ(k+1))
         return Poisson.pdf(context[self._parameters["x"]],context[self._parameters["mean"]])
 
+    def log_likelihood(self, context: Context) -> TensorVar:
+        """
+        Builds a symbolic expression for the log of the Poisson PMF.
+
+        Args:
+            context (dict): Mapping of names to pytensor variables.
+        """
+        return Poisson.logpdf(context[self._parameters["x"]],context[self._parameters["mean"]])
+
 
 class ExponentialDist(Distribution):
     r"""

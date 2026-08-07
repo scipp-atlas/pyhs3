@@ -16,6 +16,7 @@ import pytensor.tensor as pt
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
 from pyhs3.typing.aliases import TensorVar
+import pytensor_distributions.lognormal as LogNormal
 
 
 class GaussianDist(Distribution):
@@ -241,17 +242,23 @@ class LogNormalDist(Distribution):
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of log-normal PDF.
         """
-        x = context[self._parameters["x"]]
-        mu = context[self._parameters["mu"]]
-        sigma = context[self._parameters["sigma"]]
+        return LogNormal.pdf(
+            context[self._parameters["x"]],
+            context[self._parameters["mu"]],
+            context[self._parameters["sigma"]],
+        )
 
-        # Log-normal PDF: (1/x) * exp(-((ln(x) - mu)^2) / (2 * sigma^2))
-        log_x = pt.log(x)
-        normalized_log = (log_x - mu) / sigma
-        return cast(
-            TensorVar,
-            (1.0 / (x * sigma * pt.sqrt(2.0 * math.pi)))
-            * pt.exp(-0.5 * normalized_log**2),
+    def log_likelihood(self, context: Context) -> TensorVar:
+        """
+        Builds a symbolic expression for the log of the log-normal PDF.
+
+        Args:
+            context (dict): Mapping of names to pytensor variables.
+        """
+        return LogNormal.logpdf(
+            context[self._parameters["x"]],
+            context[self._parameters["mu"]],
+            context[self._parameters["sigma"]],
         )
 
 

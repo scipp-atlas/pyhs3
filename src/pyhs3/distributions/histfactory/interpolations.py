@@ -205,11 +205,29 @@ def interpolate_code4(
     coefficient_matrix = pt.constant(_CODE4_A_INV, dtype=b.dtype)
     coeffs = pt.tensordot(coefficient_matrix, b, axes=[[1], [0]])
 
-    # Evaluate a1*alpha + ... + a6*alpha**6 using Horner's method.
-    poly_sum = coeffs[5]
-    for index in range(4, -1, -1):
-        poly_sum = coeffs[index] + alpha * poly_sum
-    poly_sum = alpha * poly_sum
+    # Evaluate a1*alpha + ... + a6*alpha**6 as one tensor contraction. Pad
+    # immediately after the coefficient axis so alpha and coefficient batch
+    # dimensions retain standard right-aligned broadcasting semantics.
+    alpha_powers = [alpha]
+    for _ in range(5):
+        alpha_powers.append(alpha_powers[-1] * alpha)
+    alpha_powers_tensor = pt.stack(alpha_powers)
+
+    target_ndim = max(coeffs.ndim, alpha_powers_tensor.ndim)
+    if coeffs.ndim < target_ndim:
+        pattern = (
+            (0,) + ("x",) * (target_ndim - coeffs.ndim) + tuple(range(1, coeffs.ndim))
+        )
+        coeffs = coeffs.dimshuffle(pattern)  # type: ignore[no-untyped-call]
+    if alpha_powers_tensor.ndim < target_ndim:
+        pattern = (
+            (0,)
+            + ("x",) * (target_ndim - alpha_powers_tensor.ndim)
+            + tuple(range(1, alpha_powers_tensor.ndim))
+        )
+        alpha_powers_tensor = alpha_powers_tensor.dimshuffle(pattern)
+
+    poly_sum = pt.sum(coeffs * alpha_powers_tensor, axis=0)  # type: ignore[no-untyped-call]
     poly_result = nom * (1.0 + poly_sum)
 
     # Exponential extrapolation

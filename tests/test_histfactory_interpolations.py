@@ -895,6 +895,53 @@ class TestCode4Regression:
             atol=tolerance,
         )
 
+    def test_code4_vector_alpha_matches_scalar_evaluation(self):
+        alpha = pt.dvector("alpha")
+        nom = pt.dvector("nom")
+        hi = pt.dvector("hi")
+        lo = pt.dvector("lo")
+
+        vector_result = interpolate_code4(alpha, nom, hi, lo)
+
+        alpha_values = np.asarray([-1.0, -0.5, 0.0, 0.5, 1.0])
+        nom_values = np.asarray([1.0, 2.0, 3.0, 4.0, 5.0])
+        hi_values = nom_values * 1.2
+        lo_values = nom_values * 0.8
+
+        vector_values = vector_result.eval(
+            {
+                alpha: alpha_values,
+                nom: nom_values,
+                hi: hi_values,
+                lo: lo_values,
+            }
+        )
+
+        scalar_values = [
+            float(
+                interpolate_code4(
+                    pt.constant(alpha_value),
+                    pt.constant(nom_value),
+                    pt.constant(hi_value),
+                    pt.constant(lo_value),
+                ).eval()
+            )
+            for alpha_value, nom_value, hi_value, lo_value in zip(
+                alpha_values,
+                nom_values,
+                hi_values,
+                lo_values,
+                strict=True,
+            )
+        ]
+
+        np.testing.assert_allclose(
+            vector_values,
+            scalar_values,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+
     def test_code4_known_interior_values(self):
         alpha = pt.dscalar("alpha")
         nom = pt.dvector("nom")

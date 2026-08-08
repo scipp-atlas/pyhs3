@@ -19,6 +19,7 @@ from pyhs3.distributions.histfactory.interpolations import (
     interpolate_code0,
     interpolate_code1,
     interpolate_code2,
+    interpolate_code4,
     interpolate_code4p,
     interpolate_exp,
     interpolate_lin,
@@ -827,6 +828,99 @@ class TestInterpolationPyhfComparison:
             assert vector_vals == pytest.approx(scalar_vals, rel=1e-6), (
                 f"Vector/scalar mismatch for {method_name}"
             )
+
+
+class TestCode4Regression:
+    """Regression tests for HistFactory code4 interpolation."""
+
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    def test_code4_scalar_boundaries_and_extrapolation(self, dtype):
+        alpha = pt.scalar("alpha", dtype=dtype)
+        nom = pt.constant(100.0, dtype=dtype)
+        hi = pt.constant(120.0, dtype=dtype)
+        lo = pt.constant(80.0, dtype=dtype)
+
+        result = interpolate_code4(alpha, nom, hi, lo)
+        evaluate = function([alpha], result)
+
+        expected = {
+            -2.0: 64.0,
+            -1.0: 80.0,
+            0.0: 100.0,
+            1.0: 120.0,
+            2.0: 144.0,
+        }
+
+        tolerance = 1e-5 if dtype == "float32" else 1e-12
+
+        for alpha_value, expected_value in expected.items():
+            assert evaluate(alpha_value) == pytest.approx(
+                expected_value,
+                rel=tolerance,
+                abs=tolerance,
+            )
+
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    def test_code4_vector_values(self, dtype):
+        alpha = pt.scalar("alpha", dtype=dtype)
+        nom = pt.vector("nom", dtype=dtype)
+        hi = pt.vector("hi", dtype=dtype)
+        lo = pt.vector("lo", dtype=dtype)
+
+        result = interpolate_code4(alpha, nom, hi, lo)
+        evaluate = function([alpha, nom, hi, lo], result)
+
+        nom_value = np.asarray([1.0, 2.0, 4.0], dtype=dtype)
+        hi_value = np.asarray([1.2, 2.5, 5.0], dtype=dtype)
+        lo_value = np.asarray([0.8, 1.5, 3.0], dtype=dtype)
+
+        tolerance = 1e-5 if dtype == "float32" else 1e-12
+
+        np.testing.assert_allclose(
+            evaluate(0.0, nom_value, hi_value, lo_value),
+            nom_value,
+            rtol=tolerance,
+            atol=tolerance,
+        )
+        np.testing.assert_allclose(
+            evaluate(1.0, nom_value, hi_value, lo_value),
+            hi_value,
+            rtol=tolerance,
+            atol=tolerance,
+        )
+        np.testing.assert_allclose(
+            evaluate(-1.0, nom_value, hi_value, lo_value),
+            lo_value,
+            rtol=tolerance,
+            atol=tolerance,
+        )
+
+    def test_code4_known_interior_values(self):
+        alpha = pt.dscalar("alpha")
+        nom = pt.dvector("nom")
+        hi = pt.dvector("hi")
+        lo = pt.dvector("lo")
+
+        result = interpolate_code4(alpha, nom, hi, lo)
+        evaluate = function([alpha, nom, hi, lo], result)
+
+        nom_value = np.asarray([1.0, 2.0, 3.0, 4.0])
+        hi_value = np.asarray([1.2, 2.4, 3.6, 4.8])
+        lo_value = np.asarray([0.8, 1.6, 2.4, 3.2])
+
+        np.testing.assert_allclose(
+            evaluate(0.35, nom_value, hi_value, lo_value),
+            np.asarray(
+                [
+                    1.0685452986550936,
+                    2.1370905973101872,
+                    3.2056358959652806,
+                    4.2741811946203745,
+                ]
+            ),
+            rtol=1e-12,
+            atol=1e-12,
+        )
 
 
 class TestCode2BoundaryContinuity:

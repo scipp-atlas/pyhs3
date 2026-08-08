@@ -10,11 +10,23 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import cast
 
+import numpy as np
 import pytensor.tensor as pt
 
 # Import existing distributions for constraint terms
 from pyhs3.exceptions import HS3Exception
 from pyhs3.typing.aliases import TensorVar
+
+_CODE4_A_INV = np.asarray(
+    [
+        [15.0 / 16, -15.0 / 16, -7.0 / 16, -7.0 / 16, 1.0 / 16, -1.0 / 16],
+        [3.0 / 2, 3.0 / 2, -9.0 / 16, 9.0 / 16, 1.0 / 16, 1.0 / 16],
+        [-5.0 / 8, 5.0 / 8, 5.0 / 8, 5.0 / 8, -1.0 / 8, 1.0 / 8],
+        [-3.0 / 2, -3.0 / 2, 7.0 / 8, -7.0 / 8, -1.0 / 8, -1.0 / 8],
+        [3.0 / 16, -3.0 / 16, -3.0 / 16, -3.0 / 16, 1.0 / 16, -1.0 / 16],
+        [1.0 / 2, 1.0 / 2, -5.0 / 16, 5.0 / 16, 1.0 / 16, 1.0 / 16],
+    ]
+)
 
 
 class InterpolationError(HS3Exception):
@@ -172,40 +184,32 @@ def interpolate_code4(
     hi_ratio = hi / nom
     lo_ratio = lo / nom
 
-    # Polynomial coefficients for code4 (alpha0=1)
-    # These come from the pyhf implementation
-    A_inv = [
-        [15.0 / 16, -15.0 / 16, -7.0 / 16, -7.0 / 16, 1.0 / 16, -1.0 / 16],
-        [3.0 / 2, 3.0 / 2, -9.0 / 16, 9.0 / 16, 1.0 / 16, 1.0 / 16],
-        [-5.0 / 8, 5.0 / 8, 5.0 / 8, 5.0 / 8, -1.0 / 8, 1.0 / 8],
-        [-3.0 / 2, -3.0 / 2, 7.0 / 8, -7.0 / 8, -1.0 / 8, -1.0 / 8],
-        [3.0 / 16, -3.0 / 16, -3.0 / 16, -3.0 / 16, 1.0 / 16, -1.0 / 16],
-        [1.0 / 2, 1.0 / 2, -5.0 / 16, 5.0 / 16, 1.0 / 16, 1.0 / 16],
-    ]
-
     # Boundary values at alpha0
     hi_at_alpha0 = pt.power(hi_ratio, alpha0)  # type: ignore[no-untyped-call]
     lo_at_alpha0 = pt.power(lo_ratio, alpha0)  # type: ignore[no-untyped-call]
 
     # RHS vector b
-    b = [
-        hi_at_alpha0 - 1.0,
-        lo_at_alpha0 - 1.0,
-        pt.log(hi_ratio) * hi_at_alpha0,
-        -pt.log(lo_ratio) * lo_at_alpha0,
-        pt.power(pt.log(hi_ratio), 2) * hi_at_alpha0,  # type: ignore[no-untyped-call]
-        pt.power(pt.log(lo_ratio), 2) * lo_at_alpha0,  # type: ignore[no-untyped-call]
-    ]
+    b = pt.stack(
+        [
+            hi_at_alpha0 - 1.0,
+            lo_at_alpha0 - 1.0,
+            pt.log(hi_ratio) * hi_at_alpha0,
+            -pt.log(lo_ratio) * lo_at_alpha0,
+            pt.power(pt.log(hi_ratio), 2) * hi_at_alpha0,  # type: ignore[no-untyped-call]
+            pt.power(pt.log(lo_ratio), 2) * lo_at_alpha0,  # type: ignore[no-untyped-call]
+        ]
+    )
 
-    # Calculate polynomial coefficients a_i = A^(-1) * b
-    coeffs = []
-    for i in range(6):
-        coeff = sum(A_inv[i][j] * b[j] for j in range(6))
-        coeffs.append(coeff)
+    # Compute all polynomial coefficients in one tensor operation. Matching the
+    # matrix dtype to b preserves float32 inputs instead of forcing float64.
+    coefficient_matrix = pt.constant(_CODE4_A_INV, dtype=b.dtype)
+    coeffs = pt.tensordot(coefficient_matrix, b, axes=[[1], [0]])
 
-    # Polynomial evaluation: 1 + sum(a_i * alpha^i for i=1..6)
-    alpha_powers = [alpha, alpha**2, alpha**3, alpha**4, alpha**5, alpha**6]
-    poly_sum = sum(coeffs[i] * alpha_powers[i] for i in range(6))
+    # Evaluate a1*alpha + ... + a6*alpha**6 using Horner's method.
+    poly_sum = coeffs[5]
+    for index in range(4, -1, -1):
+        poly_sum = coeffs[index] + alpha * poly_sum
+    poly_sum = alpha * poly_sum
     poly_result = nom * (1.0 + poly_sum)
 
     # Exponential extrapolation

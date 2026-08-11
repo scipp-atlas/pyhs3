@@ -784,9 +784,7 @@ class TestBBLiteStaterrorModelBuild:
         """
         aux_dict = self._lite_staterror_channel_dict()
         aux_dict["name"] = "AUX"
-        aux_dict["axes"] = [
-            {"name": "x_AUX", "min": 0.0, "max": 10.0, "nbins": 2}
-        ]
+        aux_dict["axes"] = [{"name": "x_AUX", "min": 0.0, "max": 10.0, "nbins": 2}]
         aux_dict["samples"][0]["modifiers"].append(
             {
                 "name": "alpha_aux",

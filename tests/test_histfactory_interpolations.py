@@ -1016,9 +1016,7 @@ class TestCode4Regression:
                         pt.constant(lo),
                     ).eval()
                 )
-                for nom, hi, lo in zip(
-                    nom_value, hi_value, lo_value, strict=True
-                )
+                for nom, hi, lo in zip(nom_value, hi_value, lo_value, strict=True)
             ]
         )
 

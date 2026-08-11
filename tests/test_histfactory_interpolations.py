@@ -854,7 +854,10 @@ class TestCode4Regression:
         tolerance = 1e-5 if dtype == "float32" else 1e-12
 
         for alpha_value, expected_value in expected.items():
-            assert evaluate(alpha_value) == pytest.approx(
+            evaluated = evaluate(alpha_value)
+
+            assert np.asarray(evaluated).dtype == np.dtype(dtype)
+            assert evaluated == pytest.approx(
                 expected_value,
                 rel=tolerance,
                 abs=tolerance,
@@ -942,6 +945,50 @@ class TestCode4Regression:
             atol=1e-12,
         )
 
+    def test_code4_matrix_alpha_broadcasts_against_vector_templates(self):
+        """Cover rank alignment when alpha has more dimensions than templates."""
+        alpha = pt.tensor("alpha", shape=(None, 1), dtype="float64")
+        nom = pt.dvector("nom")
+        hi = pt.dvector("hi")
+        lo = pt.dvector("lo")
+
+        result = interpolate_code4(alpha, nom, hi, lo)
+        evaluate = function([alpha, nom, hi, lo], result)
+
+        alpha_values = np.asarray([[-0.5], [0.0], [0.35], [0.8]])
+        nom_values = np.asarray([1.0, 2.0, 4.0])
+        hi_values = np.asarray([1.2, 2.6, 5.5])
+        lo_values = np.asarray([0.8, 1.4, 2.7])
+
+        actual = evaluate(alpha_values, nom_values, hi_values, lo_values)
+
+        expected = np.asarray(
+            [
+                [
+                    float(
+                        interpolate_code4(
+                            pt.constant(alpha_value),
+                            pt.constant(nom_value),
+                            pt.constant(hi_value),
+                            pt.constant(lo_value),
+                        ).eval()
+                    )
+                    for nom_value, hi_value, lo_value in zip(
+                        nom_values, hi_values, lo_values, strict=True
+                    )
+                ]
+                for alpha_value in alpha_values[:, 0]
+            ]
+        )
+
+        assert actual.shape == (alpha_values.shape[0], nom_values.shape[0])
+        np.testing.assert_allclose(
+            actual,
+            expected,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+
     def test_code4_known_interior_values(self):
         alpha = pt.dscalar("alpha")
         nom = pt.dvector("nom")
@@ -952,19 +999,32 @@ class TestCode4Regression:
         evaluate = function([alpha, nom, hi, lo], result)
 
         nom_value = np.asarray([1.0, 2.0, 3.0, 4.0])
-        hi_value = np.asarray([1.2, 2.4, 3.6, 4.8])
-        lo_value = np.asarray([0.8, 1.6, 2.4, 3.2])
+        hi_value = np.asarray([1.2, 2.7, 4.1, 5.8])
+        lo_value = np.asarray([0.8, 1.3, 2.2, 3.1])
+
+        actual = evaluate(0.35, nom_value, hi_value, lo_value)
+
+        # Use independent scalar evaluations so differently shaped hi/lo ratios
+        # catch any accidental mixing of the polynomial coefficient axis.
+        expected = np.asarray(
+            [
+                float(
+                    interpolate_code4(
+                        pt.constant(0.35),
+                        pt.constant(nom),
+                        pt.constant(hi),
+                        pt.constant(lo),
+                    ).eval()
+                )
+                for nom, hi, lo in zip(
+                    nom_value, hi_value, lo_value, strict=True
+                )
+            ]
+        )
 
         np.testing.assert_allclose(
-            evaluate(0.35, nom_value, hi_value, lo_value),
-            np.asarray(
-                [
-                    1.0685452986550936,
-                    2.1370905973101872,
-                    3.2056358959652806,
-                    4.2741811946203745,
-                ]
-            ),
+            actual,
+            expected,
             rtol=1e-12,
             atol=1e-12,
         )

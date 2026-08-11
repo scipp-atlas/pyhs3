@@ -770,15 +770,89 @@ class TestBBLiteStaterrorModelBuild:
         val = float(fn(**model.data, **model.nominal_params).item())
         assert math.isfinite(val)
 
+    def test_aux_hfdc_constraints_stay_inside_aux_distribution(self):
+        """An auxiliary HFDC is built without duplicating its constraints.
+
+        Auxiliary distributions are roots of likelihood graph pruning, so AUX
+        remains in the likelihood-rooted graph.  It is not a primary likelihood
+        distribution, however, so its ordinary modifier constraint and its
+        BB-lite channel constraint must stay inside AUX's per-distribution log
+        expression instead of also entering the primary HFDC constraint pool.
+
+        This exercises the ``in_likelihood is False`` branches for both ordinary
+        HFDC constraints and the BB-lite channel-level constraint after pruning.
+        """
+        aux_dict = self._lite_staterror_channel_dict()
+        aux_dict["name"] = "AUX"
+        aux_dict["axes"] = [
+            {"name": "x_AUX", "min": 0.0, "max": 10.0, "nbins": 2}
+        ]
+        aux_dict["samples"][0]["modifiers"].append(
+            {
+                "name": "alpha_aux",
+                "type": "normsys",
+                "parameter": "alpha_aux",
+                "constraint": "Gauss",
+                "data": {"hi": 1.1, "lo": 0.9},
+            }
+        )
+
+        aux_channel = HistFactoryDistChannel(**aux_dict)
+        sr_channel = HistFactoryDistChannel(**_make_channel("SR", [5.0], []))
+        sr_data = BinnedData(
+            name="SR_data",
+            axes=[{"name": "x_SR", "min": 0.0, "max": 10.0, "nbins": 1}],
+            contents=[5.0],
+        )
+
+        ws = Workspace(
+            metadata=Metadata(hs3_version="0.3.0"),
+            distributions=Distributions([sr_channel, aux_channel]),
+            data=Data([sr_data]),
+            likelihoods=Likelihoods(
+                [
+                    Likelihood(
+                        name="L",
+                        distributions=[sr_channel],
+                        data=[sr_data],
+                        aux_distributions=[aux_channel],
+                    )
+                ]
+            ),
+            domains=Domains([ProductDomain(name="default")]),
+            parameter_points=ParameterPoints(
+                [
+                    ParameterSet(
+                        name="default",
+                        parameters=[
+                            ParameterPoint(name="alpha_aux", value=0.0),
+                            ParameterPoint(name="gamma_bin0", value=1.0),
+                            ParameterPoint(name="gamma_bin1", value=1.0),
+                        ],
+                    )
+                ]
+            ),
+        )
+
+        likelihood = next(iter(ws.likelihoods))
+        model = ws.model(likelihood, progress=False)
+
+        # AUX is retained because aux_distributions are pruning roots.
+        assert set(model.distributions) == {"SR", "AUX"}
+        assert "AUX" in model.log_distributions
+
+        # SR has no constraints, while AUX is auxiliary rather than primary.
+        # AUX's constraints belong to AUX's own log expression and must not be
+        # duplicated into the primary HFDC constraint pool used by log_prob.
+        assert model._hfdc_log_constraints == []  # pylint: disable=protected-access
+
     def test_inactive_bblite_channel_constraint_excluded_from_log_prob(self):
-        """A BB-lite channel excluded from the active likelihood must not
-        contribute its channel-level constraint (or its Poisson term) to
+        """A BB-lite channel outside the active likelihood is pruned and must not
+        contribute either its Poisson term or its channel-level constraint to
         ``log_prob``.
 
-        Mirrors
-        ``TestConstraintDeduplication.test_inactive_channel_constraints_excluded_from_log_prob``
-        for the channel-level BB-lite constraint: ``in_likelihood`` guards
-        both the ordinary per-modifier constraints and the BB-lite addition.
+        Likelihood-rooted model construction now builds only the active
+        dependency closure, so the inactive SR channel must not be built at all.
         """
         sr_channel = HistFactoryDistChannel(**self._lite_staterror_channel_dict())
         cr_channel = HistFactoryDistChannel(**_make_channel("CR", [5.0], []))
@@ -820,6 +894,10 @@ class TestBBLiteStaterrorModelBuild:
         )
         likelihood = next(iter(ws.likelihoods))
         model = ws.model(likelihood, progress=False)  # SR excluded from L
+
+        # Likelihood-rooted construction prunes the inactive SR branch.
+        assert set(model.distributions) == {"CR"}
+        assert "SR" not in model.log_distributions
 
         lp = model.log_prob
         inputs = {
@@ -1268,11 +1346,11 @@ class TestConstraintDeduplication:
         assert abs(val - expected) < 1e-6, f"got {val}, expected {expected}"
 
     def test_inactive_channel_constraints_excluded_from_log_prob(self):
-        """Constraints from HFDC channels not in the active likelihood must not
-        appear in log_prob even though all workspace distributions are built.
+        """An HFDC channel outside the active likelihood is pruned and must not
+        contribute its Poisson or constraint terms to ``log_prob``.
 
-        Regression: _build_distribution_node previously collected constraints
-        from ALL workspace distributions regardless of the active likelihood.
+        Regression: likelihood-rooted model construction must build only the
+        active dependency closure rather than all workspace distributions.
         """
         normsys_sr = {
             "name": "alpha_sr",
@@ -1323,6 +1401,11 @@ class TestConstraintDeduplication:
         )
         likelihood = next(iter(ws.likelihoods))
         model = ws.model(likelihood, progress=False)
+
+        # CR is not in the active likelihood and is pruned before expression build.
+        assert set(model.distributions) == {"SR"}
+        assert "CR" not in model.log_distributions
+
         lp = model.log_prob
         inputs = {
             v.name: v

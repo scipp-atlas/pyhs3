@@ -14,6 +14,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions: {}
+
 env:
   # Many color libraries just need this to be set to any value, but at least
   # one distinguishes color depth, where "3" -> "256-bit color".
@@ -23,11 +25,14 @@ jobs:
   dist:
     name: Distribution build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout the repository
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: hynek/build-and-inspect-python-package@2abe76da66d0a6a4a227101f9348ee855797cfa5 # v3.0.1
 
@@ -36,9 +41,9 @@ jobs:
     name: Publish to PyPI
     environment: pypi
     permissions:
-      id-token: write
-      attestations: write
-      contents: read
+      id-token: write # trusted publishing to PyPI
+      attestations: write # attest build provenance
+      contents: read # default minimal permission; no write access is used
     runs-on: ubuntu-latest
     if: github.event_name == 'release' && github.event.action == 'published'
 

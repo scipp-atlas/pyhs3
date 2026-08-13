@@ -77,6 +77,13 @@ repos:
     hooks:
       - id: shellcheck
 
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: 451b56af716f9f0d0c2b816503a3fd0cf8b036fa # frozen: v1.29.0
+    hooks:
+      - id: zizmor
+        files: "^\\.github"
+        args: [--persona=pedantic]
+
   - repo: local
     hooks:
       - id: disallow-caps

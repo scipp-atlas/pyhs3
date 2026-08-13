@@ -4,11 +4,13 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     groups:
-      actions:
+      github-actions:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
     labels:
       - "github-actions"
       - "dependencies"

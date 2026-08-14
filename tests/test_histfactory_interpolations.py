@@ -555,6 +555,38 @@ class TestInterpolationPyhfComparison:
                 f"Mismatch at alpha={alpha_val}: our={our_val}, expected={expected}"
             )
 
+    def test_code4_vs_pyhf(self):
+        """Test that interpolate_code4 matches pyhf.interpolators.code4."""
+
+        alpha_vals = [-2.0, -1.0, -0.5, -0.35, 0.0, 0.35, 0.5, 1.0, 2.0]
+        nom = 100.0
+        hi = 120.0
+        lo = 80.0
+
+        # pyhf format: [nsysts, nsamples, nvariations, nbins] where nvariations = [down, nominal, up]
+        histogramssets = [[[[lo], [nom], [hi]]]]
+
+        interpolator = pyhf.interpolators.code4(histogramssets, subscribe=False)
+
+        for alpha_val in alpha_vals:
+            # Our implementation
+            alpha = pt.constant(alpha_val)
+            nom_t = pt.constant(nom)
+            hi_t = pt.constant(hi)
+            lo_t = pt.constant(lo)
+
+            our_result = interpolate_code4(alpha, nom_t, hi_t, lo_t)
+            our_val = our_result.eval()
+
+            # pyhf implementation returns multiplicative factors
+            alphasets = pyhf.tensorlib.astensor([[alpha_val]])
+            pyhf_factors = interpolator(alphasets)
+            pyhf_result = nom * pyhf.tensorlib.tolist(pyhf_factors)[0][0][0][0]
+
+            assert our_val == pytest.approx(pyhf_result), (
+                f"Mismatch at alpha={alpha_val}: our={our_val}, pyhf={pyhf_result}"
+            )
+
     def test_mathematical_equivalence_code0(self):
         """Test that interpolate_code0 implements correct piecewise-linear behavior."""
         # Code0 should implement: nom + alpha * (hi - nom) for alpha >= 0

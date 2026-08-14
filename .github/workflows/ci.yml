@@ -11,6 +11,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions: {}
+
 env:
   # Many color libraries just need this to be set to any value, but at least
   # one distinguishes color depth, where "3" -> "256-bit color".
@@ -20,12 +22,15 @@ jobs:
   pre-commit:
     name: Format
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout the repository
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: prefix-dev/setup-pixi@v0.10.1
+      - uses: prefix-dev/setup-pixi@f00437f565399d418b0acc85936d12c1fb668347 # v0.10.1
         with:
           pixi-version: v0.70.2
           cache: true
@@ -43,12 +48,15 @@ jobs:
   build:
     name: Build package
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout the repository
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: prefix-dev/setup-pixi@v0.10.1
+      - uses: prefix-dev/setup-pixi@f00437f565399d418b0acc85936d12c1fb668347 # v0.10.1
         with:
           pixi-version: v0.70.2
           cache: true
@@ -66,6 +74,8 @@ jobs:
       matrix.runs-on }}
     runs-on: ${{ matrix.runs-on }}
     needs: [pre-commit]
+    permissions:
+      contents: read # checkout the repository
     strategy:
       fail-fast: false
       matrix:
@@ -91,11 +101,12 @@ jobs:
             pixi-environment: py314-jax
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: prefix-dev/setup-pixi@v0.10.1
+      - uses: prefix-dev/setup-pixi@f00437f565399d418b0acc85936d12c1fb668347 # v0.10.1
         with:
           pixi-version: v0.70.2
           cache: true
@@ -114,17 +125,18 @@ jobs:
         if: matrix.variant == 'jax'
         env:
           JAX_PLATFORMS: "cpu" # for jax-related tests
+          PIXI_ENVIRONMENT: ${{ matrix.pixi-environment }}
         run: |
-          pixi run -e ${{ matrix.pixi-environment }} test-docs
-          pixi run -e ${{ matrix.pixi-environment }} test-docstrings
+          pixi run -e "$PIXI_ENVIRONMENT" test-docs
+          pixi run -e "$PIXI_ENVIRONMENT" test-docstrings
 
       - name: Upload coverage report
-        uses: codecov/codecov-action@v7.0.0
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
-        uses: codecov/test-results-action@v1
+        uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1.2.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

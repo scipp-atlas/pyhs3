@@ -11,6 +11,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions: {}
+
 jobs:
   optimize:
     name: Optimize new code in this PR
@@ -18,15 +20,19 @@ jobs:
       github.actor != 'codeflash-ai[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # codeflash pushes an optimization branch
+      pull-requests: write # codeflash opens a PR with the optimization
     env:
       CODEFLASH_API_KEY: ${{ secrets.CODEFLASH_API_KEY }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true # codeflash needs to push its optimization branch/PR
 
-      - uses: prefix-dev/setup-pixi@v0.10.1
+      - uses: prefix-dev/setup-pixi@f00437f565399d418b0acc85936d12c1fb668347 # v0.10.1
         with:
           pixi-version: v0.70.2
           cache: true

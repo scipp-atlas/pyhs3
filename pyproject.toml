@@ -106,6 +106,9 @@ scripts.test = "pytest {args}"
 scripts.doctest = "pytest --doctest-modules src/pyhs3 {args}"
 installer = "uv"
 
+[tool.uv]
+exclude-newer = "7 days"
+
 [tool.pytest]
 minversion = "9.0"
 addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config", "--doctest-glob=docs/*.rst"]

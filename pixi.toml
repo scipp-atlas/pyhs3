@@ -4,6 +4,7 @@ name = "pyhs3"
 channels = ["conda-forge"]
 platforms = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64", "win-64"]
 preview = ["pixi-build"]
+exclude-newer = "7d"
 
 [dependencies]
 pyhs3 = { path = "./" }

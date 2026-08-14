@@ -90,18 +90,15 @@ version.source = "vcs"
 build.hooks.vcs.version-file = "src/pyhs3/_version.py"
 
 [tool.hatch.build.targets.sdist]
-core-metadata-version = "2.4"
-
 # hatchling always includes:
 # pyproject.toml, .gitignore, any README, any LICENSE, AUTHORS
 only-include = [
     "/src",
     "/CITATION.cff"
 ]
-exclude = []
+exclude = [ ]
 
-[tool.hatch.build.targets.wheel]
-core-metadata-version = "2.4"
+
 
 [tool.hatch.envs.default]
 features = ["test"]

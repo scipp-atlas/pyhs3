@@ -646,6 +646,71 @@ class TestInterpolationPyhfComparison:
                 f"inside={inside_val}, boundary={boundary_val}"
             )
 
+    def test_code4p_vs_pyhf(self):
+        """Test that interpolate_code4p matches pyhf.interpolators.code4p."""
+
+        alpha_vals = [-2.0, -1.0, -0.5, -0.35, 0.0, 0.35, 0.5, 1.0, 2.0]
+        nom = 100.0
+        hi = 120.0
+        lo = 80.0
+
+        # pyhf format: [nsysts, nsamples, nvariations, nbins] where nvariations = [down, nominal, up]
+        histogramssets = [[[[lo], [nom], [hi]]]]
+
+        interpolator = pyhf.interpolators.code4p(histogramssets, subscribe=False)
+
+        for alpha_val in alpha_vals:
+            # Our implementation
+            alpha = pt.constant(alpha_val)
+            nom_t = pt.constant(nom)
+            hi_t = pt.constant(hi)
+            lo_t = pt.constant(lo)
+
+            our_result = interpolate_code4p(alpha, nom_t, hi_t, lo_t)
+            our_val = our_result.eval()
+
+            # pyhf implementation returns additive deltas
+            alphasets = pyhf.tensorlib.astensor([[alpha_val]])
+            pyhf_deltas = interpolator(alphasets)
+            pyhf_result = nom + pyhf.tensorlib.tolist(pyhf_deltas)[0][0][0][0]
+
+            assert our_val == pytest.approx(pyhf_result), (
+                f"Mismatch at alpha={alpha_val}: our={our_val}, pyhf={pyhf_result}"
+            )
+
+    def test_code4p_nondefault_alpha0_boundary_continuity(self):
+        """Test that interpolate_code4p honors a non-default alpha0.
+
+        pyhf's code4p accepts no alpha0, so the linear extrapolation branches
+        themselves are the reference: values immediately inside the polynomial
+        region must match the linear branch value at alpha=+-alpha0.
+        Regression for polynomial coefficients hardcoded to alpha0=1.
+        """
+
+        alpha0 = 2.0
+        nom = 100.0
+        hi = 120.0
+        lo = 80.0
+
+        nom_t = pt.constant(nom)
+        hi_t = pt.constant(hi)
+        lo_t = pt.constant(lo)
+
+        eps = 1e-6
+        boundary_cases = (
+            (alpha0, nom + alpha0 * (hi - nom)),
+            (-alpha0, nom - (-alpha0) * (lo - nom)),
+        )
+        for boundary, boundary_val in boundary_cases:
+            inside_alpha = boundary - math.copysign(eps, boundary)
+            inside_val = interpolate_code4p(
+                pt.constant(inside_alpha), nom_t, hi_t, lo_t, alpha0=alpha0
+            ).eval()
+            assert inside_val == pytest.approx(boundary_val, rel=1e-4), (
+                f"Discontinuity at alpha={boundary}: "
+                f"inside={inside_val}, boundary={boundary_val}"
+            )
+
     def test_mathematical_equivalence_code0(self):
         """Test that interpolate_code0 implements correct piecewise-linear behavior."""
         # Code0 should implement: nom + alpha * (hi - nom) for alpha >= 0

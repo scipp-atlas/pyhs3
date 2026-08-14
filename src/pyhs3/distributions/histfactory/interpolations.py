@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import cast
 
 import numpy as np
+import numpy.typing as npt
 import pytensor.tensor as pt
 
 # Import existing distributions for constraint terms
@@ -27,6 +28,30 @@ _CODE4_A_INV = np.asarray(
         [1.0 / 2, 1.0 / 2, -5.0 / 16, 5.0 / 16, 1.0 / 16, 1.0 / 16],
     ]
 )
+
+
+def _code4_coefficient_matrix(alpha0: float) -> npt.NDArray[np.float64]:
+    """Inverse boundary-condition matrix for the code4/code4p polynomials.
+
+    Maps the RHS vector [f(+a0), f(-a0), f'(+a0), f'(-a0), f''(+a0), f''(-a0)]
+    (values relative to the nominal) to the polynomial coefficients a_1..a_6 of
+    ``sum(a_i * alpha**i)``.
+
+    ``_CODE4_A_INV`` inverts the system for alpha0=1.  For general alpha0,
+    substitute u = alpha/alpha0: the first-derivative RHS rows pick up a factor
+    alpha0 and the second-derivative rows alpha0**2, while the resulting
+    u-space coefficients scale back by alpha0**-i to give the alpha-space
+    coefficients.  Both scalings are folded into the constant (6, 6) matrix
+    here, in numpy, since alpha0 is a compile-time float.
+    """
+    if alpha0 == 1.0:
+        return _CODE4_A_INV
+    rhs_scale = np.array([1.0, 1.0, alpha0, alpha0, alpha0**2, alpha0**2])
+    coeff_scale = alpha0 ** -np.arange(1.0, 7.0)
+    return cast(
+        "npt.NDArray[np.float64]",
+        coeff_scale[:, None] * _CODE4_A_INV * rhs_scale[None, :],
+    )
 
 
 class InterpolationError(HS3Exception):
@@ -200,21 +225,9 @@ def interpolate_code4(
         ]
     )
 
-    # _CODE4_A_INV inverts the boundary-condition system for alpha0=1.  For
-    # general alpha0, substitute u = alpha/alpha0: the first-derivative rows of
-    # the RHS pick up a factor alpha0 and the second-derivative rows alpha0**2,
-    # while the resulting u-space coefficients scale back by alpha0**-i to give
-    # the alpha-space coefficients.  Both scalings are folded into the constant
-    # (6, 6) matrix here, in numpy, since alpha0 is a compile-time float.
-    a_inv = _CODE4_A_INV
-    if alpha0 != 1.0:
-        rhs_scale = np.array([1.0, 1.0, alpha0, alpha0, alpha0**2, alpha0**2])
-        coeff_scale = alpha0 ** -np.arange(1.0, 7.0)
-        a_inv = coeff_scale[:, None] * _CODE4_A_INV * rhs_scale[None, :]
-
     # Compute all polynomial coefficients in one tensor operation. Matching the
     # matrix dtype to b preserves float32 inputs instead of forcing float64.
-    coefficient_matrix = pt.constant(a_inv, dtype=b.dtype)
+    coefficient_matrix = pt.constant(_code4_coefficient_matrix(alpha0), dtype=b.dtype)
     coeffs = pt.tensordot(coefficient_matrix, b, axes=[[1], [0]])
 
     # Evaluate a1*alpha + ... + a6*alpha**6 as one tensor contraction. Pad
@@ -363,14 +376,7 @@ def interpolate_code4p(
 
     # For |alpha| < alpha0, use polynomial (similar to code4 but additive)
     # Calculate polynomial coefficients for boundary matching
-    A_inv = [
-        [15.0 / 16, -15.0 / 16, -7.0 / 16, -7.0 / 16, 1.0 / 16, -1.0 / 16],
-        [3.0 / 2, 3.0 / 2, -9.0 / 16, 9.0 / 16, 1.0 / 16, 1.0 / 16],
-        [-5.0 / 8, 5.0 / 8, 5.0 / 8, 5.0 / 8, -1.0 / 8, 1.0 / 8],
-        [-3.0 / 2, -3.0 / 2, 7.0 / 8, -7.0 / 8, -1.0 / 8, -1.0 / 8],
-        [3.0 / 16, -3.0 / 16, -3.0 / 16, -3.0 / 16, 1.0 / 16, -1.0 / 16],
-        [1.0 / 2, 1.0 / 2, -5.0 / 16, 5.0 / 16, 1.0 / 16, 1.0 / 16],
-    ]
+    A_inv = _code4_coefficient_matrix(alpha0)
 
     # Boundary values at alpha0 (additive form)
     hi_at_alpha0 = alpha0 * hi_delta

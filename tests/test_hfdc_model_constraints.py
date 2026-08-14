@@ -844,6 +844,55 @@ class TestBBLiteStaterrorModelBuild:
         # duplicated into the primary HFDC constraint pool used by log_prob.
         assert model._hfdc_log_constraints == []  # pylint: disable=protected-access
 
+        # Evaluate AUX's log expression at non-nominal parameter values and
+        # isolate the constraint contribution by subtracting the Poisson-only
+        # term.  The ordinary Gauss constraint (normsys alpha_aux) and the
+        # BB-lite channel constraint must each contribute exactly once: a
+        # duplicated or dropped constraint would shift the difference by a
+        # nonzero amount at these values.
+        aux_log = model.log_distributions["AUX"]
+        aux_poisson = model._hfdc_log_poisson["AUX"]  # pylint: disable=protected-access
+        inputs = {
+            v.name: v
+            for v in pytensor.graph.traversal.explicit_graph_inputs(
+                [aux_log, aux_poisson]
+            )
+            if v.name
+        }
+        assert set(inputs) == {
+            "AUX_observed",
+            "alpha_aux",
+            "gamma_bin0",
+            "gamma_bin1",
+        }
+        fn = pytensor.function(list(inputs.values()), [aux_log, aux_poisson])
+        full_val, poisson_val = (
+            float(np.asarray(v))
+            for v in fn(
+                alpha_aux=0.5,
+                gamma_bin0=1.2,
+                gamma_bin1=0.8,
+                AUX_observed=np.array([30.0, 50.0]),
+            )
+        )
+
+        def norm_logpdf(x: float, mean: float, sigma: float) -> float:
+            return (
+                -0.5 * ((x - mean) / sigma) ** 2
+                - math.log(sigma)
+                - 0.5 * math.log(2 * math.pi)
+            )
+
+        # normsys: N(0 | alpha_aux, 1).  BB-lite (Gauss): per-bin
+        # N(1 | gamma_i, sigma_i / nu_i) with combined nu = [30, 50] and
+        # sigma = [5, sqrt(41)] from the two samples' errors.
+        expected_constraints = (
+            norm_logpdf(0.0, 0.5, 1.0)
+            + norm_logpdf(1.0, 1.2, 5.0 / 30.0)
+            + norm_logpdf(1.0, 0.8, math.sqrt(41.0) / 50.0)
+        )
+        np.testing.assert_allclose(full_val - poisson_val, expected_constraints)
+
     def test_inactive_bblite_channel_constraint_excluded_from_log_prob(self):
         """A BB-lite channel outside the active likelihood is pruned and must not
         contribute either its Poisson term or its channel-level constraint to

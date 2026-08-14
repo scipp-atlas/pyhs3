@@ -200,9 +200,21 @@ def interpolate_code4(
         ]
     )
 
+    # _CODE4_A_INV inverts the boundary-condition system for alpha0=1.  For
+    # general alpha0, substitute u = alpha/alpha0: the first-derivative rows of
+    # the RHS pick up a factor alpha0 and the second-derivative rows alpha0**2,
+    # while the resulting u-space coefficients scale back by alpha0**-i to give
+    # the alpha-space coefficients.  Both scalings are folded into the constant
+    # (6, 6) matrix here, in numpy, since alpha0 is a compile-time float.
+    a_inv = _CODE4_A_INV
+    if alpha0 != 1.0:
+        rhs_scale = np.array([1.0, 1.0, alpha0, alpha0, alpha0**2, alpha0**2])
+        coeff_scale = alpha0 ** -np.arange(1.0, 7.0)
+        a_inv = coeff_scale[:, None] * _CODE4_A_INV * rhs_scale[None, :]
+
     # Compute all polynomial coefficients in one tensor operation. Matching the
     # matrix dtype to b preserves float32 inputs instead of forcing float64.
-    coefficient_matrix = pt.constant(_CODE4_A_INV, dtype=b.dtype)
+    coefficient_matrix = pt.constant(a_inv, dtype=b.dtype)
     coeffs = pt.tensordot(coefficient_matrix, b, axes=[[1], [0]])
 
     # Evaluate a1*alpha + ... + a6*alpha**6 as one tensor contraction. Pad

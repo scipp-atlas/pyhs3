@@ -7,6 +7,8 @@ and comparison with pyhf implementations.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pyhf.interpolators
 import pytensor.tensor as pt
@@ -585,6 +587,63 @@ class TestInterpolationPyhfComparison:
 
             assert our_val == pytest.approx(pyhf_result), (
                 f"Mismatch at alpha={alpha_val}: our={our_val}, pyhf={pyhf_result}"
+            )
+
+    def test_code4_nondefault_alpha0_vs_pyhf(self):
+        """Test that interpolate_code4 honors a non-default alpha0.
+
+        Regression: the polynomial coefficient matrix was hardcoded for
+        alpha0=1, so alpha0=2.0 produced a polynomial discontinuous with the
+        exponential branches at alpha=+-2.  Pin against pyhf (whose code4
+        builds its inversion matrix from alpha0) across interior, boundary,
+        and extrapolation values, and check continuity explicitly just inside
+        both boundaries.
+        """
+
+        alpha0 = 2.0
+        alpha_vals = [-2.5, -2.0, -1.5, -0.5, 0.0, 0.5, 1.5, 2.0, 2.5]
+        nom = 100.0
+        hi = 120.0
+        lo = 80.0
+
+        # pyhf format: [nsysts, nsamples, nvariations, nbins] where nvariations = [down, nominal, up]
+        histogramssets = [[[[lo], [nom], [hi]]]]
+
+        interpolator = pyhf.interpolators.code4(
+            histogramssets, subscribe=False, alpha0=alpha0
+        )
+
+        nom_t = pt.constant(nom)
+        hi_t = pt.constant(hi)
+        lo_t = pt.constant(lo)
+
+        for alpha_val in alpha_vals:
+            our_result = interpolate_code4(
+                pt.constant(alpha_val), nom_t, hi_t, lo_t, alpha0=alpha0
+            )
+            our_val = our_result.eval()
+
+            # pyhf implementation returns multiplicative factors
+            alphasets = pyhf.tensorlib.astensor([[alpha_val]])
+            pyhf_factors = interpolator(alphasets)
+            pyhf_result = nom * pyhf.tensorlib.tolist(pyhf_factors)[0][0][0][0]
+
+            assert our_val == pytest.approx(pyhf_result), (
+                f"Mismatch at alpha={alpha_val}: our={our_val}, pyhf={pyhf_result}"
+            )
+
+        # Continuity at +-alpha0: values immediately inside the polynomial
+        # region must match the exponential branch value at the boundary.
+        eps = 1e-6
+        for boundary, ratio in ((alpha0, hi / nom), (-alpha0, lo / nom)):
+            inside_alpha = boundary - math.copysign(eps, boundary)
+            inside_val = interpolate_code4(
+                pt.constant(inside_alpha), nom_t, hi_t, lo_t, alpha0=alpha0
+            ).eval()
+            boundary_val = nom * ratio**alpha0
+            assert inside_val == pytest.approx(boundary_val, rel=1e-4), (
+                f"Discontinuity at alpha={boundary}: "
+                f"inside={inside_val}, boundary={boundary_val}"
             )
 
     def test_mathematical_equivalence_code0(self):

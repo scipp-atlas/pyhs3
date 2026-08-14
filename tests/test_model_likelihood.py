@@ -154,6 +154,48 @@ def test_model_legacy_int_still_works():
     ws = _ws()
     model = ws.model(0)
     assert isinstance(model, Model)
+    assert set(model.distributions) == {"gauss1", "gauss2"}
+
+
+def test_likelihood_model_prunes_unrelated_distribution_branch():
+    """Likelihood models build only roots and their dependency closure."""
+    ws = Workspace(
+        **{
+            **_WS_DICT,
+            "likelihoods": [
+                {"name": "L", "distributions": ["gauss1"], "data": ["data1"]}
+            ],
+        }
+    )
+
+    model = ws.model(ws.analyses["A"], progress=False)
+
+    assert set(model.distributions) == {"gauss1"}
+    assert "x_obs" in model.parameters
+    assert "y_obs" not in model.parameters
+
+
+def test_likelihood_model_retains_aux_distribution_branch():
+    """Auxiliary distributions are roots of the retained graph."""
+    ws = Workspace(
+        **{
+            **_WS_DICT,
+            "likelihoods": [
+                {
+                    "name": "L",
+                    "distributions": ["gauss1"],
+                    "data": ["data1"],
+                    "aux_distributions": ["gauss2"],
+                }
+            ],
+        }
+    )
+
+    model = ws.model(ws.analyses["A"], progress=False)
+
+    assert set(model.distributions) == {"gauss1", "gauss2"}
+    assert "x_obs" in model.parameters
+    assert "y_obs" in model.parameters
 
 
 def test_model_from_analysis_no_init_uses_empty_parameterset():

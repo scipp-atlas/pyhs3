@@ -531,8 +531,9 @@ class Model:
         self._hfdc_log_poisson[node_name] = log_poisson
 
         # Whether this channel participates in the active likelihood; only then
-        # do its constraints feed the joint log_prob.  All channels still build
-        # their full expression so logpdf() works for any channel.
+        # do its constraints feed the joint log_prob. Legacy models build all
+        # channels, while likelihood-rooted models build only the active
+        # dependency closure selected in _build_dependency_graph.
         in_likelihood = self._likelihood is None or any(
             (d if isinstance(d, str) else d.name) == node_name
             for d in self._likelihood.distributions
@@ -614,6 +615,28 @@ class Model:
         )
 
         sorted_nodes = graph.topological_sort()
+
+        # A likelihood-rooted model only needs the distributions that
+        # participate in that likelihood and their transitive dependencies.
+        # The complete structural graph is still built first so dependency
+        # resolution and cycle detection retain their existing behavior.
+        # Legacy models without a likelihood continue to build every node.
+        if self._likelihood is not None:
+            likelihood_roots = [
+                dist if isinstance(dist, str) else dist.name
+                for dist in self._likelihood.distributions
+            ]
+            likelihood_roots.extend(
+                dist if isinstance(dist, str) else dist.name
+                for dist in (self._likelihood.aux_distributions or [])
+            )
+            # Workspace construction resolves and validates all likelihood
+            # references. Direct Model construction may intentionally leave
+            # string references unresolved, however; preserve its historical
+            # behavior by pruning from roots that actually exist in the graph.
+            resolved_roots = [name for name in likelihood_roots if name in graph]
+            active_nodes = graph.ancestor_closure(resolved_roots)
+            sorted_nodes = [idx for idx in sorted_nodes if idx in active_nodes]
 
         with Progress(
             SpinnerColumn(),

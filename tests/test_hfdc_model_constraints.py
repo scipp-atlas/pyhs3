@@ -369,6 +369,29 @@ class TestTryBakeHFDCObserved:
         assert result is not None
         np.testing.assert_array_equal(result.data, [10.0, 20.0])
 
+    def test_nonmatching_binned_distribution_returns_none(self):
+        """Binned data from another distribution is not baked into the parameter."""
+        ws = _simple_workspace(
+            channels=[_make_channel("SR", [10.0, 20.0], [])],
+            params=[],
+        )
+        model = ws.model(next(iter(ws.likelihoods)), progress=False)
+
+        sr_channel = next(iter(ws.distributions))
+        binned = BinnedData(
+            name="SR_data",
+            axes=[{"name": "x_SR", "min": 0.0, "max": 10.0, "nbins": 2}],
+            contents=[10.0, 20.0],
+        )
+        model._likelihood = types.SimpleNamespace(
+            distributions=[sr_channel],
+            data=[binned],
+        )
+
+        result = model._try_bake_hfdc_observed("other_observed")
+
+        assert result is None
+
 
 # ---------------------------------------------------------------------------
 # Integration tests: log_prob includes HFDC Poisson term
@@ -747,15 +770,136 @@ class TestBBLiteStaterrorModelBuild:
         val = float(fn(**model.data, **model.nominal_params).item())
         assert math.isfinite(val)
 
+    def test_aux_hfdc_constraints_stay_inside_aux_distribution(self):
+        """An auxiliary HFDC is built without duplicating its constraints.
+
+        Auxiliary distributions are roots of likelihood graph pruning, so AUX
+        remains in the likelihood-rooted graph.  It is not a primary likelihood
+        distribution, however, so its ordinary modifier constraint and its
+        BB-lite channel constraint must stay inside AUX's per-distribution log
+        expression instead of also entering the primary HFDC constraint pool.
+
+        This exercises the ``in_likelihood is False`` branches for both ordinary
+        HFDC constraints and the BB-lite channel-level constraint after pruning.
+        """
+        aux_dict = self._lite_staterror_channel_dict()
+        aux_dict["name"] = "AUX"
+        aux_dict["axes"] = [{"name": "x_AUX", "min": 0.0, "max": 10.0, "nbins": 2}]
+        aux_dict["samples"][0]["modifiers"].append(
+            {
+                "name": "alpha_aux",
+                "type": "normsys",
+                "parameter": "alpha_aux",
+                "constraint": "Gauss",
+                "data": {"hi": 1.1, "lo": 0.9},
+            }
+        )
+
+        aux_channel = HistFactoryDistChannel(**aux_dict)
+        sr_channel = HistFactoryDistChannel(**_make_channel("SR", [5.0], []))
+        sr_data = BinnedData(
+            name="SR_data",
+            axes=[{"name": "x_SR", "min": 0.0, "max": 10.0, "nbins": 1}],
+            contents=[5.0],
+        )
+
+        ws = Workspace(
+            metadata=Metadata(hs3_version="0.3.0"),
+            distributions=Distributions([sr_channel, aux_channel]),
+            data=Data([sr_data]),
+            likelihoods=Likelihoods(
+                [
+                    Likelihood(
+                        name="L",
+                        distributions=[sr_channel],
+                        data=[sr_data],
+                        aux_distributions=[aux_channel],
+                    )
+                ]
+            ),
+            domains=Domains([ProductDomain(name="default")]),
+            parameter_points=ParameterPoints(
+                [
+                    ParameterSet(
+                        name="default",
+                        parameters=[
+                            ParameterPoint(name="alpha_aux", value=0.0),
+                            ParameterPoint(name="gamma_bin0", value=1.0),
+                            ParameterPoint(name="gamma_bin1", value=1.0),
+                        ],
+                    )
+                ]
+            ),
+        )
+
+        likelihood = next(iter(ws.likelihoods))
+        model = ws.model(likelihood, progress=False)
+
+        # AUX is retained because aux_distributions are pruning roots.
+        assert set(model.distributions) == {"SR", "AUX"}
+        assert "AUX" in model.log_distributions
+
+        # SR has no constraints, while AUX is auxiliary rather than primary.
+        # AUX's constraints belong to AUX's own log expression and must not be
+        # duplicated into the primary HFDC constraint pool used by log_prob.
+        assert model._hfdc_log_constraints == []  # pylint: disable=protected-access
+
+        # Evaluate AUX's log expression at non-nominal parameter values and
+        # isolate the constraint contribution by subtracting the Poisson-only
+        # term.  The ordinary Gauss constraint (normsys alpha_aux) and the
+        # BB-lite channel constraint must each contribute exactly once: a
+        # duplicated or dropped constraint would shift the difference by a
+        # nonzero amount at these values.
+        aux_log = model.log_distributions["AUX"]
+        aux_poisson = model._hfdc_log_poisson["AUX"]  # pylint: disable=protected-access
+        inputs = {
+            v.name: v
+            for v in pytensor.graph.traversal.explicit_graph_inputs(
+                [aux_log, aux_poisson]
+            )
+            if v.name
+        }
+        assert set(inputs) == {
+            "AUX_observed",
+            "alpha_aux",
+            "gamma_bin0",
+            "gamma_bin1",
+        }
+        fn = pytensor.function(list(inputs.values()), [aux_log, aux_poisson])
+        full_val, poisson_val = (
+            float(np.asarray(v))
+            for v in fn(
+                alpha_aux=0.5,
+                gamma_bin0=1.2,
+                gamma_bin1=0.8,
+                AUX_observed=np.array([30.0, 50.0]),
+            )
+        )
+
+        def norm_logpdf(x: float, mean: float, sigma: float) -> float:
+            return (
+                -0.5 * ((x - mean) / sigma) ** 2
+                - math.log(sigma)
+                - 0.5 * math.log(2 * math.pi)
+            )
+
+        # normsys: N(0 | alpha_aux, 1).  BB-lite (Gauss): per-bin
+        # N(1 | gamma_i, sigma_i / nu_i) with combined nu = [30, 50] and
+        # sigma = [5, sqrt(41)] from the two samples' errors.
+        expected_constraints = (
+            norm_logpdf(0.0, 0.5, 1.0)
+            + norm_logpdf(1.0, 1.2, 5.0 / 30.0)
+            + norm_logpdf(1.0, 0.8, math.sqrt(41.0) / 50.0)
+        )
+        np.testing.assert_allclose(full_val - poisson_val, expected_constraints)
+
     def test_inactive_bblite_channel_constraint_excluded_from_log_prob(self):
-        """A BB-lite channel excluded from the active likelihood must not
-        contribute its channel-level constraint (or its Poisson term) to
+        """A BB-lite channel outside the active likelihood is pruned and must not
+        contribute either its Poisson term or its channel-level constraint to
         ``log_prob``.
 
-        Mirrors
-        ``TestConstraintDeduplication.test_inactive_channel_constraints_excluded_from_log_prob``
-        for the channel-level BB-lite constraint: ``in_likelihood`` guards
-        both the ordinary per-modifier constraints and the BB-lite addition.
+        Likelihood-rooted model construction now builds only the active
+        dependency closure, so the inactive SR channel must not be built at all.
         """
         sr_channel = HistFactoryDistChannel(**self._lite_staterror_channel_dict())
         cr_channel = HistFactoryDistChannel(**_make_channel("CR", [5.0], []))
@@ -797,6 +941,10 @@ class TestBBLiteStaterrorModelBuild:
         )
         likelihood = next(iter(ws.likelihoods))
         model = ws.model(likelihood, progress=False)  # SR excluded from L
+
+        # Likelihood-rooted construction prunes the inactive SR branch.
+        assert set(model.distributions) == {"CR"}
+        assert "SR" not in model.log_distributions
 
         lp = model.log_prob
         inputs = {
@@ -1245,11 +1393,11 @@ class TestConstraintDeduplication:
         assert abs(val - expected) < 1e-6, f"got {val}, expected {expected}"
 
     def test_inactive_channel_constraints_excluded_from_log_prob(self):
-        """Constraints from HFDC channels not in the active likelihood must not
-        appear in log_prob even though all workspace distributions are built.
+        """An HFDC channel outside the active likelihood is pruned and must not
+        contribute its Poisson or constraint terms to ``log_prob``.
 
-        Regression: _build_distribution_node previously collected constraints
-        from ALL workspace distributions regardless of the active likelihood.
+        Regression: likelihood-rooted model construction must build only the
+        active dependency closure rather than all workspace distributions.
         """
         normsys_sr = {
             "name": "alpha_sr",
@@ -1300,6 +1448,11 @@ class TestConstraintDeduplication:
         )
         likelihood = next(iter(ws.likelihoods))
         model = ws.model(likelihood, progress=False)
+
+        # CR is not in the active likelihood and is pruned before expression build.
+        assert set(model.distributions) == {"SR"}
+        assert "CR" not in model.log_distributions
+
         lp = model.log_prob
         inputs = {
             v.name: v

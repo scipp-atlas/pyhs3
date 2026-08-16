@@ -233,10 +233,12 @@ def interpolate_code4(
     # Evaluate a1*alpha + ... + a6*alpha**6 as one tensor contraction. Pad
     # immediately after the coefficient axis so alpha and coefficient batch
     # dimensions retain standard right-aligned broadcasting semantics.
-    alpha_powers = [alpha]
-    for _ in range(5):
-        alpha_powers.append(alpha_powers[-1] * alpha)
-    alpha_powers_tensor = pt.stack(alpha_powers)
+    exponents = pt.arange(1, 7, dtype=alpha.dtype)  # type: ignore[no-untyped-call]
+    exponent_pattern = (0,) + ("x",) * alpha.ndim
+    alpha_powers_tensor = pt.power(  # type: ignore[no-untyped-call]
+        alpha,
+        exponents.dimshuffle(exponent_pattern),
+    )
 
     target_ndim = max(coeffs.ndim, alpha_powers_tensor.ndim)
     if coeffs.ndim < target_ndim:

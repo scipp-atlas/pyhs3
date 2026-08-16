@@ -17,6 +17,8 @@ from pytensor import function
 
 from pyhs3.distributions.histfactory.interpolations import (
     InterpolationError,
+    _code4_coefficient_tensor,
+    _code4_exponent_tensor,
     apply_interpolation,
     interpolate_code0,
     interpolate_code1,
@@ -29,6 +31,37 @@ from pyhs3.distributions.histfactory.interpolations import (
     interpolate_parabolic,
     interpolate_poly6,
 )
+
+
+class TestCode4ConstantCaching:
+    """Tests for shared immutable code4 graph constants."""
+
+    def test_cache_reuses_matching_tensor_configurations(self):
+        """Equivalent code4 calls reuse coefficient and exponent tensors."""
+        _code4_coefficient_tensor.cache_clear()
+        _code4_exponent_tensor.cache_clear()
+
+        matrix = _code4_coefficient_tensor(1.0, "float64")
+        exponents = _code4_exponent_tensor("float64", 0)
+
+        assert _code4_coefficient_tensor(1.0, "float64") is matrix
+        assert _code4_exponent_tensor("float64", 0) is exponents
+
+    def test_cache_separates_dtype_alpha0_and_ndim(self):
+        """Configuration changes must produce distinct cached tensors."""
+        _code4_coefficient_tensor.cache_clear()
+        _code4_exponent_tensor.cache_clear()
+
+        matrix = _code4_coefficient_tensor(1.0, "float64")
+        exponents = _code4_exponent_tensor("float64", 0)
+
+        assert _code4_coefficient_tensor(1.0, "float32") is not matrix
+        assert _code4_coefficient_tensor(2.0, "float64") is not matrix
+        assert _code4_exponent_tensor("float32", 0) is not exponents
+        assert _code4_exponent_tensor("float64", 1) is not exponents
+
+        assert exponents.type.shape == (6,)
+        assert _code4_exponent_tensor("float64", 1).type.shape == (6, 1)
 
 
 class TestInterpolationFunctions:

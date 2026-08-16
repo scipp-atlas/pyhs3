@@ -10,11 +10,48 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import cast
 
+import numpy as np
+import numpy.typing as npt
 import pytensor.tensor as pt
 
 # Import existing distributions for constraint terms
 from pyhs3.exceptions import HS3Exception
 from pyhs3.typing.aliases import TensorVar
+
+_CODE4_A_INV = np.asarray(
+    [
+        [15.0 / 16, -15.0 / 16, -7.0 / 16, -7.0 / 16, 1.0 / 16, -1.0 / 16],
+        [3.0 / 2, 3.0 / 2, -9.0 / 16, 9.0 / 16, 1.0 / 16, 1.0 / 16],
+        [-5.0 / 8, 5.0 / 8, 5.0 / 8, 5.0 / 8, -1.0 / 8, 1.0 / 8],
+        [-3.0 / 2, -3.0 / 2, 7.0 / 8, -7.0 / 8, -1.0 / 8, -1.0 / 8],
+        [3.0 / 16, -3.0 / 16, -3.0 / 16, -3.0 / 16, 1.0 / 16, -1.0 / 16],
+        [1.0 / 2, 1.0 / 2, -5.0 / 16, 5.0 / 16, 1.0 / 16, 1.0 / 16],
+    ]
+)
+
+
+def _code4_coefficient_matrix(alpha0: float) -> npt.NDArray[np.float64]:
+    """Inverse boundary-condition matrix for the code4/code4p polynomials.
+
+    Maps the RHS vector [f(+a0), f(-a0), f'(+a0), f'(-a0), f''(+a0), f''(-a0)]
+    (values relative to the nominal) to the polynomial coefficients a_1..a_6 of
+    ``sum(a_i * alpha**i)``.
+
+    ``_CODE4_A_INV`` inverts the system for alpha0=1.  For general alpha0,
+    substitute u = alpha/alpha0: the first-derivative RHS rows pick up a factor
+    alpha0 and the second-derivative rows alpha0**2, while the resulting
+    u-space coefficients scale back by alpha0**-i to give the alpha-space
+    coefficients.  Both scalings are folded into the constant (6, 6) matrix
+    here, in numpy, since alpha0 is a compile-time float.
+    """
+    if alpha0 == 1.0:
+        return _CODE4_A_INV
+    rhs_scale = np.array([1.0, 1.0, alpha0, alpha0, alpha0**2, alpha0**2])
+    coeff_scale = alpha0 ** -np.arange(1.0, 7.0)
+    return cast(
+        "npt.NDArray[np.float64]",
+        coeff_scale[:, None] * _CODE4_A_INV * rhs_scale[None, :],
+    )
 
 
 class InterpolationError(HS3Exception):
@@ -172,40 +209,52 @@ def interpolate_code4(
     hi_ratio = hi / nom
     lo_ratio = lo / nom
 
-    # Polynomial coefficients for code4 (alpha0=1)
-    # These come from the pyhf implementation
-    A_inv = [
-        [15.0 / 16, -15.0 / 16, -7.0 / 16, -7.0 / 16, 1.0 / 16, -1.0 / 16],
-        [3.0 / 2, 3.0 / 2, -9.0 / 16, 9.0 / 16, 1.0 / 16, 1.0 / 16],
-        [-5.0 / 8, 5.0 / 8, 5.0 / 8, 5.0 / 8, -1.0 / 8, 1.0 / 8],
-        [-3.0 / 2, -3.0 / 2, 7.0 / 8, -7.0 / 8, -1.0 / 8, -1.0 / 8],
-        [3.0 / 16, -3.0 / 16, -3.0 / 16, -3.0 / 16, 1.0 / 16, -1.0 / 16],
-        [1.0 / 2, 1.0 / 2, -5.0 / 16, 5.0 / 16, 1.0 / 16, 1.0 / 16],
-    ]
-
     # Boundary values at alpha0
     hi_at_alpha0 = pt.power(hi_ratio, alpha0)  # type: ignore[no-untyped-call]
     lo_at_alpha0 = pt.power(lo_ratio, alpha0)  # type: ignore[no-untyped-call]
 
     # RHS vector b
-    b = [
-        hi_at_alpha0 - 1.0,
-        lo_at_alpha0 - 1.0,
-        pt.log(hi_ratio) * hi_at_alpha0,
-        -pt.log(lo_ratio) * lo_at_alpha0,
-        pt.power(pt.log(hi_ratio), 2) * hi_at_alpha0,  # type: ignore[no-untyped-call]
-        pt.power(pt.log(lo_ratio), 2) * lo_at_alpha0,  # type: ignore[no-untyped-call]
-    ]
+    b = pt.stack(
+        [
+            hi_at_alpha0 - 1.0,
+            lo_at_alpha0 - 1.0,
+            pt.log(hi_ratio) * hi_at_alpha0,
+            -pt.log(lo_ratio) * lo_at_alpha0,
+            pt.power(pt.log(hi_ratio), 2) * hi_at_alpha0,  # type: ignore[no-untyped-call]
+            pt.power(pt.log(lo_ratio), 2) * lo_at_alpha0,  # type: ignore[no-untyped-call]
+        ]
+    )
 
-    # Calculate polynomial coefficients a_i = A^(-1) * b
-    coeffs = []
-    for i in range(6):
-        coeff = sum(A_inv[i][j] * b[j] for j in range(6))
-        coeffs.append(coeff)
+    # Compute all polynomial coefficients in one tensor operation. Matching the
+    # matrix dtype to b preserves float32 inputs instead of forcing float64.
+    coefficient_matrix = pt.constant(_code4_coefficient_matrix(alpha0), dtype=b.dtype)
+    coeffs = pt.tensordot(coefficient_matrix, b, axes=[[1], [0]])
 
-    # Polynomial evaluation: 1 + sum(a_i * alpha^i for i=1..6)
-    alpha_powers = [alpha, alpha**2, alpha**3, alpha**4, alpha**5, alpha**6]
-    poly_sum = sum(coeffs[i] * alpha_powers[i] for i in range(6))
+    # Evaluate a1*alpha + ... + a6*alpha**6 as one tensor contraction. Pad
+    # immediately after the coefficient axis so alpha and coefficient batch
+    # dimensions retain standard right-aligned broadcasting semantics.
+    exponents = pt.arange(1, 7, dtype=alpha.dtype)  # type: ignore[no-untyped-call]
+    exponent_pattern = (0,) + ("x",) * alpha.ndim
+    alpha_powers_tensor = pt.power(  # type: ignore[no-untyped-call]
+        alpha,
+        exponents.dimshuffle(exponent_pattern),
+    )
+
+    target_ndim = max(coeffs.ndim, alpha_powers_tensor.ndim)
+    if coeffs.ndim < target_ndim:
+        pattern = (
+            (0,) + ("x",) * (target_ndim - coeffs.ndim) + tuple(range(1, coeffs.ndim))
+        )
+        coeffs = coeffs.dimshuffle(pattern)  # type: ignore[no-untyped-call]
+    if alpha_powers_tensor.ndim < target_ndim:
+        pattern = (
+            (0,)
+            + ("x",) * (target_ndim - alpha_powers_tensor.ndim)
+            + tuple(range(1, alpha_powers_tensor.ndim))
+        )
+        alpha_powers_tensor = alpha_powers_tensor.dimshuffle(pattern)
+
+    poly_sum = pt.sum(coeffs * alpha_powers_tensor, axis=0)  # type: ignore[no-untyped-call]
     poly_result = nom * (1.0 + poly_sum)
 
     # Exponential extrapolation
@@ -329,14 +378,7 @@ def interpolate_code4p(
 
     # For |alpha| < alpha0, use polynomial (similar to code4 but additive)
     # Calculate polynomial coefficients for boundary matching
-    A_inv = [
-        [15.0 / 16, -15.0 / 16, -7.0 / 16, -7.0 / 16, 1.0 / 16, -1.0 / 16],
-        [3.0 / 2, 3.0 / 2, -9.0 / 16, 9.0 / 16, 1.0 / 16, 1.0 / 16],
-        [-5.0 / 8, 5.0 / 8, 5.0 / 8, 5.0 / 8, -1.0 / 8, 1.0 / 8],
-        [-3.0 / 2, -3.0 / 2, 7.0 / 8, -7.0 / 8, -1.0 / 8, -1.0 / 8],
-        [3.0 / 16, -3.0 / 16, -3.0 / 16, -3.0 / 16, 1.0 / 16, -1.0 / 16],
-        [1.0 / 2, 1.0 / 2, -5.0 / 16, 5.0 / 16, 1.0 / 16, 1.0 / 16],
-    ]
+    A_inv = _code4_coefficient_matrix(alpha0)
 
     # Boundary values at alpha0 (additive form)
     hi_at_alpha0 = alpha0 * hi_delta

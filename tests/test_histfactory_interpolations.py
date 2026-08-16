@@ -7,6 +7,8 @@ and comparison with pyhf implementations.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pyhf.interpolators
 import pytensor.tensor as pt
@@ -19,6 +21,7 @@ from pyhs3.distributions.histfactory.interpolations import (
     interpolate_code0,
     interpolate_code1,
     interpolate_code2,
+    interpolate_code4,
     interpolate_code4p,
     interpolate_exp,
     interpolate_lin,
@@ -554,6 +557,160 @@ class TestInterpolationPyhfComparison:
                 f"Mismatch at alpha={alpha_val}: our={our_val}, expected={expected}"
             )
 
+    def test_code4_vs_pyhf(self):
+        """Test that interpolate_code4 matches pyhf.interpolators.code4."""
+
+        alpha_vals = [-2.0, -1.0, -0.5, -0.35, 0.0, 0.35, 0.5, 1.0, 2.0]
+        nom = 100.0
+        hi = 120.0
+        lo = 80.0
+
+        # pyhf format: [nsysts, nsamples, nvariations, nbins] where nvariations = [down, nominal, up]
+        histogramssets = [[[[lo], [nom], [hi]]]]
+
+        interpolator = pyhf.interpolators.code4(histogramssets, subscribe=False)
+
+        for alpha_val in alpha_vals:
+            # Our implementation
+            alpha = pt.constant(alpha_val)
+            nom_t = pt.constant(nom)
+            hi_t = pt.constant(hi)
+            lo_t = pt.constant(lo)
+
+            our_result = interpolate_code4(alpha, nom_t, hi_t, lo_t)
+            our_val = our_result.eval()
+
+            # pyhf implementation returns multiplicative factors
+            alphasets = pyhf.tensorlib.astensor([[alpha_val]])
+            pyhf_factors = interpolator(alphasets)
+            pyhf_result = nom * pyhf.tensorlib.tolist(pyhf_factors)[0][0][0][0]
+
+            assert our_val == pytest.approx(pyhf_result), (
+                f"Mismatch at alpha={alpha_val}: our={our_val}, pyhf={pyhf_result}"
+            )
+
+    def test_code4_nondefault_alpha0_vs_pyhf(self):
+        """Test that interpolate_code4 honors a non-default alpha0.
+
+        Regression: the polynomial coefficient matrix was hardcoded for
+        alpha0=1, so alpha0=2.0 produced a polynomial discontinuous with the
+        exponential branches at alpha=+-2.  Pin against pyhf (whose code4
+        builds its inversion matrix from alpha0) across interior, boundary,
+        and extrapolation values, and check continuity explicitly just inside
+        both boundaries.
+        """
+
+        alpha0 = 2.0
+        alpha_vals = [-2.5, -2.0, -1.5, -0.5, 0.0, 0.5, 1.5, 2.0, 2.5]
+        nom = 100.0
+        hi = 120.0
+        lo = 80.0
+
+        # pyhf format: [nsysts, nsamples, nvariations, nbins] where nvariations = [down, nominal, up]
+        histogramssets = [[[[lo], [nom], [hi]]]]
+
+        interpolator = pyhf.interpolators.code4(
+            histogramssets, subscribe=False, alpha0=alpha0
+        )
+
+        nom_t = pt.constant(nom)
+        hi_t = pt.constant(hi)
+        lo_t = pt.constant(lo)
+
+        for alpha_val in alpha_vals:
+            our_result = interpolate_code4(
+                pt.constant(alpha_val), nom_t, hi_t, lo_t, alpha0=alpha0
+            )
+            our_val = our_result.eval()
+
+            # pyhf implementation returns multiplicative factors
+            alphasets = pyhf.tensorlib.astensor([[alpha_val]])
+            pyhf_factors = interpolator(alphasets)
+            pyhf_result = nom * pyhf.tensorlib.tolist(pyhf_factors)[0][0][0][0]
+
+            assert our_val == pytest.approx(pyhf_result), (
+                f"Mismatch at alpha={alpha_val}: our={our_val}, pyhf={pyhf_result}"
+            )
+
+        # Continuity at +-alpha0: values immediately inside the polynomial
+        # region must match the exponential branch value at the boundary.
+        eps = 1e-6
+        for boundary, ratio in ((alpha0, hi / nom), (-alpha0, lo / nom)):
+            inside_alpha = boundary - math.copysign(eps, boundary)
+            inside_val = interpolate_code4(
+                pt.constant(inside_alpha), nom_t, hi_t, lo_t, alpha0=alpha0
+            ).eval()
+            boundary_val = nom * ratio**alpha0
+            assert inside_val == pytest.approx(boundary_val, rel=1e-4), (
+                f"Discontinuity at alpha={boundary}: "
+                f"inside={inside_val}, boundary={boundary_val}"
+            )
+
+    def test_code4p_vs_pyhf(self):
+        """Test that interpolate_code4p matches pyhf.interpolators.code4p."""
+
+        alpha_vals = [-2.0, -1.0, -0.5, -0.35, 0.0, 0.35, 0.5, 1.0, 2.0]
+        nom = 100.0
+        hi = 120.0
+        lo = 80.0
+
+        # pyhf format: [nsysts, nsamples, nvariations, nbins] where nvariations = [down, nominal, up]
+        histogramssets = [[[[lo], [nom], [hi]]]]
+
+        interpolator = pyhf.interpolators.code4p(histogramssets, subscribe=False)
+
+        for alpha_val in alpha_vals:
+            # Our implementation
+            alpha = pt.constant(alpha_val)
+            nom_t = pt.constant(nom)
+            hi_t = pt.constant(hi)
+            lo_t = pt.constant(lo)
+
+            our_result = interpolate_code4p(alpha, nom_t, hi_t, lo_t)
+            our_val = our_result.eval()
+
+            # pyhf implementation returns additive deltas
+            alphasets = pyhf.tensorlib.astensor([[alpha_val]])
+            pyhf_deltas = interpolator(alphasets)
+            pyhf_result = nom + pyhf.tensorlib.tolist(pyhf_deltas)[0][0][0][0]
+
+            assert our_val == pytest.approx(pyhf_result), (
+                f"Mismatch at alpha={alpha_val}: our={our_val}, pyhf={pyhf_result}"
+            )
+
+    def test_code4p_nondefault_alpha0_boundary_continuity(self):
+        """Test that interpolate_code4p honors a non-default alpha0.
+
+        pyhf's code4p accepts no alpha0, so the linear extrapolation branches
+        themselves are the reference: values immediately inside the polynomial
+        region must match the linear branch value at alpha=+-alpha0.
+        Regression for polynomial coefficients hardcoded to alpha0=1.
+        """
+
+        alpha0 = 2.0
+        nom = 100.0
+        hi = 120.0
+        lo = 80.0
+
+        nom_t = pt.constant(nom)
+        hi_t = pt.constant(hi)
+        lo_t = pt.constant(lo)
+
+        eps = 1e-6
+        boundary_cases = (
+            (alpha0, nom + alpha0 * (hi - nom)),
+            (-alpha0, nom - (-alpha0) * (lo - nom)),
+        )
+        for boundary, boundary_val in boundary_cases:
+            inside_alpha = boundary - math.copysign(eps, boundary)
+            inside_val = interpolate_code4p(
+                pt.constant(inside_alpha), nom_t, hi_t, lo_t, alpha0=alpha0
+            ).eval()
+            assert inside_val == pytest.approx(boundary_val, rel=1e-4), (
+                f"Discontinuity at alpha={boundary}: "
+                f"inside={inside_val}, boundary={boundary_val}"
+            )
+
     def test_mathematical_equivalence_code0(self):
         """Test that interpolate_code0 implements correct piecewise-linear behavior."""
         # Code0 should implement: nom + alpha * (hi - nom) for alpha >= 0
@@ -827,6 +984,204 @@ class TestInterpolationPyhfComparison:
             assert vector_vals == pytest.approx(scalar_vals, rel=1e-6), (
                 f"Vector/scalar mismatch for {method_name}"
             )
+
+
+class TestCode4Regression:
+    """Regression tests for HistFactory code4 interpolation."""
+
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    def test_code4_scalar_boundaries_and_extrapolation(self, dtype):
+        alpha = pt.scalar("alpha", dtype=dtype)
+        nom = pt.constant(100.0, dtype=dtype)
+        hi = pt.constant(120.0, dtype=dtype)
+        lo = pt.constant(80.0, dtype=dtype)
+
+        result = interpolate_code4(alpha, nom, hi, lo)
+        evaluate = function([alpha], result)
+
+        expected = {
+            -2.0: 64.0,
+            -1.0: 80.0,
+            0.0: 100.0,
+            1.0: 120.0,
+            2.0: 144.0,
+        }
+
+        tolerance = 1e-5 if dtype == "float32" else 1e-12
+
+        for alpha_value, expected_value in expected.items():
+            evaluated = evaluate(alpha_value)
+
+            assert np.asarray(evaluated).dtype == np.dtype(dtype)
+            assert evaluated == pytest.approx(
+                expected_value,
+                rel=tolerance,
+                abs=tolerance,
+            )
+
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    def test_code4_vector_values(self, dtype):
+        alpha = pt.scalar("alpha", dtype=dtype)
+        nom = pt.vector("nom", dtype=dtype)
+        hi = pt.vector("hi", dtype=dtype)
+        lo = pt.vector("lo", dtype=dtype)
+
+        result = interpolate_code4(alpha, nom, hi, lo)
+        evaluate = function([alpha, nom, hi, lo], result)
+
+        nom_value = np.asarray([1.0, 2.0, 4.0], dtype=dtype)
+        hi_value = np.asarray([1.2, 2.5, 5.0], dtype=dtype)
+        lo_value = np.asarray([0.8, 1.5, 3.0], dtype=dtype)
+
+        tolerance = 1e-5 if dtype == "float32" else 1e-12
+
+        np.testing.assert_allclose(
+            evaluate(0.0, nom_value, hi_value, lo_value),
+            nom_value,
+            rtol=tolerance,
+            atol=tolerance,
+        )
+        np.testing.assert_allclose(
+            evaluate(1.0, nom_value, hi_value, lo_value),
+            hi_value,
+            rtol=tolerance,
+            atol=tolerance,
+        )
+        np.testing.assert_allclose(
+            evaluate(-1.0, nom_value, hi_value, lo_value),
+            lo_value,
+            rtol=tolerance,
+            atol=tolerance,
+        )
+
+    def test_code4_vector_alpha_matches_scalar_evaluation(self):
+        alpha = pt.dvector("alpha")
+        nom = pt.dvector("nom")
+        hi = pt.dvector("hi")
+        lo = pt.dvector("lo")
+
+        vector_result = interpolate_code4(alpha, nom, hi, lo)
+
+        alpha_values = np.asarray([-1.0, -0.5, 0.0, 0.5, 1.0])
+        nom_values = np.asarray([1.0, 2.0, 3.0, 4.0, 5.0])
+        hi_values = nom_values * 1.2
+        lo_values = nom_values * 0.8
+
+        vector_values = vector_result.eval(
+            {
+                alpha: alpha_values,
+                nom: nom_values,
+                hi: hi_values,
+                lo: lo_values,
+            }
+        )
+
+        scalar_values = [
+            float(
+                interpolate_code4(
+                    pt.constant(alpha_value),
+                    pt.constant(nom_value),
+                    pt.constant(hi_value),
+                    pt.constant(lo_value),
+                ).eval()
+            )
+            for alpha_value, nom_value, hi_value, lo_value in zip(
+                alpha_values,
+                nom_values,
+                hi_values,
+                lo_values,
+                strict=True,
+            )
+        ]
+
+        np.testing.assert_allclose(
+            vector_values,
+            scalar_values,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+
+    def test_code4_matrix_alpha_broadcasts_against_vector_templates(self):
+        """Cover rank alignment when alpha has more dimensions than templates."""
+        alpha = pt.tensor("alpha", shape=(None, 1), dtype="float64")
+        nom = pt.dvector("nom")
+        hi = pt.dvector("hi")
+        lo = pt.dvector("lo")
+
+        result = interpolate_code4(alpha, nom, hi, lo)
+        evaluate = function([alpha, nom, hi, lo], result)
+
+        alpha_values = np.asarray([[-0.5], [0.0], [0.35], [0.8]])
+        nom_values = np.asarray([1.0, 2.0, 4.0])
+        hi_values = np.asarray([1.2, 2.6, 5.5])
+        lo_values = np.asarray([0.8, 1.4, 2.7])
+
+        actual = evaluate(alpha_values, nom_values, hi_values, lo_values)
+
+        expected = np.asarray(
+            [
+                [
+                    float(
+                        interpolate_code4(
+                            pt.constant(alpha_value),
+                            pt.constant(nom_value),
+                            pt.constant(hi_value),
+                            pt.constant(lo_value),
+                        ).eval()
+                    )
+                    for nom_value, hi_value, lo_value in zip(
+                        nom_values, hi_values, lo_values, strict=True
+                    )
+                ]
+                for alpha_value in alpha_values[:, 0]
+            ]
+        )
+
+        assert actual.shape == (alpha_values.shape[0], nom_values.shape[0])
+        np.testing.assert_allclose(
+            actual,
+            expected,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+
+    def test_code4_known_interior_values(self):
+        alpha = pt.dscalar("alpha")
+        nom = pt.dvector("nom")
+        hi = pt.dvector("hi")
+        lo = pt.dvector("lo")
+
+        result = interpolate_code4(alpha, nom, hi, lo)
+        evaluate = function([alpha, nom, hi, lo], result)
+
+        nom_value = np.asarray([1.0, 2.0, 3.0, 4.0])
+        hi_value = np.asarray([1.2, 2.7, 4.1, 5.8])
+        lo_value = np.asarray([0.8, 1.3, 2.2, 3.1])
+
+        actual = evaluate(0.35, nom_value, hi_value, lo_value)
+
+        # Use independent scalar evaluations so differently shaped hi/lo ratios
+        # catch any accidental mixing of the polynomial coefficient axis.
+        expected = np.asarray(
+            [
+                float(
+                    interpolate_code4(
+                        pt.constant(0.35),
+                        pt.constant(nom),
+                        pt.constant(hi),
+                        pt.constant(lo),
+                    ).eval()
+                )
+                for nom, hi, lo in zip(nom_value, hi_value, lo_value, strict=True)
+            ]
+        )
+
+        np.testing.assert_allclose(
+            actual,
+            expected,
+            rtol=1e-12,
+            atol=1e-12,
+        )
 
 
 class TestCode2BoundaryContinuity:

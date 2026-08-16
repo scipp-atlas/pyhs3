@@ -8,6 +8,7 @@ with samples and modifiers as defined in the HS3 specification.
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import lru_cache
 from typing import cast
 
 import numpy as np
@@ -51,6 +52,38 @@ def _code4_coefficient_matrix(alpha0: float) -> npt.NDArray[np.float64]:
     return cast(
         "npt.NDArray[np.float64]",
         coeff_scale[:, None] * _CODE4_A_INV * rhs_scale[None, :],
+    )
+
+
+@lru_cache(maxsize=128)
+def _code4_coefficient_tensor(
+    alpha0: float,
+    dtype: str,
+) -> TensorVar:
+    """Return a shared immutable code4 coefficient matrix tensor."""
+    return cast(
+        TensorVar,
+        pt.constant(
+            _code4_coefficient_matrix(alpha0),
+            dtype=dtype,
+        ),
+    )
+
+
+@lru_cache(maxsize=128)
+def _code4_exponent_tensor(
+    dtype: str,
+    alpha_ndim: int,
+) -> TensorVar:
+    """Return shared broadcast-ready powers 1 through 6."""
+    exponents = pt.constant(
+        np.arange(1, 7),
+        dtype=dtype,
+    )
+    pattern = (0,) + ("x",) * alpha_ndim
+    return cast(
+        TensorVar,
+        exponents.dimshuffle(pattern),  # type: ignore[no-untyped-call]
     )
 
 
@@ -227,17 +260,22 @@ def interpolate_code4(
 
     # Compute all polynomial coefficients in one tensor operation. Matching the
     # matrix dtype to b preserves float32 inputs instead of forcing float64.
-    coefficient_matrix = pt.constant(_code4_coefficient_matrix(alpha0), dtype=b.dtype)
+    coefficient_matrix = _code4_coefficient_tensor(
+        alpha0,
+        b.dtype,
+    )
     coeffs = pt.tensordot(coefficient_matrix, b, axes=[[1], [0]])
 
     # Evaluate a1*alpha + ... + a6*alpha**6 as one tensor contraction. Pad
     # immediately after the coefficient axis so alpha and coefficient batch
     # dimensions retain standard right-aligned broadcasting semantics.
-    exponents = pt.arange(1, 7, dtype=alpha.dtype)  # type: ignore[no-untyped-call]
-    exponent_pattern = (0,) + ("x",) * alpha.ndim
+    exponents = _code4_exponent_tensor(
+        alpha.dtype,
+        alpha.ndim,
+    )
     alpha_powers_tensor = pt.power(  # type: ignore[no-untyped-call]
         alpha,
-        exponents.dimshuffle(exponent_pattern),
+        exponents,
     )
 
     target_ndim = max(coeffs.ndim, alpha_powers_tensor.ndim)

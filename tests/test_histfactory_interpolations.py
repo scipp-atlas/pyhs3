@@ -14,6 +14,11 @@ import pyhf.interpolators
 import pytensor.tensor as pt
 import pytest
 from pytensor import function
+from pytensor.graph.traversal import io_toposort
+from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.rewriting.elemwise import (
+    local_upcast_elemwise_constant_inputs,
+)
 
 from pyhs3.distributions.histfactory.interpolations import (
     InterpolationError,
@@ -1021,6 +1026,25 @@ class TestInterpolationPyhfComparison:
 
 class TestCode4Regression:
     """Regression tests for HistFactory code4 interpolation."""
+
+    def test_code4_avoids_implicit_add_constant_upcast(self):
+        """Code4 should construct additive constants at the output dtype."""
+        alpha = pt.dscalar("alpha")
+        nom = pt.dscalar("nom")
+        hi = pt.dscalar("hi")
+        lo = pt.dscalar("lo")
+
+        result = interpolate_code4(alpha, nom, hi, lo)
+
+        candidates = [
+            node
+            for node in io_toposort([], [result])
+            if isinstance(node.op, Elemwise)
+            and type(node.op.scalar_op).__name__ == "Add"
+            and local_upcast_elemwise_constant_inputs.transform(None, node)
+        ]
+
+        assert candidates == []
 
     @pytest.mark.parametrize("dtype", ["float32", "float64"])
     def test_code4_scalar_boundaries_and_extrapolation(self, dtype):

@@ -14,6 +14,11 @@ import pytensor.tensor as pt
 import pytest
 from pydantic import ValidationError
 from pytensor import function
+from pytensor.graph.traversal import io_toposort
+from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.rewriting.elemwise import (
+    local_upcast_elemwise_constant_inputs,
+)
 
 from pyhs3 import Workspace
 from pyhs3.functions import (
@@ -406,6 +411,36 @@ class TestGenericFunction:
 
 class TestInterpolationFunction:
     """Test InterpolationFunction implementation."""
+
+    def test_multiplicative_mode_avoids_implicit_add_constant_upcast(self):
+        """Multiplicative interpolation should use a dtype-matched one."""
+        func = InterpolationFunction(
+            name="test_interp",
+            high=["high"],
+            low=["low"],
+            nom="nominal",
+            interpolationCodes=[1],
+            positiveDefinite=False,
+            vars=["nuisance"],
+        )
+        context = {
+            "nominal": pt.dscalar("nominal"),
+            "high": pt.dscalar("high"),
+            "low": pt.dscalar("low"),
+            "nuisance": pt.dscalar("nuisance"),
+        }
+
+        result = func.expression(context)
+
+        candidates = [
+            node
+            for node in io_toposort([], [result])
+            if isinstance(node.op, Elemwise)
+            and type(node.op.scalar_op).__name__ == "Add"
+            and local_upcast_elemwise_constant_inputs.transform(None, node)
+        ]
+
+        assert candidates == []
 
     def test_interpolation_function_creation(self):
         """Test InterpolationFunction can be created and configured."""

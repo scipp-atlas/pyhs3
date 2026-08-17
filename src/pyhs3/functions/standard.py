@@ -431,7 +431,8 @@ class InterpolationFunction(Function):
             if interp_code in [0, 2, 3, 4]:  # Additive modes
                 result = result + contribution
             else:  # Multiplicative modes (1, 5, 6)
-                result = result * (1.0 + contribution)
+                one = pt.constant(1.0, dtype=contribution.dtype)
+                result = result * (one + contribution)
 
         # Apply positive definite constraint if requested
         if self.positiveDefinite:

@@ -293,7 +293,8 @@ def interpolate_code4(
         alpha_powers_tensor = alpha_powers_tensor.dimshuffle(pattern)
 
     poly_sum = pt.sum(coeffs * alpha_powers_tensor, axis=0)  # type: ignore[no-untyped-call]
-    poly_result = nom * (1.0 + poly_sum)
+    one = pt.constant(1.0, dtype=poly_sum.dtype)
+    poly_result = nom * (one + poly_sum)
 
     # Exponential extrapolation
     exp_hi = nom * pt.power(hi_ratio, alpha)  # type: ignore[no-untyped-call]

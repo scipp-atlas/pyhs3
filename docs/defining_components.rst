@@ -250,8 +250,8 @@ Once defined, your custom components work like built-in ones:
     }
 
     # In Python
-    workspace = Workspace.from_file("my_workspace.json")
-    model = workspace.model()
+    workspace = Workspace.load("my_workspace.json")
+    model = workspace.model(0)
 
     # Your components are automatically instantiated and available
 

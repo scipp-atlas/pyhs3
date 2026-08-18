@@ -441,7 +441,7 @@ Override ``normalization_expression()`` to return the antiderivative for efficie
 
 Without an analytical expression, pyhs3 uses 64-point Gauss-Legendre quadrature for numerical integration.
 
-For complete details, see :ref:`normalization`.
+For complete details, see :doc:`/normalization`.
 
 Best Practices
 --------------

@@ -207,5 +207,6 @@ See Also
 
 - :doc:`defining_components` - Distribution architecture and implementation
 - :doc:`architecture` - Overall pyhs3 design patterns
+- :doc:`/explanation/building_a_model` - How pyhs3 builds a model
 - :class:`~pyhs3.distributions.core.Distribution` - Base distribution class
 - :func:`~pyhs3.normalization.gauss_legendre_integral` - Numerical integration routine

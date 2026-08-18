@@ -191,7 +191,7 @@ Project Structure
    │   ├── explanation/              # Diataxis: explanation
    │   ├── broadcasting.rst          # Broadcasting guide
    │   ├── defining_components.rst   # Component definition
-   │   ├── contributing.rst          # Contributor guide
+   │   ├── CONTRIBUTING.md           # Contributor guide
    │   ├── testing.rst               # Testing guide
    │   ├── development.rst           # Development workflow
    │   └── architecture.rst          # This file
@@ -513,7 +513,7 @@ External Documentation
 Internal Documentation
 ~~~~~~~~~~~~~~~~~~~~~~
 
-- :doc:`contributing` - Contributor guide
+- :doc:`CONTRIBUTING` - Contributor guide
 - :doc:`testing` - Testing guide
 - :doc:`development` - Development workflow
 - :doc:`/reference/api` - API reference

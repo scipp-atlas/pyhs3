@@ -585,7 +585,7 @@ Getting Help
 
 If you're stuck:
 
-- Check this guide and :doc:`contributing` guide
+- Check this guide and :doc:`CONTRIBUTING` guide
 - Review :doc:`testing` for testing questions
 - Read :doc:`architecture` to understand the codebase
 - Open a discussion on GitHub

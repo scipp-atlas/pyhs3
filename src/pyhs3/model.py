@@ -116,6 +116,10 @@ class Model:
             distributions (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic distribution expressions.
             parameters (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic parameter variables.
             functions (dict[str, pytensor.tensor.variable.TensorVariable]): Computed function values.
+            modifiers (dict[str, pytensor.tensor.variable.TensorVariable]): HistFactory modifier terms
+                (normalization factors, shape systematics, and similar) discovered while building the graph.
+            log_distributions (dict[str, pytensor.tensor.variable.TensorVariable]): Log-space expression for
+                each distribution, keyed by name; what :meth:`logpdf`/:meth:`logpdf_unsafe` evaluate.
             mode (str): PyTensor compilation mode.
             _compiled_functions (dict[str, Callable[..., npt.NDArray[np.float64]]]): Cache of compiled PyTensor functions.
         """

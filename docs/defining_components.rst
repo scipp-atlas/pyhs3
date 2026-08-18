@@ -250,8 +250,8 @@ Once defined, your custom components work like built-in ones:
     }
 
     # In Python
-    workspace = Workspace.from_file("my_workspace.json")
-    model = workspace.model()
+    workspace = Workspace.load("my_workspace.json")
+    model = workspace.model(0)
 
     # Your components are automatically instantiated and available
 
@@ -441,7 +441,7 @@ Override ``normalization_expression()`` to return the antiderivative for efficie
 
 Without an analytical expression, pyhs3 uses 64-point Gauss-Legendre quadrature for numerical integration.
 
-For complete details, see :ref:`normalization`.
+For complete details, see :doc:`/normalization`.
 
 Best Practices
 --------------

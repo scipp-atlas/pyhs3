@@ -30,6 +30,7 @@ from pyhs3.distributions.histogram import HistogramData
 from pyhs3.exceptions import custom_error_msg
 from pyhs3.functions.core import Function
 from pyhs3.generic_parse import GenericExpressionMixin
+from pyhs3.tensorutils import is_scalar_multiplicative_identity
 from pyhs3.typing.aliases import TensorVar
 
 log = logging.getLogger(__name__)
@@ -148,7 +149,21 @@ class ProductFunction(Function):
         # Get list of factors using flattened parameter keys
         factor_values = self.get_parameter_list(context, "factors")
         result = factor_values[0]
+
         for factor_value in factor_values[1:]:
+            if (
+                is_scalar_multiplicative_identity(factor_value)
+                and factor_value.dtype == result.dtype
+            ):
+                continue
+
+            if (
+                is_scalar_multiplicative_identity(result)
+                and result.dtype == factor_value.dtype
+            ):
+                result = factor_value
+                continue
+
             result = result * factor_value
 
         return result

@@ -6,8 +6,16 @@ from typing import cast
 import numpy as np
 import numpy.typing as npt
 import pytensor.tensor as pt
+from pytensor.tensor.variable import TensorConstant
 
 from pyhs3.typing.aliases import DomainBounds, TensorVar
+
+
+def is_scalar_multiplicative_identity(value: TensorVar) -> bool:
+    """Return whether a tensor is a scalar constant equal to one."""
+    return (
+        isinstance(value, TensorConstant) and value.ndim == 0 and value.data.item() == 1
+    )
 
 
 def ensure_array(

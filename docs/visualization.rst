@@ -20,14 +20,14 @@ BinnedData to hist
    :include-source:
 
    from pyhs3.data import BinnedData
-   from pyhs3.axes import BinnedAxis
+   from pyhs3.axes import RegularAxis
 
    # Create binned data with regular binning
    data = BinnedData(
        name="example",
        type="binned",
        contents=[10.0, 20.0, 15.0, 25.0, 18.0],
-       axes=[BinnedAxis(name="x", min=0.0, max=5.0, nbins=5)]
+       axes=[RegularAxis(name="x", min=0.0, max=5.0, nbins=5)]
    )
 
    # Convert to hist and plot
@@ -45,14 +45,14 @@ BinnedData to hist
    :include-source:
 
    from pyhs3.data import BinnedData
-   from pyhs3.axes import BinnedAxis
+   from pyhs3.axes import IrregularAxis
 
    # Create binned data with variable-width bins
    data = BinnedData(
        name="variable_bins",
        type="binned",
        contents=[5.0, 15.0, 8.0],
-       axes=[BinnedAxis(name="pt", edges=[0.0, 10.0, 50.0, 100.0])]
+       axes=[IrregularAxis(name="pt", edges=[0.0, 10.0, 50.0, 100.0])]
    )
 
    # Convert to hist and plot
@@ -70,7 +70,7 @@ Binned Data with Uncertainties
    :include-source:
 
    from pyhs3.data import BinnedData, GaussianUncertainty
-   from pyhs3.axes import BinnedAxis
+   from pyhs3.axes import RegularAxis
 
    # Create binned data with uncertainties
    contents = [12.5, 18.3, 15.7, 22.1, 19.4]
@@ -80,7 +80,7 @@ Binned Data with Uncertainties
        name="with_errors",
        type="binned",
        contents=contents,
-       axes=[BinnedAxis(name="mass", min=100.0, max=150.0, nbins=5)],
+       axes=[RegularAxis(name="mass", min=100.0, max=150.0, nbins=5)],
        uncertainty=GaussianUncertainty(type="gaussian_uncertainty", sigma=sigma)
    )
 
@@ -99,7 +99,7 @@ Binned Data with Uncertainties
    :include-source:
 
    from pyhs3.data import BinnedData
-   from pyhs3.axes import BinnedAxis
+   from pyhs3.axes import RegularAxis
 
    # Create 2D binned data (3x4 = 12 bins)
    contents = [1.0, 2.0, 3.0, 4.0,
@@ -111,8 +111,8 @@ Binned Data with Uncertainties
        type="binned",
        contents=contents,
        axes=[
-           BinnedAxis(name="x", min=0.0, max=3.0, nbins=3),
-           BinnedAxis(name="y", min=0.0, max=4.0, nbins=4),
+           RegularAxis(name="x", min=0.0, max=3.0, nbins=3),
+           RegularAxis(name="y", min=0.0, max=4.0, nbins=4),
        ]
    )
 
@@ -388,13 +388,13 @@ The ``hist.Hist`` objects returned by ``to_hist()`` support the full matplotlib 
    :include-source:
 
    from pyhs3.data import BinnedData
-   from pyhs3.axes import BinnedAxis
+   from pyhs3.axes import RegularAxis
 
    data = BinnedData(
        name="custom",
        type="binned",
        contents=[12.0, 18.0, 15.0, 22.0, 19.0, 14.0],
-       axes=[BinnedAxis(name="x", min=0.0, max=6.0, nbins=6)]
+       axes=[RegularAxis(name="x", min=0.0, max=6.0, nbins=6)]
    )
 
    h = data.to_hist()
@@ -424,13 +424,13 @@ Once you have a ``hist.Hist`` object, you can use all the features of the hist l
 .. code-block:: python
 
    from pyhs3.data import BinnedData
-   from pyhs3.axes import BinnedAxis
+   from pyhs3.axes import RegularAxis
 
    data = BinnedData(
        name="analysis",
        type="binned",
        contents=[10.0, 20.0, 15.0],
-       axes=[BinnedAxis(name="x", min=0.0, max=3.0, nbins=3)],
+       axes=[RegularAxis(name="x", min=0.0, max=3.0, nbins=3)],
    )
 
    h = data.to_hist()

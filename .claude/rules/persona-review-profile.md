@@ -6,9 +6,13 @@ The document is the pyhs3 Sphinx site under `docs/`, treated as one document
 whose section set is an output of the run: files may be split, merged, or newly
 created as content is reorganized into Diátaxis quadrants.
 
-In scope: the main toctree (`structure`, `workspace`, `model`, `broadcasting`,
-`defining_components`, `normalization`, `visualization`, `api`) and the
-Contributing toctree (`CONTRIBUTING`, `development`, `testing`, `architecture`).
+In scope: the main toctree — the "building and running a model" pilot's current
+section set (`getting_started`, `howto_load_workspace`, `howto_evaluate_model`,
+`howto_fit_model`, `howto_debug_model`, `workspace_reference`,
+`model_reference`, `data_reference`, `building_a_model`) plus the
+not-yet-reorganized `broadcasting`, `defining_components`, `normalization`,
+`visualization`, `api` — and the Contributing toctree (`CONTRIBUTING`,
+`development`, `testing`, `architecture`).
 
 Out of scope: the Academics toctree (`acknowledgements`, `abstracts`, `talks`)
 and `CODE_OF_CONDUCT` — archival and governance content, not
@@ -63,8 +67,13 @@ None. No single fact or design decision needs pinning before drafting begins.
   verified against `tests/`, and by actually running the example where feasible.
 - Spec-compliance claims: verified against the public HS3 spec text; a claim
   citing no spec section is flagged unverifiable, not assumed correct.
-- Checking note: doctests must actually execute (`pixi run docs-build` runs
-  them) — a code block that renders but was never run does not pass.
+- Checking note: doctests must actually execute
+  (`JAX_PLATFORMS=cpu pixi run --environment py312-jax test-docs` runs them —
+  `pixi run docs-build` only builds HTML) — a code block that renders but was
+  never run does not pass. An example using a library that isn't a pyhs3
+  dependency (e.g. optimistix) is a `code-block` rather than a `doctest`, since
+  no environment has it installed to run against; verify it by hand before
+  shipping instead.
 
 ## Status dimension
 
@@ -82,8 +91,17 @@ One-time wiring: `reviewed-writer` pinned in `.claude/settings.json`
 (`extraKnownMarketplaces` + `enabledPlugins`); the profile, declaration file,
 persona files, and voice-rules file committed.
 
-Re-run every round: `pixi run docs-build` must succeed (executes doctests);
-`pre-commit run --files <changed docs>` must pass.
+Re-run every round:
+`JAX_PLATFORMS=cpu pixi run --environment py312-jax test-docs` must succeed
+(this repo's actual doctest runner — `pytest README.rst docs`, only executes
+literal `>>>` lines; `.. testsetup::` blocks are a Sphinx-only construct this
+runner ignores entirely, so setup code must be written as real `>>>` examples).
+`pixi run --environment docs docs-build -W` must also succeed with zero warnings
+(HTML build only — it does not run doctests, despite the two often being
+conflated). `pre-commit run --files <changed docs>` must pass; note markers use
+a single colon (`.. diataxis: how-to`, not `.. diataxis:: how-to`) since the
+double-colon form is real RST directive-invocation syntax and fails
+`rstcheck`/`sphinx -W` on the unregistered directive name.
 
 ## Record
 

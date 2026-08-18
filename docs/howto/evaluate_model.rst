@@ -67,7 +67,7 @@ space rather than by taking ``log(pdf(...))`` yourself:
     ... )  # doctest: +ELLIPSIS
     array(-0.918938...)
 
-See :doc:`building_a_model` for why ``logpdf`` stays finite in cases where
+See :doc:`/explanation/building_a_model` for why ``logpdf`` stays finite in cases where
 ``np.log(model.pdf(...))`` would underflow to ``-inf``.
 
 Evaluate at many points at once
@@ -115,7 +115,7 @@ this way marks ``x`` as a plain vector parameter rather than an observable —
 pyhs3 broadcasts a non-observable vector override differently from an
 observable's data axis. Observables carried by a likelihood's data are
 vectorized for you automatically, without needing this override at all; see
-:doc:`broadcasting` for the full rules on which parameters can be vectors,
+:doc:`/broadcasting` for the full rules on which parameters can be vectors,
 which shape convention applies to each, and how their shapes combine.
 
 Evaluate a joint likelihood for a fit
@@ -191,9 +191,10 @@ extra (``pip install pyhs3[jax]``):
 ``fit_model.free_params`` gives every non-constant parameter's starting value
 from the workspace, and ``fit_model.data`` gives the observed arrays each
 distribution needs, so the two dicts together are exactly what a jaxified
-``log_prob`` expects as keyword arguments. See :doc:`model_reference` for
-what ``log_prob``/``data``/``free_params`` require and :doc:`building_a_model`
-for why the joint likelihood is exposed in log space rather than probability
-space. pyhs3 doesn't ship a minimizer itself; this section stops at producing
-the callable one needs. See :doc:`howto_fit_model` for minimizing
+``log_prob`` expects as keyword arguments. See :attr:`~pyhs3.Model.log_prob`,
+:attr:`~pyhs3.Model.data`, :attr:`~pyhs3.Model.free_params` for what each
+requires, and :doc:`/explanation/building_a_model` for why the joint
+likelihood is exposed in log space rather than probability space. pyhs3
+doesn't ship a minimizer itself; this section stops at producing the
+callable one needs. See :doc:`/howto/fit_model` for minimizing
 ``nll_graph`` over ``free_params`` with optimistix.

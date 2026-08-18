@@ -2,20 +2,17 @@
    :hidden:
    :maxdepth: 2
 
-   getting_started
-   howto_load_workspace
-   howto_evaluate_model
-   howto_fit_model
-   howto_debug_model
-   workspace_reference
-   model_reference
-   data_reference
-   building_a_model
+   tutorial/getting_started
+   howto/load_workspace
+   howto/evaluate_model
+   howto/fit_model
+   howto/debug_model
+   reference/api
+   explanation/building_a_model
    broadcasting
    defining_components
    normalization
    visualization
-   api
 
 .. toctree::
    :hidden:

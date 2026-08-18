@@ -80,19 +80,18 @@ a scalar, so a model built from a likelihood can be evaluated against every
 event or bin at once instead of one at a time. The mechanics of vector
 parameters — how to opt an ordinary parameter into the same treatment, and
 what changes about evaluation once you do — are covered in
-:doc:`broadcasting`, not here.
+:doc:`/broadcasting`, not here.
 
 Why the joint likelihood is exposed in log space
 ----------------------------------------------------
 
 Building a model from an :class:`~pyhs3.analyses.Analysis` or a
-:class:`~pyhs3.likelihoods.Likelihood` (see :doc:`model_reference`) exposes
-``model.log_prob``: the joint log-probability across every channel and
-constraint term, summed once in log space rather than multiplied in
-probability space and logged afterward. Per-distribution evaluation follows
-the same logic: :doc:`howto_evaluate_model`'s ``logpdf``/``logpdf_unsafe``
-evaluate directly in log space rather than computing ``log(pdf(...))``
-afterward.
+:class:`~pyhs3.likelihoods.Likelihood` exposes ``model.log_prob``: the joint
+log-probability across every channel and constraint term, summed once in
+log space rather than multiplied in probability space and logged
+afterward. Per-distribution evaluation follows the same logic:
+:doc:`/howto/evaluate_model`'s ``logpdf``/``logpdf_unsafe`` evaluate
+directly in log space rather than computing ``log(pdf(...))`` afterward.
 
 The reason in both cases is the same: for a multi-channel likelihood built
 from many per-bin or per-channel probability factors (a HistFactory model is
@@ -103,7 +102,7 @@ the fact. This is also why ``model.log_prob`` is what gets passed to
 :func:`pyhs3.jaxify` for gradient-based minimization, instead of jaxifying a
 probability-space ``pdf`` and taking a log of the result.
 
-See :doc:`normalization` for how pyhs3 normalizes a distribution over its
+See :doc:`/normalization` for how pyhs3 normalizes a distribution over its
 observable domain, a separate concern from the log-space summation
 described here.
 

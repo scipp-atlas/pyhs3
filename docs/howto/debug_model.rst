@@ -117,4 +117,5 @@ modeling mistake:
     debug_model = ws.model(0, mode="DebugMode")
     nanguard_model = ws.model(0, mode="NanGuardMode")
 
-See :doc:`model_reference` for every ``mode`` value pyhs3 accepts.
+See :class:`~pyhs3.Model` for every ``mode`` value pyhs3 accepts (documented
+in its constructor docstring).

@@ -516,9 +516,8 @@ Internal Documentation
 - :doc:`contributing` - Contributor guide
 - :doc:`testing` - Testing guide
 - :doc:`development` - Development workflow
-- :doc:`api` - API reference
-- :doc:`workspace_reference` - HS3 workspace component reference
-- :doc:`building_a_model` - How pyhs3 builds a model
+- :doc:`/reference/api` - API reference
+- :doc:`/explanation/building_a_model` - How pyhs3 builds a model
 
 Getting Help
 ------------

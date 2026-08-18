@@ -85,5 +85,5 @@ the file defines named domains and parameter sets, select them by name:
     ws = pyhs3.Workspace.load("my_analysis.json")
     model = ws.model("signal_region", parameter_set="best_fit")
 
-See :doc:`model_reference` for how ``.model()`` selects a domain and
+See :meth:`~pyhs3.Workspace.model` for how it selects a domain and
 parameter set for each kind of target you can pass it.

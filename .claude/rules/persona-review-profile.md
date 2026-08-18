@@ -7,12 +7,25 @@ whose section set is an output of the run: files may be split, merged, or newly
 created as content is reorganized into Diátaxis quadrants.
 
 In scope: the main toctree — the "building and running a model" pilot's current
-section set (`getting_started`, `howto_load_workspace`, `howto_evaluate_model`,
-`howto_fit_model`, `howto_debug_model`, `workspace_reference`,
-`model_reference`, `data_reference`, `building_a_model`) plus the
-not-yet-reorganized `broadcasting`, `defining_components`, `normalization`,
-`visualization`, `api` — and the Contributing toctree (`CONTRIBUTING`,
-`development`, `testing`, `architecture`).
+section set (`tutorial/getting_started`, `howto/load_workspace`,
+`howto/evaluate_model`, `howto/fit_model`, `howto/debug_model`, `reference/api`,
+`explanation/building_a_model`) plus the not-yet-reorganized `broadcasting`,
+`defining_components`, `normalization`, `visualization` — and the Contributing
+toctree (`CONTRIBUTING`, `development`, `testing`, `architecture`). Each
+Diátaxis quadrant that currently holds pilot content has its own folder
+(`tutorial/`, `howto/`, `reference/`, `explanation/`), even where only one file
+lives there today, anticipating more content per quadrant as later passes
+migrate the rest of `docs/`.
+
+`reference/api.rst` (pre-existing, `autosummary`/`autodoc`-based) is the
+Reference unit — not a hand-authored page. Reference content that's mechanically
+derivable from a docstring belongs in the docstring, surfaced through that
+existing autodoc setup; a Reference unit should only be hand-authored when it
+curates/indexes multiple autodoc targets or explains structure no single
+docstring covers. (`workspace_reference.rst`, `model_reference.rst`, and
+`data_reference.rst` — hand-authored duplicates of what `reference/api.rst`
+already covered from docstrings — were deleted for exactly this reason; one of
+them had already drifted from the actual behavior it claimed to describe.)
 
 Out of scope: the Academics toctree (`acknowledgements`, `abstracts`, `talks`)
 and `CODE_OF_CONDUCT` — archival and governance content, not

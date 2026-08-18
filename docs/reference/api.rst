@@ -1,3 +1,6 @@
+.. diataxis: reference
+.. status: implemented
+
 Python API
 ==========
 

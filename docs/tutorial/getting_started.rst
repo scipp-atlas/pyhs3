@@ -104,8 +104,8 @@ What you built
 ----------------
 
 The workspace you assembled is the same thing an HS3 JSON file describes:
-:doc:`howto_load_workspace` covers loading one from disk instead of
-constructing it in Python. :doc:`workspace_reference` and
-:doc:`model_reference` catalog every component and method this tutorial
-touched; :doc:`building_a_model` explains what happens between assembling the
-workspace and getting a number out of it.
+:doc:`/howto/load_workspace` covers loading one from disk instead of
+constructing it in Python. :doc:`/reference/api` catalogs every component and
+method this tutorial touched (see :class:`~pyhs3.Workspace` and
+:class:`~pyhs3.Model` directly); :doc:`/explanation/building_a_model` explains
+what happens between assembling the workspace and getting a number out of it.

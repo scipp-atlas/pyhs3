@@ -1,9 +1,11 @@
 # Docs voice rules — pyhs3
 
-Editorial rules for `docs/*.rst`, applied by every persona reviewer and by the
-synthesis step of a `write-doc` run. These describe how content should read, not
-what it should say — the Diátaxis rules and the profile's rubric govern content;
-this file governs prose and code style.
+Editorial rules for every `.rst` file under `docs/`, including the quadrant
+folders (`docs/tutorial/`, `docs/howto/`, `docs/reference/`,
+`docs/explanation/`), applied by every persona reviewer and by the synthesis
+step of a `write-doc` run. These describe how content should read, not what it
+should say — the Diátaxis rules and the profile's rubric govern content; this
+file governs prose and code style.
 
 ## Naming
 

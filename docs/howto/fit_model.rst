@@ -107,14 +107,16 @@ minimization at each point — can be vectorized with ``jax.vmap``:
         sol = optx.minimise(
             profile_nll, solver, y0=nuisance_y0, args=mu_value, max_steps=1000, throw=False
         )
-        return profile_nll(sol.value, mu_value)
+        return profile_nll(sol.value, mu_value), sol.result
 
 
-    scan_nll = jax.vmap(fit_at)(scan_points)
+    scan_nll, scan_status = jax.vmap(fit_at)(scan_points)
+    converged = scan_status == optx.RESULTS.successful
 
 This gives the same result as calling ``fit_at`` in a Python loop over
-``scan_points``, in one traced, batched call. ``throw=False`` keeps one
-non-convergent scan point from raising for the whole batch; ``fit_at`` above
-doesn't check ``sol.result`` per point, but the batched ``sol`` from a call
-made outside ``vmap`` would carry ``result`` as an array with one entry per
-scan point, checkable the same way as the single-fit example above.
+``scan_points``, in one traced, batched call. ``fit_at`` returns
+``sol.result`` alongside the NLL value — under ``vmap`` this batches into
+an array with one entry per scan point, so ``converged`` is a per-point
+boolean mask rather than a single check; a non-convergent point still
+produces a number in ``scan_nll``, but ``converged`` tells you which ones
+to trust.

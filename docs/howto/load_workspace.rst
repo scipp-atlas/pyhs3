@@ -68,7 +68,8 @@ summarizes how many more exist; pass ``verbose=True`` to see every one:
     pyhs3.exceptions.WorkspaceValidationError: ...
 
 The example above is missing ``metadata`` and the distribution's required
-``mean``/``sigma`` parameters, both of which show up in the validation error.
+``x``/``mean``/``sigma`` parameters, all of which show up in the validation
+error.
 
 .. warning::
     ``suppress_traceback`` defaults to ``True``, which sets

@@ -2,14 +2,17 @@
    :hidden:
    :maxdepth: 2
 
-   structure
-   workspace
-   model
+   tutorial/getting_started
+   howto/load_workspace
+   howto/evaluate_model
+   howto/fit_model
+   howto/debug_model
+   reference/api
+   explanation/building_a_model
    broadcasting
    defining_components
    normalization
    visualization
-   api
 
 .. toctree::
    :hidden:

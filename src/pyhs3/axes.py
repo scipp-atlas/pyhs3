@@ -89,6 +89,13 @@ class ConstantAxis(Axis):
 
     Alias for Axis with required const field.
 
+    As a domain axis, this currently has no effect on model construction:
+    :meth:`~pyhs3.domains.Domain.get` returns the unbounded default for any
+    axis that isn't a :class:`DomainCoordinateAxis`, so a parameter named by
+    a ``ConstantAxis`` is treated as unbounded, the same as one the domain
+    doesn't name at all. To fix a parameter's value, set ``const=True`` on
+    its :class:`~pyhs3.parameter_points.ParameterPoint` instead.
+
     Attributes:
         name: Name of the axis/variable
         const: true (required)

@@ -214,3 +214,11 @@ Current Behavior
   creation to enable parameter-scan broadcasting (axis 1).  A warning is emitted
   when the override differs from the automatically determined default.
 - The ``kind`` must be set before creating the model.
+
+See Also
+--------
+
+- :doc:`/howto/evaluate_model` - Evaluating a model's pdf/logpdf, including
+  the ``kind`` override pattern shown above
+- :doc:`/explanation/building_a_model` - Why observables are auto-vectorized
+  and how parameter discovery works

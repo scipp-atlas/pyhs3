@@ -185,13 +185,13 @@ Project Structure
    ├── docs/                         # Documentation
    │   ├── conf.py                   # Sphinx configuration
    │   ├── index.rst                 # Documentation index
-   │   ├── api.rst                   # API reference
-   │   ├── structure.rst             # HS3 structure
-   │   ├── workspace.rst             # Workspace guide
-   │   ├── model.rst                 # Model guide
+   │   ├── tutorial/                 # Diataxis: tutorial
+   │   ├── howto/                    # Diataxis: how-to guides
+   │   ├── reference/                # Diataxis: reference (api.rst)
+   │   ├── explanation/              # Diataxis: explanation
    │   ├── broadcasting.rst          # Broadcasting guide
    │   ├── defining_components.rst   # Component definition
-   │   ├── contributing.rst          # Contributor guide
+   │   ├── CONTRIBUTING.md           # Contributor guide
    │   ├── testing.rst               # Testing guide
    │   ├── development.rst           # Development workflow
    │   └── architecture.rst          # This file
@@ -250,8 +250,8 @@ The typical flow through pyhs3:
 
    .. code-block:: python
 
-      # Build computational graph
-      model = ws.model()
+      # Build computational graph (target is required -- no no-argument form)
+      model = ws.model(0)
 
    - Distributions converted to PyTensor ops
    - Functions resolved and linked
@@ -513,11 +513,11 @@ External Documentation
 Internal Documentation
 ~~~~~~~~~~~~~~~~~~~~~~
 
-- :doc:`contributing` - Contributor guide
+- :doc:`CONTRIBUTING` - Contributor guide
 - :doc:`testing` - Testing guide
 - :doc:`development` - Development workflow
-- :doc:`api` - API reference
-- :doc:`structure` - HS3 structure guide
+- :doc:`/reference/api` - API reference
+- :doc:`/explanation/building_a_model` - How pyhs3 builds a model
 
 Getting Help
 ------------

@@ -2,9 +2,15 @@
    :hidden:
    :maxdepth: 2
 
-   structure
-   workspace
-   model
+   getting_started
+   howto_load_workspace
+   howto_evaluate_model
+   howto_fit_model
+   howto_debug_model
+   workspace_reference
+   model_reference
+   data_reference
+   building_a_model
    broadcasting
    defining_components
    normalization

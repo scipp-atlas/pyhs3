@@ -45,17 +45,22 @@ Minimize
 .. code-block:: python
 
     solver = optx.BFGS(rtol=1e-6, atol=1e-6)
-    sol = optx.minimise(nll, solver, y0=y0, max_steps=1000)
+    sol = optx.minimise(nll, solver, y0=y0, max_steps=1000, throw=False)
 
-    converged = sol.result == optx.RESULTS.successful
-    best_fit = dict(zip(param_names, sol.value, strict=True))
-    print(f"converged: {converged}")
-    print(f"best fit: {best_fit}")
-    print(f"-2 log L at best fit: {float(nll(sol.value, None)):.4f}")
+    if sol.result != optx.RESULTS.successful:
+        print(f"did not converge: {sol.result}")
+    else:
+        best_fit = dict(zip(param_names, sol.value, strict=True))
+        print(f"best fit: {best_fit}")
+        print(f"-2 log L at best fit: {float(nll(sol.value, None)):.4f}")
 
-For the single-Gaussian example workspace built in :doc:`/howto/evaluate_model`,
-this converges to ``mu`` at the sample mean of ``observed_x`` and ``sigma`` at
-its population standard deviation, as expected for a Gaussian's maximum
+``throw=False`` makes ``optx.minimise`` return a ``Solution`` on failure
+instead of raising (the default, ``throw=True``, would raise before you
+ever see ``sol.result``) — check ``sol.result`` before trusting ``sol.value``,
+since it can be meaningless when the solve didn't converge. For the
+single-Gaussian example workspace built in :doc:`/howto/evaluate_model`,
+this converges to ``mu`` at the sample mean of ``observed_x`` and ``sigma``
+at its population standard deviation, as expected for a Gaussian's maximum
 likelihood estimate.
 
 Profile a parameter of interest
@@ -100,7 +105,7 @@ minimization at each point — can be vectorized with ``jax.vmap``:
 
     def fit_at(mu_value):
         sol = optx.minimise(
-            profile_nll, solver, y0=nuisance_y0, args=mu_value, max_steps=1000
+            profile_nll, solver, y0=nuisance_y0, args=mu_value, max_steps=1000, throw=False
         )
         return profile_nll(sol.value, mu_value)
 
@@ -108,4 +113,8 @@ minimization at each point — can be vectorized with ``jax.vmap``:
     scan_nll = jax.vmap(fit_at)(scan_points)
 
 This gives the same result as calling ``fit_at`` in a Python loop over
-``scan_points``, in one traced, batched call.
+``scan_points``, in one traced, batched call. ``throw=False`` keeps one
+non-convergent scan point from raising for the whole batch; ``fit_at`` above
+doesn't check ``sol.result`` per point, but the batched ``sol`` from a call
+made outside ``vmap`` would carry ``result`` as an array with one entry per
+scan point, checkable the same way as the single-fit example above.

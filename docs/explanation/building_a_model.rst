@@ -56,10 +56,13 @@ Parameter discovery and bounds
 Any name that appears in a distribution or function but is never itself the
 output of a function is a leaf of the graph — a parameter. pyhs3 does not
 require you to declare these in ``parameter_points``; it creates one for
-every leaf it finds. If a ``domains`` entry names that parameter, pyhs3
-clips the resulting tensor to the stated ``min``/``max`` at construction
-time (via ``pt.clip``), so pyhs3 itself never proposes a value outside it;
-if no domain names it, the parameter is created unbounded.
+every leaf it finds. Clipping applies only to a **free** parameter: if a
+``domains`` entry names it, pyhs3 clips the resulting tensor to the stated
+``min``/``max`` at construction time (via ``pt.clip``), so pyhs3 itself
+never proposes a value outside it; if no domain names it, the parameter is
+created unbounded. A parameter marked ``const=True`` in ``parameter_points``
+is baked in at its literal value instead, before any clipping happens — an
+out-of-domain constant is used as-is (with a warning), never clipped.
 
 This clip has a consequence worth knowing if you hand ``model.log_prob`` to
 an external gradient-based minimizer: ``pt.clip``'s gradient is exactly zero
@@ -111,9 +114,12 @@ What "compiled" means for a distribution
 
 A distribution's graph is built (topologically sorted, tensors created) as
 soon as the model is constructed, but not compiled into an executable
-function until the first call to ``pdf``/``logpdf`` for that distribution —
-:meth:`~pyhs3.Model.graph_summary` reports this as ``Compiled: No`` or
-``Compiled: Yes``. Building the graph is cheap and happens for every
-distribution up front; compiling is the expensive step PyTensor performs once
-per distribution, on first use, under whichever ``mode`` the model was
-constructed with, and the result is cached for reuse.
+function until first use. ``pdf``/``pdf_unsafe`` and ``logpdf``/
+``logpdf_unsafe`` compile and cache separate functions on first call, one
+per distribution per path. :meth:`~pyhs3.Model.graph_summary` reports
+``Compiled: Yes``/``No`` from the ``pdf`` path's cache only — calling only
+``logpdf`` for a distribution compiles and caches its log-space function
+without ``graph_summary`` reflecting that. Building the graph is cheap and
+happens for every distribution up front; compiling is the expensive step
+PyTensor performs once per distribution per path, under whichever ``mode``
+the model was constructed with.

@@ -9,8 +9,9 @@ with pyhs3's Python API ergonomics.
 **Scope.** Any unit making a claim of numerical or semantic equivalence with
 ROOT/HistFactory/RooFit conventions — constraint-term parameterization,
 interpolation codes, normalization conventions — wherever it appears (likely
-spread across `docs/model.rst`, `docs/defining_components.rst`,
-`docs/normalization.rst`, `docs/broadcasting.rst`).
+spread across `docs/explanation/building_a_model.rst`,
+`docs/defining_components.rst`, `docs/normalization.rst`,
+`docs/broadcasting.rst`).
 
 **Goals.** Know exactly which HistFactory/RooFit conventions pyhs3 reproduces
 exactly, which it reproduces only under stated conditions, and which known

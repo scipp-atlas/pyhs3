@@ -29,11 +29,13 @@ Use ``Workspace.load()``, passing the file's path:
     ...         }
     ...     ],
     ... }
-    >>> with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-    ...     json.dump(workspace_json, f)
-    ...     path = f.name
+    >>> import pathlib
+    >>> with tempfile.TemporaryDirectory() as tmpdir:
+    ...     path = str(pathlib.Path(tmpdir) / "workspace.json")
+    ...     with open(path, "w") as f:
+    ...         json.dump(workspace_json, f)
+    ...     ws = pyhs3.Workspace.load(path)
     ...
-    >>> ws = pyhs3.Workspace.load(path)
     >>> ws.distributions[0].name
     'gauss'
 
@@ -53,13 +55,14 @@ summarizes how many more exist; pass ``verbose=True`` to see every one:
 
     >>> import pyhs3
     >>> broken_json = {"distributions": [{"name": "gauss", "type": "gaussian_dist"}]}
-    >>> with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-    ...     json.dump(broken_json, f)
-    ...     broken_path = f.name
+    >>> with tempfile.TemporaryDirectory() as tmpdir:
+    ...     broken_path = str(pathlib.Path(tmpdir) / "broken.json")
+    ...     with open(broken_path, "w") as f:
+    ...         json.dump(broken_json, f)
+    ...     ws = pyhs3.Workspace.load(
+    ...         broken_path, verbose=True, suppress_traceback=False
+    ...     )  # doctest: +ELLIPSIS
     ...
-    >>> ws = pyhs3.Workspace.load(
-    ...     broken_path, verbose=True, suppress_traceback=False
-    ... )  # doctest: +ELLIPSIS
     Traceback (most recent call last):
         ...
     pyhs3.exceptions.WorkspaceValidationError: ...

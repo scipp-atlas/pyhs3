@@ -38,8 +38,14 @@ inflated symbolism or grandiosity about pyhs3's role ("revolutionizes,"
 
 - Use `.. doctest::` blocks with the `>>>` REPL style already used throughout
   `docs/*.rst`, matching `README.rst`'s Hello World examples — every example
-  must actually run (`pixi run docs-build` executes doctests; an example that
-  renders but was never checked does not pass).
+  must actually run
+  (`JAX_PLATFORMS=cpu pixi run --environment py312-jax test-docs` executes
+  doctests; `pixi run --environment docs docs-build -W` only builds HTML with
+  warnings as errors — an example that renders but was never checked does not
+  pass). The one exception: an example using a library that isn't a pyhs3
+  dependency (e.g. optimistix) is a `code-block` rather than a `doctest`, since
+  no environment has it installed to run against — verify it by hand before
+  shipping instead.
 - Prefer Scikit-HEP ecosystem tools in examples (`awkward`, `hist`,
   `boost-histogram`, `pyhf`, `uproot`, `vector`) over generic alternatives when
   a choice exists.

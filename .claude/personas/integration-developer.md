@@ -31,6 +31,6 @@ propagation with no surfaced warning.
 source, and would a wrong shape or ordering assumption fail loudly or fail
 silently?
 
-**Sources checked.** `docs/broadcasting.rst`, `docs/model.rst`, the `Model`
-class source, and PyTensor/JAX's own documentation for cross-referencing
-conventions.
+**Sources checked.** `docs/broadcasting.rst`, `docs/reference/api.rst`,
+`docs/explanation/building_a_model.rst`, the `Model` class source, and
+PyTensor/JAX's own documentation for cross-referencing conventions.

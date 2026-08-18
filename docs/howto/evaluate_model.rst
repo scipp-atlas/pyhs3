@@ -154,7 +154,10 @@ extra (``pip install pyhs3[jax]``):
     ...         {
     ...             "name": "fit_region",
     ...             "type": "product_domain",
-    ...             "axes": [{"name": "mu", "min": -5.0, "max": 5.0}],
+    ...             "axes": [
+    ...                 {"name": "mu", "min": -5.0, "max": 5.0},
+    ...                 {"name": "sigma", "min": 0.01, "max": 10.0},
+    ...             ],
     ...         }
     ...     ],
     ...     "data": [

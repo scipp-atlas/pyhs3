@@ -72,9 +72,11 @@ building one distribution, and whether it has been compiled yet:
         Mode: ...
         Compiled: ...
 
-"Compiled: No" means pyhs3 hasn't built and cached the underlying PyTensor
-function yet. That happens the first time you call ``.pdf()``, ``.logpdf()``,
-or one of their ``_unsafe`` variants for that distribution.
+"Compiled: No" reflects only the ``pdf``/``pdf_unsafe`` path: it flips to
+"Yes" the first time you call one of those two for this distribution.
+``logpdf``/``logpdf_unsafe`` compile and cache a separate log-space
+function on their own first call, which this summary doesn't report — see
+:doc:`/explanation/building_a_model`.
 
 Visualize the graph
 -----------------------

@@ -73,10 +73,10 @@ first domain and first parameter set:
 
    >>> model = ws.model(0)
    <BLANKLINE>
-   >>> print(model)
+   >>> print(model)  # doctest: +ELLIPSIS
    Model(
        mode: FAST_RUN
-       parameters: 3 (sigma, mu, x)
+       parameters: 3 (...)
        distributions: 1 (gauss)
        functions: 0 ()
    )

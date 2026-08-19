@@ -84,6 +84,61 @@ class TestProductFunction:
         f = function([], result)
         assert np.isclose(f(), 1.0)
 
+    def test_product_function_skips_same_dtype_scalar_identities(self):
+        """Scalar ones should not create redundant multiplication nodes."""
+        func = ProductFunction(
+            name="test_product",
+            factors=["one_before", "value", "one_after"],
+        )
+        value = pt.dscalar("value")
+        context = {
+            "one_before": pt.constant(1.0, dtype="float64"),
+            "value": value,
+            "one_after": pt.constant(1.0, dtype="float64"),
+        }
+
+        result = func.expression(context)
+        mul_nodes = [
+            node
+            for node in io_toposort([], [result])
+            if isinstance(node.op, Elemwise)
+            and type(node.op.scalar_op).__name__ == "Mul"
+        ]
+
+        assert result.dtype == "float64"
+        assert result.ndim == 0
+        assert mul_nodes == []
+
+        f = function([value], result)
+        assert f(3.5) == pytest.approx(3.5)
+
+    def test_product_function_preserves_identity_dtype_promotion(self):
+        """An identity with a wider dtype must retain dtype promotion."""
+        func = ProductFunction(
+            name="test_product",
+            factors=["one", "value"],
+        )
+        value = pt.fscalar("value")
+        context = {
+            "one": pt.constant(1.0, dtype="float64"),
+            "value": value,
+        }
+
+        result = func.expression(context)
+        mul_nodes = [
+            node
+            for node in io_toposort([], [result])
+            if isinstance(node.op, Elemwise)
+            and type(node.op.scalar_op).__name__ == "Mul"
+        ]
+
+        assert result.dtype == "float64"
+        assert result.ndim == 0
+        assert len(mul_nodes) == 1
+
+        f = function([value], result)
+        assert f(np.float32(2.5)) == pytest.approx(2.5)
+
     @pytest.mark.parametrize(
         ("factors", "values", "expected"),
         [

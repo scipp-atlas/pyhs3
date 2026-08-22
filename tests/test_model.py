@@ -13,7 +13,10 @@ from pytensor.graph.traversal import explicit_graph_inputs
 from pytensor.tensor.basic import TensorConstant
 
 import pyhs3 as hs3
+from pyhs3.distributions import Distributions
+from pyhs3.distributions.mathematical import GenericDist
 from pyhs3.domains import ProductDomain
+from pyhs3.functions import Functions
 from pyhs3.parameter_points import ParameterPoint, ParameterSet
 
 
@@ -390,6 +393,97 @@ class TestModelGraphVisualization:
 
         with pytest.raises(ImportError, match="Graph visualization requires pydot"):
             model.visualize_graph("gauss")
+
+
+class TestModelGraphVisualizationOptions:
+    """Test Model.visualize_graph()'s paper-rendering kwargs, end-to-end.
+
+    Uses a normalized distribution (an observable triggers Gauss-Legendre
+    integration) so the compiled graph actually contains the ExpandDims
+    plumbing and the large quadrature-node constant these options target -
+    the plain "gauss" distribution in ``simple_workspace`` has neither.
+    """
+
+    @pytest.fixture
+    def normalized_model(self):
+        """A Model whose one distribution is normalized over an observable."""
+        generic_dist = GenericDist(name="test_dist", expression="exp(-x)")
+        parameterset = ParameterSet(name="default", parameters=[])
+        distributions = Distributions([generic_dist])
+        domain = ProductDomain(name="default")
+        functions = Functions([])
+
+        return hs3.Model(
+            parameterset=parameterset,
+            distributions=distributions,
+            domain=domain,
+            functions=functions,
+            progress=False,
+            observables={"x": (0.0, 10.0)},
+        )
+
+    @pytest.mark.pydot
+    def test_default_elides_expand_dims_and_drops_dtype_shape_and_id(
+        self, normalized_model, tmp_path
+    ):
+        output_file = normalized_model.visualize_graph("test_dist", path=tmp_path)
+        svg = Path(output_file).read_text()
+
+        assert "ExpandDims" not in svg
+        assert "shape=" not in svg
+        assert not re.search(r"id=\d", svg)
+
+    @pytest.mark.pydot
+    def test_op_params_orig_keeps_expand_dims(self, normalized_model, tmp_path):
+        output_file = normalized_model.visualize_graph(
+            "test_dist", path=tmp_path, op_params="orig"
+        )
+        svg = Path(output_file).read_text()
+
+        assert "ExpandDims" in svg
+
+    @pytest.mark.pydot
+    def test_show_id_true_keeps_toposort_index(self, normalized_model, tmp_path):
+        output_file = normalized_model.visualize_graph(
+            "test_dist", path=tmp_path, show_id=True
+        )
+        svg = Path(output_file).read_text()
+
+        assert re.search(r"id=\d", svg)
+
+    @pytest.mark.pydot
+    def test_show_dtype_and_show_shape_restore_type_annotations(
+        self, normalized_model, tmp_path
+    ):
+        output_file = normalized_model.visualize_graph(
+            "test_dist", path=tmp_path, show_dtype=True, show_shape=True
+        )
+        svg = Path(output_file).read_text()
+
+        assert "float" in svg
+        assert "shape=" in svg
+
+    @pytest.mark.pydot
+    def test_const_arrays_elide_collapses_quadrature_nodes(
+        self, normalized_model, tmp_path
+    ):
+        output_file = normalized_model.visualize_graph(
+            "test_dist", path=tmp_path, const_arrays="elide"
+        )
+        svg = Path(output_file).read_text()
+
+        assert "const[64]" in svg
+
+    @pytest.mark.pydot
+    def test_const_arrays_orig_leaves_quadrature_nodes_unrenamed(
+        self, normalized_model, tmp_path
+    ):
+        output_file = normalized_model.visualize_graph(
+            "test_dist", path=tmp_path, const_arrays="orig"
+        )
+        svg = Path(output_file).read_text()
+
+        assert "const[64]" not in svg
 
 
 class TestModelWithoutParameterPoints:

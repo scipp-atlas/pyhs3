@@ -28,6 +28,12 @@ from pyhs3.data import BinnedData
 from pyhs3.distributions import Distributions, HistFactoryDistChannel
 from pyhs3.domains import Domain
 from pyhs3.functions import Functions
+from pyhs3.graph_viz import (
+    DEFAULT_OP_PARAMS,
+    ConstArrayMode,
+    OpParamMode,
+    render_graph,
+)
 from pyhs3.networks import build_dependency_graph
 from pyhs3.parameter_points import ParameterSet
 from pyhs3.tensorutils import create_bounded_tensor, ensure_array
@@ -1044,15 +1050,52 @@ class Model:
         fmt: str = "svg",
         outfile: str | None = None,
         path: str | None = None,
+        *,
+        op_params: OpParamMode | Mapping[str, OpParamMode] = DEFAULT_OP_PARAMS,
+        show_id: bool = False,
+        show_dtype: bool = False,
+        show_shape: bool = False,
+        const_arrays: ConstArrayMode = "elide",
+        const_array_threshold: int = 8,
     ) -> str:
         """
         Visualize the computation graph for a distribution.
+
+        The defaults favor a figure that's readable at a glance over one that
+        exposes every implementation detail: dtype/shape annotations and
+        toposort-index ids are hidden, single-input broadcasting plumbing ops
+        (``ExpandDims``, ``DimShuffle``) are spliced out of the drawing, and
+        constant arrays larger than ``const_array_threshold`` collapse to a
+        ``const[shape]`` placeholder. Pass the corresponding kwarg to bring any
+        of that detail back.
 
         Args:
             name (str): Distribution name.
             fmt (str): Output format ('svg', 'png', 'pdf'). Defaults to 'svg'.
             outfile (str | None): Output filename. If None, uses '{name}_graph.{fmt}'.
             path (str | None): Directory path for output. If None, uses current working directory.
+            op_params: Per-op-name display mode, or one mode applied to every
+                op. ``"orig"`` keeps the op's full label (e.g. ``Sum{axis=0}``);
+                ``"none"`` drops the parameter block (``Sum``); ``"elide"``
+                removes the node from the drawing entirely, rewiring its
+                consumers to its own (sole) input - only sound for
+                single-input ops. Op names absent from a mapping default to
+                ``"orig"``. Defaults to eliding ``ExpandDims``/``DimShuffle``
+                only.
+            show_id: Append each op's toposort index to its label
+                (e.g. ``Add id=9``). Defaults to ``False``.
+            show_dtype: Keep the dtype portion of PyTensor's type annotations
+                (e.g. ``Matrix(float32)``). Defaults to ``False``.
+            show_shape: Keep the shape portion of PyTensor's type annotations
+                (e.g. ``Matrix(shape=(1, 1))``). Defaults to ``False``.
+            const_arrays: How to render constant arrays larger than
+                ``const_array_threshold`` elements. ``"orig"`` leaves
+                pydotprint's own (possibly mid-token-truncated) value dump
+                untouched; ``"truncate"`` shows a deliberate
+                ``[v0, v1, v2, ...] (shape)`` preview; ``"elide"`` collapses
+                it to ``const[shape]``. Defaults to ``"elide"``.
+            const_array_threshold: Element count above which ``const_arrays``
+                applies. Defaults to 8.
 
         Returns:
             str: Path to the generated visualization file.
@@ -1061,8 +1104,8 @@ class Model:
             ImportError: If pydot is not installed.
         """
         try:
-            from pytensor.printing import (  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
-                pydotprint,
+            from pytensor.printing import (  # noqa: F401, PLC0415  # pylint: disable=import-outside-toplevel,unused-import
+                pydotprint as _pydotprint_availability_probe,
             )
         except ImportError as e:
             msg = "Graph visualization requires pydot. Install with: pip install pydot"
@@ -1083,10 +1126,17 @@ class Model:
             else:
                 filename = base_filename
 
-        pydotprint(
-            dist, outfile=filename, format=fmt, with_ids=True, high_contrast=True
+        return render_graph(
+            dist,
+            filename,
+            fmt,
+            op_params=op_params,
+            show_id=show_id,
+            show_dtype=show_dtype,
+            show_shape=show_shape,
+            const_arrays=const_arrays,
+            const_array_threshold=const_array_threshold,
         )
-        return filename
 
     def __repr__(self) -> str:
         """Provide a concise overview of the model structure."""

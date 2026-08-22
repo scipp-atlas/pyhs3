@@ -116,6 +116,9 @@ xfail_strict = true
 filterwarnings = [
     "error",
     "ignore:jsonschema.RefResolver is deprecated.*:DeprecationWarning",
+    # pydot's dot_parser calls pyparsing's old setParseAction API internally;
+    # nothing pyhs3 can fix on its own end.
+    "ignore:'setParseAction' deprecated - use 'set_parse_action':DeprecationWarning",
 ]
 log_cli_level = "INFO"
 testpaths = [
@@ -160,6 +163,7 @@ module = [
   "pytensor.link.jax.*",
   "pytensor.compile.function",  # removed in pytensor >= 3; replaced by pytensor.compile.maker
   "pytensor_distributions.*",  # https://github.com/pymc-devs/pytensor-distributions/issues/62
+  "pydot.*",  # no type stubs published
 ]
 ignore_missing_imports = true
 

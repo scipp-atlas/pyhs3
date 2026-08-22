@@ -313,3 +313,13 @@ class TestRenderGraphEndToEnd:
         svg = Path(outfile).read_text()
 
         assert "axis" in svg
+
+    def test_outfile_ending_in_dot_is_not_deleted(self, tmp_path):
+        # The internal scratch file is also a ".dot" file; outfile must not
+        # collide with it and get unlinked as cleanup.
+        out = pt.scalar("x") + pt.constant(1.0)
+
+        outfile = render_graph(out, str(tmp_path / "graph.dot"), fmt="dot")
+
+        assert Path(outfile).exists()
+        assert "digraph" in Path(outfile).read_text()

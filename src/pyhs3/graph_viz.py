@@ -14,7 +14,9 @@ Used by :meth:`pyhs3.model.Model.visualize_graph`.
 
 from __future__ import annotations
 
+import os
 import re
+import tempfile
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal, cast
@@ -285,29 +287,37 @@ def render_graph(
         var, const_arrays=const_arrays, threshold=const_array_threshold
     )
 
-    tmp_dot = Path(outfile).with_suffix(".dot")
-    pydotprint(
-        var,
-        outfile=str(tmp_dot),
-        format="dot",
-        with_ids=show_id,
-        high_contrast=True,
-        var_with_name_simple=True,
-        compact=True,
-        print_output_file=False,
-    )
+    # A name derived from outfile (e.g. outfile.with_suffix(".dot")) can equal
+    # outfile itself when outfile already ends in ".dot" - then the cleanup
+    # unlink below would delete the very file we just rendered. mkstemp
+    # guarantees a name distinct from outfile regardless of its suffix.
+    fd, tmp_name = tempfile.mkstemp(suffix=".dot", dir=str(Path(outfile).parent))
+    os.close(fd)
+    tmp_dot = Path(tmp_name)
+    try:
+        pydotprint(
+            var,
+            outfile=str(tmp_dot),
+            format="dot",
+            with_ids=show_id,
+            high_contrast=True,
+            var_with_name_simple=True,
+            compact=True,
+            print_output_file=False,
+        )
 
-    (graph,) = pydot.graph_from_dot_file(str(tmp_dot))
-    _elide_nodes(graph, op_params)
-    _reset_layout(graph)
-    _clean_labels(
-        graph,
-        op_params=op_params,
-        show_id=show_id,
-        show_dtype=show_dtype,
-        show_shape=show_shape,
-    )
+        (graph,) = pydot.graph_from_dot_file(str(tmp_dot))
+        _elide_nodes(graph, op_params)
+        _reset_layout(graph)
+        _clean_labels(
+            graph,
+            op_params=op_params,
+            show_id=show_id,
+            show_dtype=show_dtype,
+            show_shape=show_shape,
+        )
 
-    graph.write(outfile, prog="dot", format=fmt)
-    tmp_dot.unlink()
+        graph.write(outfile, prog="dot", format=fmt)
+    finally:
+        tmp_dot.unlink(missing_ok=True)
     return outfile

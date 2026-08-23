@@ -246,15 +246,19 @@ def interpolate_code4(
     hi_at_alpha0 = pt.power(hi_ratio, alpha0)  # type: ignore[no-untyped-call]
     lo_at_alpha0 = pt.power(lo_ratio, alpha0)  # type: ignore[no-untyped-call]
 
+    # Reuse logarithms across the first- and second-derivative terms.
+    log_hi_ratio = pt.log(hi_ratio)
+    log_lo_ratio = pt.log(lo_ratio)
+
     # RHS vector b
     b = pt.stack(
         [
             hi_at_alpha0 - 1.0,
             lo_at_alpha0 - 1.0,
-            pt.log(hi_ratio) * hi_at_alpha0,
-            -pt.log(lo_ratio) * lo_at_alpha0,
-            pt.power(pt.log(hi_ratio), 2) * hi_at_alpha0,  # type: ignore[no-untyped-call]
-            pt.power(pt.log(lo_ratio), 2) * lo_at_alpha0,  # type: ignore[no-untyped-call]
+            log_hi_ratio * hi_at_alpha0,
+            -log_lo_ratio * lo_at_alpha0,
+            pt.power(log_hi_ratio, 2) * hi_at_alpha0,  # type: ignore[no-untyped-call]
+            pt.power(log_lo_ratio, 2) * lo_at_alpha0,  # type: ignore[no-untyped-call]
         ]
     )
 

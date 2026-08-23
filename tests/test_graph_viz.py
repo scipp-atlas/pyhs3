@@ -139,6 +139,29 @@ class TestCleanLabel:
             == label
         )
 
+    def test_parenthesized_text_without_a_dtype_hint_is_left_untouched(self):
+        # Matches _TYPE_SUFFIX_RE's "word(...)" shape but has no dtype/shape=
+        # hint inside - a hypothetical op param, not a type annotation.
+        label = "SomeOp(axis=-1)"
+        assert (
+            _clean_label(label, show_id=False, show_dtype=False, show_shape=False)
+            == label
+        )
+
+    def test_unparseable_type_inner_is_left_untouched(self):
+        # Contains a dtype hint ("float32") but not the "dtype, shape=(...)"
+        # format _TYPE_INNER_RE expects - e.g. a future PyTensor type repr.
+        # Left as-is rather than guessed at, regardless of the knobs.
+        label = "0 Matrix(float32)"
+        assert (
+            _clean_label(label, show_id=False, show_dtype=False, show_shape=False)
+            == label
+        )
+        assert (
+            _clean_label(label, show_id=False, show_dtype=True, show_shape=True)
+            == label
+        )
+
 
 class TestConstArrayLabel:
     def test_elide_shows_shape_only(self):

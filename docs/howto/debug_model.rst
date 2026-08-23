@@ -89,9 +89,8 @@ the optional ``pydot`` dependency:
     >>> import tempfile
     >>> with tempfile.TemporaryDirectory() as tmpdir:
     ...     path = model.visualize_graph("gauss", fmt="svg", path=tmpdir)
-    ...     print(path.endswith("gauss_graph.svg"))  # doctest: +ELLIPSIS
+    ...     print(path.endswith("gauss_graph.svg"))
     ...
-    The output file is available at ...
     True
 
 If ``pydot`` isn't installed, ``visualize_graph()`` raises ``ImportError``

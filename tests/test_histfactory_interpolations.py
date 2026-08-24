@@ -1027,6 +1027,25 @@ class TestInterpolationPyhfComparison:
 class TestCode4Regression:
     """Regression tests for HistFactory code4 interpolation."""
 
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    def test_code4_reuses_ratio_logarithms(self, dtype):
+        """Code4 should reuse logs across derivative terms."""
+        alpha = pt.scalar("alpha", dtype=dtype)
+        nom = pt.scalar("nom", dtype=dtype)
+        hi = pt.scalar("hi", dtype=dtype)
+        lo = pt.scalar("lo", dtype=dtype)
+
+        result = interpolate_code4(alpha, nom, hi, lo)
+
+        log_nodes = [
+            node
+            for node in io_toposort([], [result])
+            if isinstance(node.op, Elemwise)
+            and type(node.op.scalar_op).__name__ == "Log"
+        ]
+
+        assert len(log_nodes) == 2
+
     def test_code4_avoids_implicit_add_constant_upcast(self):
         """Code4 should construct additive constants at the output dtype."""
         alpha = pt.dscalar("alpha")

@@ -14,6 +14,7 @@ from pyhs3.distributions import (
     CrystalBallDist,
     GaussianDist,
     GenericDist,
+    GenNormalDist,
     MixtureDist,
     PoissonDist,
     ProductDist,
@@ -100,6 +101,35 @@ class TestDistributionRoundtripping:
         # Should be equivalent
         assert dist1.name == dist2.name
         assert dist1.type == dist2.type
+        assert serialized == config
+
+    def test_gennormal_dist_roundtrip(self):
+        """Test GenNormalDist roundtripping."""
+        config = {
+            "type": "generalized_normal_dist",
+            "name": "test_gennormal",
+            "x": "obs",
+            "mean": "mu",
+            "alpha": "width",
+            "beta": "power",
+        }
+
+        # Create from dict
+        dist1 = GenNormalDist(**config)
+
+        # Serialize back to dict
+        serialized = dist1.model_dump()
+
+        # Create again from serialized dict
+        dist2 = GenNormalDist(**serialized)
+
+        # Should be equivalent
+        assert dist1.name == dist2.name
+        assert dist1.type == dist2.type
+        assert dist1.mean == dist2.mean
+        assert dist1.alpha == dist2.alpha
+        assert dist1.beta == dist2.beta
+        assert dist1.x == dist2.x
         assert serialized == config
 
     def test_mixture_dist_roundtrip(self):

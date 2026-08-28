@@ -18,6 +18,7 @@ import pytest
 from pydantic import ValidationError
 from pytensor import function
 from scipy.special import logsumexp
+from scipy.stats import gennorm, laplace, norm
 
 from pyhs3 import Workspace
 from pyhs3.context import Context
@@ -33,6 +34,7 @@ from pyhs3.distributions import (
     FastVerticalInterpHistPdf2Dist,
     GaussianDist,
     GenericDist,
+    GenNormalDist,
     GGZZBackgroundDist,
     HistogramDist,
     LandauDist,
@@ -2776,6 +2778,218 @@ class TestLandauDist:
 
             # The distribution should be properly scaled by 1/sigma
             # (this is a basic sanity check, not a strict mathematical verification)
+
+
+class TestGenNormalDist:
+    """Test GenNormalDist (generalized normal / Subbotin) implementation."""
+
+    def test_gennormal_dist_creation(self):
+        """Test GenNormalDist can be created and configured."""
+        dist = GenNormalDist(name="test_gn", x="x_var", mean="mu", alpha="a", beta="b")
+        assert dist.name == "test_gn"
+        assert dist.x == "x_var"
+        assert dist.mean == "mu"
+        assert dist.alpha == "a"
+        assert dist.beta == "b"
+        assert dist.type == "generalized_normal_dist"
+        assert dist.parameters == {"x_var", "mu", "a", "b"}
+
+    def test_gennormal_dist_from_dict(self):
+        """Test GenNormalDist can be created from an HS3-style dictionary."""
+        config = {
+            "type": "generalized_normal_dist",
+            "name": "test_gn",
+            "x": "obs",
+            "mean": "mu",
+            "alpha": "width",
+            "beta": "power",
+        }
+        dist = GenNormalDist(**config)
+        assert dist.name == "test_gn"
+        assert dist.x == "obs"
+        assert dist.mean == "mu"
+        assert dist.alpha == "width"
+        assert dist.beta == "power"
+
+    @pytest.mark.parametrize(
+        ("mu", "alpha", "beta", "x"),
+        [
+            pytest.param(0.3, 1.5, 3.0, 0.8, id="flat_top"),
+            pytest.param(0.0, 1.0, 2.0, 1.2, id="gaussian_like"),
+            pytest.param(-0.5, 2.0, 1.0, 0.7, id="laplace_like"),
+            pytest.param(1.0, 0.7, 5.0, 1.0, id="at_mode"),
+            pytest.param(0.2, 1.3, 8.0, -0.4, id="flat_top_beta8"),
+        ],
+    )
+    def test_gennormal_pdf_matches_scipy(self, mu, alpha, beta, x):
+        """Normalized GenNormal PDF matches scipy.stats.gennorm.
+
+        scipy parameterization mapping verified empirically:
+        ``gennorm.pdf(x, beta, loc=mu, scale=alpha)`` with beta the shape,
+        loc=mu, scale=alpha (no extra scale factor). All inputs are scalars,
+        so the expression evaluates to a scalar.
+        """
+        dist = GenNormalDist(name="gn", x="x", mean="mu", alpha="alpha", beta="beta")
+        params = {
+            "x": pt.constant(x),
+            "mu": pt.constant(mu),
+            "alpha": pt.constant(alpha),
+            "beta": pt.constant(beta),
+        }
+        result = dist.expression(Context(params))
+        val = function([], result)()
+        expected = gennorm.pdf(x, beta, loc=mu, scale=alpha)
+        np.testing.assert_allclose(val, expected, rtol=1e-6)
+
+    def test_gennormal_beta2_reduces_to_gaussian(self):
+        """beta=2 reduces to a Gaussian with sigma = alpha / sqrt(2)."""
+        mu, alpha = 0.3, 1.5
+        sigma = alpha / np.sqrt(2.0)
+        dist = GenNormalDist(name="gn", x="x", mean="mu", alpha="alpha", beta="beta")
+        for x in (-1.0, 0.3, 1.7):
+            params = {
+                "x": pt.constant(x),
+                "mu": pt.constant(mu),
+                "alpha": pt.constant(alpha),
+                "beta": pt.constant(2.0),
+            }
+            val = function([], dist.expression(Context(params)))()
+            np.testing.assert_allclose(val, norm.pdf(x, mu, sigma), rtol=1e-6)
+
+    def test_gennormal_beta1_reduces_to_laplace(self):
+        """beta=1 reduces to a Laplace with scale = alpha."""
+        mu, alpha = -0.5, 2.0
+        dist = GenNormalDist(name="gn", x="x", mean="mu", alpha="alpha", beta="beta")
+        for x in (-2.0, -0.5, 1.3):
+            params = {
+                "x": pt.constant(x),
+                "mu": pt.constant(mu),
+                "alpha": pt.constant(alpha),
+                "beta": pt.constant(1.0),
+            }
+            val = function([], dist.expression(Context(params)))()
+            np.testing.assert_allclose(val, laplace.pdf(x, mu, alpha), rtol=1e-6)
+
+    def test_gennormal_log_likelihood_matches_scipy(self):
+        """Analytic log-PDF matches scipy.stats.gennorm.logpdf, including deep tails."""
+        mu, alpha, beta = 0.3, 1.5, 3.0
+        dist = GenNormalDist(name="gn", x="x", mean="mu", alpha="alpha", beta="beta")
+        # x far in the tail: the probability-space PDF underflows to 0.0, so a
+        # log(pdf) round-trip would give -inf while the analytic log form stays finite.
+        for x in (0.3, 2.0, 12.0):
+            params = {
+                "x": pt.constant(x),
+                "mu": pt.constant(mu),
+                "alpha": pt.constant(alpha),
+                "beta": pt.constant(beta),
+            }
+            val = function([], dist.log_likelihood(Context(params)))()
+            expected = gennorm.logpdf(x, beta, loc=mu, scale=alpha)
+            assert np.isfinite(val)
+            np.testing.assert_allclose(val, expected, rtol=1e-6)
+
+    @pytest.mark.parametrize(
+        ("lower", "upper"),
+        [
+            pytest.param(-2.0, 3.5, id="finite"),
+            pytest.param(-20.0, 20.0, id="wide"),
+        ],
+    )
+    def test_gennormal_antiderivative_matches_scipy_cdf(self, lower, upper):
+        """The analytic antiderivative F(upper) - F(lower) equals scipy's domain mass.
+
+        ``normalization_expression`` returns the centered CDF F; the framework
+        uses ``F(upper) - F(lower)`` as the finite-domain normalization integral.
+        That difference equals ``gennorm.cdf(upper) - gennorm.cdf(lower)`` exactly,
+        and approaches 1 over a domain wide enough to hold essentially all the mass.
+        """
+        mu, alpha, beta = 0.3, 1.5, 3.0
+        dist = GenNormalDist(name="gn", x="x", mean="mu", alpha="alpha", beta="beta")
+        x_var = pt.scalar("x")
+        context = Context(
+            {
+                "x": x_var,
+                "mu": pt.constant(mu),
+                "alpha": pt.constant(alpha),
+                "beta": pt.constant(beta),
+            }
+        )
+        antideriv = function([x_var], dist.normalization_expression(context, "x"))
+        analytic_mass = antideriv(upper) - antideriv(lower)
+        expected_mass = gennorm.cdf(upper, beta, loc=mu, scale=alpha) - gennorm.cdf(
+            lower, beta, loc=mu, scale=alpha
+        )
+        np.testing.assert_allclose(analytic_mass, expected_mass, rtol=1e-6)
+
+    def test_gennormal_normalization_expression_none_for_other_observable(self):
+        """normalization_expression defers to quadrature when the observable is not x."""
+        dist = GenNormalDist(name="gn", x="x", mean="mu", alpha="alpha", beta="beta")
+        context = Context(
+            {
+                "x": pt.scalar("x"),
+                "mu": pt.constant(0.0),
+                "alpha": pt.constant(1.0),
+                "beta": pt.constant(2.0),
+            }
+        )
+        assert dist.normalization_expression(context, "mu") is None
+
+    def test_gennormal_dist_workspace_normalized_pdf(self):
+        """GenNormal PDF through a Workspace, normalized over its observable domain.
+
+        With a finite domain the framework renormalizes over ``[lower, upper]``,
+        so the value matches scipy's PDF renormalized by the domain mass
+        (``gennorm.cdf(upper) - gennorm.cdf(lower)``).
+        """
+        lower, upper = -6.0, 6.0
+        mu, alpha, beta, x = 0.3, 1.5, 3.0, 0.8
+        test_data = {
+            "parameter_points": [
+                {
+                    "name": "pset",
+                    "parameters": [
+                        {"name": "obs", "value": x},
+                        {"name": "mu", "value": mu},
+                        {"name": "alpha", "value": alpha},
+                        {"name": "beta", "value": beta},
+                    ],
+                }
+            ],
+            "distributions": [
+                {
+                    "type": "generalized_normal_dist",
+                    "name": "gn",
+                    "x": "obs",
+                    "mean": "mu",
+                    "alpha": "alpha",
+                    "beta": "beta",
+                }
+            ],
+            "domains": [
+                {
+                    "name": "test_domain",
+                    "type": "product_domain",
+                    "axes": [{"name": "obs", "min": lower, "max": upper}],
+                }
+            ],
+            "functions": [],
+            "metadata": {"hs3_version": "0.2"},
+        }
+        ws = Workspace(**test_data)
+        model = ws.model(0, domain="test_domain", parameter_set="pset")
+        assert "gn" in model.distributions
+        pdf_value = model.pdf(
+            "gn",
+            obs=np.array(x),
+            mu=np.array(mu),
+            alpha=np.array(alpha),
+            beta=np.array(beta),
+        )
+        domain_mass = gennorm.cdf(upper, beta, loc=mu, scale=alpha) - gennorm.cdf(
+            lower, beta, loc=mu, scale=alpha
+        )
+        expected = gennorm.pdf(x, beta, loc=mu, scale=alpha) / domain_mass
+        np.testing.assert_allclose(pdf_value, expected, rtol=1e-6)
 
 
 class TestDistributionsContainer:

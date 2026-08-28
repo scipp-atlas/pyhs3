@@ -224,8 +224,13 @@ class TestConstantAxis:
 
     def test_constant_axis_const_required(self):
         """Test that ConstantAxis const=False."""
-        with pytest.raises(ValidationError, match="Input should be True"):
+        with pytest.raises(ValidationError, match="const must be the boolean true"):
             ConstantAxis(name="x", const=False)
+
+    def test_constant_axis_rejects_truthy_integer(self):
+        """Test that the integer one is not accepted as JSON true."""
+        with pytest.raises(ValidationError, match="const must be the boolean true"):
+            ConstantAxis(name="x", const=1)
 
     def test_constant_axis_not_mutable(self):
         """Test that ConstantAxis is frozen."""
@@ -264,12 +269,9 @@ class TestRegularAxis:
             RegularAxis(name="x", min=10.0, max=5.0, nbins=5)
 
     def test_binned_axis_range_equal_min_max(self):
-        """Test RegularAxis allows equal min and max (though not very useful)."""
-        # The base Axis class allows min == max, so this should work
-        axis = RegularAxis(name="x", min=5.0, max=5.0, nbins=5)
-        assert axis.min == 5.0
-        assert axis.max == 5.0
-        assert axis.nbins == 5
+        """Test RegularAxis rejects a zero-width binning range."""
+        with pytest.raises(ValueError, match="bounds must be finite and increasing"):
+            RegularAxis(name="x", min=5.0, max=5.0, nbins=5)
 
     def test_binned_axis_range_zero_bins(self):
         """Test RegularAxis raises error when nbins is zero."""
@@ -286,6 +288,34 @@ class TestRegularAxis:
             match="RegularAxis 'x' must have positive number of bins, got -5",
         ):
             RegularAxis(name="x", min=0.0, max=10.0, nbins=-5)
+
+    @pytest.mark.parametrize("nbins", [True, False, 1.5, "2", float("inf")])
+    def test_binned_axis_rejects_non_integer_bin_counts(self, nbins):
+        """Test that booleans and non-integer values are not coerced to nbins."""
+        with pytest.raises(ValueError, match="nbins must be a positive integer"):
+            RegularAxis(name="x", min=0.0, max=10.0, nbins=nbins)
+
+    def test_binned_axis_accepts_integer_valued_float_bin_count(self):
+        """Test ROOT-compatible integer-valued JSON float handling."""
+        axis = RegularAxis(name="x", min=0.0, max=10.0, nbins=5.0)
+        assert axis.nbins == 5
+        assert isinstance(axis.nbins, int)
+
+    @pytest.mark.parametrize(
+        ("min_value", "max_value"),
+        [
+            (float("nan"), 1.0),
+            (0.0, float("inf")),
+            (False, 1.0),
+            ("0", 1.0),
+        ],
+    )
+    def test_binned_axis_rejects_non_finite_or_non_numeric_bounds(
+        self, min_value, max_value
+    ):
+        """Test that malformed regular bounds are not silently coerced."""
+        with pytest.raises(ValueError, match="bounds must be finite numeric values"):
+            RegularAxis(name="x", min=min_value, max=max_value, nbins=5)
 
 
 class TestIrregularAxis:
@@ -333,6 +363,20 @@ class TestIrregularAxis:
             ValueError, match="IrregularAxis 'x' edges must be in ascending order"
         ):
             IrregularAxis(name="x", edges=[0.0, 5.0, 5.0, 10.0])
+
+    @pytest.mark.parametrize(
+        "edges",
+        [
+            [0.0, float("nan"), 1.0],
+            [0.0, float("inf")],
+            [False, 1.0],
+            ["0", 1.0],
+        ],
+    )
+    def test_binned_axis_edges_must_be_finite_numbers(self, edges):
+        """Test that malformed irregular edges are not silently coerced."""
+        with pytest.raises(ValueError, match="finite numeric values"):
+            IrregularAxis(name="x", edges=edges)
 
 
 class TestBinnedAxisDiscriminatedUnion:
@@ -475,12 +519,9 @@ class TestBinnedAxisEdges:
         assert axis.edges == pytest.approx([1.0, 2.0])
 
     def test_binned_axis_edges_zero_range(self):
-        """Test edges property with zero range (min=max)."""
-        axis = make_binned_axis(name="zero_range", min=5.0, max=5.0, nbins=1)
-
-        # Should return [5.0, 5.0] for zero range
-        assert len(axis.edges) == 2
-        assert axis.edges == pytest.approx([5.0, 5.0])
+        """Test regular binning rejects a zero-width range."""
+        with pytest.raises(ValueError, match="bounds must be finite and increasing"):
+            make_binned_axis(name="zero_range", min=5.0, max=5.0, nbins=1)
 
     def test_binned_axis_edges_negative_range(self):
         """Test edges property with negative values."""
@@ -739,6 +780,20 @@ class TestDomainCoordinateAxis:
             match=r"DomainCoordinateAxis 'x': max \(5\.0\) must be >= min \(10\.0\)",
         ):
             DomainCoordinateAxis(name="x", min=10, max=5)
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("min", float("nan")),
+            ("max", float("inf")),
+            ("min", False),
+            ("max", "1"),
+        ],
+    )
+    def test_domain_axis_explicit_bounds_must_be_finite_numbers(self, field, value):
+        """Test strict validation without changing omitted unbounded bounds."""
+        with pytest.raises(ValueError, match="bounds must be finite numeric values"):
+            DomainCoordinateAxis(name="x", **{field: value})
 
     def test_domain_axis_round_trip_unbounded(self):
         """Test serialization round-trip for unbounded axis."""

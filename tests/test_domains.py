@@ -9,7 +9,12 @@ from __future__ import annotations
 
 import pytest
 
-from pyhs3.axes import ConstantAxis, DomainCoordinateAxis
+from pyhs3.axes import (
+    ConstantAxis,
+    DomainCoordinateAxis,
+    IrregularAxis,
+    RegularAxis,
+)
 from pyhs3.domains import Domain, Domains, ProductDomain
 
 
@@ -91,6 +96,98 @@ class TestProductDomain:
         assert len(domain.axes) == 2
         assert domain.axes[0].name == "param1"
         assert domain.axes[1].name == "param2"
+
+    def test_product_domain_discriminates_all_axis_variants(self):
+        """Test structural discrimination and lossless binning round-trips."""
+        axes = [
+            {"name": "coordinate", "min": -1.0, "max": 1.0},
+            {"name": "constant", "const": True},
+            {"name": "regular", "min": 0.0, "max": 4.0, "nbins": 4},
+            {"name": "irregular", "edges": [0.0, 1.0, 3.0, 10.0]},
+        ]
+        domain = ProductDomain(name="mixed", axes=axes)
+
+        assert isinstance(domain.axes[0], DomainCoordinateAxis)
+        assert isinstance(domain.axes[1], ConstantAxis)
+        assert isinstance(domain.axes[2], RegularAxis)
+        assert isinstance(domain.axes[3], IrregularAxis)
+        assert domain.get("coordinate") == (-1.0, 1.0)
+        assert domain.get("regular") == (0.0, 4.0)
+        assert domain.get("irregular") == (0.0, 10.0)
+        assert domain.get("constant") == (None, None)
+        assert domain["regular"] == (0.0, 4.0)
+        assert domain["irregular"] == (0.0, 10.0)
+
+        dumped = domain.model_dump(mode="json")
+        assert dumped["axes"] == axes
+        restored = ProductDomain.model_validate(dumped)
+        assert isinstance(restored.axes[2], RegularAxis)
+        assert restored.axes[2].nbins == 4
+        assert isinstance(restored.axes[3], IrregularAxis)
+        assert restored.axes[3].edges == [0.0, 1.0, 3.0, 10.0]
+
+    @pytest.mark.parametrize(
+        "axis",
+        [
+            {
+                "name": "mixed_binning",
+                "min": 0.0,
+                "max": 2.0,
+                "nbins": 2,
+                "edges": [0.0, 1.0, 2.0],
+            },
+            {"name": "constant_binning", "const": True, "nbins": 2},
+        ],
+    )
+    def test_product_domain_rejects_conflicting_axis_discriminators(self, axis):
+        """Test that one axis cannot select multiple structural variants."""
+        with pytest.raises(ValueError, match="exactly one of const, nbins, edges"):
+            ProductDomain(name="invalid", axes=[axis])
+
+    @pytest.mark.parametrize(
+        "axis",
+        [
+            {"name": "regular", "min": 0.0, "max": 1.0, "nbins": 1, "foo": 1},
+            {"name": "coordinate", "min": 0.0, "max": 1.0, "foo": 1},
+            {"name": "constant", "const": True, "min": 0.0},
+        ],
+    )
+    def test_product_domain_rejects_fields_from_other_axis_forms(self, axis):
+        """Test that selected variants do not discard unmodelled fields."""
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            ProductDomain(name="invalid", axes=[axis])
+
+    def test_irregular_axis_accepts_matching_redundant_bounds(self):
+        axis = {
+            "name": "irregular",
+            "edges": [0.0, 1.0, 3.0],
+            "min": 0.0,
+            "max": 3.0,
+        }
+        domain = ProductDomain(name="valid", axes=[axis])
+
+        assert domain.get("irregular") == (0.0, 3.0)
+        assert domain.model_dump(mode="json")["axes"] == [axis]
+
+    @pytest.mark.parametrize(
+        "bound",
+        [
+            {"min": -1.0, "max": 3.0},
+            {"min": 0.0, "max": 4.0},
+        ],
+    )
+    def test_irregular_axis_rejects_conflicting_redundant_bounds(self, bound):
+        with pytest.raises(ValueError, match="must match"):
+            ProductDomain(
+                name="invalid",
+                axes=[
+                    {
+                        "name": "irregular",
+                        "edges": [0.0, 1.0, 3.0],
+                        **bound,
+                    }
+                ],
+            )
 
     def test_product_domain_validation_propagates_axis_errors(self):
         """Test that ProductDomain propagates axis validation errors."""

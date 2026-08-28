@@ -9,6 +9,7 @@ including unbinned axes (with min/max bounds) and binned axes
 from __future__ import annotations
 
 from itertools import pairwise
+from math import isfinite
 from typing import Annotated, Any, Literal
 
 import hist
@@ -18,6 +19,7 @@ from pydantic import (
     Discriminator,
     Field,
     Tag,
+    field_validator,
     model_validator,
 )
 
@@ -105,6 +107,15 @@ class ConstantAxis(Axis):
 
     const: Literal[True] = Field(True, repr=False, init=False)
 
+    @field_validator("const", mode="before")
+    @classmethod
+    def validate_const(cls, value: Any) -> Any:
+        """Require the JSON boolean ``true``, not a truthy numeric value."""
+        if value is not True or not isinstance(value, bool):
+            msg = "const must be the boolean true"
+            raise ValueError(msg)
+        return value
+
 
 class RegularAxis(BoundedAxis):
     """
@@ -115,13 +126,51 @@ class RegularAxis(BoundedAxis):
         nbins: Number of bins (for regular binning)
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     nbins: int = Field(repr=False)
+
+    @field_validator("min", "max", mode="before")
+    @classmethod
+    def validate_finite_bounds(cls, value: Any) -> Any:
+        """Require finite numeric regular-binning bounds."""
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not isfinite(value)
+        ):
+            msg = "regular axis bounds must be finite numeric values"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("nbins", mode="before")
+    @classmethod
+    def validate_nbins(cls, value: Any) -> int:
+        """Require a positive, non-boolean integer bin count.
+
+        ROOT also accepts integer-valued JSON floats, so values such as
+        ``4.0`` remain valid while booleans, strings, fractions and non-finite
+        numbers are rejected.
+        """
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            msg = "nbins must be a positive integer"
+            raise ValueError(msg)
+        if not isfinite(value) or value != int(value) or value > np.iinfo(np.int32).max:
+            msg = "nbins must be a positive integer"
+            raise ValueError(msg)
+        return int(value)
 
     @model_validator(mode="after")
     def check_binning(self) -> RegularAxis:
-        """Validate that max >= min."""
+        """Validate finite, increasing bounds and a positive bin count."""
         if self.nbins <= 0:
             msg = f"RegularAxis '{self.name}' must have positive number of bins, got {self.nbins}"
+            raise ValueError(msg)
+        if not isfinite(self.min) or not isfinite(self.max) or self.max <= self.min:
+            msg = (
+                f"RegularAxis '{self.name}' bounds must be finite and increasing, "
+                f"got min={self.min}, max={self.max}"
+            )
             raise ValueError(msg)
         return self
 
@@ -151,7 +200,45 @@ class IrregularAxis(Axis):
         edges: Bin edges array (length n+1)
     """
 
+    model_config = ConfigDict(extra="forbid", serialize_by_alias=True)
+
     edges: list[float] = Field(repr=False)
+    v_min: float | None = Field(
+        default=None, alias="min", repr=False, exclude_if=lambda value: value is None
+    )
+    v_max: float | None = Field(
+        default=None, alias="max", repr=False, exclude_if=lambda value: value is None
+    )
+
+    @field_validator("v_min", "v_max", mode="before")
+    @classmethod
+    def validate_redundant_bound(cls, value: Any) -> Any:
+        """Require redundant ROOT bounds to be finite JSON numbers."""
+        if value is None:
+            return value
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not isfinite(value)
+        ):
+            msg = "irregular axis bounds must be finite numeric values"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("edges", mode="before")
+    @classmethod
+    def validate_finite_edges(cls, value: Any) -> Any:
+        """Reject non-numeric, boolean, and non-finite bin edges."""
+        if isinstance(value, (list, tuple)):
+            for edge in value:
+                if (
+                    isinstance(edge, bool)
+                    or not isinstance(edge, (int, float))
+                    or not isfinite(edge)
+                ):
+                    msg = "edges must contain only finite numeric values"
+                    raise ValueError(msg)
+        return value
 
     @model_validator(mode="after")
     def validate_binning(self) -> IrregularAxis:
@@ -164,6 +251,18 @@ class IrregularAxis(Axis):
             if curr <= prev:
                 msg = f"IrregularAxis '{self.name}' edges must be in ascending order"
                 raise ValueError(msg)
+        if self.v_min is not None and self.v_min != self.edges[0]:
+            msg = (
+                f"IrregularAxis '{self.name}' min ({self.v_min}) must match "
+                f"its first edge ({self.edges[0]})"
+            )
+            raise ValueError(msg)
+        if self.v_max is not None and self.v_max != self.edges[-1]:
+            msg = (
+                f"IrregularAxis '{self.name}' max ({self.v_max}) must match "
+                f"its last edge ({self.edges[-1]})"
+            )
+            raise ValueError(msg)
         return self
 
     @property
@@ -240,7 +339,7 @@ class DomainCoordinateAxis(Axis):
         DomainCoordinateAxis(x ∈ [0, 5])
     """
 
-    model_config = ConfigDict(serialize_by_alias=True)
+    model_config = ConfigDict(serialize_by_alias=True, extra="forbid")
 
     v_min: float | None = Field(
         default=None, alias="min", repr=False, exclude_if=lambda v: v is None
@@ -248,6 +347,21 @@ class DomainCoordinateAxis(Axis):
     v_max: float | None = Field(
         default=None, alias="max", repr=False, exclude_if=lambda v: v is None
     )
+
+    @field_validator("v_min", "v_max", mode="before")
+    @classmethod
+    def validate_finite_bound(cls, value: Any) -> Any:
+        """Require explicitly supplied bounds to be finite JSON numbers."""
+        if value is None:
+            return value
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not isfinite(value)
+        ):
+            msg = "domain axis bounds must be finite numeric values or null"
+            raise ValueError(msg)
+        return value
 
     @property
     def min(self) -> float:
@@ -324,7 +438,51 @@ class BinnedAxes(NamedCollection[BinnedAxis]):
         return total
 
 
-type DomainAxis = DomainCoordinateAxis | ConstantAxis
+def _domain_axis_discriminator(v: Any) -> str | None:
+    """Select a product-domain axis variant from its structural wire fields."""
+    if isinstance(v, dict):
+        tags = [
+            tag
+            for field, tag in (
+                ("const", "constant"),
+                ("nbins", "regular"),
+                ("edges", "irregular"),
+            )
+            if field in v
+        ]
+        if len(tags) > 1:
+            return None
+        return tags[0] if tags else "coordinate"
+
+    if isinstance(v, ConstantAxis):
+        return "constant"
+    if isinstance(v, RegularAxis):
+        return "regular"
+    if isinstance(v, IrregularAxis):
+        return "irregular"
+    if isinstance(v, DomainCoordinateAxis):
+        return "coordinate"
+
+    return None
+
+
+DomainAxis = Annotated[
+    (
+        Annotated[DomainCoordinateAxis, Tag("coordinate")]
+        | Annotated[ConstantAxis, Tag("constant")]
+        | Annotated[RegularAxis, Tag("regular")]
+        | Annotated[IrregularAxis, Tag("irregular")]
+    ),
+    Discriminator(_domain_axis_discriminator),
+    custom_error_msg(
+        {
+            "union_tag_not_found": (
+                "Unknown product-domain axis {input}. Axis definitions must use "
+                "exactly one of const, nbins, edges, or coordinate bounds."
+            )
+        }
+    ),
+]
 
 
 class UnbinnedAxes(NamedCollection[UnbinnedAxis]):

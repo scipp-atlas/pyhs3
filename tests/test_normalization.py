@@ -17,7 +17,7 @@ from pytensor.compile.maker import function
 
 from pyhs3.axes import RegularAxis
 from pyhs3.context import Context
-from pyhs3.distributions.basic import ExponentialDist, GaussianDist
+from pyhs3.distributions.basic import ExponentialDist, GaussianDist, UniformDist
 from pyhs3.distributions.composite import MixtureDist
 from pyhs3.distributions.core import Distribution
 from pyhs3.distributions.histfactory import HistFactoryDistChannel
@@ -392,6 +392,46 @@ class TestDistributionNormalization:
 
         xs = np.linspace(0, 10, 10000)
         ys = compiled(xs)
+        integral = np.trapezoid(ys, xs)
+        assert np.isclose(integral, 1.0, atol=1e-6)
+
+    def test_uniform_dist_integrates_to_one(self):
+        """UniformDist normalized over a finite domain integrates to 1.0 and
+        equals ``1/(upper-lower)`` everywhere on its support.
+
+        HS3 ``uniform_dist`` declares only ``name``/``type``/``x`` with PDF
+        ``1/M``, where ``M`` is the domain measure. pyhs3 emits a constant
+        density and relies on its own normalization system to divide by
+        ``(upper-lower)``, producing the correct ``1/(upper-lower)`` without any
+        ``lower``/``upper`` distribution parameters.
+        """
+        dist = UniformDist(name="uniform", x=["x"])
+
+        x_var = pt.vector("x")
+        lower = pt.constant(2.0, name="x_lower")
+        upper = pt.constant(7.0, name="x_upper")
+
+        context = Context(
+            parameters={"x": x_var},
+            observables={"x": (lower, upper)},
+        )
+
+        # The normalized uniform density is a scalar constant that does not
+        # depend on x, so x_var is unused in the compiled graph (on_unused_input
+        # is set accordingly). This is the HS3 semantics: 1/M with M the domain
+        # measure, no lower/upper distribution parameters.
+        expr = dist._expression(context)
+        compiled = function([x_var], expr, on_unused_input="ignore")
+        density = float(compiled(np.array([2.0, 4.5, 7.0])))
+
+        # Constant density equals 1/(upper-lower).
+        expected_density = 1.0 / (7.0 - 2.0)
+        assert np.isclose(density, expected_density, rtol=1e-10)
+
+        # Integrating that constant density over [2, 7] recovers 1.0. Broadcast
+        # the scalar onto the support grid (shape (10000,)) to integrate it.
+        xs = np.linspace(2.0, 7.0, 10000)
+        ys = np.full_like(xs, density)
         integral = np.trapezoid(ys, xs)
         assert np.isclose(integral, 1.0, atol=1e-6)
 

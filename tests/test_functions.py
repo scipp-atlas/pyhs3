@@ -19,6 +19,7 @@ from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.rewriting.elemwise import (
     local_upcast_elemwise_constant_inputs,
 )
+from pytensor.tensor.variable import TensorConstant
 
 from pyhs3 import Workspace
 from pyhs3.functions import (
@@ -466,6 +467,48 @@ class TestGenericFunction:
 
 class TestInterpolationFunction:
     """Test InterpolationFunction implementation."""
+
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    def test_multiplicative_modes_reuse_scalar_identity(self, dtype):
+        """Multiplicative terms should share one dtype-matched scalar identity."""
+        names = ["first", "second", "third"]
+        func = InterpolationFunction(
+            name="test_interp",
+            high=[f"high_{name}" for name in names],
+            low=[f"low_{name}" for name in names],
+            nom="nominal",
+            interpolationCodes=[1, 1, 1],
+            positiveDefinite=False,
+            vars=[f"theta_{name}" for name in names],
+        )
+        context = {
+            "nominal": pt.scalar("nominal", dtype=dtype),
+            **{
+                key: pt.scalar(key, dtype=dtype)
+                for name in names
+                for key in (
+                    f"high_{name}",
+                    f"low_{name}",
+                    f"theta_{name}",
+                )
+            },
+        }
+
+        result = func.expression(context)
+        identity_inputs = [
+            value
+            for node in io_toposort([], [result])
+            if isinstance(node.op, Elemwise)
+            and type(node.op.scalar_op).__name__ == "Add"
+            for value in node.inputs
+            if isinstance(value, TensorConstant)
+            and value.ndim == 0
+            and value.dtype == dtype
+            and value.data.item() == 1
+        ]
+
+        assert len(identity_inputs) == len(names)
+        assert len({id(value) for value in identity_inputs}) == 1
 
     def test_multiplicative_mode_avoids_implicit_add_constant_upcast(self):
         """Multiplicative interpolation should use a dtype-matched one."""

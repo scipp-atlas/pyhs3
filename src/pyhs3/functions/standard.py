@@ -413,6 +413,9 @@ class InterpolationFunction(Function):
         nominal = context[self.nom]
         result = nominal
 
+        # Reuse dtype-matched scalar identities across multiplicative terms.
+        ones_by_dtype: dict[str, TensorVar] = {}
+
         # Apply interpolation for each nuisance parameter
         for i, var_name in enumerate(self.vars):
             if (
@@ -446,7 +449,10 @@ class InterpolationFunction(Function):
             if interp_code in [0, 2, 3, 4]:  # Additive modes
                 result = result + contribution
             else:  # Multiplicative modes (1, 5, 6)
-                one = pt.constant(1.0, dtype=contribution.dtype)
+                one = ones_by_dtype.get(contribution.dtype)
+                if one is None:
+                    one = pt.constant(1.0, dtype=contribution.dtype)
+                    ones_by_dtype[contribution.dtype] = one
                 result = result * (one + contribution)
 
         # Apply positive definite constraint if requested

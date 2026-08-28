@@ -664,13 +664,21 @@ class TestUniformLogLikelihood:
     """UniformDist.log_likelihood is the analytic log form of likelihood()."""
 
     def test_matches_log_of_likelihood(self):
-        """log_likelihood equals log(likelihood): both are parameter-independent constants."""
+        """log_likelihood equals log(likelihood): the self-normalized 1/(upper-lower).
+
+        Bounds come from the observable domain; on-support the density is the
+        constant 1/(7-2) = 0.2, so log_likelihood == log(0.2).
+        """
         dist = UniformDist(name="u", x=["x"])
-        context = Context({"x": _c(1.23)})
+        context = Context(
+            parameters={"x": _c(4.5)},
+            observables={"x": (_c(2.0), _c(7.0))},
+        )
         log_val = float(pytensor.function([], dist.log_likelihood(context))())
         prob_val = float(pytensor.function([], dist.likelihood(context))())
         np.testing.assert_allclose(log_val, np.log(prob_val), rtol=1e-12)
-        assert log_val == pytest.approx(0.0, abs=1e-12)
+        np.testing.assert_allclose(prob_val, 0.2, rtol=1e-12)
+        assert log_val == pytest.approx(np.log(0.2), rel=1e-12)
 
 
 class TestLandauLogLikelihood:

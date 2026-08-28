@@ -17,7 +17,7 @@ from pytensor.compile.maker import function
 
 from pyhs3.axes import RegularAxis
 from pyhs3.context import Context
-from pyhs3.distributions.basic import ExponentialDist, GaussianDist
+from pyhs3.distributions.basic import ExponentialDist, GaussianDist, UniformDist
 from pyhs3.distributions.composite import MixtureDist
 from pyhs3.distributions.core import Distribution
 from pyhs3.distributions.histfactory import HistFactoryDistChannel
@@ -391,6 +391,44 @@ class TestDistributionNormalization:
         compiled = function([x_var], expr)
 
         xs = np.linspace(0, 10, 10000)
+        ys = compiled(xs)
+        integral = np.trapezoid(ys, xs)
+        assert np.isclose(integral, 1.0, atol=1e-6)
+
+    def test_uniform_dist_integrates_to_one(self):
+        """UniformDist over a finite domain integrates to 1.0 and equals
+        ``1/(upper-lower)`` everywhere on its support.
+
+        HS3 ``uniform_dist`` declares only ``name``/``type``/``x`` with PDF
+        ``1/M``, where ``M`` is the domain measure. pyhs3 delegates to
+        ``pytensor_distributions.uniform``, which returns the self-normalized
+        ``1/(upper-lower)`` on the support (and 0 outside), deriving the bounds
+        from the observable domain with no ``lower``/``upper`` distribution
+        parameters.
+        """
+        dist = UniformDist(name="uniform", x=["x"])
+
+        x_var = pt.vector("x", dtype="float64")
+        lower = pt.constant(2.0, name="x_lower", dtype="float64")
+        upper = pt.constant(7.0, name="x_upper", dtype="float64")
+
+        context = Context(
+            parameters={"x": x_var},
+            observables={"x": (lower, upper)},
+        )
+
+        # The self-normalized density broadcasts to x's shape: 1/(upper-lower)
+        # on the support, 0 outside it. Evaluated on a length-3 grid, every
+        # on-support point equals 1/(7-2) = 0.2.
+        expr = dist._expression(context)
+        compiled = function([x_var], expr)
+        density = compiled(np.array([2.0, 4.5, 7.0]))
+
+        expected_density = 1.0 / (7.0 - 2.0)
+        np.testing.assert_allclose(density, expected_density, rtol=1e-10)
+
+        # Integrating the density over [2, 7] recovers 1.0.
+        xs = np.linspace(2.0, 7.0, 10000)
         ys = compiled(xs)
         integral = np.trapezoid(ys, xs)
         assert np.isclose(integral, 1.0, atol=1e-6)

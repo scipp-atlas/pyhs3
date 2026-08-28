@@ -16,6 +16,8 @@ import pytensor_distributions.exponential as Exponential
 import pytensor_distributions.lognormal as LogNormal
 import pytensor_distributions.normal as Normal
 import pytensor_distributions.poisson as Poisson
+import pytensor_distributions.uniform as Uniform
+from pydantic import PrivateAttr
 
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
@@ -103,20 +105,32 @@ class UniformDist(Distribution):
     Uniform (rectangular) probability distribution.
 
     Implements the continuous uniform probability density function with constant
-    density over its support region, as defined in ROOT's RooUniform.
+    density over its support region, as defined in ROOT's RooUniform. The support
+    of each axis is the observable's domain, so the density is the product over
+    axes of the per-axis reciprocal measure:
 
     .. math::
 
-        f(x) = \frac{1}{\mathcal{M}}
+        f(x_1, \ldots, x_D) = \prod_{i=1}^{D} \frac{1}{u_i - l_i}
 
-    where the normalization constant $\mathcal{M}$ is determined by the domain bounds.
+    where :math:`(l_i, u_i)` are the domain bounds of axis :math:`x_i`.
+
+    Delegates to :mod:`pytensor_distributions.uniform`, which already returns the
+    self-normalized :math:`1/(u_i - l_i)` on the support, so the distribution
+    opts out of pyhs3's own normalization (``_normalizable = False``) to avoid
+    dividing by the domain measure a second time. Because normalization is opted
+    out, a multivariate ``x`` does not hit the single-observable normalization
+    limit (see https://github.com/scipp-atlas/pyhs3/issues/214).
 
     Parameters:
-        x (str): Input variable name.
+        x (list[str]): Input variable names (one per axis of the box).
 
     Note:
-        The actual bounds are defined by the domain, not by distribution parameters.
-        This matches both the HS3 specification and ROOT's RooUniform implementation.
+        The bounds are derived from the observable domain, not from distribution
+        parameters, matching both the HS3 specification and ROOT's RooUniform.
+        An axis with no domain/observable bounds has no well-defined uniform
+        density, so :meth:`likelihood` and :meth:`log_likelihood` raise
+        ``ValueError`` naming that axis rather than returning a wrong density.
 
     HS3 Reference:
         :ref:`hs3:hs3.uniform-distribution`
@@ -124,43 +138,99 @@ class UniformDist(Distribution):
 
     type: Literal["uniform_dist"] = "uniform_dist"
     x: list[str]
+    _normalizable: bool = PrivateAttr(default=False)
 
-    def likelihood(self, _context: Context) -> TensorVar:
+    def _resolved_bounds(
+        self, context: Context
+    ) -> list[tuple[str, TensorVar, TensorVar]]:
+        """
+        Per-axis ``(name, lower, upper)`` bounds in the order of ``self.x``.
+
+        Bounds come from the observable domain via
+        :meth:`~pyhs3.distributions.core.Distribution._matching_observables`.
+
+        Args:
+            context: Mapping of names to pytensor variables (includes observables).
+
+        Returns:
+            List of ``(name, lower, upper)``, one per axis in ``self.x`` order.
+
+        Raises:
+            ValueError: If ``x`` is empty, or if any axis has no
+                observable/domain bounds.
+        """
+        if not self.x:
+            msg = (
+                f"uniform_dist {self.name!r} requires at least one axis in 'x', "
+                f"but 'x' is empty."
+            )
+            raise ValueError(msg)
+        bounds = {
+            name: (lower, upper)
+            for name, lower, upper in self._matching_observables(context)
+        }
+        resolved: list[tuple[str, TensorVar, TensorVar]] = []
+        for index in range(len(self.x)):
+            name = self._parameters[f"x[{index}]"]
+            if name not in bounds:
+                msg = (
+                    f"uniform_dist {self.name!r} requires domain/observable bounds "
+                    f"for axis {name!r}, but none were found in the context. "
+                    f"Provide the observable range via the model's domain "
+                    f"(e.g. observables={{{name!r}: (lower, upper)}})."
+                )
+                raise ValueError(msg)
+            lower, upper = bounds[name]
+            resolved.append((name, lower, upper))
+        return resolved
+
+    def likelihood(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the uniform PDF.
 
+        Delegates to :mod:`pytensor_distributions.uniform`, returning the product
+        over axes of :math:`1/(u_i - l_i)` on the support. The bounds are derived
+        from the observable domain, so ``x`` itself does not appear in the density.
+
         Args:
-            _context (dict): Mapping of names to pytensor variables.
+            context: Mapping of names to pytensor variables (includes observables).
 
         Returns:
-            pytensor.tensor.variable.TensorVariable: Constant value representing uniform density.
+            pytensor.tensor.variable.TensorVariable: Self-normalized uniform density.
 
-        Note:
-            Returns a constant value of 1.0. The actual normalization is handled
-            by the domain bounds during integration/sampling. The variables in self.x
-            are used to define the domain but don't affect the constant density.
+        Raises:
+            ValueError: If any axis has no observable/domain bounds.
         """
-        # Uniform distribution has constant density over its support
-        # The actual normalization factor is handled by domain bounds
-        # The variables in self.x define the domain but don't change the constant density
-        return cast(TensorVar, pt.constant(1.0))
+        density: TensorVar | None = None
+        for name, lower, upper in self._resolved_bounds(context):
+            factor = Uniform.pdf(context[name], lower, upper)
+            density = factor if density is None else density * factor
+        return cast(TensorVar, density)
 
-    def log_likelihood(self, _context: Context) -> TensorVar:
+    def log_likelihood(self, context: Context) -> TensorVar:
         """
         Builds a symbolic expression for the uniform log-PDF.
 
-        Analytic log form of :meth:`likelihood`: ``log(1.0) == 0.0``, a
-        constant independent of any parameter, so there is no underflow
-        concern to guard against here.
+        Analytic log form of :meth:`likelihood`: the sum over axes of
+        ``pytensor_distributions.uniform.logpdf``, i.e.
+        :math:`-\\sum_i \\log(u_i - l_i)` on the support. Each term is a constant
+        independent of any parameter, so there is no underflow concern to guard
+        against here.
 
         Args:
-            _context (dict): Mapping of names to pytensor variables.
+            context: Mapping of names to pytensor variables (includes observables).
 
         Returns:
-            pytensor.tensor.variable.TensorVariable: Constant value (0.0) representing
-            the uniform log-density.
+            pytensor.tensor.variable.TensorVariable: Self-normalized uniform log-density.
+
+        Raises:
+            ValueError: If any axis has no observable/domain bounds.
         """
-        return cast(TensorVar, pt.constant(0.0))
+        log_density: TensorVar | None = None
+        for name, lower, upper in self._resolved_bounds(context):
+            term = Uniform.logpdf(context[name], lower, upper)
+            log_density = term if log_density is None else log_density + term
+        return cast(TensorVar, log_density)
 
 
 class PoissonDist(Distribution):

@@ -128,7 +128,7 @@ class CrystalBallDist(Distribution):
     alpha: str
     m: str
     m0: str
-    n: str
+    n: str | float | int
     sigma: str
 
     def likelihood(self, context: Context) -> TensorVar:
@@ -145,7 +145,7 @@ class CrystalBallDist(Distribution):
         alpha = _clip_shape(context[self.alpha])
         m = context[self.m]
         m0 = context[self.m0]
-        n = _clip_shape(context[self.n])
+        n = _clip_shape(context[self._parameters["n"]])
         sigma = _clip_shape(context[self.sigma])
 
         # Calculate A and B per ROOT formula
@@ -205,7 +205,7 @@ class CrystalBallDist(Distribution):
         alpha = _clip_shape(context[self.alpha])
         m = context[self.m]
         m0 = context[self.m0]
-        n = _clip_shape(context[self.n])
+        n = _clip_shape(context[self._parameters["n"]])
         sigma = _clip_shape(context[self.sigma])
 
         B = (n / alpha) - alpha

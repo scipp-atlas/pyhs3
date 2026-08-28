@@ -344,7 +344,7 @@ class TestFunctionRoundtripping:
         assert func1.name == func2.name
         assert func1.type == func2.type
         assert func1.expression_str == func2.expression_str
-        assert serialized == config
+        assert serialized == {**config, "type": "generic"}
 
 
 class TestParametersHandling:

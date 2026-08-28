@@ -145,7 +145,7 @@ class MixtureDist(Distribution):
         """Do not serialize ref_coef_norm if it is unspecified (None)."""
         data = handler(self)
         if self.ref_coef_norm is None:
-            del data["ref_coef_norm"]
+            data.pop("ref_coef_norm", None)
         return data
 
     @field_validator("ref_coef_norm", mode="before")

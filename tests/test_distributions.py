@@ -285,6 +285,29 @@ class TestCrystalBallDist:
         assert dist.m == "mass"
         assert dist.m0 == "mean"
 
+    def test_crystal_dist_accepts_numeric_exponent(self):
+        dist = CrystalBallDist(
+            name="test_crystal",
+            alpha="alpha",
+            m="m",
+            m0="m0",
+            n=10.0,
+            sigma="sigma",
+        )
+        context = Context(
+            {
+                "alpha": pt.constant(1.5),
+                "m": pt.constant(0.0),
+                "m0": pt.constant(0.0),
+                "sigma": pt.constant(1.0),
+                **dist.constants,
+            }
+        )
+
+        value = function([], dist.expression(context))()
+        assert dist.model_dump()["n"] == 10.0
+        assert np.isfinite(value)
+
     def test_crystal_dist_expression_gaussian_core(self):
         """Test CrystalBallDist (single-sided) reduces to Gaussian in core region."""
         dist = CrystalBallDist(

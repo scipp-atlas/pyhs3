@@ -574,6 +574,7 @@ class Workspace(BaseModel):
         self,
         parameter_set: int | str | ParameterSet | None,
         *,
+        base_parameter_set: int | str | ParameterSet | None = None,
         fallback_first: bool = True,
     ) -> ParameterSet:
         """Resolve *parameter_set* to a :class:`~pyhs3.parameter_points.ParameterSet`.
@@ -581,21 +582,47 @@ class Workspace(BaseModel):
         Args:
             parameter_set: Explicit override -- a ``ParameterSet`` instance, an int
                 or str index into ``self.parameter_points``, or ``None`` to fall back.
+            base_parameter_set: Optional complete parameter set on which the
+                selected set is overlaid. This makes partial-snapshot handling
+                explicit instead of assigning implicit inheritance semantics to
+                HS3 parameter points.
             fallback_first: When *parameter_set* is ``None`` and ``fallback_first``
                 is ``True`` (the default), fall back to ``parameter_points[0]``.
                 Pass ``False`` to return an empty default instead (used by the
                 ``Analysis`` path which manages its own ``init`` fallback).
         """
-        if isinstance(parameter_set, ParameterSet):
-            return parameter_set
-        if parameter_set is not None:
+
+        def resolve(
+            reference: int | str | ParameterSet,
+            argument_name: str,
+        ) -> ParameterSet:
+            if isinstance(reference, ParameterSet):
+                return reference
             if not self.parameter_points:
-                msg = f"parameter_set={parameter_set!r} was requested but no parameter_points are available in this workspace"
+                msg = (
+                    f"{argument_name}={reference!r} was requested but no "
+                    "parameter_points are available in this workspace"
+                )
                 raise ValueError(msg)
-            return self.parameter_points[parameter_set]
-        if fallback_first and self.parameter_points:
-            return self.parameter_points[0]
-        return ParameterSet(name="default", parameters=[])
+            return self.parameter_points[reference]
+
+        selected: ParameterSet | None = None
+        if parameter_set is not None:
+            selected = resolve(parameter_set, "parameter_set")
+        elif fallback_first and self.parameter_points:
+            selected = self.parameter_points[0]
+
+        if base_parameter_set is None:
+            return (
+                selected
+                if selected is not None
+                else ParameterSet(name="default", parameters=[])
+            )
+
+        base = resolve(base_parameter_set, "base_parameter_set")
+        if selected is None or selected is base:
+            return base
+        return base.overlay(selected)
 
     def _select_domain(
         self,
@@ -635,6 +662,7 @@ class Workspace(BaseModel):
         *,
         domain: int | str | Domain | None = None,
         parameter_set: int | str | ParameterSet | None = None,
+        base_parameter_set: int | str | ParameterSet | None = None,
         progress: bool = True,
         mode: str = "FAST_RUN",
     ) -> Model:
@@ -666,7 +694,10 @@ class Workspace(BaseModel):
                 a name string to search analyses/likelihoods, or an ``int``
                 domain index for the legacy path.
             domain: Override domain (legacy and Likelihood paths only).
-            parameter_set: Override parameter set (legacy and Likelihood paths only).
+            parameter_set: Override parameter set. It may be partial when
+                ``base_parameter_set`` is also supplied.
+            base_parameter_set: Complete parameter set beneath ``parameter_set``.
+                Parameters omitted by the override are inherited from this base.
             progress: Whether to show a progress bar during graph construction.
             mode: PyTensor compilation mode (default ``"FAST_RUN"``).
 
@@ -675,7 +706,9 @@ class Workspace(BaseModel):
         """
         # Legacy int path: target indexes into workspace domains.
         selected_domain = self._select_domain(domain, default_index=target)
-        parameterset = self._select_parameterset(parameter_set)
+        parameterset = self._select_parameterset(
+            parameter_set, base_parameter_set=base_parameter_set
+        )
         return Model(
             parameterset=parameterset,
             distributions=self.distributions or Distributions(),
@@ -693,6 +726,7 @@ class Workspace(BaseModel):
         target: Analysis,
         *,
         parameter_set: int | str | ParameterSet | None = None,
+        base_parameter_set: int | str | ParameterSet | None = None,
         progress: bool = True,
         mode: str = "FAST_RUN",
     ) -> Model:
@@ -721,12 +755,14 @@ class Workspace(BaseModel):
         # Explicit override takes priority; otherwise use analysis.init param_set or empty default.
         # Do NOT fall back to parameter_points[0] when neither init nor override was given —
         # that would silently impose workspace defaults that the caller did not request.
-        if parameter_set is not None:
-            parameterset = self._select_parameterset(
-                parameter_set, fallback_first=False
-            )
-        else:
-            parameterset = param_set or ParameterSet(name="default", parameters=[])
+        selected_parameter_set = (
+            parameter_set if parameter_set is not None else param_set
+        )
+        parameterset = self._select_parameterset(
+            selected_parameter_set,
+            base_parameter_set=base_parameter_set,
+            fallback_first=False,
+        )
 
         return Model(
             parameterset=parameterset,
@@ -746,11 +782,14 @@ class Workspace(BaseModel):
         *,
         domain: int | str | Domain | None = None,
         parameter_set: int | str | ParameterSet | None = None,
+        base_parameter_set: int | str | ParameterSet | None = None,
         progress: bool = True,
         mode: str = "FAST_RUN",
     ) -> Model:
         selected_domain = self._select_domain(domain)
-        parameterset = self._select_parameterset(parameter_set)
+        parameterset = self._select_parameterset(
+            parameter_set, base_parameter_set=base_parameter_set
+        )
         return Model(
             parameterset=parameterset,
             distributions=self.distributions or Distributions(),
@@ -769,6 +808,7 @@ class Workspace(BaseModel):
         *,
         domain: int | str | Domain | None = None,
         parameter_set: int | str | ParameterSet | None = None,
+        base_parameter_set: int | str | ParameterSet | None = None,
         progress: bool = True,
         mode: str = "FAST_RUN",
     ) -> Model:
@@ -782,6 +822,7 @@ class Workspace(BaseModel):
                 return self.model(
                     analysis,
                     parameter_set=parameter_set,
+                    base_parameter_set=base_parameter_set,
                     progress=progress,
                     mode=mode,
                 )
@@ -792,12 +833,15 @@ class Workspace(BaseModel):
                     likelihood,
                     domain=domain,
                     parameter_set=parameter_set,
+                    base_parameter_set=base_parameter_set,
                     progress=progress,
                     mode=mode,
                 )
         # Legacy fallback: treat target as a domain name.
         selected_domain = self._select_domain(domain, default_index=target)
-        parameterset = self._select_parameterset(parameter_set)
+        parameterset = self._select_parameterset(
+            parameter_set, base_parameter_set=base_parameter_set
+        )
         return Model(
             parameterset=parameterset,
             distributions=self.distributions or Distributions(),

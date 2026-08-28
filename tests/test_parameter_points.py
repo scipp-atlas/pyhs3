@@ -132,6 +132,49 @@ class TestParameterSet:
         param_names = [param.name for param in param_set]
         assert param_names == ["mu", "sigma"]
 
+    def test_parameter_set_overlay(self):
+        """A partial set replaces matching records and inherits the rest."""
+        base = ParameterSet(
+            name="base",
+            parameters=[
+                ParameterPoint(
+                    name="mu", value=0.0, const=True, nbins=4, kind=pt.vector
+                ),
+                ParameterPoint(name="sigma", value=1.0),
+            ],
+        )
+        partial = ParameterSet(
+            name="snapshot",
+            parameters=[
+                ParameterPoint(name="sigma", value=2.5, const=True),
+                ParameterPoint(name="extra", value=3.0),
+            ],
+        )
+
+        combined = base.overlay(partial)
+
+        assert combined.name == "snapshot"
+        assert [parameter.name for parameter in combined] == ["mu", "sigma", "extra"]
+        assert combined["mu"].value == pytest.approx(0.0)
+        assert combined["mu"].const is True
+        assert combined["mu"].nbins == 4
+        assert combined["mu"].kind is pt.vector
+        assert combined["sigma"].value == pytest.approx(2.5)
+        assert combined["sigma"].const is True
+        assert combined["extra"].value == pytest.approx(3.0)
+
+        # Composition must not share mutable ParameterPoint instances.
+        assert combined["mu"] is not base["mu"]
+        assert combined["sigma"] is not partial["sigma"]
+        assert base["sigma"].value == pytest.approx(1.0)
+
+    def test_parameter_set_overlay_can_name_result(self):
+        """Callers can identify a composed set independently of either input."""
+        base = ParameterSet(name="base", parameters=[])
+        partial = ParameterSet(name="snapshot", parameters=[])
+
+        assert base.overlay(partial, name="effective").name == "effective"
+
 
 class TestParameterPoints:
     """Tests for the ParameterPoints collection class."""

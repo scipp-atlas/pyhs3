@@ -1496,6 +1496,12 @@ class TestWorkspaceModelDispatch:
         assert model.parameterset.name == "custom"
         assert model.parameterset.get("mu").value == pytest.approx(99.0)
 
+    def test_empty_parameterset_instance_is_preserved(self, ws):
+        """An explicitly selected empty set is not confused with no selection."""
+        empty = ParameterSet(name="empty", parameters=[])
+
+        assert ws._select_parameterset(empty) is empty
+
     def test_analysis_parameterset_string_lookup(self, ws):
         """parameter_set='alt' looks up the named set in workspace.parameter_points."""
         analysis = ws.analyses["sig_analysis"]
@@ -1510,6 +1516,27 @@ class TestWorkspaceModelDispatch:
         # index 1 → 'alt' → mu=1.0
         assert model.parameterset.name == "alt"
         assert model.parameterset.get("mu").value == pytest.approx(1.0)
+
+    def test_analysis_partial_parameterset_overlays_explicit_base(self, ws):
+        """An explicit base fills parameters omitted by a partial snapshot."""
+        partial = ParameterSet(
+            name="partial",
+            parameters=[ParameterPoint(name="mu", value=9.0, const=True)],
+        )
+        analysis = ws.analyses["sig_analysis"]
+
+        model = ws.model(
+            analysis,
+            parameter_set=partial,
+            base_parameter_set="nominal",
+            progress=False,
+        )
+
+        assert model.parameterset.name == "partial"
+        assert model.parameterset.get("mu").value == pytest.approx(9.0)
+        assert model.parameterset.get("mu").const is True
+        assert model.parameterset.get("sigma").value == pytest.approx(1.0)
+        assert model.parameterset.get("x").value == pytest.approx(0.0)
 
     def test_analysis_parameterset_from_init(self, ws):
         """No parameter_set override → analysis.init ('nominal') is used."""
@@ -1608,6 +1635,23 @@ class TestWorkspaceModelDispatch:
         assert model is not None
         assert model.parameterset.name == "nominal"
 
+    def test_str_dispatch_forwards_base_parameter_set(self, ws):
+        """The string dispatcher preserves explicit partial-set composition."""
+        partial = ParameterSet(
+            name="partial",
+            parameters=[ParameterPoint(name="mu", value=4.0)],
+        )
+
+        model = ws.model(
+            "sig_analysis",
+            parameter_set=partial,
+            base_parameter_set="nominal",
+            progress=False,
+        )
+
+        assert model.parameterset.get("mu").value == pytest.approx(4.0)
+        assert model.parameterset.get("sigma").value == pytest.approx(1.0)
+
     def test_str_dispatches_to_likelihood(self, ws):
         """workspace.model('sig_likelihood') resolves to the Likelihood overload."""
         model = ws.model("sig_likelihood", progress=False)
@@ -1646,6 +1690,31 @@ class TestWorkspaceModelDispatch:
         model = ws.model("first_domain", parameter_set="alt", progress=False)
         assert model.parameterset.name == "alt"
         assert model.parameterset.get("mu").value == pytest.approx(1.0)
+
+    @pytest.mark.parametrize("target_kind", ["int", "likelihood", "legacy_str"])
+    def test_partial_parameterset_supported_by_non_analysis_paths(
+        self, ws, target_kind
+    ):
+        """All remaining dispatch paths accept the same explicit composition."""
+        partial = ParameterSet(
+            name="partial",
+            parameters=[ParameterPoint(name="mu", value=6.0)],
+        )
+        targets = {
+            "int": 0,
+            "likelihood": ws.likelihoods["sig_likelihood"],
+            "legacy_str": "first_domain",
+        }
+
+        model = ws.model(
+            targets[target_kind],
+            parameter_set=partial,
+            base_parameter_set="nominal",
+            progress=False,
+        )
+
+        assert model.parameterset.get("mu").value == pytest.approx(6.0)
+        assert model.parameterset.get("sigma").value == pytest.approx(1.0)
 
     # ------------------------------------------------------------------ #
     # Likelihood target — parameter_set branches                          #

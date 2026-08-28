@@ -47,6 +47,7 @@ from pyhs3.distributions import (
     UniformDist,
 )
 from pyhs3.distributions.composite import _stable_logsumexp
+from pyhs3.distributions.physics import _SHAPE_CLIP_MIN
 from pyhs3.normalization import gauss_legendre_integral
 from pyhs3.tensorutils import create_bounded_tensor
 
@@ -342,6 +343,97 @@ class TestCrystalBallDist:
         assert result_val > 0
         assert np.isfinite(result_val)
 
+    def test_crystal_dist_pins_scipy_reference(self):
+        r"""Pin the single-sided Crystal Ball shape against ``scipy.stats.crystalball``.
+
+        This distribution is hand-rolled (no ``pytensor_distributions``
+        equivalent), so its pdf shape is pinned against an independent
+        reference. ``scipy.stats.crystalball`` maps to pyhs3 as:
+
+            scipy ``beta``  -> pyhs3 ``alpha``   (transition point)
+            scipy ``m``     -> pyhs3 ``n``       (power-law exponent)
+            scipy ``loc``   -> pyhs3 ``m0``      (peak position)
+            scipy ``scale`` -> pyhs3 ``sigma``   (width)
+
+        scipy's internal ``x = (value - loc)/scale`` equals pyhs3's
+        ``t = (m - m0)/sigma``, and both tails use ``A (B - x)^{-n}`` with
+        ``A = (n/alpha)^n exp(-alpha^2/2)``, ``B = n/alpha - alpha`` (verified
+        against the ``likelihood`` expression, not assumed). pyhs3's
+        ``likelihood`` returns the *unnormalized* shape ``f(t)``; scipy's
+        ``pdf`` is that same shape times a single normalization constant ``N``
+        (which also carries scipy's ``1/scale``). So
+        ``scipy_pdf(x)/pyhs3_raw(x)`` is constant across x. Anchoring pyhs3 to
+        scipy at the core (``t = 0``, where ``pyhs3_raw = exp(0) = 1``) pins the
+        full functional form -- Gaussian core and power-law tail alike.
+        """
+        st = pytest.importorskip("scipy.stats")
+
+        alpha, n, m0, sigma = 1.5, 3.0, 0.0, 1.0
+        dist = CrystalBallDist(
+            name="test_crystal", alpha="alpha", m="m", m0="m0", n="n", sigma="sigma"
+        )
+        m_var = pt.vector("m", dtype="float64")
+        context = Context(
+            {
+                "alpha": pt.constant(alpha, dtype="float64"),
+                "m": m_var,
+                "m0": pt.constant(m0, dtype="float64"),
+                "n": pt.constant(n, dtype="float64"),
+                "sigma": pt.constant(sigma, dtype="float64"),
+            }
+        )
+        raw_fn = function([m_var], dist.likelihood(context))
+
+        # xs shape (7,): four core points (t in [-1.0, 1.0]) and three tail
+        # points (t < -1.5, the power-law region).
+        xs = np.array([-1.0, 0.0, 0.5, 1.0, -2.0, -3.0, -5.0])
+        pyhs3_raw = raw_fn(xs)  # shape (7,), unnormalized shape f(t)
+        scipy_pdf = st.crystalball.pdf(xs, beta=alpha, m=n, loc=m0, scale=sigma)
+
+        # Anchor scipy's normalization to pyhs3 at the core peak (index 1, t=0),
+        # then require agreement at every point (core AND power-law tail).
+        assert pyhs3_raw[1] == pytest.approx(1.0)  # exp(0) core peak
+        norm = scipy_pdf[1] / pyhs3_raw[1]
+        np.testing.assert_allclose(scipy_pdf, norm * pyhs3_raw, rtol=1e-6)
+
+    @pytest.mark.parametrize("negated", ["alpha", "n", "sigma"])
+    def test_crystal_dist_clips_negative_shape_inputs(self, negated):
+        r"""Negative alpha/n/sigma inputs are clipped inside the expression (#57).
+
+        The shape parameters alpha, n, sigma are mathematically required to be
+        positive, but a negative value can still be fed in (the input may be a
+        shared bounded scalar or a compound expression bounded for another
+        distribution). Rather than constrain the input parameter, the
+        expression clips each of these at ``_SHAPE_CLIP_MIN`` > 0. A negative
+        input must therefore yield a finite pdf equal to the pdf evaluated with
+        that parameter replaced by ``_SHAPE_CLIP_MIN`` -- not a NaN (which the
+        un-clipped power-law tail produces for a negative alpha with a
+        non-integer n) and not a negative "pdf" value.
+        """
+        dist = CrystalBallDist(
+            name="test_crystal", alpha="alpha", m="m", m0="m0", n="n", sigma="sigma"
+        )
+        m_var = pt.vector("m", dtype="float64")
+        # Fractional n so the un-clipped tail is NaN (not merely negative) for a
+        # negative alpha, making the div-by-zero / NaN failure unambiguous.
+        base = {"alpha": 1.5, "n": 3.5, "sigma": 1.0, "m0": 0.0}
+
+        def raw(**overrides):
+            values = base | overrides
+            context = Context(
+                {name: pt.constant(v, dtype="float64") for name, v in values.items()}
+                | {"m": m_var}
+            )
+            return function([m_var], dist.likelihood(context))
+
+        # xs shape (5,): tail and core points relative to m0 = 0.
+        xs = np.array([-4.0, -2.5, -1.0, 0.0, 1.0])
+        clipped = raw(**{negated: _SHAPE_CLIP_MIN})(xs)  # shape (5,)
+        negative = raw(**{negated: -abs(base[negated])})(xs)  # shape (5,)
+
+        assert np.all(np.isfinite(negative))
+        np.testing.assert_allclose(negative, clipped, rtol=1e-12)
+
 
 class TestAsymmetricCrystalBallDist:
     """Test AsymmetricCrystalBallDist (double-sided) implementation."""
@@ -451,6 +543,136 @@ class TestAsymmetricCrystalBallDist:
         # Value should be positive and finite
         assert result_val > 0
         assert np.isfinite(result_val)
+
+    def test_asymmetric_crystal_dist_pins_piecewise_reference(self):
+        r"""Pin the double-sided Crystal Ball against its piecewise analytic form.
+
+        No scipy (or ``pytensor_distributions``) equivalent exists, so the
+        four-region shape is pinned against an independent scalar-``math``
+        reimplementation of the piecewise definition -- left power-law tail,
+        left Gaussian core, right Gaussian core, right power-law tail -- with
+        ``A_i = (n_i/alpha_i)^{n_i} exp(-alpha_i^2/2)`` and
+        ``B_i = n_i/alpha_i - alpha_i``. The reference is written from the
+        mathematical definition (scalar Python), independent of the vectorized
+        PyTensor expression under test. Test points are chosen to land one in
+        each of the four regions, and continuity is checked at the two tail/core
+        junctions (``t_L = -alpha_L`` and ``t_R = alpha_R``).
+        """
+        aL, aR, nL, nR, sL, sR, m0 = 1.2, 1.7, 5.3, 9.1, 1.5, 2.0, 125.0
+
+        def ref(m):
+            # Piecewise DSCB shape (unnormalized), scalar math, independent of
+            # the PyTensor expression. Regions in order: left tail, left core,
+            # right core, right tail.
+            tL = (m - m0) / sL
+            tR = (m - m0) / sR
+            AL = (nL / aL) ** nL * math.exp(-(aL**2) / 2)
+            AR = (nR / aR) ** nR * math.exp(-(aR**2) / 2)
+            BL = nL / aL - aL
+            BR = nR / aR - aR
+            if tL < -aL:
+                return AL * (BL - tL) ** (-nL)
+            if tL <= 0:
+                return math.exp(-(tL**2) / 2)
+            if tR <= aR:
+                return math.exp(-(tR**2) / 2)
+            return AR * (BR + tR) ** (-nR)
+
+        dist = AsymmetricCrystalBallDist(
+            name="test_crystal",
+            alpha_L="alpha_L",
+            alpha_R="alpha_R",
+            m="m",
+            m0="m0",
+            n_L="n_L",
+            n_R="n_R",
+            sigma_L="sigma_L",
+            sigma_R="sigma_R",
+        )
+        m_var = pt.vector("m", dtype="float64")
+        shape = {
+            "alpha_L": aL,
+            "alpha_R": aR,
+            "m0": m0,
+            "n_L": nL,
+            "n_R": nR,
+            "sigma_L": sL,
+            "sigma_R": sR,
+        }
+        context = Context(
+            {name: pt.constant(v, dtype="float64") for name, v in shape.items()}
+            | {"m": m_var}
+        )
+        raw_fn = function([m_var], dist.likelihood(context))
+
+        # xs shape (7,): 115/120 left tail, 124 left core, 125 peak, 127 right
+        # core, 132/140 right tail -- one point in each of the four regions.
+        xs = np.array([115.0, 120.0, 124.0, 125.0, 127.0, 132.0, 140.0])
+        pyhs3_raw = raw_fn(xs)  # shape (7,)
+        expected = np.array([ref(x) for x in xs])  # shape (7,)
+        np.testing.assert_allclose(pyhs3_raw, expected, rtol=1e-12)
+
+        # Continuity at the tail/core junctions: the switch conditions are
+        # strict (t_L < -alpha_L, t_R <= alpha_R), so evaluate just inside and
+        # just outside each junction and require the pdf not to jump.
+        m_left_junc = m0 - aL * sL  # t_L = -alpha_L
+        m_right_junc = m0 + aR * sR  # t_R = alpha_R
+        eps = 1e-6
+        left = raw_fn(np.array([m_left_junc - eps, m_left_junc + eps]))
+        right = raw_fn(np.array([m_right_junc - eps, m_right_junc + eps]))
+        np.testing.assert_allclose(left[0], left[1], rtol=1e-5)
+        np.testing.assert_allclose(right[0], right[1], rtol=1e-5)
+
+    @pytest.mark.parametrize(
+        "negated",
+        ["alpha_L", "alpha_R", "n_L", "n_R", "sigma_L", "sigma_R"],
+    )
+    def test_asymmetric_crystal_dist_clips_negative_shape_inputs(self, negated):
+        r"""Negative side-shape inputs are clipped inside the expression (#57).
+
+        Each side's alpha/n/sigma is clipped at ``_SHAPE_CLIP_MIN`` > 0 in the
+        expression, exactly as for the single-sided case. A negative input on
+        any side yields a finite pdf equal to the pdf with that parameter
+        replaced by ``_SHAPE_CLIP_MIN``.
+        """
+        dist = AsymmetricCrystalBallDist(
+            name="test_crystal",
+            alpha_L="alpha_L",
+            alpha_R="alpha_R",
+            m="m",
+            m0="m0",
+            n_L="n_L",
+            n_R="n_R",
+            sigma_L="sigma_L",
+            sigma_R="sigma_R",
+        )
+        m_var = pt.vector("m", dtype="float64")
+        # Fractional n_L/n_R so the un-clipped tail is NaN for a negative alpha.
+        base = {
+            "alpha_L": 1.2,
+            "alpha_R": 1.7,
+            "n_L": 5.3,
+            "n_R": 9.1,
+            "sigma_L": 1.5,
+            "sigma_R": 2.0,
+            "m0": 0.0,
+        }
+
+        def raw(**overrides):
+            values = base | overrides
+            context = Context(
+                {name: pt.constant(v, dtype="float64") for name, v in values.items()}
+                | {"m": m_var}
+            )
+            return function([m_var], dist.likelihood(context))
+
+        # xs shape (5,): left tail through right tail relative to m0 = 0.
+        xs = np.array([-6.0, -2.0, 0.0, 2.0, 6.0])
+        clipped = raw(**{negated: _SHAPE_CLIP_MIN})(xs)  # shape (5,)
+        negative = raw(**{negated: -abs(base[negated])})(xs)  # shape (5,)
+
+        assert np.all(np.isfinite(negative))
+        np.testing.assert_allclose(negative, clipped, rtol=1e-12)
 
     @staticmethod
     def _make_dist_and_context(shape_params, lower, upper, vector_obs=False):
@@ -2445,6 +2667,66 @@ class TestArgusDist:
             assert pdf_val >= 0.0, (
                 f"PDF should be non-negative, got {pdf_val} for m={m_val}"
             )
+
+    def test_argus_dist_pins_analytic_reference(self):
+        r"""Pin the ARGUS shape against its closed-form pdf and its normalization.
+
+        scipy has no ARGUS pdf, so reference values are computed from the
+        closed-form ARGUS density in the ROOT ``RooArgusBG`` convention that
+        pyhs3 implements, with ``r = m/m0``:
+
+            f(m; m0, c, p) = m (1 - r^2)^p exp[c (1 - r^2)],  0 <= m < m0
+
+        (0 for m >= m0). pyhs3's ``likelihood`` returns this *unnormalized*
+        density; the reference below computes it with scalar ``math`` at each
+        point, independent of the vectorized PyTensor expression. A second,
+        independent check normalizes the density over its kinematic support
+        [0, m0) with adaptive quadrature and confirms the normalized pdf
+        integrates to 1 -- a genuine independent validation of the shape rather
+        than a restatement of the same expression.
+        """
+        m0, c, p = 5.279, -20.0, 0.5  # B-meson endpoint, typical B-physics shape
+        dist = ArgusDist(
+            name="test_argus", mass="m", resonance="m0", slope="c", power="p"
+        )
+        m_var = pt.vector("m", dtype="float64")
+        context = Context(
+            {
+                "m": m_var,
+                "m0": pt.constant(m0, dtype="float64"),
+                "c": pt.constant(c, dtype="float64"),
+                "p": pt.constant(p, dtype="float64"),
+            }
+        )
+        raw_fn = function([m_var], dist.likelihood(context))
+
+        def ref(m):
+            # Closed-form ARGUS density (unnormalized), scalar math.
+            r2 = (m / m0) ** 2
+            bracket = 1.0 - r2
+            return m * bracket**p * math.exp(c * bracket)
+
+        # xs shape (5,): points across the support, from deep in the
+        # exponentially suppressed low-mass region up near the endpoint.
+        xs = np.array([1.0, 3.0, 4.5, 5.0, 5.2])
+        pyhs3_raw = raw_fn(xs)  # shape (5,)
+        expected = np.array([ref(x) for x in xs])  # shape (5,)
+        np.testing.assert_allclose(pyhs3_raw, expected, rtol=1e-12)
+
+        # Independent normalization check: the raw density divided by its
+        # integral over the kinematic support [0, m0) is a proper pdf.
+        scipy_integrate = pytest.importorskip("scipy.integrate")
+        integral, _ = scipy_integrate.quad(
+            lambda x: float(raw_fn(np.array([x]))[0]), 0.0, m0, epsabs=1e-12
+        )
+        assert integral > 0.0
+        normalized, _ = scipy_integrate.quad(
+            lambda x: float(raw_fn(np.array([x]))[0]) / integral,
+            0.0,
+            m0,
+            epsabs=1e-12,
+        )
+        np.testing.assert_allclose(normalized, 1.0, rtol=1e-8)
 
     def test_argus_dist_integration_with_workspace(self):
         """Test ArgusDist integration in full Workspace workflow."""

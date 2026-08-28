@@ -12,6 +12,7 @@ import math
 from typing import Literal, cast
 
 import pytensor.tensor as pt
+import pytensor_distributions.exponential as Exponential
 import pytensor_distributions.lognormal as LogNormal
 import pytensor_distributions.normal as Normal
 import pytensor_distributions.poisson as Poisson
@@ -246,20 +247,26 @@ class ExponentialDist(Distribution):
     r"""
     Exponential probability distribution.
 
-    Implements the exponential probability density function:
+    Implements the exponential probability density function. The raw density,
+    delegated to :mod:`pytensor_distributions.exponential`, is rate-normalized
+    and supported on :math:`x \ge 0`:
 
     .. math::
 
-        f(x; c) = \exp(-c \cdot x)
+        f(x; c) = c \exp(-c \cdot x), \quad x \ge 0, \qquad f(x; c) = 0, \quad x < 0
 
     Parameters:
         x (str): Input variable name.
         c (str): Rate/decay parameter (coefficient).
 
     Note:
-        The HS3 specification uses the form exp(-c*x), which matches ROOT's RooExponential
-        when the negateCoefficient flag is True. ROOT handles parameter transformations
-        automatically for compatibility.
+        The HS3 specification defines the density as
+        :math:`(1/\mathcal{M}) \exp(-c \cdot x)`, where :math:`\mathcal{M}` is the
+        domain measure. This distribution is normalized over its observable
+        domain, so the constant rate factor :math:`c` in the delegated
+        :math:`c \exp(-c \cdot x)` divides out and the normalized density equals
+        the HS3 form. The sign convention matches ROOT's RooExponential with the
+        negateCoefficient flag set to True.
 
     HS3 Reference:
         :hs3:label:`exponential_dist <hs3.exponential-distribution>`
@@ -276,23 +283,29 @@ class ExponentialDist(Distribution):
         """
         Builds a symbolic expression for the exponential PDF.
 
+        Delegates to pytensor-distributions' rate-normalized form
+        :math:`c\\,\\exp(-c x)`.
+
         Args:
             context (dict): Mapping of names to pytensor variables.
 
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of exponential PDF.
         """
-        x = context[self._parameters["x"]]
-        c = context[self._parameters["c"]]
-
-        # Exponential PDF: exp(-c * x)
-        return cast(TensorVar, (c) * pt.exp(-c * x))
+        return cast(
+            TensorVar,
+            Exponential.pdf(
+                context[self._parameters["x"]],
+                context[self._parameters["c"]],
+            ),
+        )
 
     def log_likelihood(self, context: Context) -> TensorVar:
         r"""
         Builds a symbolic expression for the exponential log-PDF.
 
-        Analytic log form of :meth:`likelihood`:
+        Delegates to pytensor-distributions' analytic log form of
+        :meth:`likelihood`:
 
         .. math::
 
@@ -309,10 +322,13 @@ class ExponentialDist(Distribution):
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of exponential log-PDF.
         """
-        x = context[self._parameters["x"]]
-        c = context[self._parameters["c"]]
-
-        return cast(TensorVar, pt.log(c) - c * x)
+        return cast(
+            TensorVar,
+            Exponential.logpdf(
+                context[self._parameters["x"]],
+                context[self._parameters["c"]],
+            ),
+        )
 
 
 class LogNormalDist(Distribution):

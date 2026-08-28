@@ -310,20 +310,26 @@ class ExponentialDist(Distribution):
     r"""
     Exponential probability distribution.
 
-    Implements the exponential probability density function:
+    Implements the exponential probability density function. The raw density,
+    delegated to :mod:`pytensor_distributions.exponential`, is rate-normalized
+    and supported on :math:`x \ge 0`:
 
     .. math::
 
-        f(x; c) = \exp(-c \cdot x)
+        f(x; c) = c \exp(-c \cdot x), \quad x \ge 0, \qquad f(x; c) = 0, \quad x < 0
 
     Parameters:
         x (str): Input variable name.
         c (str): Rate/decay parameter (coefficient).
 
     Note:
-        The HS3 specification uses the form exp(-c*x), which matches ROOT's RooExponential
-        when the negateCoefficient flag is True. ROOT handles parameter transformations
-        automatically for compatibility.
+        The HS3 specification defines the density as
+        :math:`(1/\mathcal{M}) \exp(-c \cdot x)`, where :math:`\mathcal{M}` is the
+        domain measure. This distribution is normalized over its observable
+        domain, so the constant rate factor :math:`c` in the delegated
+        :math:`c \exp(-c \cdot x)` divides out and the normalized density equals
+        the HS3 form. The sign convention matches ROOT's RooExponential with the
+        negateCoefficient flag set to True.
 
     HS3 Reference:
         :hs3:label:`exponential_dist <hs3.exponential-distribution>`

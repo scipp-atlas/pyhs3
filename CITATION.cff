@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using these metadata."
+title: "pyhs3: pure-Python HS3 implementation with tensors and autodiff"
+abstract: "pyhs3 is a pure-Python implementation of the HEP Statistics Serialization Standard (HS3), building statistical models as PyTensor computation graphs with autodiff support."
+type: software
+authors:
+  - family-names: "Stark"
+    given-names: "Giordon"
+    email: "kratsg@gmail.com"
+license: Apache-2.0
+repository-code: "https://github.com/scipp-atlas/pyhs3"
+url: "https://pyhs3.readthedocs.io/"
+keywords:
+  - HS3
+  - HEP
+  - statistics
+  - pytensor
+  - autodiff
+# No Zenodo DOI has been minted yet; add a `doi:` and/or `identifiers:` block
+# here once a release is archived on Zenodo.

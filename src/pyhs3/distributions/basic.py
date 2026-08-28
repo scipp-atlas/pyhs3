@@ -156,8 +156,15 @@ class UniformDist(Distribution):
             List of ``(name, lower, upper)``, one per axis in ``self.x`` order.
 
         Raises:
-            ValueError: If any axis has no observable/domain bounds.
+            ValueError: If ``x`` is empty, or if any axis has no
+                observable/domain bounds.
         """
+        if not self.x:
+            msg = (
+                f"uniform_dist {self.name!r} requires at least one axis in 'x', "
+                f"but 'x' is empty."
+            )
+            raise ValueError(msg)
         bounds = {
             name: (lower, upper)
             for name, lower, upper in self._matching_observables(context)

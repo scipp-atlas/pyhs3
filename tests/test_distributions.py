@@ -1644,6 +1644,18 @@ class TestUniformDist:
         with pytest.raises(ValueError, match=r"requires domain/observable bounds"):
             dist.expression(context)
 
+    def test_uniform_dist_requires_at_least_one_axis(self):
+        """An empty ``x`` has no axes to build a density over and raises ValueError.
+
+        Without the guard the axis loop never runs and ``likelihood`` returns
+        ``None``, which is an invalid density downstream.
+        """
+        dist = UniformDist(name="test_uniform", x=[])
+
+        context = Context({})
+        with pytest.raises(ValueError, match=r"requires at least one axis"):
+            dist.expression(context)
+
     def test_uniform_dist_integration_with_workspace(self):
         """Test UniformDist integration in full Workspace workflow.
 

@@ -189,7 +189,7 @@ class GenericFunction(GenericExpressionMixin, Function):
         >>> func = GenericFunction(name="sinusoid", expression="sin(x) * exp(-t)")
 
     HS3 Reference:
-        :hs3:label:`generic_function <hs3.generic-function>`
+        :external+hs3:ref:`generic_function <hs3.generic-function>`
     """
 
     type: Literal["generic_function"] = Field(default="generic_function", repr=False)

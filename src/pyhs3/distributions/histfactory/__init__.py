@@ -119,7 +119,7 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         if they share the same parameter name, they are correlated.
 
     HS3 Reference:
-        :hs3:label:`histfactory_dist <hs3.histfactory-distribution>`
+        :external+hs3:ref:`histfactory_dist <hs3.histfactory-distribution>`
     """
 
     type: Literal["histfactory_dist"] = "histfactory_dist"

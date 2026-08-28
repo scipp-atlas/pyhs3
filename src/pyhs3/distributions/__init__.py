@@ -140,7 +140,7 @@ class Distributions(NamedCollection[DistributionType]):
     dictionaries and maintains a registry of available distribution types.
 
     HS3 Reference:
-        :hs3:label:`distributions <hs3.sec:distributions>`
+        :external+hs3:ref:`distributions <hs3.sec:distributions>`
     """
 
     _enforce_unique_names: bool = True

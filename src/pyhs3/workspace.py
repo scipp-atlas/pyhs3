@@ -54,7 +54,7 @@ class Workspace(BaseModel):
         function_set (Functions): Available functions for parameter computation.
 
     HS3 Reference:
-        See :hs3:label:`HS3 file format specification <hs3.file-format>` for the complete workspace structure.
+        See :external+hs3:ref:`HS3 file format specification <hs3.file-format>` for the complete workspace structure.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

@@ -396,42 +396,40 @@ class TestDistributionNormalization:
         assert np.isclose(integral, 1.0, atol=1e-6)
 
     def test_uniform_dist_integrates_to_one(self):
-        """UniformDist normalized over a finite domain integrates to 1.0 and
-        equals ``1/(upper-lower)`` everywhere on its support.
+        """UniformDist over a finite domain integrates to 1.0 and equals
+        ``1/(upper-lower)`` everywhere on its support.
 
         HS3 ``uniform_dist`` declares only ``name``/``type``/``x`` with PDF
-        ``1/M``, where ``M`` is the domain measure. pyhs3 emits a constant
-        density and relies on its own normalization system to divide by
-        ``(upper-lower)``, producing the correct ``1/(upper-lower)`` without any
-        ``lower``/``upper`` distribution parameters.
+        ``1/M``, where ``M`` is the domain measure. pyhs3 delegates to
+        ``pytensor_distributions.uniform``, which returns the self-normalized
+        ``1/(upper-lower)`` on the support (and 0 outside), deriving the bounds
+        from the observable domain with no ``lower``/``upper`` distribution
+        parameters.
         """
         dist = UniformDist(name="uniform", x=["x"])
 
-        x_var = pt.vector("x")
-        lower = pt.constant(2.0, name="x_lower")
-        upper = pt.constant(7.0, name="x_upper")
+        x_var = pt.vector("x", dtype="float64")
+        lower = pt.constant(2.0, name="x_lower", dtype="float64")
+        upper = pt.constant(7.0, name="x_upper", dtype="float64")
 
         context = Context(
             parameters={"x": x_var},
             observables={"x": (lower, upper)},
         )
 
-        # The normalized uniform density is a scalar constant that does not
-        # depend on x, so x_var is unused in the compiled graph (on_unused_input
-        # is set accordingly). This is the HS3 semantics: 1/M with M the domain
-        # measure, no lower/upper distribution parameters.
+        # The self-normalized density broadcasts to x's shape: 1/(upper-lower)
+        # on the support, 0 outside it. Evaluated on a length-3 grid, every
+        # on-support point equals 1/(7-2) = 0.2.
         expr = dist._expression(context)
-        compiled = function([x_var], expr, on_unused_input="ignore")
-        density = float(compiled(np.array([2.0, 4.5, 7.0])))
+        compiled = function([x_var], expr)
+        density = compiled(np.array([2.0, 4.5, 7.0]))
 
-        # Constant density equals 1/(upper-lower).
         expected_density = 1.0 / (7.0 - 2.0)
-        assert np.isclose(density, expected_density, rtol=1e-10)
+        np.testing.assert_allclose(density, expected_density, rtol=1e-10)
 
-        # Integrating that constant density over [2, 7] recovers 1.0. Broadcast
-        # the scalar onto the support grid (shape (10000,)) to integrate it.
+        # Integrating the density over [2, 7] recovers 1.0.
         xs = np.linspace(2.0, 7.0, 10000)
-        ys = np.full_like(xs, density)
+        ys = compiled(xs)
         integral = np.trapezoid(ys, xs)
         assert np.isclose(integral, 1.0, atol=1e-6)
 

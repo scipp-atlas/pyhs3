@@ -1599,36 +1599,57 @@ class TestUniformDist:
         assert "obs_var" in dist.parameters
         assert "obs_var" in dist.parameters
 
-    def test_uniform_dist_expression_constant_value(self):
-        """Test UniformDist returns constant value of 1.0."""
+    def test_uniform_dist_expression_self_normalized_value(self):
+        """UniformDist density is the self-normalized ``1/(upper-lower)`` from domain bounds."""
         dist = UniformDist(name="test_uniform", x=["x"])
 
-        # Parameters - the x value doesn't matter for uniform distribution
-        params = {"x": pt.constant(0.5)}
+        x_var = pt.vector("x", dtype="float64")
+        lower = pt.constant(2.0, dtype="float64")
+        upper = pt.constant(7.0, dtype="float64")
+        context = Context(
+            parameters={"x": x_var},
+            observables={"x": (lower, upper)},
+        )
 
-        result = dist.expression(Context(params))
-        f = function([], result)
-        result_val = f()
+        result = dist.expression(context)
+        # x is a length-1 vector; the on-support density is 1/(7-2) = 0.2.
+        f = function([x_var], result, on_unused_input="ignore")
+        np.testing.assert_allclose(f(np.array([4.5])), 0.2, rtol=1e-10)
 
-        # Should always return 1.0 (normalization handled by domain)
-        assert result_val == 1.0
-
-    def test_uniform_dist_expression_with_different_x_values(self):
-        """Test UniformDist returns same value regardless of x."""
+    def test_uniform_dist_expression_constant_across_support(self):
+        """UniformDist density equals ``1/(upper-lower)`` everywhere on its support."""
         dist = UniformDist(name="test_uniform", x=["x"])
 
-        # Test multiple x values - should all give same result
-        x_values = [-1.0, 0.0, 0.5, 1.0, 10.0]
+        x_var = pt.vector("x", dtype="float64")
+        lower = pt.constant(2.0, dtype="float64")
+        upper = pt.constant(7.0, dtype="float64")
+        context = Context(
+            parameters={"x": x_var},
+            observables={"x": (lower, upper)},
+        )
+        f = function([x_var], dist.expression(context), on_unused_input="ignore")
 
-        for x_val in x_values:
-            params = {"x": pt.constant(x_val)}
-            result = dist.expression(Context(params))
-            f = function([], result)
-            result_val = f()
-            assert result_val == 1.0, f"Failed for x={x_val}"
+        # Any point inside [2, 7] gives the same constant density 0.2.
+        on_support = np.array([2.0, 3.0, 4.5, 6.0, 7.0])
+        np.testing.assert_allclose(
+            f(on_support), np.full_like(on_support, 0.2), rtol=1e-10
+        )
+
+    def test_uniform_dist_requires_bounds(self):
+        """A bound-less axis has no well-defined uniform density and raises ValueError."""
+        dist = UniformDist(name="test_uniform", x=["x"])
+
+        # No observables in the context: no domain bounds for axis "x".
+        context = Context({"x": pt.vector("x")})
+        with pytest.raises(ValueError, match=r"requires domain/observable bounds"):
+            dist.expression(context)
 
     def test_uniform_dist_integration_with_workspace(self):
-        """Test UniformDist integration in full Workspace workflow."""
+        """Test UniformDist integration in full Workspace workflow.
+
+        The observable ``obs`` gets its domain bounds from the likelihood's data
+        axes (min/max), so the self-normalized density is ``1/(max-min)``.
+        """
         test_data = {
             "parameter_points": [
                 {
@@ -1645,6 +1666,21 @@ class TestUniformDist:
                     "x": ["obs"],
                 }
             ],
+            "data": [
+                {
+                    "name": "data1",
+                    "type": "point",
+                    "value": 0.5,
+                    "axes": [{"name": "obs", "min": 0.0, "max": 4.0}],
+                }
+            ],
+            "likelihoods": [
+                {
+                    "name": "likelihood1",
+                    "distributions": ["uniform_dist"],
+                    "data": ["data1"],
+                }
+            ],
             "domains": [{"name": "test_domain", "type": "product_domain", "axes": []}],
             "functions": [],
             "metadata": {"hs3_version": "0.2"},
@@ -1657,10 +1693,69 @@ class TestUniformDist:
         assert "uniform_dist" in model.distributions
         assert "obs" in model.parameters
 
-        # Verify we can evaluate the PDF
-        pdf_value = model.pdf("uniform_dist", obs=np.array(0.5))
+        # obs is a vector-kind observable; the density depends on it via the
+        # support indicator, so pass a 1-D array. obs domain is [0, 4], so the
+        # self-normalized density on support is 1/(4-0) = 0.25.
+        pdf_value = model.pdf("uniform_dist", obs=np.array([0.5]))
         assert pdf_value is not None
-        assert pdf_value == 1.0
+        np.testing.assert_allclose(pdf_value, 0.25, rtol=1e-6)
+
+    def test_uniform_dist_multivariate_box(self):
+        """A 2-D uniform over a box gives ``1/((b1-a1)(b2-a2))``.
+
+        Multivariate uniform previously hit the single-observable normalization
+        limit (issue #214); opting out of pyhs3 normalization and delegating to
+        pytensor-distributions removes that limit.
+        """
+        dist = UniformDist(name="box", x=["x1", "x2"])
+
+        x1 = pt.vector("x1", dtype="float64")
+        x2 = pt.vector("x2", dtype="float64")
+        context = Context(
+            parameters={"x1": x1, "x2": x2},
+            observables={
+                "x1": (
+                    pt.constant(2.0, dtype="float64"),
+                    pt.constant(7.0, dtype="float64"),
+                ),  # width 5
+                "x2": (
+                    pt.constant(0.0, dtype="float64"),
+                    pt.constant(4.0, dtype="float64"),
+                ),  # width 4
+            },
+        )
+
+        f = function([x1, x2], dist.expression(context), on_unused_input="ignore")
+        # 1/((7-2)*(4-0)) = 1/20 = 0.05, constant across the box.
+        density = f(np.array([3.0]), np.array([1.0]))
+        np.testing.assert_allclose(density, 1.0 / 20.0, rtol=1e-10)
+
+    def test_uniform_dist_not_double_normalized(self):
+        """The compiled density equals ``1/(b-a)`` exactly, not ``1/(b-a)^2``.
+
+        ``_normalizable = False`` means pyhs3 does not divide by the domain
+        measure a second time on top of pytensor-distributions' already
+        self-normalized density.
+        """
+        dist = UniformDist(name="u", x=["x"])
+        assert dist._normalizable is False
+
+        x_var = pt.vector("x", dtype="float64")
+        context = Context(
+            parameters={"x": x_var},
+            observables={
+                "x": (
+                    pt.constant(2.0, dtype="float64"),
+                    pt.constant(7.0, dtype="float64"),
+                )
+            },
+        )
+        f = function([x_var], dist.expression(context), on_unused_input="ignore")
+
+        # Single normalization: 1/(7-2) = 0.2. Double would give 1/25 = 0.04.
+        density = float(f(np.array([4.5]))[0])
+        np.testing.assert_allclose(density, 0.2, rtol=1e-10)
+        assert not np.isclose(density, 0.04)
 
 
 class TestExponentialDist:

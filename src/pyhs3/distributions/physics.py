@@ -4,6 +4,11 @@ Physics-specific distribution implementations.
 Provides classes for handling probability distributions commonly used
 in high-energy physics analysis, including Crystal Ball distributions
 and ARGUS background models.
+
+``CrystalBallDist``, ``AsymmetricCrystalBallDist``, and ``ArgusDist`` are
+hand-rolled symbolic PyTensor expressions and stay that way:
+``pytensor_distributions`` provides no equivalent for any of them, so they
+cannot be delegated the way the basic distributions are.
 """
 
 from __future__ import annotations
@@ -16,6 +21,27 @@ import pytensor.tensor as pt
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
 from pyhs3.typing.aliases import TensorVar
+
+# Lower bound applied to Crystal Ball shape parameters (alpha, n, sigma) inside
+# the symbolic expression. These are mathematically required to be positive --
+# sigma and alpha appear as divisors, n is a power-law exponent -- but the input
+# parameter may be a shared bounded scalar or a compound expression whose bounds
+# are set for a different distribution. Clipping here, rather than constraining
+# the input, guards against division-by-zero / NaN (e.g. a negative alpha with a
+# non-integer n makes the power-law tail NaN) without touching the shared
+# parameter. See issue #57.
+_SHAPE_CLIP_MIN = 1e-12
+
+
+def _clip_shape(value: TensorVar) -> TensorVar:
+    """Lower-bound a Crystal Ball shape parameter at ``_SHAPE_CLIP_MIN`` > 0.
+
+    Applied element-wise; preserves the input shape. For any valid (positive)
+    parameter this is a no-op, so it does not change the pdf for in-range
+    inputs -- it only rescues out-of-range (<= 0) values from producing NaN or a
+    negative pseudo-pdf.
+    """
+    return cast(TensorVar, pt.maximum(value, _SHAPE_CLIP_MIN))
 
 
 def _crystalball_log_tail(n: TensorVar, alpha: TensorVar, u: TensorVar) -> TensorVar:
@@ -112,11 +138,15 @@ class CrystalBallDist(Distribution):
         Implements the ROOT RooCrystalBall formula with a single tail.
         All shape parameters (alpha, n, sigma) are assumed to be positive.
         """
-        alpha = context[self.alpha]
+        # Clip shape parameters at _SHAPE_CLIP_MIN > 0 (see _clip_shape): guards
+        # the sigma/alpha divisors and the power-law exponent n against <= 0
+        # inputs. m and m0 are positions and stay unclipped. Element-wise; keeps
+        # each input's shape.
+        alpha = _clip_shape(context[self.alpha])
         m = context[self.m]
         m0 = context[self.m0]
-        n = context[self.n]
-        sigma = context[self.sigma]
+        n = _clip_shape(context[self.n])
+        sigma = _clip_shape(context[self.sigma])
 
         # Calculate A and B per ROOT formula
         # Note: alpha, n, sigma are assumed to be positive
@@ -168,11 +198,15 @@ class CrystalBallDist(Distribution):
             pytensor.tensor.variable.TensorVariable: Symbolic representation
             of the single-sided Crystal Ball log-PDF.
         """
-        alpha = context[self.alpha]
+        # Clip shape parameters at _SHAPE_CLIP_MIN > 0 (see _clip_shape): guards
+        # the sigma/alpha divisors and the power-law exponent n against <= 0
+        # inputs. m and m0 are positions and stay unclipped. Element-wise; keeps
+        # each input's shape.
+        alpha = _clip_shape(context[self.alpha])
         m = context[self.m]
         m0 = context[self.m0]
-        n = context[self.n]
-        sigma = context[self.sigma]
+        n = _clip_shape(context[self.n])
+        sigma = _clip_shape(context[self.sigma])
 
         B = (n / alpha) - alpha
         t = (m - m0) / sigma
@@ -246,14 +280,18 @@ class AsymmetricCrystalBallDist(Distribution):
         Implements the ROOT RooCrystalBall formula with proper parameter validation.
         All shape parameters (alpha, n, sigma) are assumed to be positive.
         """
-        alpha_L = context[self.alpha_L]
-        alpha_R = context[self.alpha_R]
+        # Clip shape parameters at _SHAPE_CLIP_MIN > 0 (see _clip_shape): guards
+        # the sigma/alpha divisors and the power-law exponents n against <= 0
+        # inputs on either side. m and m0 are positions and stay unclipped.
+        # Element-wise; keeps each input's shape.
+        alpha_L = _clip_shape(context[self.alpha_L])
+        alpha_R = _clip_shape(context[self.alpha_R])
         m = context[self.m]
         m0 = context[self.m0]
-        n_L = context[self.n_L]
-        n_R = context[self.n_R]
-        sigma_L = context[self.sigma_L]
-        sigma_R = context[self.sigma_R]
+        n_L = _clip_shape(context[self.n_L])
+        n_R = _clip_shape(context[self.n_R])
+        sigma_L = _clip_shape(context[self.sigma_L])
+        sigma_R = _clip_shape(context[self.sigma_R])
 
         # Calculate A_i and B_i per ROOT formula
         # Note: alpha, n, sigma are assumed to be positive
@@ -316,14 +354,18 @@ class AsymmetricCrystalBallDist(Distribution):
             pytensor.tensor.variable.TensorVariable: Symbolic representation
             of the double-sided Crystal Ball log-PDF.
         """
-        alpha_L = context[self.alpha_L]
-        alpha_R = context[self.alpha_R]
+        # Clip shape parameters at _SHAPE_CLIP_MIN > 0 (see _clip_shape): guards
+        # the sigma/alpha divisors and the power-law exponents n against <= 0
+        # inputs on either side. m and m0 are positions and stay unclipped.
+        # Element-wise; keeps each input's shape.
+        alpha_L = _clip_shape(context[self.alpha_L])
+        alpha_R = _clip_shape(context[self.alpha_R])
         m = context[self.m]
         m0 = context[self.m0]
-        n_L = context[self.n_L]
-        n_R = context[self.n_R]
-        sigma_L = context[self.sigma_L]
-        sigma_R = context[self.sigma_R]
+        n_L = _clip_shape(context[self.n_L])
+        n_R = _clip_shape(context[self.n_R])
+        sigma_L = _clip_shape(context[self.sigma_L])
+        sigma_R = _clip_shape(context[self.sigma_R])
 
         B_L = (n_L / alpha_L) - alpha_L
         B_R = (n_R / alpha_R) - alpha_R
@@ -371,14 +413,18 @@ class AsymmetricCrystalBallDist(Distribution):
         if observable_name != self.m:
             return None
 
-        alpha_L = context[self.alpha_L]
-        alpha_R = context[self.alpha_R]
+        # Clip shape parameters at _SHAPE_CLIP_MIN > 0 (see _clip_shape): guards
+        # the sigma/alpha divisors and the power-law exponents n against <= 0
+        # inputs on either side. m and m0 are positions and stay unclipped.
+        # Element-wise; keeps each input's shape.
+        alpha_L = _clip_shape(context[self.alpha_L])
+        alpha_R = _clip_shape(context[self.alpha_R])
         m = context[self.m]
         m0 = context[self.m0]
-        n_L = context[self.n_L]
-        n_R = context[self.n_R]
-        sigma_L = context[self.sigma_L]
-        sigma_R = context[self.sigma_R]
+        n_L = _clip_shape(context[self.n_L])
+        n_R = _clip_shape(context[self.n_R])
+        sigma_L = _clip_shape(context[self.sigma_L])
+        sigma_R = _clip_shape(context[self.sigma_R])
 
         # Same A_i and B_i as likelihood(); alpha, n, sigma assumed positive.
         A_L = (n_L / alpha_L) ** n_L * pt.exp(-(alpha_L**2) / 2)

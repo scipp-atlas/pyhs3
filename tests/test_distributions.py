@@ -45,6 +45,7 @@ from pyhs3.distributions import (
     UniformDist,
 )
 from pyhs3.distributions.composite import _stable_logsumexp
+from pyhs3.distributions.physics import _SHAPE_CLIP_MIN
 from pyhs3.normalization import gauss_legendre_integral
 from pyhs3.tensorutils import create_bounded_tensor
 
@@ -393,6 +394,44 @@ class TestCrystalBallDist:
         norm = scipy_pdf[1] / pyhs3_raw[1]
         np.testing.assert_allclose(scipy_pdf, norm * pyhs3_raw, rtol=1e-6)
 
+    @pytest.mark.parametrize("negated", ["alpha", "n", "sigma"])
+    def test_crystal_dist_clips_negative_shape_inputs(self, negated):
+        r"""Negative alpha/n/sigma inputs are clipped inside the expression (#57).
+
+        The shape parameters alpha, n, sigma are mathematically required to be
+        positive, but a negative value can still be fed in (the input may be a
+        shared bounded scalar or a compound expression bounded for another
+        distribution). Rather than constrain the input parameter, the
+        expression clips each of these at ``_SHAPE_CLIP_MIN`` > 0. A negative
+        input must therefore yield a finite pdf equal to the pdf evaluated with
+        that parameter replaced by ``_SHAPE_CLIP_MIN`` -- not a NaN (which the
+        un-clipped power-law tail produces for a negative alpha with a
+        non-integer n) and not a negative "pdf" value.
+        """
+        dist = CrystalBallDist(
+            name="test_crystal", alpha="alpha", m="m", m0="m0", n="n", sigma="sigma"
+        )
+        m_var = pt.vector("m", dtype="float64")
+        # Fractional n so the un-clipped tail is NaN (not merely negative) for a
+        # negative alpha, making the div-by-zero / NaN failure unambiguous.
+        base = {"alpha": 1.5, "n": 3.5, "sigma": 1.0, "m0": 0.0}
+
+        def raw(**overrides):
+            values = base | overrides
+            context = Context(
+                {name: pt.constant(v, dtype="float64") for name, v in values.items()}
+                | {"m": m_var}
+            )
+            return function([m_var], dist.likelihood(context))
+
+        # xs shape (5,): tail and core points relative to m0 = 0.
+        xs = np.array([-4.0, -2.5, -1.0, 0.0, 1.0])
+        clipped = raw(**{negated: _SHAPE_CLIP_MIN})(xs)  # shape (5,)
+        negative = raw(**{negated: -abs(base[negated])})(xs)  # shape (5,)
+
+        assert np.all(np.isfinite(negative))
+        np.testing.assert_allclose(negative, clipped, rtol=1e-12)
+
 
 class TestAsymmetricCrystalBallDist:
     """Test AsymmetricCrystalBallDist (double-sided) implementation."""
@@ -581,6 +620,57 @@ class TestAsymmetricCrystalBallDist:
         right = raw_fn(np.array([m_right_junc - eps, m_right_junc + eps]))
         np.testing.assert_allclose(left[0], left[1], rtol=1e-5)
         np.testing.assert_allclose(right[0], right[1], rtol=1e-5)
+
+    @pytest.mark.parametrize(
+        "negated",
+        ["alpha_L", "alpha_R", "n_L", "n_R", "sigma_L", "sigma_R"],
+    )
+    def test_asymmetric_crystal_dist_clips_negative_shape_inputs(self, negated):
+        r"""Negative side-shape inputs are clipped inside the expression (#57).
+
+        Each side's alpha/n/sigma is clipped at ``_SHAPE_CLIP_MIN`` > 0 in the
+        expression, exactly as for the single-sided case. A negative input on
+        any side yields a finite pdf equal to the pdf with that parameter
+        replaced by ``_SHAPE_CLIP_MIN``.
+        """
+        dist = AsymmetricCrystalBallDist(
+            name="test_crystal",
+            alpha_L="alpha_L",
+            alpha_R="alpha_R",
+            m="m",
+            m0="m0",
+            n_L="n_L",
+            n_R="n_R",
+            sigma_L="sigma_L",
+            sigma_R="sigma_R",
+        )
+        m_var = pt.vector("m", dtype="float64")
+        # Fractional n_L/n_R so the un-clipped tail is NaN for a negative alpha.
+        base = {
+            "alpha_L": 1.2,
+            "alpha_R": 1.7,
+            "n_L": 5.3,
+            "n_R": 9.1,
+            "sigma_L": 1.5,
+            "sigma_R": 2.0,
+            "m0": 0.0,
+        }
+
+        def raw(**overrides):
+            values = base | overrides
+            context = Context(
+                {name: pt.constant(v, dtype="float64") for name, v in values.items()}
+                | {"m": m_var}
+            )
+            return function([m_var], dist.likelihood(context))
+
+        # xs shape (5,): left tail through right tail relative to m0 = 0.
+        xs = np.array([-6.0, -2.0, 0.0, 2.0, 6.0])
+        clipped = raw(**{negated: _SHAPE_CLIP_MIN})(xs)  # shape (5,)
+        negative = raw(**{negated: -abs(base[negated])})(xs)  # shape (5,)
+
+        assert np.all(np.isfinite(negative))
+        np.testing.assert_allclose(negative, clipped, rtol=1e-12)
 
     @staticmethod
     def _make_dist_and_context(shape_params, lower, upper, vector_obs=False):

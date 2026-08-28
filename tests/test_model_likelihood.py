@@ -4,6 +4,8 @@ Tests for ws.model(analysis) / ws.model(likelihood) — joint log-prob interface
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytensor
 import pytest
@@ -453,6 +455,98 @@ def test_model_free_params_excludes_const():
     assert "mean" in model.free_params
     assert "fixed_scale" not in model.free_params
     assert model.free_params["mean"] == pytest.approx(2.0)
+
+
+def test_model_free_params_excludes_observable_initializers():
+    ws = Workspace(
+        metadata={"hs3_version": "0.2"},
+        distributions=[
+            {
+                "name": "gauss",
+                "type": "gaussian_dist",
+                "x": "x",
+                "mean": 0.0,
+                "sigma": 1.0,
+            }
+        ],
+        domains=[{"name": "main", "type": "product_domain", "axes": []}],
+        data=[
+            {
+                "name": "observed",
+                "type": "unbinned",
+                "axes": [{"name": "x", "min": -10.0, "max": 10.0}],
+                "entries": [[0.0], [1.0]],
+            }
+        ],
+        parameter_points=[
+            {"name": "params", "parameters": [{"name": "x", "value": 159.7}]}
+        ],
+        likelihoods=[{"name": "L", "distributions": ["gauss"], "data": ["observed"]}],
+        analyses=[
+            {"name": "A", "likelihood": "L", "domains": ["main"], "init": "params"}
+        ],
+    )
+
+    model = ws.model("A", progress=False, mode="FAST_COMPILE")
+    assert "x" in model.data
+    assert "x" not in model.free_params
+
+
+def test_repeated_observable_is_bound_per_likelihood_pair():
+    ws = Workspace(
+        metadata={"hs3_version": "0.2"},
+        distributions=[
+            {
+                "name": "first",
+                "type": "gaussian_dist",
+                "x": "x",
+                "mean": 0.0,
+                "sigma": 1.0,
+            },
+            {
+                "name": "second",
+                "type": "gaussian_dist",
+                "x": "x",
+                "mean": 10.0,
+                "sigma": 1.0,
+            },
+        ],
+        domains=[{"name": "main", "type": "product_domain", "axes": []}],
+        data=[
+            {
+                "name": "first_data",
+                "type": "unbinned",
+                "axes": [{"name": "x", "min": -100.0, "max": 100.0}],
+                "entries": [[0.0]],
+            },
+            {
+                "name": "second_data",
+                "type": "unbinned",
+                "axes": [{"name": "x", "min": -100.0, "max": 100.0}],
+                "entries": [[10.0]],
+            },
+        ],
+        likelihoods=[
+            {
+                "name": "L",
+                "distributions": ["first", "second"],
+                "data": ["first_data", "second_data"],
+            }
+        ],
+        analyses=[{"name": "A", "likelihood": "L", "domains": ["main"]}],
+    )
+    model = ws.model("A", progress=False, mode="FAST_COMPILE")
+    inputs = [
+        variable
+        for variable in explicit_graph_inputs([model.log_prob])
+        if variable.name is not None
+    ]
+    available = {**model.free_params, **model.data}
+    evaluate = pytensor.function(inputs, model.log_prob, mode="FAST_COMPILE")
+    actual = float(evaluate(*[available[variable.name] for variable in inputs]).item())
+
+    assert set(model.data) == {"first_data__x", "second_data__x"}
+    assert actual == pytest.approx(-math.log(2.0 * math.pi), abs=1.0e-10)
 
 
 def test_model_data_raises_without_likelihood():

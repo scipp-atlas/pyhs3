@@ -12,6 +12,7 @@ import numpy as np
 import numpy.typing as npt
 import pytensor.tensor as pt
 from pytensor.compile.maker import function
+from pytensor.graph.replace import graph_replace
 from pytensor.graph.traversal import applys_between, explicit_graph_inputs
 from rich.progress import (
     BarColumn,
@@ -44,6 +45,33 @@ if TYPE_CHECKING:
     from pyhs3.likelihoods import Likelihood
 
 log = logging.getLogger(__name__)
+
+
+class _ReplacedExpressionMapping(Mapping[str, TensorVar]):
+    """Lazy graph-replaced view used for one likelihood data pair."""
+
+    def __init__(
+        self,
+        expressions: Mapping[str, TensorVar],
+        replacements: list[tuple[TensorVar, TensorVar]],
+    ) -> None:
+        self._expressions = expressions
+        self._replacements = replacements
+        self._cache: dict[str, TensorVar] = {}
+
+    def __getitem__(self, key: str) -> TensorVar:
+        if key not in self._cache:
+            self._cache[key] = cast(
+                TensorVar,
+                graph_replace(self._expressions[key], self._replacements, strict=False),
+            )
+        return self._cache[key]
+
+    def __iter__(self):  # type: ignore[no-untyped-def]
+        return iter(self._expressions)
+
+    def __len__(self) -> int:
+        return len(self._expressions)
 
 
 class Model:
@@ -168,6 +196,31 @@ class Model:
         # and does not underflow to -inf.
         self.log_distributions: dict[str, TensorVar] = {}
         self._likelihood = likelihood
+        self._observable_bindings = (
+            likelihood.observable_bindings() if likelihood is not None else []
+        )
+        self._data_input_tensors: dict[str, TensorVar] = {}
+        self._pair_observable_tensors: list[dict[str, TensorVar]] = []
+        if likelihood is not None:
+            for pair_index, datum in enumerate(likelihood.data):
+                pair_tensors: dict[str, TensorVar] = {}
+                if not isinstance(datum, str):
+                    for axis in datum.axes or []:
+                        bound_name = self._observable_bindings[pair_index].get(
+                            axis.name
+                        )
+                        if bound_name is None or bound_name == axis.name:
+                            continue
+                        tensor = self._data_input_tensors.get(bound_name)
+                        if tensor is None:
+                            tensor = create_bounded_tensor(
+                                bound_name,
+                                (axis.min, axis.max),
+                                pt.vector,
+                            )
+                            self._data_input_tensors[bound_name] = tensor
+                        pair_tensors[axis.name] = tensor
+                self._pair_observable_tensors.append(pair_tensors)
         # Views used internally for broadcasting: leaf[:, None] for observables,
         # leaf[None, :] for non-observable vector overrides.  Distributions see
         # these via Context; model.parameters[name] always holds the leaf.
@@ -235,7 +288,7 @@ class Model:
         """
         result: dict[str, float] = {}
         for pp in self.parameterset:
-            if not pp.const:
+            if not pp.const and pp.name not in self._observables:
                 result[pp.name] = float(pp.value)
         return result
 
@@ -291,8 +344,12 @@ class Model:
         # HS3; see https://github.com/scipp-atlas/pyhs3/issues/240.
         seen_constraint_factors: set[str] = set()
 
-        for dist_obj, datum in zip(
-            self._likelihood.distributions, self._likelihood.data, strict=True
+        for pair_index, (dist_obj, datum) in enumerate(
+            zip(
+                self._likelihood.distributions,
+                self._likelihood.data,
+                strict=True,
+            )
         ):
             if isinstance(datum, str):
                 continue
@@ -341,9 +398,23 @@ class Model:
             # constraints) via Distribution.log_prob_terms; the model owns
             # the channel-dataset pairing and applies event weights, sums
             # over events, and deduplicates constraints globally.
+            replacements = [
+                (self.parameters[axis_name], tensor)
+                for axis_name, tensor in self._pair_observable_tensors[
+                    pair_index
+                ].items()
+            ]
+            expressions: Mapping[str, TensorVar] = self.distributions
+            log_expressions: Mapping[str, TensorVar] = self.log_distributions
+            if replacements:
+                expressions = _ReplacedExpressionMapping(expressions, replacements)
+                log_expressions = _ReplacedExpressionMapping(
+                    log_expressions, replacements
+                )
+
             contrib = self._distribution_objects[dist_name].log_prob_terms(
-                self.distributions,
-                self.log_distributions,
+                expressions,
+                log_expressions,
                 self._distribution_objects,
             )
 
@@ -438,10 +509,13 @@ class Model:
             return baked
 
         param_point = self.parameterset.get(node_name) if self.parameterset else None
+        is_observable = (
+            node_name.endswith("_observed") or node_name in context.observables
+        )
         domain_bounds = (
             self.domain.get(node_name, (None, None)) if self.domain else (None, None)
         )
-        if param_point and param_point.const:
+        if param_point and param_point.const and not is_observable:
             # Bake as a compile-time constant so it is invisible to
             # explicit_graph_inputs and JAX transpilation.
             val = np.float64(param_point.value)
@@ -457,19 +531,28 @@ class Model:
                 )
             return pt.constant(val, name=node_name)
 
-        is_observable = (
-            node_name.endswith("_observed") or node_name in context.observables
-        )
-
         # Free variable: determine default kind (vector for observables, scalar otherwise)
         default_kind: Callable[..., TensorVar] = (
             pt.vector if is_observable else pt.scalar
         )
 
-        # Allow explicit override from ParameterPoint.kind
+        # Allow explicit overrides for ordinary parameters. Observable data
+        # must remain vectors even when a stale parameter-point initializer
+        # declares a scalar kind; warn about that ignored override.
         if param_point and param_point.kind is not None:
-            param_kind = param_point.kind
-            if param_kind is not default_kind:
+            if is_observable:
+                if param_point.kind is not default_kind:
+                    warnings.warn(
+                        f"Parameter '{node_name}' has kind override"
+                        f" {param_point.kind.__name__} (default would be"
+                        f" {default_kind.__name__}); ignoring it because"
+                        " likelihood observables are event arrays",
+                        stacklevel=2,
+                    )
+                param_kind = default_kind
+            else:
+                param_kind = param_point.kind
+            if not is_observable and param_kind is not default_kind:
                 warnings.warn(
                     f"Parameter '{node_name}' has kind override"
                     f" {param_kind.__name__} (default would be"
@@ -548,7 +631,14 @@ class Model:
         # Poisson term and per-modifier make_constraint() are never called
         # here: the probability-space channel expression is derived below as
         # pt.exp() of the log expression instead.
-        log_poisson = dist.log_likelihood(context)
+        try:
+            log_poisson = dist.log_likelihood(context)
+        finally:
+            # The captured TensorVar owns everything needed by this Model.
+            # Do not leave the shared workspace channel retaining the global
+            # Context (and therefore this complete model graph), especially
+            # when another analysis is built from the same Workspace.
+            dist._clear_expression_cache()  # pylint: disable=protected-access
         self._hfdc_log_poisson[node_name] = log_poisson
 
         # Whether this channel participates in the active likelihood; only then

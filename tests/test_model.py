@@ -656,8 +656,9 @@ class TestModelWithoutParameterPoints:
         ):
             model = workspace.model(0)
 
-        # obs_x should be scalar (override respected)
-        assert model.parameters["obs_x"].type.ndim == 0
+        # Observable inputs remain event vectors; the stale scalar override is
+        # reported but cannot replace likelihood data.
+        assert model.parameters["obs_x"].type.ndim == 1
 
     def test_parameter_kind_override_no_warns_when_default(self):
         """Test that overriding observable parameter kind to vector emits no warning."""

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 import types
+from copy import deepcopy
 
 import numpy as np
 import pytensor
@@ -21,7 +22,13 @@ import pytest
 
 from pyhs3.context import Context
 from pyhs3.data import BinnedData, Data, UnbinnedData
-from pyhs3.distributions import Distributions, HistFactoryDistChannel
+from pyhs3.distributions import (
+    Distributions,
+    GaussianDist,
+    HistFactoryDistChannel,
+    LogNormalDist,
+    PoissonDist,
+)
 from pyhs3.distributions.histfactory.modifiers import (
     HasConstraint,
     ParameterModifier,
@@ -63,11 +70,37 @@ def _make_channel(name: str, contents: list[float], modifiers: list[dict]) -> di
 def _simple_workspace(channels: list[dict], params: list[dict]) -> Workspace:
     """Build a minimal Workspace with HFDC channel(s) and BinnedData."""
     distributions = []
+    constraint_distributions = {}
     data = []
     likelihood_dists = []
     likelihood_data = []
 
-    for ch in channels:
+    for original_ch in channels:
+        ch = deepcopy(original_ch)
+        # Migrate the old test shorthand into the current named-distribution
+        # wire representation. The family literals themselves are no longer
+        # interpreted by pyhs3.
+        for sample in ch["samples"]:
+            for modifier in sample["modifiers"]:
+                family = modifier.get("constraint")
+                parameter = modifier.get("parameter")
+                if family not in {"Gauss", "Poisson", "LogNormal"} or not parameter:
+                    continue
+                target_name = f"constraint_{parameter}_{family.lower()}"
+                modifier["constraint"] = target_name
+                if target_name in constraint_distributions:
+                    continue
+                if family == "Gauss":
+                    target = GaussianDist(
+                        name=target_name, x=parameter, mean=0.0, sigma=1.0
+                    )
+                elif family == "Poisson":
+                    target = PoissonDist(name=target_name, x=1.0, mean=parameter)
+                else:
+                    target = LogNormalDist(
+                        name=target_name, x=1.0, mu=parameter, sigma=1.0
+                    )
+                constraint_distributions[target_name] = target
         dist = HistFactoryDistChannel(**ch)
         distributions.append(dist)
         likelihood_dists.append(dist)
@@ -81,6 +114,8 @@ def _simple_workspace(channels: list[dict], params: list[dict]) -> Workspace:
         )
         data.append(binned)
         likelihood_data.append(binned)
+
+    distributions.extend(constraint_distributions.values())
 
     param_points = [ParameterPoint(name=p["name"], value=p["value"]) for p in params]
 
@@ -139,7 +174,7 @@ class TestConstraintModifiers:
                         "name": "lumi",
                         "type": "normsys",
                         "parameter": "lumi",
-                        "constraint": "Gauss",
+                        "constraint": "lumi_constraint",
                         "data": {"hi": 1.05, "lo": 0.95},
                     }
                 ],
@@ -148,7 +183,7 @@ class TestConstraintModifiers:
         specs = list(ch.constraint_specs())
         assert len(specs) == 1
         dedup_key, modifier, _sample_data = specs[0]
-        assert dedup_key == "lumi"
+        assert dedup_key == "lumi_constraint"
         assert isinstance(modifier, HasConstraint)
         assert isinstance(modifier, ParameterModifier)
 
@@ -187,7 +222,7 @@ class TestConstraintModifiers:
                         "name": "lumi",
                         "type": "normsys",
                         "parameter": "lumi",
-                        "constraint": "Gauss",
+                        "constraint": "lumi_constraint",
                         "data": {"hi": 1.05, "lo": 0.95},
                     },
                     {
@@ -203,7 +238,7 @@ class TestConstraintModifiers:
         specs = list(ch.constraint_specs())
         assert len(specs) == 2
         keys = [key for key, _, _ in specs]
-        assert "lumi" in keys
+        assert "lumi_constraint" in keys
         assert None in keys
 
     def test_duplicate_normsys_parameter_in_same_channel_yields_both(self):
@@ -224,7 +259,7 @@ class TestConstraintModifiers:
                             "name": "lumi",
                             "type": "normsys",
                             "parameter": "lumi",
-                            "constraint": "Gauss",
+                            "constraint": "lumi_constraint",
                             "data": {"hi": 1.05, "lo": 0.95},
                         }
                     ],
@@ -237,7 +272,7 @@ class TestConstraintModifiers:
                             "name": "lumi",
                             "type": "normsys",
                             "parameter": "lumi",
-                            "constraint": "Gauss",
+                            "constraint": "lumi_constraint",
                             "data": {"hi": 1.05, "lo": 0.95},
                         }
                     ],
@@ -247,7 +282,7 @@ class TestConstraintModifiers:
         specs = list(dist.constraint_specs())
         keys = [key for key, _, _ in specs]
         # Both specs have the same dedup_key; callers apply the seen-set dedup.
-        assert keys == ["lumi", "lumi"]
+        assert keys == ["lumi_constraint", "lumi_constraint"]
 
     def test_log_extended_likelihood_dedups_shared_parameter(self):
         """Two samples sharing a normsys parameter contribute one log-constraint.
@@ -268,7 +303,7 @@ class TestConstraintModifiers:
                             "name": "lumi",
                             "type": "normsys",
                             "parameter": "lumi",
-                            "constraint": "Gauss",
+                            "constraint": "lumi_constraint",
                             "data": {"hi": 1.05, "lo": 0.95},
                         }
                     ],
@@ -281,7 +316,7 @@ class TestConstraintModifiers:
                             "name": "lumi",
                             "type": "normsys",
                             "parameter": "lumi",
-                            "constraint": "Gauss",
+                            "constraint": "lumi_constraint",
                             "data": {"hi": 1.05, "lo": 0.95},
                         }
                     ],
@@ -289,9 +324,14 @@ class TestConstraintModifiers:
             ],
         )
         lumi = pt.dscalar("lumi")
-        context = Context({"lumi": lumi})
+        context = Context(
+            {
+                "lumi": lumi,
+                "lumi_constraint": pt.exp(-0.5 * math.log(2 * math.pi)),
+            }
+        )
         expr = dist.log_extended_likelihood(context)
-        fn = pytensor.function([lumi], expr)
+        fn = pytensor.function([lumi], expr, on_unused_input="ignore")
         val = float(fn(0.0))
         assert abs(val - (-0.5 * math.log(2 * math.pi))) < 1e-9
 
@@ -790,12 +830,15 @@ class TestBBLiteStaterrorModelBuild:
                 "name": "alpha_aux",
                 "type": "normsys",
                 "parameter": "alpha_aux",
-                "constraint": "Gauss",
+                "constraint": "alpha_aux_constraint",
                 "data": {"hi": 1.1, "lo": 0.9},
             }
         )
 
         aux_channel = HistFactoryDistChannel(**aux_dict)
+        aux_constraint = GaussianDist(
+            name="alpha_aux_constraint", x="alpha_aux", mean=0.0, sigma=1.0
+        )
         sr_channel = HistFactoryDistChannel(**_make_channel("SR", [5.0], []))
         sr_data = BinnedData(
             name="SR_data",
@@ -805,7 +848,7 @@ class TestBBLiteStaterrorModelBuild:
 
         ws = Workspace(
             metadata=Metadata(hs3_version="0.3.0"),
-            distributions=Distributions([sr_channel, aux_channel]),
+            distributions=Distributions([sr_channel, aux_channel, aux_constraint]),
             data=Data([sr_data]),
             likelihoods=Likelihoods(
                 [
@@ -836,7 +879,7 @@ class TestBBLiteStaterrorModelBuild:
         model = ws.model(likelihood, progress=False)
 
         # AUX is retained because aux_distributions are pruning roots.
-        assert set(model.distributions) == {"SR", "AUX"}
+        assert set(model.distributions) == {"SR", "AUX", "alpha_aux_constraint"}
         assert "AUX" in model.log_distributions
 
         # SR has no constraints, while AUX is auxiliary rather than primary.
@@ -1030,6 +1073,19 @@ class TestHFDCSubgraphBuildCounts:
             f"expected exactly one _compute_expected_rates call per channel, got {calls}"
         )
 
+    def test_model_build_releases_shared_channel_expression_cache(self):
+        """A built model owns its graph; the workspace channel must not retain it."""
+        ws = _single_channel_normsys_workspace()
+        likelihood = next(iter(ws.likelihoods))
+
+        ws.model(likelihood, progress=False)
+
+        channel = next(iter(ws.distributions))
+        assert isinstance(channel, HistFactoryDistChannel)
+        assert channel._cached_context is None  # pylint: disable=protected-access
+        assert channel._cached_expected_rates is None  # pylint: disable=protected-access
+        assert channel._cached_bin_log_probs is None  # pylint: disable=protected-access
+
     def test_make_constraint_not_called(self, monkeypatch):
         """``make_constraint`` (the probability-space constraint term) must
         never be called during model construction: the probability-space
@@ -1052,9 +1108,8 @@ class TestHFDCSubgraphBuildCounts:
 
         assert calls == [], f"expected make_constraint to never be called, got {calls}"
 
-    def test_log_constraint_called_once_per_spec(self, monkeypatch):
-        """``log_constraint`` (#243 Layer 2) must build each log-space constraint
-        factor exactly once during model construction."""
+    def test_named_constraint_reuses_distribution_log_graph(self, monkeypatch):
+        """Named constraints bypass modifier log synthesis and reuse the target."""
         calls: list[str] = []
         original = SingleParamConstraint.log_constraint
 
@@ -1070,9 +1125,7 @@ class TestHFDCSubgraphBuildCounts:
         likelihood = next(iter(ws.likelihoods))
         ws.model(likelihood, progress=False)
 
-        assert calls == ["lumi"], (
-            f"expected exactly one log_constraint call per constraint spec, got {calls}"
-        )
+        assert calls == []
 
     def test_logpdf_matches_log_pdf_for_hfdc_with_constraint(self):
         """logpdf(channel) must equal log(pdf(channel)) for an HFDC channel with
@@ -1403,18 +1456,24 @@ class TestConstraintDeduplication:
             "name": "alpha_sr",
             "type": "normsys",
             "parameter": "alpha_sr",
-            "constraint": "Gauss",
+            "constraint": "alpha_sr_constraint",
             "data": {"hi": 1.1, "lo": 0.9},
         }
         normsys_cr = {
             "name": "alpha_cr",
             "type": "normsys",
             "parameter": "alpha_cr",
-            "constraint": "Gauss",
+            "constraint": "alpha_cr_constraint",
             "data": {"hi": 1.2, "lo": 0.8},
         }
         sr_channel = HistFactoryDistChannel(**_make_channel("SR", [10.0], [normsys_sr]))
         cr_channel = HistFactoryDistChannel(**_make_channel("CR", [50.0], [normsys_cr]))
+        sr_constraint = GaussianDist(
+            name="alpha_sr_constraint", x="alpha_sr", mean=0.0, sigma=1.0
+        )
+        cr_constraint = GaussianDist(
+            name="alpha_cr_constraint", x="alpha_cr", mean=0.0, sigma=1.0
+        )
         sr_data = BinnedData(
             name="SR_data",
             axes=[{"name": "x_SR", "min": 0.0, "max": 10.0, "nbins": 1}],
@@ -1422,7 +1481,9 @@ class TestConstraintDeduplication:
         )
         ws = Workspace(
             metadata=Metadata(hs3_version="0.3.0"),
-            distributions=Distributions([sr_channel, cr_channel]),
+            distributions=Distributions(
+                [sr_channel, cr_channel, sr_constraint, cr_constraint]
+            ),
             data=Data([sr_data]),
             likelihoods=Likelihoods(
                 [
@@ -1450,7 +1511,7 @@ class TestConstraintDeduplication:
         model = ws.model(likelihood, progress=False)
 
         # CR is not in the active likelihood and is pruned before expression build.
-        assert set(model.distributions) == {"SR"}
+        assert set(model.distributions) == {"SR", "alpha_sr_constraint"}
         assert "CR" not in model.log_distributions
 
         lp = model.log_prob
@@ -1504,43 +1565,41 @@ class TestConstraintDeduplication:
 
 
 class TestConstraintValidator:
-    """Workspace validation catches conflicting constraint configurations."""
+    """Workspace validation catches invalid constraint configurations."""
 
-    def test_conflicting_constraint_types_raises(self):
-        """Same nuisance parameter with different constraint types must raise ValueError.
-
-        'lumi' as normsys(Gauss) in SR and normsys(LogNormal) in CR is invalid.
-        """
-        sr_channel = _make_channel(
-            "SR",
-            [10.0],
-            [
-                {
-                    "name": "lumi",
-                    "type": "normsys",
-                    "parameter": "lumi",
-                    "constraint": "Gauss",
-                    "data": {"hi": 1.05, "lo": 0.95},
-                }
-            ],
+    def test_legacy_family_literal_is_an_unresolved_name(self):
+        """Legacy family tokens have no special meaning on the current wire."""
+        channel = HistFactoryDistChannel(
+            **_make_channel(
+                "SR",
+                [10.0],
+                [
+                    {
+                        "name": "lumi",
+                        "type": "normsys",
+                        "parameter": "lumi",
+                        "constraint": "Gauss",
+                        "data": {"hi": 1.05, "lo": 0.95},
+                    }
+                ],
+            )
         )
-        cr_channel = _make_channel(
-            "CR",
-            [50.0],
-            [
-                {
-                    "name": "lumi",
-                    "type": "normsys",
-                    "parameter": "lumi",
-                    "constraint": "LogNormal",
-                    "data": {"hi": 1.05, "lo": 0.95},
-                }
-            ],
+        datum = BinnedData(
+            name="SR_data",
+            axes=[{"name": "x_SR", "min": 0.0, "max": 10.0, "nbins": 1}],
+            contents=[10.0],
         )
-        with pytest.raises(WorkspaceValidationError, match="conflicting constraint"):
-            _simple_workspace(
-                channels=[sr_channel, cr_channel],
-                params=[{"name": "lumi", "value": 0.0}],
+        with pytest.raises(
+            WorkspaceValidationError,
+            match="unknown constraint distribution 'Gauss'",
+        ):
+            Workspace(
+                metadata=Metadata(hs3_version="0.3.0"),
+                distributions=Distributions([channel]),
+                data=Data([datum]),
+                likelihoods=Likelihoods(
+                    [Likelihood(name="L", distributions=[channel], data=[datum])]
+                ),
             )
 
     def test_shapesys_shared_across_channels_raises(self):

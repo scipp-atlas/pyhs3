@@ -26,6 +26,7 @@ from rich.progress import (
 from pyhs3.context import Context
 from pyhs3.data import BinnedData
 from pyhs3.distributions import Distributions, HistFactoryDistChannel
+from pyhs3.distributions.histfactory.modifiers import SingleParamConstraint
 from pyhs3.domains import Domain
 from pyhs3.functions import Functions
 from pyhs3.graph_viz import (
@@ -73,15 +74,13 @@ class Model:
     asking about a single channel's probability; ``self.distributions[name]``
     is ``pt.exp`` of that.  ``self._hfdc_log_poisson[name]`` stores only the
     log-space Poisson term; ``log_prob`` uses it to assemble the joint NLL
-    without double-counting constraint factors when multiple channels share a
-    nuisance parameter.  Log-space constraint expressions are appended to
-    ``self._hfdc_log_constraints`` exactly once per unique dedup key across
-    all channels: single-parameter modifiers (``normsys``, ``histosys``) are
-    deduped by parameter name using ``self._hfdc_constraint_params_seen``;
-    multi-parameter modifiers (``shapesys``, ``staterror``) are channel-local
-    by workspace validation and always emitted as-is.  ``log_prob`` sums
-    ``self._hfdc_log_constraints`` directly, so it stays finite where a
-    probability-space constraint would underflow to 0.0.
+    without double-counting constraint factors. Named single-parameter
+    constraints reuse their target's exact log expression and are deduped by
+    distribution name against HistFactory references, ProductDist factors,
+    and auxiliary distributions. Internal multi-parameter constraints
+    (``shapesys``, ``staterror``) remain channel-local. ``log_prob`` sums both
+    collections directly, so it stays finite where a probability-space
+    constraint would underflow to 0.0.
 
     HS3 Reference:
         Models are computational representations of :external+hs3:ref:`HS3 workspaces <hs3.file-format>`.
@@ -173,12 +172,13 @@ class Model:
         # leaf[None, :] for non-observable vector overrides.  Distributions see
         # these via Context; model.parameters[name] always holds the leaf.
         self._views: dict[str, TensorVar] = {}
-        # Pre-built HFDC log-space constraint expressions, collected during
-        # graph construction. ParameterModifier constraints are deduped by
-        # parameter name across channels; ParametersModifier constraints
-        # (shapesys/staterror) are emitted per-channel.
+        # Pre-built internal HFDC log-space constraints (shapesys/staterror),
+        # collected during graph construction. Named single-parameter
+        # constraints are kept separately by referenced distribution name so
+        # log_prob can deduplicate them against ProductDist factors and
+        # likelihood aux_distributions as well as across HFDC channels.
         self._hfdc_log_constraints: list[TensorVar] = []
-        self._hfdc_constraint_params_seen: set[str] = set()
+        self._hfdc_named_log_constraints: dict[str, TensorVar] = {}
         # Log-space Poisson-only (no constraint sum) expression for each HFDC
         # channel: the summed per-bin Poisson log-pmf. log_prob uses this
         # instead of log(exp(...)) so the joint NLL stays finite where the
@@ -376,20 +376,31 @@ class Model:
                     terms.append(constraint_expr)
 
         # Auxiliary distributions (constraint terms) are scalars; they broadcast
-        # onto the parameter-scan axis when non-scalar params are present.
+        # onto the parameter-scan axis when non-scalar params are present. A
+        # named factor already supplied by a ProductDist is not counted again.
         if self._likelihood.aux_distributions:
-            terms.extend(
-                self.log_distributions[
-                    aux_name if isinstance(aux_name, str) else aux_name.name
-                ]
-                for aux_name in self._likelihood.aux_distributions
-            )
+            for aux in self._likelihood.aux_distributions:
+                aux_name = aux if isinstance(aux, str) else aux.name
+                if aux_name in seen_constraint_factors:
+                    continue
+                seen_constraint_factors.add(aux_name)
+                terms.append(self.log_distributions[aux_name])
 
-        # HFDC constraint terms: collected once per unique nuisance parameter
-        # across all channels during graph construction. These are log-space
-        # terms built directly (not pt.log() of a probability-space product),
-        # so this stays finite where a probability-space constraint would
-        # underflow to 0.0.
+        # Named HistFactory constraints reuse the referenced distribution's
+        # exact pre-built log expression and share the same once-per-likelihood
+        # registry as ProductDist factors and aux_distributions.
+        for (
+            constraint_name,
+            constraint_expr,
+        ) in self._hfdc_named_log_constraints.items():
+            if constraint_name in seen_constraint_factors:
+                continue
+            seen_constraint_factors.add(constraint_name)
+            terms.append(constraint_expr)
+
+        # Internal HFDC constraint terms are built directly in log space (not
+        # pt.log() of a probability-space product), so they remain finite where
+        # a product of many per-bin probabilities would underflow.
         terms.extend(self._hfdc_log_constraints)
 
         if not terms:
@@ -550,14 +561,27 @@ class Model:
         )
 
         # Single pass over constraint specs builds each log-constraint factor
-        # exactly once.
-        # - channel_seen dedups by parameter for the per-channel sum (matches
-        #   log_extended_likelihood's local dedup),
-        # - self._hfdc_constraint_params_seen dedups across channels for log_prob.
+        # exactly once. Named single-parameter constraints reuse the already
+        # built target distribution log-expression. Internal multi-parameter
+        # constraints retain their existing generated log-expression path.
         channel_seen: set[str] = set()
         channel_log_constraints: list[TensorVar] = []
         for dedup_key, modifier, sample_data in dist.constraint_specs():
-            log_constraint = modifier.log_constraint(context, sample_data)
+            if isinstance(modifier, SingleParamConstraint):
+                # Workspace validation guarantees that the target exists and
+                # graph ordering guarantees it has already been built.
+                constraint_name = modifier.constraint
+                if constraint_name is None:  # defensive; specs omit these
+                    continue
+                if constraint_name not in self.log_distributions:
+                    msg = (
+                        f"HistFactory modifier '{modifier.name}' references "
+                        f"unknown constraint distribution '{constraint_name}'"
+                    )
+                    raise ValueError(msg)
+                log_constraint = self.log_distributions[constraint_name]
+            else:
+                log_constraint = modifier.log_constraint(context, sample_data)
 
             if dedup_key is None or dedup_key not in channel_seen:
                 if dedup_key is not None:
@@ -565,11 +589,14 @@ class Model:
                 channel_log_constraints.append(log_constraint)
 
             if in_likelihood:
-                if dedup_key is not None:
-                    if dedup_key in self._hfdc_constraint_params_seen:
-                        continue
-                    self._hfdc_constraint_params_seen.add(dedup_key)
-                self._hfdc_log_constraints.append(log_constraint)
+                if isinstance(modifier, SingleParamConstraint):
+                    # setdefault makes repeated references across channels a
+                    # single contribution while preserving first-seen order.
+                    self._hfdc_named_log_constraints.setdefault(
+                        cast("str", constraint_name), log_constraint
+                    )
+                else:
+                    self._hfdc_log_constraints.append(log_constraint)
 
         # BB-lite mode's channel-level constraint (shared gamma parameters
         # combining all samples' statistical uncertainties) is not a

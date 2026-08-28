@@ -33,6 +33,7 @@ UniformDist = basic.UniformDist
 PoissonDist = basic.PoissonDist
 ExponentialDist = basic.ExponentialDist
 LogNormalDist = basic.LogNormalDist
+GenNormalDist = basic.GenNormalDist
 LandauDist = basic.LandauDist
 
 # Composite distributions
@@ -74,6 +75,7 @@ __all__ = [
     "FastVerticalInterpHistPdf2Dist",
     "GGZZBackgroundDist",
     "GaussianDist",
+    "GenNormalDist",
     "GenericDist",
     "HistFactoryDistChannel",
     "HistogramDist",
@@ -108,6 +110,7 @@ DistributionType = Annotated[
     | basic.PoissonDist
     | basic.ExponentialDist
     | basic.LogNormalDist
+    | basic.GenNormalDist
     | basic.LandauDist
     # Composite distributions
     | composite.MixtureDist

@@ -613,6 +613,162 @@ class LandauDist(Distribution):
         )
 
 
+class GenNormalDist(Distribution):
+    r"""
+    Generalized normal (Subbotin) probability distribution, version 1.
+
+    Implements the symmetric generalized normal probability density function:
+
+    .. math::
+
+        f(x; \mu, \alpha, \beta) = \frac{\beta}{2\alpha\,\Gamma(1/\beta)}
+        \exp\left\{ -\left( \frac{|x-\mu|}{\alpha} \right)^\beta \right\}
+
+    :math:`\mu` is the location, :math:`\alpha > 0` the scale, and
+    :math:`\beta > 0` the shape. :math:`\beta = 2` recovers a Gaussian with
+    :math:`\sigma = \alpha/\sqrt{2}`; :math:`\beta = 1` recovers a Laplace with
+    scale :math:`\alpha`. Large :math:`\beta` (e.g. :math:`\beta \sim 8`)
+    produces a flat-topped shape used for "2 point" parameter constraints
+    between models with no clear preference.
+
+    The pyhs3 parameter names (``mean``, ``alpha``, ``beta``) map onto
+    :func:`scipy.stats.gennorm` as ``loc = mean``, ``scale = alpha``,
+    ``beta = beta`` with no additional scale factor.
+
+    Parameters:
+        x (str): Input variable name.
+        mean (str): Location parameter (μ).
+        alpha (str): Scale parameter (alpha), corresponding to sigma = alpha/sqrt(2) at beta = 2.
+        beta (str): Shape/power parameter (beta), with beta = 2 the Gaussian shape.
+
+    HS3 Reference:
+        :ref:`hs3:hs3.generalized-normal-distribution`
+    """
+
+    type: Literal["generalized_normal_dist"] = "generalized_normal_dist"
+    x: str | float | int
+    mean: str | float | int
+    alpha: str | float | int
+    beta: str | float | int
+
+    def likelihood(self, context: Context) -> TensorVar:
+        r"""
+        Builds a symbolic expression for the generalized normal PDF.
+
+        Returns the fully normalized density (over infinite support)
+
+        .. math::
+
+            f(x; \mu, \alpha, \beta) = \frac{\beta}{2\alpha\,\Gamma(1/\beta)}
+            \exp\left\{ -\left( \frac{|x-\mu|}{\alpha} \right)^\beta \right\}
+
+        matching :func:`scipy.stats.gennorm`. When the model carries a finite
+        observable domain, :meth:`normalization_expression` renormalizes this
+        over that domain exactly.
+
+        Args:
+            context (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of the
+            generalized normal PDF.
+        """
+        x = context[self._parameters["x"]]
+        mu = context[self._parameters["mean"]]
+        alpha = context[self._parameters["alpha"]]
+        beta = context[self._parameters["beta"]]
+
+        norm = beta / (2.0 * alpha * pt.gamma(1.0 / beta))
+        return cast(
+            TensorVar,
+            norm * pt.exp(-((pt.abs(x - mu) / alpha) ** beta)),
+        )
+
+    def log_likelihood(self, context: Context) -> TensorVar:
+        r"""
+        Builds a symbolic expression for the generalized normal log-PDF.
+
+        Analytic log form of :meth:`likelihood`:
+
+        .. math::
+
+            \log f(x; \mu, \alpha, \beta) = \log\beta - \log 2 - \log\alpha
+            - \log\Gamma(1/\beta) - \left( \frac{|x-\mu|}{\alpha} \right)^\beta
+
+        Evaluating this directly (rather than ``pt.log(self.likelihood(...))``)
+        avoids computing :math:`\exp(-(|x-\mu|/\alpha)^\beta)` and re-logging it,
+        which underflows to 0.0 (and then to ``-inf``) once the exponent grows
+        large in the tail. ``pt.gammaln`` is used for :math:`\log\Gamma(1/\beta)`.
+
+        Args:
+            context (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of the
+            generalized normal log-PDF.
+        """
+        x = context[self._parameters["x"]]
+        mu = context[self._parameters["mean"]]
+        alpha = context[self._parameters["alpha"]]
+        beta = context[self._parameters["beta"]]
+
+        log_norm = pt.log(beta) - math.log(2.0) - pt.log(alpha) - pt.gammaln(1.0 / beta)
+        return cast(
+            TensorVar,
+            log_norm - (pt.abs(x - mu) / alpha) ** beta,
+        )
+
+    def normalization_expression(
+        self, context: Context, observable_name: str
+    ) -> TensorVar | None:
+        r"""
+        Analytic antiderivative of the generalized normal PDF.
+
+        The antiderivative of the fully normalized :meth:`likelihood` density is
+        the centered CDF
+
+        .. math::
+
+            F(x) = \frac{1}{2}\,\operatorname{sign}(x-\mu)\,
+            P\!\left( \frac{1}{\beta}, \left(\frac{|x-\mu|}{\alpha}\right)^\beta \right)
+
+        where :math:`P(a, z)` is the regularized lower incomplete gamma function
+        (``pt.gammainc``). The :math:`1/M` normalization constant of the density
+        collapses the antiderivative's prefactor to exactly :math:`1/2`, so
+        :math:`F(+\infty) - F(-\infty) = 1`. The framework evaluates
+        :math:`F(\text{upper}) - F(\text{lower})` to renormalize over a finite
+        observable domain, which is exact and avoids the Gauss-Legendre
+        quadrature fallback.
+
+        Returns None (deferring to quadrature) when the matching observable is
+        not this distribution's ``x``, since the antiderivative is only defined
+        with respect to ``x``.
+
+        Args:
+            context: Mapping of names to pytensor variables.
+            observable_name: Name of the observable to integrate over.
+
+        Returns:
+            Symbolic antiderivative expression, or None for numerical fallback.
+        """
+        if observable_name != self._parameters["x"]:
+            return None
+
+        x = context[self._parameters["x"]]
+        mu = context[self._parameters["mean"]]
+        alpha = context[self._parameters["alpha"]]
+        beta = context[self._parameters["beta"]]
+
+        # F(x) = 0.5 * sign(x - mu) * P(1/beta, (|x-mu|/alpha)^beta); the
+        # regularized lower incomplete gamma P is pt.gammainc.
+        return cast(
+            TensorVar,
+            0.5
+            * pt.sign(x - mu)
+            * pt.gammainc(1.0 / beta, (pt.abs(x - mu) / alpha) ** beta),
+        )
+
+
 # Registry of basic distributions
 distributions: dict[str, type[Distribution]] = {
     "gaussian_dist": GaussianDist,
@@ -620,6 +776,7 @@ distributions: dict[str, type[Distribution]] = {
     "poisson_dist": PoissonDist,
     "exponential_dist": ExponentialDist,
     "lognormal_dist": LogNormalDist,
+    "generalized_normal_dist": GenNormalDist,
     "landau_dist": LandauDist,
 }
 
@@ -627,6 +784,7 @@ distributions: dict[str, type[Distribution]] = {
 __all__ = [
     "ExponentialDist",
     "GaussianDist",
+    "GenNormalDist",
     "LandauDist",
     "LogNormalDist",
     "PoissonDist",

@@ -66,6 +66,7 @@ repos:
           - pydantic
           - hist
           - pytensor_distributions
+          - typer
 
   - repo: https://github.com/codespell-project/codespell
     rev: "57b21406f092110c18776e39b0bda50d37c945c8" # frozen: v2.4.3

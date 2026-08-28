@@ -38,6 +38,7 @@ dependencies = [
     'pydantic>=2.12',
     'hist >= 2.7.0',
     'pytensor-distributions >= 0.2.0',
+    'typer',
 ]
 
 [project.optional-dependencies]
@@ -76,6 +77,9 @@ jax = [
 develop = [
   "pyhs3[test,docs,dev,jax]",
 ]
+
+[project.scripts]
+pyhs3 = "pyhs3.cli:app"
 
 [project.urls]
 Documentation = "https://pyhs3.readthedocs.io/"

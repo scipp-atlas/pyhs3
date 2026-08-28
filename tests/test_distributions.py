@@ -46,7 +46,7 @@ from pyhs3.distributions import (
     QQZZBackgroundDist,
     UniformDist,
 )
-from pyhs3.distributions.composite import _stable_logsumexp
+from pyhs3.distributions.composite import _stable_logsumexp, _stable_signed_logsum
 from pyhs3.distributions.physics import _SHAPE_CLIP_MIN
 from pyhs3.normalization import gauss_legendre_integral
 from pyhs3.tensorutils import create_bounded_tensor
@@ -2858,6 +2858,23 @@ class TestBernsteinPolyDist:
         expected = 1.0 * (1 - x_val) + 3.0 * x_val
         np.testing.assert_allclose(result_val, expected, rtol=1e-6)
 
+    def test_bernstein_poly_scales_a_physical_observable(self):
+        dist = BernsteinPolyDist(
+            name="bernstein_linear",
+            x="mass",
+            coefficients=[1.0, 2.0],
+        )
+        mass = pt.dvector("mass")
+        context = Context(
+            parameters={"mass": mass, **dist.constants},
+            observables={"mass": (pt.constant(100.0), pt.constant(160.0))},
+            views={"mass": mass[:, None]},
+        )
+
+        raw = dist.likelihood(context)
+        actual = function([mass], raw)(np.asarray([100.0, 130.0, 160.0]))
+        np.testing.assert_allclose(actual.reshape(-1), [1.0, 1.5, 2.0])
+
     def test_bernstein_poly_quadratic(self):
         """Test BernsteinPolyDist with quadratic polynomial (degree 2)."""
         dist = BernsteinPolyDist(
@@ -3732,6 +3749,28 @@ class TestMixtureDist:
         assert dist.coefficients == ["coeff1", "coeff2"]
         assert dist.extended is False
         assert dist.ref_coef_norm is None
+
+    def test_mixture_dist_exclude_none_serialization(self):
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2"],
+            coefficients=["fraction"],
+        )
+
+        dumped = dist.model_dump(exclude_none=True)
+        assert "ref_coef_norm" not in dumped
+        assert MixtureDist.model_validate(dumped).ref_coef_norm is None
+
+    def test_stable_signed_logsum(self):
+        log_value = pt.dvector("log_value")
+        result = _stable_signed_logsum(
+            [pt.constant(2.0), pt.constant(-1.0)],
+            [log_value, log_value],
+        )
+        evaluate = function([log_value], result)
+
+        actual = evaluate(np.asarray([-1000.0, -2.0, 0.0]))
+        np.testing.assert_allclose(actual, [-1000.0, -2.0, 0.0])
 
     def test_mixture_dist_n_minus_1_coefficients_fails(self):
         """Test traditional N-1 coefficient case (2 coefficients, 3 PDFs)."""

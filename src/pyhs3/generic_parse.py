@@ -33,6 +33,21 @@ _transformations = (
 
 log = logging.getLogger(__name__)
 
+# Controlled namespace for parse_expr. SymPy's default global namespace binds
+# special functions (``beta``, ``gamma``, ``zeta``, ...) as bare names, so a
+# variable sharing one of those names resolves to the function instead of a free
+# symbol (issue #117). Restricting the namespace to the constructors the
+# transformations emit lets ``auto_symbol`` turn every free name into a Symbol.
+# ``Function`` must be present because ``auto_symbol`` emits ``Function('name')``
+# for a name followed by ``(``, keeping genuine calls like ``sin(x)`` working.
+_global_dict = {
+    "Symbol": sp.Symbol,
+    "Integer": sp.Integer,
+    "Float": sp.Float,
+    "Rational": sp.Rational,
+    "Function": sp.Function,
+}
+
 
 def analyze_sympy_expr(sympy_expr: sp.Expr) -> dict[str, Any]:
     """
@@ -149,7 +164,9 @@ def sympy_to_pytensor(
 @lru_cache(maxsize=2048)
 def _parse_expr_cached(expr_str: str) -> sp.Expr:
     # Delegate to SymPy's parser; results are cached to avoid repeated work
-    return sympy_parser.parse_expr(expr_str, transformations=_transformations)
+    return sympy_parser.parse_expr(
+        expr_str, transformations=_transformations, global_dict=_global_dict
+    )
 
 
 class GenericExpressionMixin:

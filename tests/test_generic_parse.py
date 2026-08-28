@@ -542,3 +542,84 @@ class TestRealWorldExpressions:
         test_vals = [1.0] * len(variables)
         output = f(*test_vals)
         assert np.isfinite(output)
+
+
+class TestSymPyNamespaceClash:
+    """Regression tests for variable names that collide with SymPy builtins.
+
+    SymPy's default parsing namespace pre-binds special functions such as
+    ``beta``, ``gamma``, and ``zeta``. Without a controlled namespace those
+    names resolve to the built-in ``FunctionClass`` objects instead of becoming
+    free symbols, so ``1 + beta`` fails with a ``TypeError``. See issue #117.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            pytest.param("beta", id="beta"),
+            pytest.param("gamma", id="gamma"),
+            pytest.param("zeta", id="zeta"),
+        ],
+    )
+    def test_builtin_named_variable_is_free_symbol(self, name):
+        """A variable named like a SymPy special function parses as a symbol."""
+        expr = parse_expression(f"1 + {name}")
+
+        # The colliding name must become a free symbol, not a bound function.
+        assert expr.free_symbols == {sp.Symbol(name)}
+        assert expr.atoms(sp.Function) == set()
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            pytest.param("beta", id="beta"),
+            pytest.param("gamma", id="gamma"),
+            pytest.param("zeta", id="zeta"),
+        ],
+    )
+    def test_builtin_named_variable_evaluates(self, name):
+        """A colliding-name symbol is usable as a PyTensor parameter."""
+        expr = parse_expression(f"1 + {name}")
+        var = pt.scalar(name)
+        result = sympy_to_pytensor(expr, [var])
+
+        f = function([var], result)
+        assert np.isclose(f(2.0), 3.0)  # 1 + 2 = 3
+
+    def test_builtin_name_mixed_with_function_call(self):
+        """A colliding name coexists with a genuine function call in one expr."""
+        # sin(beta) + gamma: sin is a function of beta, gamma is a free symbol.
+        expr = parse_expression("sin(beta) + gamma")
+
+        assert expr.free_symbols == {sp.Symbol("beta"), sp.Symbol("gamma")}
+        assert len(expr.atoms(sp.Function)) == 1
+
+        beta = pt.scalar("beta")
+        gamma = pt.scalar("gamma")
+        result = sympy_to_pytensor(expr, [beta, gamma])
+        f = function([beta, gamma], result)
+        assert np.isclose(f(0.0, 5.0), 5.0)  # sin(0) + 5 = 5
+
+    @pytest.mark.parametrize(
+        ("expr_str", "value", "expected"),
+        [
+            pytest.param("sin(x)", 0.0, 0.0, id="sin"),
+            pytest.param("cos(x)", 0.0, 1.0, id="cos"),
+            pytest.param("exp(x)", 0.0, 1.0, id="exp"),
+            pytest.param("log(x)", 1.0, 0.0, id="log"),
+            pytest.param("sqrt(x)", 4.0, 2.0, id="sqrt"),
+            pytest.param("erf(x)", 0.0, 0.0, id="erf"),
+            pytest.param("abs(x)", -3.0, 3.0, id="abs"),
+        ],
+    )
+    def test_function_calls_still_resolve(self, expr_str, value, expected):
+        """The controlled namespace must not symbolize genuine function calls."""
+        expr = parse_expression(expr_str)
+
+        # A real function call stays a function, not a free-symbol name.
+        assert sp.Symbol(expr_str.split("(")[0]) not in expr.free_symbols
+
+        x = pt.scalar("x")
+        result = sympy_to_pytensor(expr, [x])
+        f = function([x], result)
+        assert np.isclose(f(value), expected, atol=1e-10)

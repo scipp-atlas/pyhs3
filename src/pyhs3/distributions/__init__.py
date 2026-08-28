@@ -33,6 +33,7 @@ UniformDist = basic.UniformDist
 PoissonDist = basic.PoissonDist
 ExponentialDist = basic.ExponentialDist
 LogNormalDist = basic.LogNormalDist
+GenNormalDist = basic.GenNormalDist
 LandauDist = basic.LandauDist
 
 # Composite distributions
@@ -74,6 +75,7 @@ __all__ = [
     "FastVerticalInterpHistPdf2Dist",
     "GGZZBackgroundDist",
     "GaussianDist",
+    "GenNormalDist",
     "GenericDist",
     "HistFactoryDistChannel",
     "HistogramDist",
@@ -108,6 +110,7 @@ DistributionType = Annotated[
     | basic.PoissonDist
     | basic.ExponentialDist
     | basic.LogNormalDist
+    | basic.GenNormalDist
     | basic.LandauDist
     # Composite distributions
     | composite.MixtureDist
@@ -140,7 +143,7 @@ class Distributions(NamedCollection[DistributionType]):
     dictionaries and maintains a registry of available distribution types.
 
     HS3 Reference:
-        :hs3:label:`distributions <hs3.sec:distributions>`
+        :external+hs3:ref:`distributions <hs3.sec:distributions>`
     """
 
     _enforce_unique_names: bool = True

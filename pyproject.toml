@@ -248,7 +248,7 @@ ignore_directives = [
 ignore_roles = [
     "cite:p",
     "cite:ps",
-    "hs3:label",
+    "external+hs3:ref",
     "root"
 ]
 

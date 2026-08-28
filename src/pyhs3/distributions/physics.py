@@ -95,7 +95,7 @@ class CrystalBallDist(Distribution):
         single-sided Crystal Ball used widely in high-energy physics.
 
     HS3 Reference:
-        :hs3:label:`crystalball_dist <hs3.crystalball-distribution>`
+        :external+hs3:ref:`crystalball_dist <hs3.crystal-ball-distribution>`
     """
 
     type: Literal["crystalball_dist"] = "crystalball_dist"
@@ -493,7 +493,7 @@ class ArgusDist(Distribution):
         typically corresponds to a kinematic endpoint.
 
     HS3 Reference:
-        :hs3:label:`argus_dist <hs3.argus-distribution>`
+        :external+hs3:ref:`argus_dist <hs3.argus-distribution>`
     """
 
     type: Literal["argus_dist"] = "argus_dist"

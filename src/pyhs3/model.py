@@ -84,7 +84,7 @@ class Model:
     probability-space constraint would underflow to 0.0.
 
     HS3 Reference:
-        Models are computational representations of :hs3:label:`HS3 workspaces <hs3.file-format>`.
+        Models are computational representations of :external+hs3:ref:`HS3 workspaces <hs3.file-format>`.
     """
 
     def __init__(

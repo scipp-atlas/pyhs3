@@ -339,7 +339,7 @@ class ExponentialDist(Distribution):
         negateCoefficient flag set to True.
 
     HS3 Reference:
-        :hs3:label:`exponential_dist <hs3.exponential-distribution>`
+        :external+hs3:ref:`exponential_dist <hs3.exponential-distribution>`
 
     ROOT Reference:
         :root:`RooExponential`
@@ -423,7 +423,7 @@ class LogNormalDist(Distribution):
         compatibility with median/shape parametrization.
 
     HS3 Reference:
-        :hs3:label:`lognormal_dist <hs3.log-normal-distribution>`
+        :external+hs3:ref:`lognormal_dist <hs3.log-normal-distribution>`
     """
 
     type: Literal["lognormal_dist"] = "lognormal_dist"

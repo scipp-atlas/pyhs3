@@ -2,11 +2,44 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from skhep_testdata import data_path as skhep_testdata_path
 
 import pyhs3 as hs3
+
+_LEGACY_PIECEWISE_INTERPOLATIONS: dict[int, dict[str, str | None]] = {
+    0: {"type": "add", "in": "poly1", "out": None},
+    1: {"type": "mult", "in": "exp", "out": None},
+    2: {"type": "add", "in": "poly2", "out": "poly1"},
+    3: {"type": "add", "in": "poly2", "out": "poly1"},
+    4: {"type": "add", "in": "poly6", "out": "poly1"},
+    5: {"type": "mult", "in": "poly6", "out": "exp"},
+    6: {"type": "mult", "in": "poly6", "out": "poly1"},
+}
+
+
+def _canonicalize_legacy_interpolation_functions(
+    workspace: dict[str, Any],
+) -> dict[str, Any]:
+    """Adapt the issue-41 fixture to the current structured producer wire.
+
+    The external file deliberately remains untouched. pyhs3 no longer accepts
+    integer ``interpolationCodes`` on standalone functions, so this test-side
+    adapter keeps the unrelated real-world regression useful with the current
+    ROOT descriptors.
+    """
+    for function in workspace.get("functions", []):
+        if function.get("type") != "interpolation":
+            continue
+        codes = function.pop("interpolationCodes", None)
+        if codes is None:
+            continue
+        function["interpolations"] = [
+            _LEGACY_PIECEWISE_INTERPOLATIONS[code] for code in codes
+        ]
+    return workspace
 
 
 @pytest.fixture
@@ -17,7 +50,8 @@ def ws_json():
     related to GitHub issue #41.
     """
     fpath = Path(skhep_testdata_path("test_hs3_unbinned_pyhs3_validation_issue41.json"))
-    return json.loads(fpath.read_text(encoding="utf-8"))
+    workspace = json.loads(fpath.read_text(encoding="utf-8"))
+    return _canonicalize_legacy_interpolation_functions(workspace)
 
 
 @pytest.fixture

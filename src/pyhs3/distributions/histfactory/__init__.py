@@ -14,6 +14,7 @@ import hist
 import numpy as np
 import pytensor.tensor as pt
 from pydantic import Field, PrivateAttr, model_validator
+from pytensor.configdefaults import config
 
 from pyhs3.axes import BinnedAxes
 from pyhs3.context import Context
@@ -22,10 +23,17 @@ from pyhs3.context import Context
 from pyhs3.distributions.basic import GaussianDist, PoissonDist
 from pyhs3.distributions.core import Distribution
 from pyhs3.distributions.histfactory.data import SampleData
+from pyhs3.distributions.histfactory.interpolations import (
+    InterpolationDescriptor,
+    interpolate_code4,
+    interpolate_poly6,
+)
 from pyhs3.distributions.histfactory.modifiers import (
     HasConstraint,
+    HistoSysModifier,
     Modifier,
-    ParameterModifier,
+    NormSysModifier,
+    SingleParamConstraint,
     StatErrorModifier,
 )
 from pyhs3.distributions.histfactory.samples import Sample, Samples
@@ -125,6 +133,10 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     type: Literal["histfactory_dist"] = "histfactory_dist"
     axes: BinnedAxes = Field(..., json_schema_extra={"preprocess": False})
     samples: Samples = Field(..., json_schema_extra={"preprocess": False})
+    default_interpolation: InterpolationDescriptor | None = Field(
+        default=None,
+        json_schema_extra={"preprocess": False},
+    )
     barlow_beeston_method: Literal["full", "lite"] = Field(
         default="lite",
         json_schema_extra={"preprocess": False},
@@ -147,6 +159,19 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     _cached_context: Context | None = PrivateAttr(default=None)
     _cached_expected_rates: TensorVar | None = PrivateAttr(default=None)
     _cached_bin_log_probs: TensorVar | None = PrivateAttr(default=None)
+
+    def _clear_expression_cache(self) -> None:
+        """Release graph-building references retained by the channel cache.
+
+        Direct ``likelihood``/``log_likelihood`` callers still benefit from
+        the per-context cache. A :class:`Model` captures the resulting graph,
+        however, so keeping the shared workspace channel pointed at that
+        model's global ``Context`` would unnecessarily retain the entire graph
+        while another analysis is built.
+        """
+        self._cached_context = None
+        self._cached_expected_rates = None
+        self._cached_bin_log_probs = None
 
     @model_validator(mode="after")
     def _validate_staterror(self) -> HistFactoryDistChannel:
@@ -172,6 +197,30 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
                     mod.parameters = [
                         f"staterror_{self.name}_bin{i}" for i in range(total_bins)
                     ]
+        return self
+
+    @model_validator(mode="after")
+    def _resolve_structured_interpolations(self) -> HistFactoryDistChannel:
+        """Resolve modifier overrides against the channel default.
+
+        Representability is checked only after precedence resolution.  This is
+        important for ROOT channels whose Piecewise-only default is inherited
+        by histosys while every normsys supplies a Flexible-compatible
+        override.
+        """
+        for sample in self.samples:
+            for modifier in sample.modifiers:
+                if not isinstance(modifier, NormSysModifier | HistoSysModifier):
+                    continue
+                descriptor = modifier.interpolation or self.default_interpolation
+                if descriptor is None:
+                    # Compatibility for existing HS3 0.2 workspaces and the
+                    # established pyhs3 API. Translate the old class-specific
+                    # code/default immediately and serialize it canonically as
+                    # a modifier-level structured descriptor.
+                    descriptor = modifier.compatibility_interpolation()
+                    modifier.interpolation = descriptor
+                modifier.resolve_interpolation(descriptor)
         return self
 
     def get_internal_nodes(self) -> list[Any]:
@@ -238,10 +287,10 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     ) -> Iterator[tuple[str | None, HasConstraint, SampleData]]:
         """Yield ``(dedup_key, modifier, sample_data)`` for each constraint modifier.
 
-        ``dedup_key`` is the modifier's parameter name for single-parameter
-        modifiers (``normsys``, ``histosys``); callers may use it to dedup
-        constraints when multiple modifier instances reference the same nuisance
-        parameter — within a channel or across channels in a joint fit.  For
+        ``dedup_key`` is the referenced distribution name for single-parameter
+        modifiers (``normfactor``, ``normsys``, ``histosys``); callers may use
+        it to dedup constraints when multiple modifier instances reference the
+        same serialized constraint distribution.  For
         multi-parameter modifiers (``shapesys``, ``staterror``) ``dedup_key``
         is ``None`` — these constraints are channel-local by workspace validation
         and are always emitted as-is.
@@ -260,8 +309,10 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
                     modifier, StatErrorModifier
                 ):
                     continue
-                if isinstance(modifier, ParameterModifier):
-                    yield modifier.parameter, modifier, sample.data
+                if isinstance(modifier, SingleParamConstraint):
+                    if modifier.constraint is None:
+                        continue
+                    yield modifier.constraint, modifier, sample.data
                 else:
                     yield None, modifier, sample.data
 
@@ -270,12 +321,9 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     ) -> TensorVar:
         """Build constraint product for this channel.
 
-        Constraints are deduped by parameter — multiple ``ParameterModifier``
-        instances sharing one nuisance parameter (e.g., two ``normsys`` on
-        different samples both pointing at ``alpha_lumi``) emit a single
-        constraint factor, not one per modifier.  ``ParametersModifier``
-        constraints (``shapesys``, ``staterror``) carry per-bin nominal yields
-        and are always emitted per-modifier.
+        Named constraints are deduped by referenced distribution name.
+        ``ParametersModifier`` constraints (``shapesys``, ``staterror``) carry
+        per-bin nominal yields and are always emitted per-modifier.
         """
         seen: set[str] = set()
         constraint_probs: list[TensorVar] = []
@@ -454,14 +502,14 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     def _process_sample(
         self, context: Context, sample: Sample, total_bins: int
     ) -> TensorVar:
-        """Process a single sample with its modifiers.
+        """Process one sample with ROOT's grouped interpolation semantics.
 
-        The HistFactory formula is lambda = (N + sum(delta_histosys(N))) * prod(kappa_multiplicative).
-        Additive variations (histosys) must each be computed against the sample
-        nominal N, then summed; multiplicative modifiers apply to the combined
-        result. Applying modifiers sequentially against accumulating rates would
-        cause histosys to compute its variation against already-scaled rates,
-        violating the formula when a multiplicative modifier precedes it.
+        ROOT builds one PiecewiseInterpolation from all histosys entries and
+        one FlexibleInterpVar from all normsys entries.  Within either group,
+        additive descriptors add a fixed-nominal delta and multiplicative
+        descriptors scale the running result in serialized order.  The final
+        shape and normalization groups are then multiplied by the remaining
+        HistFactory modifiers.
         """
         contents = sample.data.contents
         if len(contents) != total_bins:
@@ -470,25 +518,111 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
             )
             raise ValueError(msg)
 
-        nominal_rates = pt.as_tensor_variable(contents)
+        nominal_rates = pt.as_tensor_variable(np.asarray(contents, dtype=config.floatX))
 
-        # Pass 1: accumulate additive variations against the nominal.
-        # modifier.apply(ctx, nominal) returns nominal + variation; subtract to
-        # isolate the variation so multiple histosys modifiers each reference
-        # the same nominal rather than each other's output.
-        additive_sum = pt.zeros(total_bins)
-        for modifier in sample.modifiers:
-            if modifier.is_additive:
-                additive_sum = additive_sum + (
-                    modifier.apply(context, nominal_rates) - nominal_rates
+        histosys_modifiers = [
+            modifier
+            for modifier in sample.modifiers
+            if isinstance(modifier, HistoSysModifier)
+        ]
+
+        # PiecewiseInterpolation group. ROOT's common additive poly6/linear
+        # form is separable across modifiers, so evaluate every entry in one
+        # bin-vectorized kernel call and reduce the modifier axis. This keeps
+        # the graph size nearly independent of the number of systematics. Any
+        # mixed or otherwise non-separable sequence uses the general ordered
+        # implementation below.
+        histosys_inputs = [
+            modifier.interpolation_inputs(context) for modifier in histosys_modifiers
+        ]
+        histosys_alpha_ndims = {alpha.ndim for alpha, _, _ in histosys_inputs}
+        use_batched_histosys = (
+            len(histosys_modifiers) > 1
+            and all(
+                modifier.resolved_interpolation.key == ("add", "poly6", "poly1")
+                for modifier in histosys_modifiers
+            )
+            and histosys_alpha_ndims == {0}
+        )
+
+        if use_batched_histosys:
+            alphas = pt.stack([alpha for alpha, _, _ in histosys_inputs]).dimshuffle(
+                0, "x"
+            )
+            highs = pt.stack([high for _, high, _ in histosys_inputs])
+            lows = pt.stack([low for _, _, low in histosys_inputs])
+            interpolated = interpolate_poly6(
+                alphas,
+                nominal_rates,
+                highs,
+                lows,
+            )
+            shape_rates = nominal_rates + pt.sum(  # type: ignore[no-untyped-call]
+                interpolated - nominal_rates,
+                axis=0,
+            )
+        else:
+            shape_rates = nominal_rates
+            for histosys_modifier in histosys_modifiers:
+                shape_rates = histosys_modifier.interpolate_group(
+                    context,
+                    nominal_rates,
+                    shape_rates,
                 )
 
-        rates = nominal_rates + additive_sum
+        if histosys_modifiers:
+            zero = pt.constant(0.0, dtype=shape_rates.dtype)
+            shape_rates = pt.maximum(shape_rates, zero)
 
-        # Pass 2: apply multiplicative modifiers to (nominal + Σ additive).
-        for modifier in sample.modifiers:
-            if modifier.is_multiplicative:
-                rates = modifier.apply(context, rates)
+        normsys_modifiers = [
+            modifier
+            for modifier in sample.modifiers
+            if isinstance(modifier, NormSysModifier)
+        ]
+
+        # The polynomial/exponential FlexibleInterpVar form is purely
+        # multiplicative. Stack all modifiers and retain the optimized code4
+        # tensordot/cache path once per sample instead of once per modifier.
+        normsys_inputs = [
+            modifier.interpolation_inputs(context) for modifier in normsys_modifiers
+        ]
+        normsys_alpha_ndims = {alpha.ndim for alpha, _, _ in normsys_inputs}
+        use_batched_normsys = (
+            len(normsys_modifiers) > 1
+            and all(
+                modifier.resolved_interpolation.key == ("mult", "poly6", "exp")
+                for modifier in normsys_modifiers
+            )
+            and normsys_alpha_ndims == {0}
+        )
+
+        if use_batched_normsys:
+            alphas = pt.stack([alpha for alpha, _, _ in normsys_inputs])
+            highs = pt.stack([high for _, high, _ in normsys_inputs])
+            lows = pt.stack([low for _, _, low in normsys_inputs])
+            one = pt.constant(1.0, dtype=nominal_rates.dtype)
+            factors = interpolate_code4(alphas, one, highs, lows)
+            norm_factor = pt.cumprod(factors, axis=0)[-1]  # type: ignore[no-untyped-call]
+        else:
+            norm_factor = pt.constant(1.0, dtype=nominal_rates.dtype)
+            for normsys_modifier in normsys_modifiers:
+                norm_factor = normsys_modifier.interpolate_group(context, norm_factor)
+
+        if normsys_modifiers:
+            tiny_value = np.finfo(np.dtype(norm_factor.dtype)).tiny
+            tiny = pt.constant(tiny_value, dtype=norm_factor.dtype)
+            norm_factor = pt.where(  # type: ignore[no-untyped-call]
+                norm_factor <= 0, tiny, norm_factor
+            )
+
+        rates = shape_rates * norm_factor
+
+        # Normfactor, shape/statistical factors and any other non-interpolating
+        # modifiers multiply the completed ROOT interpolation groups.
+        for final_modifier in sample.modifiers:
+            if isinstance(final_modifier, NormSysModifier | HistoSysModifier):
+                continue
+            rates = final_modifier.apply(context, rates)
 
         return cast(TensorVar, rates)
 

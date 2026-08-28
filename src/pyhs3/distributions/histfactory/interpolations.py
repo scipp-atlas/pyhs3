@@ -9,11 +9,19 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from functools import lru_cache
-from typing import cast
+from typing import Literal, cast
 
 import numpy as np
 import numpy.typing as npt
 import pytensor.tensor as pt
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 # Import existing distributions for constraint terms
 from pyhs3.exceptions import HS3Exception
@@ -89,6 +97,130 @@ def _code4_exponent_tensor(
 
 class InterpolationError(HS3Exception):
     """Raised when an unknown interpolation method name is requested."""
+
+
+type InterpolationClass = Literal["piecewise", "flexible"]
+type InterpolationKey = tuple[str, str, str | None]
+
+_PIECEWISE_INTERPOLATIONS: frozenset[InterpolationKey] = frozenset(
+    {
+        ("add", "poly1", None),
+        ("mult", "exp", None),
+        ("add", "poly2", "poly1"),
+        ("add", "poly6", "poly1"),
+        ("mult", "poly6", "exp"),
+        ("mult", "poly6", "poly1"),
+    }
+)
+_FLEXIBLE_INTERPOLATIONS: frozenset[InterpolationKey] = frozenset(
+    {
+        ("add", "poly1", None),
+        ("mult", "exp", None),
+        ("add", "poly2", "poly1"),
+        ("mult", "poly6", "exp"),
+    }
+)
+
+
+class InterpolationDescriptor(BaseModel):
+    """Canonical structured interpolation descriptor emitted by ROOT HS3.
+
+    The field named ``in`` in JSON is exposed as :attr:`inside` in Python,
+    because ``in`` is a Python keyword.  All three JSON keys are required;
+    notably, the two piecewise forms without a separate extrapolator must
+    explicitly serialize ``"out": null``.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        serialize_by_alias=True,
+    )
+
+    type: Literal["add", "mult"]
+    inside: Literal["poly1", "poly2", "poly6", "exp"] = Field(alias="in")
+    out: Literal["poly1", "exp"] | None
+
+    @property
+    def key(self) -> InterpolationKey:
+        """Return the descriptor's compact lookup key."""
+        return (self.type, self.inside, self.out)
+
+    @property
+    def is_additive(self) -> bool:
+        """Whether contributions from this form are additive."""
+        return self.type == "add"
+
+    @model_validator(mode="after")
+    def _validate_supported_form(self) -> InterpolationDescriptor:
+        if self.key not in _PIECEWISE_INTERPOLATIONS:
+            msg = (
+                "Unsupported interpolation descriptor "
+                f"{{'type': {self.type!r}, 'in': {self.inside!r}, "
+                f"'out': {self.out!r}}}"
+            )
+            raise ValueError(msg)
+        return self
+
+    @model_serializer(mode="wrap")
+    def _serialize_with_explicit_out(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, object]:
+        """Keep required ``out: null`` even under ``exclude_none=True``."""
+        data = cast("dict[str, object]", handler(self))
+        data["out"] = self.out
+        return data
+
+
+def validate_interpolation_for_class(
+    descriptor: InterpolationDescriptor,
+    interpolation_class: InterpolationClass,
+) -> InterpolationDescriptor:
+    """Validate that *descriptor* is representable by the requested ROOT class."""
+    supported = (
+        _PIECEWISE_INTERPOLATIONS
+        if interpolation_class == "piecewise"
+        else _FLEXIBLE_INTERPOLATIONS
+    )
+    if descriptor.key not in supported:
+        class_name = (
+            "PiecewiseInterpolation"
+            if interpolation_class == "piecewise"
+            else "FlexibleInterpVar"
+        )
+        msg = (
+            f"Interpolation descriptor {descriptor.model_dump(by_alias=True)!r} "
+            f"cannot be represented by {class_name}"
+        )
+        raise ValueError(msg)
+    return descriptor
+
+
+def expand_interpolations(
+    descriptors: list[InterpolationDescriptor],
+    n_parameters: int,
+    interpolation_class: InterpolationClass,
+) -> list[InterpolationDescriptor]:
+    """Validate and expand ROOT's one-or-one-per-parameter shorthand."""
+    valid_size = (
+        len(descriptors) == 0
+        if n_parameters == 0
+        else len(descriptors) in (1, n_parameters)
+    )
+    if not valid_size:
+        msg = (
+            "interpolations must contain either one descriptor or one descriptor "
+            f"per parameter (got {len(descriptors)} for {n_parameters} parameters)"
+        )
+        raise ValueError(msg)
+
+    validated = [
+        validate_interpolation_for_class(descriptor, interpolation_class)
+        for descriptor in descriptors
+    ]
+    if n_parameters > 1 and len(validated) == 1:
+        return validated * n_parameters
+    return validated
 
 
 def interpolate_lin(
@@ -455,6 +587,80 @@ def interpolate_code4p(
     )
 
     return cast(TensorVar, result)
+
+
+def apply_interpolation_descriptor(
+    descriptor: InterpolationDescriptor,
+    alpha: TensorVar,
+    nominal: TensorVar,
+    high: TensorVar,
+    low: TensorVar,
+    current: TensorVar | None = None,
+) -> TensorVar:
+    """Apply one structured interpolation to a ROOT-style running result.
+
+    Additive forms contribute a delta relative to the fixed ``nominal``.
+    Multiplicative forms scale ``current`` (or ``nominal`` for the first
+    contribution), while their high/low ratios remain defined relative to the
+    fixed nominal.  This is the sequential behaviour shared by ROOT's
+    ``FlexibleInterpVar`` and ``PiecewiseInterpolation`` implementations.
+
+    The descriptor is expected to have been class-validated when its owning
+    model was constructed.  Dispatch happens here while the PyTensor graph is
+    built, so there is no runtime/per-bin Python branching.
+    """
+    result = nominal if current is None else current
+
+    if descriptor.key == ("add", "poly1", None):
+        interpolated = interpolate_code0(alpha, nominal, high, low)
+        return cast(TensorVar, result + interpolated - nominal)
+
+    if descriptor.key == ("mult", "exp", None):
+        one = pt.constant(1.0, dtype=nominal.dtype)
+        factor = interpolate_code1(
+            alpha,
+            one,
+            high / nominal,
+            low / nominal,
+        )
+        return cast(TensorVar, result * factor)
+
+    if descriptor.key == ("add", "poly2", "poly1"):
+        interpolated = interpolate_code2(alpha, nominal, high, low)
+        return cast(TensorVar, result + interpolated - nominal)
+
+    if descriptor.key == ("add", "poly6", "poly1"):
+        interpolated = interpolate_poly6(alpha, nominal, high, low)
+        return cast(TensorVar, result + interpolated - nominal)
+
+    if descriptor.key == ("mult", "poly6", "exp"):
+        # Keep this direct call: interpolate_code4 contains the cached,
+        # dtype-preserving, vectorized tensordot implementation.
+        one = pt.constant(1.0, dtype=nominal.dtype)
+        factor = interpolate_code4(
+            alpha,
+            one,
+            high / nominal,
+            low / nominal,
+        )
+        return cast(TensorVar, result * factor)
+
+    if descriptor.key == ("mult", "poly6", "poly1"):
+        one = pt.constant(1.0, dtype=nominal.dtype)
+        factor = interpolate_poly6(
+            alpha,
+            one,
+            high / nominal,
+            low / nominal,
+        )
+        return cast(TensorVar, result * factor)
+
+    # Construction through InterpolationDescriptor makes this unreachable, but
+    # keep a domain-specific error for callers crossing a type-checking boundary.
+    msg = (
+        f"Unsupported interpolation descriptor {descriptor.model_dump(by_alias=True)!r}"
+    )
+    raise InterpolationError(msg)
 
 
 _INTERPOLATION_METHODS: dict[

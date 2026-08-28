@@ -23,6 +23,7 @@ SumFunction = standard.SumFunction
 ProductFunction = standard.ProductFunction
 GenericFunction = standard.GenericFunction
 InterpolationFunction = standard.InterpolationFunction
+Interpolation0DFunction = standard.Interpolation0DFunction
 ProcessNormalizationFunction = standard.ProcessNormalizationFunction
 CMSAsymPowFunction = standard.CMSAsymPowFunction
 HistogramFunction = standard.HistogramFunction
@@ -40,6 +41,7 @@ FunctionType = Annotated[
     | ProductFunction
     | GenericFunction
     | InterpolationFunction
+    | Interpolation0DFunction
     | ProcessNormalizationFunction
     | CMSAsymPowFunction
     | RooRecursiveFractionFunction,

@@ -8,14 +8,16 @@ import numpy as np
 import pytensor.tensor as pt
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     PrivateAttr,
     RootModel,
     model_validator,
 )
+from pytensor.configdefaults import config
 
 from pyhs3.context import Context
-from pyhs3.distributions.basic import GaussianDist, LogNormalDist, PoissonDist
+from pyhs3.distributions.basic import GaussianDist, PoissonDist
 from pyhs3.distributions.core import Distribution
 from pyhs3.distributions.histfactory import interpolations
 from pyhs3.distributions.histfactory.data import SampleData
@@ -33,9 +35,16 @@ class ModifierData(BaseModel):
 class NormSysData(ModifierData):
     """Data for normsys modifier."""
 
+    model_config = ConfigDict(extra="forbid")
+
     hi: float
     lo: float
-    interpolation: Literal["code1", "code4"] = Field(default="code4")
+    # Narrow HS3 0.2 import adapter. The channel validator translates this to
+    # a structured modifier descriptor and this legacy field is never emitted.
+    interpolation: Literal["code1", "code4"] | None = Field(
+        default=None,
+        exclude=True,
+    )
 
 
 class HistoSysDataContents(BaseModel):
@@ -47,9 +56,15 @@ class HistoSysDataContents(BaseModel):
 class HistoSysData(ModifierData):
     """Data for histosys modifier."""
 
+    model_config = ConfigDict(extra="forbid")
+
     hi: HistoSysDataContents
     lo: HistoSysDataContents
-    interpolation: Literal["code0", "code2", "code4p"] = Field(default="code4p")
+    # Narrow HS3 0.2 import adapter; see NormSysData.interpolation.
+    interpolation: Literal["code0", "code2", "code4p"] | None = Field(
+        default=None,
+        exclude=True,
+    )
 
     @model_validator(mode="after")
     def validate_lengths(self) -> HistoSysData:
@@ -103,7 +118,7 @@ class Modifier(BaseModel, HasDependencies, ABC):
 class HasConstraint(ABC):
     """Base class for modifiers that can have constraint terms."""
 
-    constraint: Literal["Gauss", "Poisson", "LogNormal"] | None
+    constraint: str | None
 
     @abstractmethod
     def make_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
@@ -122,44 +137,42 @@ class HasConstraint(ABC):
 
 
 class SingleParamConstraint(HasConstraint, ABC):
-    """Mixin for single-parameter modifiers that use a standard Gauss/Poisson/LogNormal constraint."""
+    """Mixin for modifiers constrained by a named workspace distribution.
+
+    The HS3 field is a foreign-key-like reference, not a distribution-family
+    selector.  The referenced distribution is built as an ordinary dependency
+    of the HistFactory channel.  :class:`pyhs3.model.Model` reuses its analytic
+    ``log_expression`` when assembling a model; the direct methods below use
+    the probability-space expression available in a bare :class:`Context`.
+    """
 
     name: str
     parameter: str
+    constraint: str | None
 
-    def _build_constraint(self, context: Context) -> tuple[Distribution, Context]:
-        """Construct the Gauss/Poisson/LogNormal constraint distribution.
-
-        Shared by :meth:`make_constraint` and :meth:`log_constraint` so the
-        parametrization (which distribution, and with which parameter/constant
-        values) is defined exactly once.
-        """
-        name = f"constraint_{self.name}"
-        constraint_dist: Distribution
-
-        if self.constraint == "Gauss":
-            constraint_dist = GaussianDist(
-                name=name, x=0.0, mean=self.parameter, sigma=1.0
-            )
-        elif self.constraint == "Poisson":
-            constraint_dist = PoissonDist(name=name, x=1.0, mean=self.parameter)
-        else:  # self.constraint == "LogNormal"
-            constraint_dist = LogNormalDist(
-                name=name, x=1.0, mu=self.parameter, sigma=1.0
-            )
-
-        augmented_context = {**context, **constraint_dist.constants}
-        return constraint_dist, Context(augmented_context)
+    @property
+    def dependencies(self) -> set[str]:
+        """Return the nuisance parameter and optional constraint distribution."""
+        result = {self.parameter}
+        if self.constraint is not None:
+            result.add(self.constraint)
+        return result
 
     def make_constraint(self, context: Context, _: SampleData) -> TensorVar:
-        """Create constraint term using a Gauss, Poisson, or LogNormal distribution."""
-        constraint_dist, augmented_context = self._build_constraint(context)
-        return constraint_dist.expression(augmented_context)
+        """Return the referenced distribution expression in probability space."""
+        if self.constraint is None:
+            return pt.constant(1.0)
+        return context[self.constraint]
 
     def log_constraint(self, context: Context, _: SampleData) -> TensorVar:
-        """Create constraint term using the analytic log form of the same distribution."""
-        constraint_dist, augmented_context = self._build_constraint(context)
-        return constraint_dist.log_expression(augmented_context)
+        """Return the log of the referenced expression for direct channel use.
+
+        Model construction replaces this with the referenced distribution's
+        pre-built analytic log expression, avoiding probability underflow.
+        """
+        if self.constraint is None:
+            return pt.constant(0.0)
+        return cast("TensorVar", pt.log(context[self.constraint]))
 
 
 # Parameterized modifier base (single parameter)
@@ -208,13 +221,12 @@ class ParametersModifier(Modifier, ABC):
         """Apply this modifier to the given rates tensor."""
 
 
-class NormFactorModifier(ParameterModifier):
+class NormFactorModifier(SingleParamConstraint, ParameterModifier):
     """Normalization factor modifier (simple scaling by parameter value)."""
 
     type: Literal["normfactor"] = "normfactor"
     application: Literal["multiplicative"] = Field("multiplicative", exclude=True)
-    # NormFactor purposely has no constraint by default (keeps it None)
-    constraint: None = Field(default=None)
+    constraint: str | None = Field(default=None)
 
     @property
     def auxdata(self) -> float:
@@ -237,17 +249,89 @@ class NormSysModifier(SingleParamConstraint, ParameterModifier):
 
     type: Literal["normsys"] = "normsys"
     application: Literal["multiplicative"] = Field("multiplicative", exclude=True)
-    constraint: Literal["Gauss", "Poisson", "LogNormal"] = "Gauss"
+    constraint: str | None = None
+    interpolation: interpolations.InterpolationDescriptor | None = None
     data: NormSysData
     _nominal_factor: TensorVar = PrivateAttr()
     _hi_factor_tensor: TensorVar = PrivateAttr()
     _lo_factor_tensor: TensorVar = PrivateAttr()
+    _resolved_interpolation: interpolations.InterpolationDescriptor | None = (
+        PrivateAttr(default=None)
+    )
 
     def model_post_init(self, __context: Any, /) -> None:
         """Initialize computed collections after Pydantic validation."""
-        self._nominal_factor = pt.constant(1.0)
-        self._hi_factor_tensor = pt.constant(self.data.hi)
-        self._lo_factor_tensor = pt.constant(self.data.lo)
+        # HS3/ROOT numeric payloads are doubles.  Make that explicit instead
+        # of letting PyTensor's Python-scalar cast policy narrow them to
+        # float32 before interpolation.
+        self._nominal_factor = pt.constant(np.asarray(1.0, dtype=config.floatX))
+        self._materialize_anchors(self.data.hi, self.data.lo)
+        if self.interpolation is not None:
+            self.resolve_interpolation(self.interpolation)
+
+    def _materialize_anchors(self, hi: float, lo: float) -> None:
+        """Materialize dtype-matched anchor tensors once per resolved form."""
+        dtype = self._nominal_factor.dtype
+        self._hi_factor_tensor = pt.constant(hi, dtype=dtype)
+        self._lo_factor_tensor = pt.constant(lo, dtype=dtype)
+
+    def resolve_interpolation(
+        self, descriptor: interpolations.InterpolationDescriptor
+    ) -> None:
+        """Store the effective FlexibleInterpVar descriptor for evaluation.
+
+        ROOT protects only the polynomial/exponential Flexible form from
+        non-positive anchors.  Keep the serialized values untouched and use
+        separate epsilon-adjusted tensors for the computation graph.
+        """
+        descriptor = interpolations.validate_interpolation_for_class(
+            descriptor, "flexible"
+        )
+        self._resolved_interpolation = descriptor
+        hi = self.data.hi
+        lo = self.data.lo
+        if descriptor.key == ("mult", "poly6", "exp"):
+            epsilon = np.finfo(np.dtype(self._nominal_factor.dtype)).eps
+            hi = epsilon if hi <= 0 else hi
+            lo = epsilon if lo <= 0 else lo
+        self._materialize_anchors(hi, lo)
+
+    def compatibility_interpolation(self) -> interpolations.InterpolationDescriptor:
+        """Translate the former pyhs3/ROOT-0.2 code to a structured form."""
+        if self.data.interpolation == "code1":
+            return interpolations.InterpolationDescriptor.model_validate(
+                {"type": "mult", "in": "exp", "out": None}
+            )
+        # Both an explicit legacy code4 and the historical omitted default map
+        # to FlexibleInterpVar's polynomial/exponential form.
+        return interpolations.InterpolationDescriptor.model_validate(
+            {"type": "mult", "in": "poly6", "out": "exp"}
+        )
+
+    @property
+    def resolved_interpolation(self) -> interpolations.InterpolationDescriptor:
+        """Return the channel-resolved descriptor or fail before graph building."""
+        if self._resolved_interpolation is None:
+            msg = f"normsys modifier '{self.name}' has no structured interpolation"
+            raise ValueError(msg)
+        return self._resolved_interpolation
+
+    def interpolate_group(self, context: Context, current: TensorVar) -> TensorVar:
+        """Apply this entry to a running FlexibleInterpVar result."""
+        return interpolations.apply_interpolation_descriptor(
+            self.resolved_interpolation,
+            context[self.parameter],
+            self._nominal_factor,
+            self._hi_factor_tensor,
+            self._lo_factor_tensor,
+            current=current,
+        )
+
+    def interpolation_inputs(
+        self, context: Context
+    ) -> tuple[TensorVar, TensorVar, TensorVar]:
+        """Return the parameter and materialized anchors for grouped evaluation."""
+        return context[self.parameter], self._hi_factor_tensor, self._lo_factor_tensor
 
     @property
     def auxdata(self) -> float:
@@ -259,14 +343,7 @@ class NormSysModifier(SingleParamConstraint, ParameterModifier):
 
     def expression(self, context: Context) -> TensorVar:
         """Return multiplicative factor for normsys."""
-        alpha = context[self.parameter]
-        return interpolations.apply_interpolation(
-            self.data.interpolation,
-            alpha,
-            self._nominal_factor,
-            self._hi_factor_tensor,
-            self._lo_factor_tensor,
-        )
+        return self.interpolate_group(context, self._nominal_factor)
 
     def apply(self, context: Context, rates: TensorVar) -> TensorVar:
         """Apply normsys modifier (systematic with hi/lo interpolation)."""
@@ -278,8 +355,80 @@ class HistoSysModifier(SingleParamConstraint, ParameterModifier):
 
     type: Literal["histosys"] = "histosys"
     application: Literal["additive"] = Field("additive", exclude=True)
-    constraint: Literal["Gauss", "Poisson", "LogNormal"] = "Gauss"
+    constraint: str | None = None
+    interpolation: interpolations.InterpolationDescriptor | None = None
     data: HistoSysData
+    _hi_tensor: TensorVar = PrivateAttr()
+    _lo_tensor: TensorVar = PrivateAttr()
+    _resolved_interpolation: interpolations.InterpolationDescriptor | None = (
+        PrivateAttr(default=None)
+    )
+
+    def model_post_init(self, __context: Any, /) -> None:
+        """Materialize absolute templates and any modifier-level descriptor."""
+        self._hi_tensor = pt.as_tensor_variable(
+            np.asarray(self.data.hi.contents, dtype=config.floatX)
+        )
+        self._lo_tensor = pt.as_tensor_variable(
+            np.asarray(self.data.lo.contents, dtype=config.floatX)
+        )
+        if self.interpolation is not None:
+            self.resolve_interpolation(self.interpolation)
+
+    def resolve_interpolation(
+        self, descriptor: interpolations.InterpolationDescriptor
+    ) -> None:
+        """Store the effective PiecewiseInterpolation descriptor."""
+        self._resolved_interpolation = interpolations.validate_interpolation_for_class(
+            descriptor, "piecewise"
+        )
+
+    def compatibility_interpolation(self) -> interpolations.InterpolationDescriptor:
+        """Translate the former pyhs3/ROOT-0.2 code to a structured form."""
+        legacy = self.data.interpolation
+        if legacy == "code0":
+            raw: dict[str, str | None] = {
+                "type": "add",
+                "in": "poly1",
+                "out": None,
+            }
+        elif legacy == "code2":
+            raw = {"type": "add", "in": "poly2", "out": "poly1"}
+        else:
+            # Explicit code4p and the former omitted default are ROOT
+            # PiecewiseInterpolation's additive polynomial/linear form.
+            raw = {"type": "add", "in": "poly6", "out": "poly1"}
+        return interpolations.InterpolationDescriptor.model_validate(raw)
+
+    @property
+    def resolved_interpolation(self) -> interpolations.InterpolationDescriptor:
+        """Return the channel-resolved descriptor or fail before graph building."""
+        if self._resolved_interpolation is None:
+            msg = f"histosys modifier '{self.name}' has no structured interpolation"
+            raise ValueError(msg)
+        return self._resolved_interpolation
+
+    def interpolate_group(
+        self,
+        context: Context,
+        nominal: TensorVar,
+        current: TensorVar,
+    ) -> TensorVar:
+        """Apply this entry to a running PiecewiseInterpolation result."""
+        return interpolations.apply_interpolation_descriptor(
+            self.resolved_interpolation,
+            context[self.parameter],
+            nominal,
+            self._hi_tensor,
+            self._lo_tensor,
+            current=current,
+        )
+
+    def interpolation_inputs(
+        self, context: Context
+    ) -> tuple[TensorVar, TensorVar, TensorVar]:
+        """Return the parameter and materialized templates for grouped evaluation."""
+        return context[self.parameter], self._hi_tensor, self._lo_tensor
 
     @property
     def auxdata(self) -> float:
@@ -297,27 +446,8 @@ class HistoSysModifier(SingleParamConstraint, ParameterModifier):
         return context[self.parameter]
 
     def apply(self, context: Context, rates: TensorVar) -> TensorVar:
-        """Apply histosys (additive systematic) modifier."""
-        alpha = context[self.parameter]
-
-        # Get hi/lo absolute values
-        hi_contents = self.data.hi.contents
-        lo_contents = self.data.lo.contents
-
-        # Convert absolute values to differences from nominal (current rates)
-        hi_absolute = pt.as_tensor_variable(hi_contents)
-        lo_absolute = pt.as_tensor_variable(lo_contents)
-        hi_variation = hi_absolute - rates  # difference from nominal
-        lo_variation = lo_absolute - rates  # difference from nominal
-        zero_variation = pt.zeros_like(hi_variation)  # type: ignore[no-untyped-call]
-
-        # Apply interpolation method to the differences
-        interpolation = self.data.interpolation
-        variation = interpolations.apply_interpolation(
-            interpolation, alpha, zero_variation, hi_variation, lo_variation
-        )
-
-        return cast("TensorVar", rates + variation)
+        """Apply one histosys entry with *rates* as nominal and running value."""
+        return self.interpolate_group(context, rates, rates)
 
 
 class ShapeFactorModifier(ParametersModifier):

@@ -61,6 +61,8 @@ from pyhs3.parameter_points import ParameterPoints, ParameterSet
 from pyhs3.typing.aliases import TensorVar
 from pyhs3.workspace import Workspace
 
+MULT_POLY6_EXPONENTIAL = {"type": "mult", "in": "poly6", "out": "exp"}
+
 # scipy.stats is preferred for analytic references; fall back to closed forms
 # built from stdlib math if scipy is unavailable in the test environment.
 try:
@@ -785,7 +787,8 @@ def _normsys_workspace(alpha_value: float) -> Workspace:
                         "name": "lumi",
                         "type": "normsys",
                         "parameter": "alpha_lumi",
-                        "constraint": "Gauss",
+                        "interpolation": MULT_POLY6_EXPONENTIAL,
+                        "constraint": "lumi_constraint",
                         "data": {"hi": 1.1, "lo": 0.9},
                     }
                 ],
@@ -797,9 +800,12 @@ def _normsys_workspace(alpha_value: float) -> Workspace:
         axes=[{"name": obs_name, "min": 0.0, "max": 10.0, "nbins": 1}],
         contents=[10.0],
     )
+    constraint = GaussianDist(
+        name="lumi_constraint", x=0.0, mean="alpha_lumi", sigma=1.0
+    )
     return Workspace(
         metadata=Metadata(hs3_version="0.3.0"),
-        distributions=Distributions([channel]),
+        distributions=Distributions([channel, constraint]),
         data=Data([binned]),
         likelihoods=Likelihoods(
             [Likelihood(name="L", distributions=[channel], data=[binned])]
@@ -827,10 +833,17 @@ def test_log_prob_finite_for_normsys_constraint_at_alpha_40():
     # The probability-space constraint underflows to 0.0 at |alpha|=40.
     dist = next(iter(ws.distributions))
     _, modifier, sample_data = next(dist.constraint_specs())
+    alpha = pt.constant(40.0, dtype="float64")
+    constraint_expression = pt.exp(-0.5 * alpha**2) / math.sqrt(2.0 * math.pi)
     prob_constraint = float(
         np.asarray(
             modifier.make_constraint(
-                Context({"alpha_lumi": pt.constant(40.0, dtype="float64")}),
+                Context(
+                    {
+                        "alpha_lumi": alpha,
+                        "lumi_constraint": constraint_expression,
+                    }
+                ),
                 sample_data,
             ).eval()
         )

@@ -7,33 +7,29 @@ generic functions with mathematical expressions, and interpolation functions.
 
 from __future__ import annotations
 
-import logging
-from enum import IntEnum
-from typing import Annotated, Literal, cast
+from typing import Literal, cast
 
+import numpy as np
 import pytensor.tensor as pt
 from pydantic import (
     ConfigDict,
     Field,
+    model_validator,
 )
+from pytensor.configdefaults import config
 
 from pyhs3.base import balanced_sum
 from pyhs3.context import Context
 from pyhs3.distributions.histfactory.interpolations import (
-    interpolate_code0,
-    interpolate_code1,
-    interpolate_code4,
-    interpolate_parabolic,
-    interpolate_poly6,
+    InterpolationDescriptor,
+    apply_interpolation_descriptor,
+    expand_interpolations,
 )
 from pyhs3.distributions.histogram import HistogramData
-from pyhs3.exceptions import custom_error_msg
 from pyhs3.functions.core import Function
 from pyhs3.generic_parse import GenericExpressionMixin
 from pyhs3.tensorutils import is_scalar_multiplicative_identity
 from pyhs3.typing.aliases import TensorVar
-
-log = logging.getLogger(__name__)
 
 
 def _asym_interpolation(
@@ -107,7 +103,7 @@ class SumFunction(Function):
     """
 
     type: Literal["sum"] = Field(default="sum", repr=False)
-    summands: list[str] = Field(..., repr=False)
+    summands: list[int | float | str] = Field(..., repr=False)
 
     def _expression(self, context: Context) -> TensorVar:
         """
@@ -119,7 +115,7 @@ class SumFunction(Function):
         Returns:
             TensorVar: PyTensor expression representing the sum of all summands.
         """
-        terms = [context[summand] for summand in self.summands]
+        terms = self.get_parameter_list(context, "summands")
         return balanced_sum(terms, pt.constant(0.0))
 
 
@@ -189,10 +185,18 @@ class GenericFunction(GenericExpressionMixin, Function):
         >>> func = GenericFunction(name="sinusoid", expression="sin(x) * exp(-t)")
 
     HS3 Reference:
-        :external+hs3:ref:`generic_function <hs3.generic-function>`
+        :external+hs3:ref:`generic <hs3.generic-function>`
     """
 
-    type: Literal["generic_function"] = Field(default="generic_function", repr=False)
+    type: Literal["generic", "generic_function"] = Field(default="generic", repr=False)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _canonicalize_legacy_type(cls, data: object) -> object:
+        """Accept pyhs3's historical tag but always retain ROOT's canonical one."""
+        if isinstance(data, dict) and data.get("type") == "generic_function":
+            data = {**data, "type": "generic"}
+        return data
 
     def _expression(self, context: Context) -> TensorVar:
         """
@@ -207,259 +211,160 @@ class GenericFunction(GenericExpressionMixin, Function):
         return self._eval_expression(context)
 
 
-class InterpolationCode(IntEnum):
-    """
-    Enumeration of interpolation codes for systematic variations.
-
-    Defines the different interpolation methods used by InterpolationFunction
-    for systematic uncertainty variations. Each code represents a different
-    mathematical approach to interpolating between nominal, low, and high values.
-    """
-
-    LIN_LIN_ADD = 0
-    EXP_EXP_MUL = 1
-    EXP_LIN_ADD = 2
-    EXP_MIX_ADD = 3
-    POL_LIN_ADD = 4
-    POL_EXP_MUL = 5
-    POL_LIN_MUL = 6
-
-
 class InterpolationFunction(Function):
-    r"""
-    Piecewise interpolation function implementation.
+    """ROOT ``PiecewiseInterpolation`` with structured interpolation forms."""
 
-    Implements ROOT's PiecewiseInterpolation logic to morph between nominal
-    and variation distributions based on nuisance parameter values.
-    Supports multiple interpolation codes (0-6) for different mathematical approaches.
-
-    HS3 Reference:
-        Note: Interpolation functions are not explicitly defined in the current HS3 specification.
-
-    Mathematical Formulations:
-        For **additive** interpolation modes (codes 0, 2, 3, 4):
-
-        .. math::
-
-            \text{result} = \text{nominal} + \sum_i I_i(\theta_i; \text{low}_i, \text{nominal}, \text{high}_i)
-
-        For **multiplicative** interpolation modes (codes 1, 5, 6):
-
-        .. math::
-
-            \text{result} = \text{nominal} \times \prod_i [1 + I_i(\theta_i; \text{low}_i/\text{nominal}, 1, \text{high}_i/\text{nominal})]
-
-    Parameters:
-        name: Name of the function
-        high: High variation parameter names
-        low: Low variation parameter names
-        nom: Nominal parameter name
-        interpolationCodes: Interpolation method codes (0-6)
-        positiveDefinite: Whether function should be positive definite
-        vars: Variable names this function depends on (nuisance parameters)
-    """
-
-    model_config = ConfigDict(use_enum_values=True)
+    model_config = ConfigDict(extra="forbid", serialize_by_alias=True)
 
     type: Literal["interpolation"] = Field(default="interpolation", repr=False)
     high: list[str] = Field(..., repr=False)
     low: list[str] = Field(..., repr=False)
     nom: str = Field(..., repr=False)
-    interpolationCodes: Annotated[
-        list[InterpolationCode],
-        custom_error_msg(
-            {
-                "enum": "Unknown interpolation code {input} in function '{name}'. Valid codes are {expected}."
-            }
-        ),
-    ] = Field(..., repr=False)
+    interpolations: list[InterpolationDescriptor] = Field(
+        ...,
+        repr=False,
+        json_schema_extra={"preprocess": False},
+    )
     positiveDefinite: bool = Field(..., repr=False)
     vars: list[str] = Field(..., repr=False)
 
-    def _flexible_interp_single(
-        self,
-        interp_code: int,
-        low_val: TensorVar,
-        high_val: TensorVar,
-        boundary: float,
-        nominal: TensorVar,
-        param_val: TensorVar,
-    ) -> TensorVar:
-        r"""
-        Implement flexible interpolation for a single parameter.
-
-        Based on ROOT's ``FlexibleInterpVar`` /
-        ``RooFit::Detail::MathFuncs::flexibleInterpSingle`` with support for
-        interpolation codes 0-6. This method computes the interpolation
-        contribution :math:`I_i(\theta_i)` for a single nuisance parameter.
-
-        The verified-correct building blocks from
-        :mod:`pyhs3.distributions.histfactory.interpolations` are reused
-        directly (those return the full ``nominal + delta`` value, so the
-        nominal/baseline is subtracted off here to recover the additive delta
-        or multiplicative factor that ROOT's ``flexibleInterpSingle`` returns):
-
-        - **Code 0** (additive): piecewise-linear, ``interpolate_code0``.
-        - **Code 1** (multiplicative): piecewise-exponential, ``interpolate_code1``.
-        - **Codes 2, 3** (additive): parabolic interpolation with linear
-          extrapolation, ``interpolate_parabolic``. ROOT maps code 3 onto code 2.
-        - **Code 4** (additive): 6th-degree polynomial interpolation with
-          linear extrapolation, ``interpolate_poly6``.
-        - **Code 5** (multiplicative): 6th-degree polynomial interpolation in
-          log space with exponential extrapolation, ``interpolate_code4``.
-        - **Code 6** (multiplicative): 6th-degree polynomial interpolation with
-          linear extrapolation in ratio space, ``interpolate_poly6`` applied to
-          ``high/nominal`` and ``low/nominal``.
-
-        Args:
-            interp_code: Interpolation code (0-6) determining the mathematical approach
-            low_val: Low variation value (used when :math:`\theta < 0`)
-            high_val: High variation value (used when :math:`\theta \geq 0`)
-            boundary: Boundary value for switching between interpolation and extrapolation (typically 1.0)
-            nominal: Nominal value (baseline)
-            param_val: Parameter value :math:`\theta` (nuisance parameter)
-
-        Returns:
-            Interpolated contribution :math:`I_i(\theta_i)` to be added (additive modes)
-            or multiplied (multiplicative modes) with the result
-
-        Note:
-            The returned value interpretation depends on the interpolation code:
-            - Codes 0,2,3,4: Direct additive contribution
-            - Codes 1,5,6: Multiplicative factor (already with 1 subtracted)
-        """
-        # The interpolations helpers assume a boundary of 1.0; ProcessNormalization
-        # / PiecewiseInterpolation always use this boundary.
-        del boundary
-
-        if interp_code == 0:
-            # Piecewise-linear interpolation/extrapolation (additive)
-            return cast(
-                TensorVar,
-                interpolate_code0(param_val, nominal, high_val, low_val) - nominal,
+    @model_validator(mode="after")
+    def _validate_interpolation_lengths(self) -> InterpolationFunction:
+        n_parameters = len(self.vars)
+        if len(self.low) != n_parameters or len(self.high) != n_parameters:
+            msg = (
+                f"PiecewiseInterpolation '{self.name}' has non-matching lengths "
+                "of 'vars', 'high' and 'low'"
             )
-
-        if interp_code == 1:
-            # Piecewise-exponential interpolation/extrapolation (multiplicative)
-            return cast(
-                TensorVar,
-                interpolate_code1(param_val, nominal, high_val, low_val) / nominal
-                - 1.0,
-            )
-
-        if interp_code in (2, 3):
-            # Parabolic interpolation with linear extrapolation (additive).
-            # ROOT converts code 3 to code 2. interpolate_parabolic matches ROOT's
-            # a*alpha^2 + b*alpha central region with continuous linear extensions.
-            return cast(
-                TensorVar,
-                interpolate_parabolic(param_val, nominal, high_val, low_val) - nominal,
-            )
-
-        if interp_code == 4:
-            # 6th-degree polynomial interpolation + linear extrapolation (additive)
-            return cast(
-                TensorVar,
-                interpolate_poly6(param_val, nominal, high_val, low_val) - nominal,
-            )
-
-        if interp_code == 5:
-            # 6th-degree polynomial in log space + exponential extrapolation
-            # (multiplicative)
-            return cast(
-                TensorVar,
-                interpolate_code4(param_val, nominal, high_val, low_val) / nominal
-                - 1.0,
-            )
-
-        # Code 6: 6th-degree polynomial + linear extrapolation in ratio space
-        # (multiplicative). Work in nominal=1 ratio space, as ROOT does.
-        one = pt.constant(1.0)
-        ratio_high = high_val / nominal
-        ratio_low = low_val / nominal
-        return cast(
-            TensorVar,
-            interpolate_poly6(param_val, one, ratio_high, ratio_low) - 1.0,
+            raise ValueError(msg)
+        expanded = expand_interpolations(
+            self.interpolations,
+            n_parameters,
+            "piecewise",
         )
+        if expanded and all(item == expanded[0] for item in expanded[1:]):
+            self.interpolations = [expanded[0]]
+        else:
+            self.interpolations = expanded
+        return self
 
     def _expression(self, context: Context) -> TensorVar:
-        r"""
-        Evaluate the interpolation function.
-
-        Implements ROOT's PiecewiseInterpolation algorithm following the mathematical
-        formulations described in the class docstring. The algorithm proceeds as:
-
-        1. Start with nominal value: :math:`\text{result} = \text{nominal}`
-        2. For each nuisance parameter :math:`\theta_i`, compute interpolation contribution :math:`I_i(\theta_i)`
-        3. Combine contributions based on interpolation mode:
-           - **Additive modes** (codes 0,2,3,4): :math:`\text{result} += I_i(\theta_i)`
-           - **Multiplicative modes** (codes 1,5,6): :math:`\text{result} \times= (1 + I_i(\theta_i))`
-        4. Apply positive definite constraint: :math:`\text{result} = \max(\text{result}, 0)` if requested
-
-        Args:
-            context: Mapping of names to pytensor variables containing:
-                - Nominal parameter (referenced by `nom`)
-                - High/low variation parameters (referenced by `high`/`low` lists)
-                - Nuisance parameters (referenced by `vars` list)
-
-        Returns:
-            PyTensor expression representing the interpolated result
-
-        Note:
-            The evaluation order ensures that all interpolation contributions are properly
-            combined according to their mathematical modes before applying constraints.
-        """
-        # Start with nominal value
-        nominal = context[self.nom]
+        nominal = context[self._parameters["nom"]]
         result = nominal
-
-        # Reuse dtype-matched scalar identities across multiplicative terms.
-        ones_by_dtype: dict[str, TensorVar] = {}
-
-        # Apply interpolation for each nuisance parameter
-        for i, var_name in enumerate(self.vars):
-            if (
-                i >= len(self.high)
-                or i >= len(self.low)
-                or i >= len(self.interpolationCodes)
-            ):
-                log.warning(
-                    "Parameter index %d exceeds variation lists for function %s",
-                    i,
-                    self.name,
-                )
-                continue
-
-            param_val = context[var_name]
-            low_val = context[self.low[i]]
-            high_val = context[self.high[i]]
-            interp_code = self.interpolationCodes[i]
-
-            # Calculate interpolated contribution
-            contribution = self._flexible_interp_single(
-                interp_code=interp_code,
-                low_val=low_val,
-                high_val=high_val,
-                boundary=1.0,
-                nominal=nominal,
-                param_val=param_val,
+        descriptors = expand_interpolations(
+            self.interpolations,
+            len(self.vars),
+            "piecewise",
+        )
+        variables = self.get_parameter_list(context, "vars")
+        highs = self.get_parameter_list(context, "high")
+        lows = self.get_parameter_list(context, "low")
+        for descriptor, alpha, high, low in zip(
+            descriptors, variables, highs, lows, strict=True
+        ):
+            result = apply_interpolation_descriptor(
+                descriptor,
+                alpha,
+                nominal,
+                high,
+                low,
+                current=result,
             )
 
-            # Add contribution based on interpolation mode
-            if interp_code in [0, 2, 3, 4]:  # Additive modes
-                result = result + contribution
-            else:  # Multiplicative modes (1, 5, 6)
-                one = ones_by_dtype.get(contribution.dtype)
-                if one is None:
-                    one = pt.constant(1.0, dtype=contribution.dtype)
-                    ones_by_dtype[contribution.dtype] = one
-                result = result * (one + contribution)
-
-        # Apply positive definite constraint if requested
         if self.positiveDefinite:
-            result = pt.maximum(result, 0.0)
+            zero = pt.constant(0.0, dtype=result.dtype)
+            result = pt.maximum(result, zero)
 
         return result
+
+
+class Interpolation0DFunction(Function):
+    """ROOT ``FlexibleInterpVar`` with numeric nominal and anchor values."""
+
+    model_config = ConfigDict(extra="forbid", serialize_by_alias=True)
+
+    type: Literal["interpolation0d"] = Field(default="interpolation0d", repr=False)
+    high: list[float] = Field(
+        ...,
+        repr=False,
+        json_schema_extra={"preprocess": False},
+    )
+    low: list[float] = Field(
+        ...,
+        repr=False,
+        json_schema_extra={"preprocess": False},
+    )
+    nom: float = Field(
+        ...,
+        repr=False,
+        json_schema_extra={"preprocess": False},
+    )
+    interpolations: list[InterpolationDescriptor] = Field(
+        ...,
+        repr=False,
+        json_schema_extra={"preprocess": False},
+    )
+    vars: list[str] = Field(..., repr=False)
+
+    @model_validator(mode="after")
+    def _validate_interpolation_lengths(self) -> Interpolation0DFunction:
+        n_parameters = len(self.vars)
+        if len(self.low) != n_parameters or len(self.high) != n_parameters:
+            msg = (
+                f"FlexibleInterpVar '{self.name}' has non-matching lengths of "
+                "'vars', 'high' and 'low'"
+            )
+            raise ValueError(msg)
+        expanded = expand_interpolations(
+            self.interpolations,
+            n_parameters,
+            "flexible",
+        )
+        if expanded and all(item == expanded[0] for item in expanded[1:]):
+            self.interpolations = [expanded[0]]
+        else:
+            self.interpolations = expanded
+        return self
+
+    def _expression(self, context: Context) -> TensorVar:
+        # RooFit stores the numeric FlexibleInterpVar payload as doubles.
+        nominal = cast(
+            TensorVar,
+            pt.constant(np.asarray(self.nom, dtype=config.floatX)),
+        )
+        result = nominal
+        descriptors = expand_interpolations(
+            self.interpolations,
+            len(self.vars),
+            "flexible",
+        )
+        variables = self.get_parameter_list(context, "vars")
+        for descriptor, alpha, high_value, low_value in zip(
+            descriptors,
+            variables,
+            self.high,
+            self.low,
+            strict=True,
+        ):
+            high = cast(TensorVar, pt.constant(high_value, dtype=nominal.dtype))
+            low = cast(TensorVar, pt.constant(low_value, dtype=nominal.dtype))
+            result = apply_interpolation_descriptor(
+                descriptor,
+                alpha,
+                nominal,
+                high,
+                low,
+                current=result,
+            )
+
+        tiny_value = np.finfo(np.dtype(result.dtype)).tiny
+        tiny = pt.constant(tiny_value, dtype=result.dtype)
+        zero = pt.constant(0.0, dtype=result.dtype)
+        result = pt.where(  # type: ignore[no-untyped-call]
+            result <= zero, tiny, result
+        )
+
+        return cast(TensorVar, result)
 
 
 class ProcessNormalizationFunction(Function):
@@ -699,8 +604,10 @@ class RooRecursiveFractionFunction(Function):
 functions: dict[str, type[Function]] = {
     "sum": SumFunction,
     "product": ProductFunction,
+    "generic": GenericFunction,
     "generic_function": GenericFunction,
     "interpolation": InterpolationFunction,
+    "interpolation0d": Interpolation0DFunction,
     "CMS::process_normalization": ProcessNormalizationFunction,
     "CMS::asympow": CMSAsymPowFunction,
     "roorecursivefraction_dist": RooRecursiveFractionFunction,

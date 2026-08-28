@@ -12,6 +12,7 @@ import math
 from typing import Literal, cast
 
 import pytensor.tensor as pt
+import pytensor_distributions.exponential as Exponential
 import pytensor_distributions.lognormal as LogNormal
 import pytensor_distributions.normal as Normal
 import pytensor_distributions.poisson as Poisson
@@ -276,23 +277,29 @@ class ExponentialDist(Distribution):
         """
         Builds a symbolic expression for the exponential PDF.
 
+        Delegates to pytensor-distributions' rate-normalized form
+        :math:`c\\,\\exp(-c x)`.
+
         Args:
             context (dict): Mapping of names to pytensor variables.
 
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of exponential PDF.
         """
-        x = context[self._parameters["x"]]
-        c = context[self._parameters["c"]]
-
-        # Exponential PDF: exp(-c * x)
-        return cast(TensorVar, (c) * pt.exp(-c * x))
+        return cast(
+            TensorVar,
+            Exponential.pdf(
+                context[self._parameters["x"]],
+                context[self._parameters["c"]],
+            ),
+        )
 
     def log_likelihood(self, context: Context) -> TensorVar:
         r"""
         Builds a symbolic expression for the exponential log-PDF.
 
-        Analytic log form of :meth:`likelihood`:
+        Delegates to pytensor-distributions' analytic log form of
+        :meth:`likelihood`:
 
         .. math::
 
@@ -309,10 +316,13 @@ class ExponentialDist(Distribution):
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of exponential log-PDF.
         """
-        x = context[self._parameters["x"]]
-        c = context[self._parameters["c"]]
-
-        return cast(TensorVar, pt.log(c) - c * x)
+        return cast(
+            TensorVar,
+            Exponential.logpdf(
+                context[self._parameters["x"]],
+                context[self._parameters["c"]],
+            ),
+        )
 
 
 class LogNormalDist(Distribution):

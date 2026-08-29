@@ -14,7 +14,7 @@ authors:
     orcid: "https://orcid.org/0000-0001-8392-0934"
   - family-names: "Smith"
     given-names: "Allexindir"
-    # email: ""  # TODO: add Allexindir Smith's email once available
+    email: "allexindir@gmail.com"
     orcid: "https://orcid.org/0009-0000-6568-9847"
 license: Apache-2.0
 repository-code: "https://github.com/scipp-atlas/pyhs3"

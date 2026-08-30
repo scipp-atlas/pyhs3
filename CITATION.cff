@@ -8,17 +8,20 @@ authors:
     given-names: "Giordon"
     email: "kratsg@gmail.com"
     orcid: "https://orcid.org/0000-0001-6616-3433"
+    affiliation: "SCIPP, University of California, Santa Cruz"
   - family-names: "Hance"
     given-names: "Michael"
     email: "mhance@ucsc.edu"
     orcid: "https://orcid.org/0000-0001-8392-0934"
+    affiliation: "University of California, Santa Cruz"
   - family-names: "Smith"
     given-names: "Allexindir"
     email: "allexindir@gmail.com"
     orcid: "https://orcid.org/0009-0000-6568-9847"
 license: Apache-2.0
-repository-code: "https://github.com/scipp-atlas/pyhs3"
-url: "https://pyhs3.readthedocs.io/"
+version: "0.4.2"
+repository-code: "https://github.com/scipp-atlas/pyhs3/releases/tag/v0.4.2"
+url: "https://pyhs3.readthedocs.io/en/v0.4.2/"
 keywords:
   - HS3
   - HEP

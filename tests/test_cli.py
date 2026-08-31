@@ -146,6 +146,16 @@ def test_validate_bad_json(tmp_path):
     assert result.exit_code != 0
 
 
+@pytest.mark.parametrize("root", ["[]", "42", '"just a string"'])
+def test_validate_non_object_json_root(tmp_path, root):
+    """A JSON root that isn't an object fails cleanly, not with a raw TypeError."""
+    path = tmp_path / "root.json"
+    path.write_text(root, encoding="utf-8")
+    result = runner.invoke(app, ["validate", str(path)])
+    assert result.exit_code == 1
+    assert "object" in result.output.lower()
+
+
 # ---------------------------------------------------------------------------
 # inspect
 # ---------------------------------------------------------------------------
@@ -252,5 +262,15 @@ def test_nll_from_stdin(good_workspace):
         app, ["nll", "-", "--param", "mean=2.0"], input=good_workspace.read_text()
     )
     assert result.exit_code == 0, result.output
+    value = float(result.output.strip().splitlines()[-1])
+    assert value == pytest.approx(_expected_nll(2.0), rel=1e-6)
+
+
+def test_nll_param_override_rejects_observable_name(good_workspace):
+    """--param naming an observable must be ignored, never clobber workspace data."""
+    result = runner.invoke(app, ["nll", str(good_workspace), "--param", "x_obs=999"])
+    assert result.exception is None, result.output
+    assert result.exit_code == 0, result.output
+    assert "x_obs" in result.output
     value = float(result.output.strip().splitlines()[-1])
     assert value == pytest.approx(_expected_nll(2.0), rel=1e-6)

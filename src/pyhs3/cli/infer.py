@@ -67,10 +67,12 @@ def _compute_nll(
     ``parameter_points`` (a convenience base so an analysis without an ``init``
     set is still evaluable), then the model's free (non-const) parameter values,
     then the caller's *overrides*. Observable data is taken from the likelihood
-    the model was built from.
+    the model was built from, and always wins over an override of the same
+    name: ``--param`` overrides a free parameter, never the observed data.
     """
     model = ws.model(target, progress=False)
     log_prob = model.log_prob
+    data = model.data
 
     # Free symbolic inputs: observable data arrays plus the non-const parameters.
     inputs_map = {
@@ -91,6 +93,11 @@ def _compute_nll(
     params.update(model.free_params)
 
     for name, value in overrides.items():
+        if name in data:
+            _err_console.print(
+                f"[yellow]warning:[/yellow] --param {name!r} names observable data, not a free parameter; ignoring"
+            )
+            continue
         if name not in inputs_map:
             _err_console.print(
                 f"[yellow]warning:[/yellow] --param {name!r} is not a free parameter of this model; ignoring"
@@ -99,8 +106,8 @@ def _compute_nll(
         params[name] = value
 
     call_kwargs: dict[str, Any] = {
-        **model.data,
         **{name: value for name, value in params.items() if name in inputs_map},
+        **data,
     }
     missing = [name for name in inputs_map if name not in call_kwargs]
     if missing:

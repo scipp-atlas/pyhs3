@@ -49,6 +49,9 @@ def validate(
     except json.JSONDecodeError as exc:
         _err_console.print(f"[red]Invalid JSON in {source}:[/red] {exc}")
         raise typer.Exit(code=1) from None
+    except typer.BadParameter as exc:
+        _err_console.print(f"[red]Invalid workspace spec in {source}:[/red] {exc}")
+        raise typer.Exit(code=1) from None
 
     try:
         Workspace(**spec)

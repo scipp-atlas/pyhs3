@@ -62,7 +62,8 @@ def read_spec(path: str | None) -> dict[str, Any]:
         The parsed JSON object as a dict.
 
     Raises:
-        typer.BadParameter: stdin was requested but is an interactive terminal.
+        typer.BadParameter: stdin was requested but is an interactive terminal,
+            or the parsed JSON's root is not an object.
         json.JSONDecodeError: the input is not valid JSON.
     """
     if path is None or path == STDIN_MARKER:
@@ -72,7 +73,10 @@ def read_spec(path: str | None) -> dict[str, Any]:
         text = sys.stdin.read()
     else:
         text = Path(path).read_text(encoding="utf-8")
-    spec: dict[str, Any] = json.loads(text)
+    spec = json.loads(text)
+    if not isinstance(spec, dict):
+        msg = f"expected a JSON object at the workspace root, got {type(spec).__name__}"
+        raise typer.BadParameter(msg)
     return spec
 
 

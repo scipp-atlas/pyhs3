@@ -596,6 +596,7 @@ def apply_interpolation_descriptor(
     high: TensorVar,
     low: TensorVar,
     current: TensorVar | None = None,
+    multiplicative_identity: TensorVar | None = None,
 ) -> TensorVar:
     """Apply one structured interpolation to a ROOT-style running result.
 
@@ -611,12 +612,19 @@ def apply_interpolation_descriptor(
     """
     result = nominal if current is None else current
 
+    def identity() -> TensorVar:
+        return (
+            multiplicative_identity
+            if multiplicative_identity is not None
+            else pt.constant(1.0, dtype=nominal.dtype)
+        )
+
     if descriptor.key == ("add", "poly1", None):
         interpolated = interpolate_code0(alpha, nominal, high, low)
         return cast(TensorVar, result + interpolated - nominal)
 
     if descriptor.key == ("mult", "exp", None):
-        one = pt.constant(1.0, dtype=nominal.dtype)
+        one = identity()
         factor = interpolate_code1(
             alpha,
             one,
@@ -636,7 +644,7 @@ def apply_interpolation_descriptor(
     if descriptor.key == ("mult", "poly6", "exp"):
         # Keep this direct call: interpolate_code4 contains the cached,
         # dtype-preserving, vectorized tensordot implementation.
-        one = pt.constant(1.0, dtype=nominal.dtype)
+        one = identity()
         factor = interpolate_code4(
             alpha,
             one,
@@ -646,7 +654,7 @@ def apply_interpolation_descriptor(
         return cast(TensorVar, result * factor)
 
     if descriptor.key == ("mult", "poly6", "poly1"):
-        one = pt.constant(1.0, dtype=nominal.dtype)
+        one = identity()
         factor = interpolate_poly6(
             alpha,
             one,

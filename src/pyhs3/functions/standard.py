@@ -259,6 +259,7 @@ class InterpolationFunction(Function):
         variables = self.get_parameter_list(context, "vars")
         highs = self.get_parameter_list(context, "high")
         lows = self.get_parameter_list(context, "low")
+        multiplicative_identity = pt.constant(1.0, dtype=nominal.dtype)
         for descriptor, alpha, high, low in zip(
             descriptors, variables, highs, lows, strict=True
         ):
@@ -269,6 +270,7 @@ class InterpolationFunction(Function):
                 high,
                 low,
                 current=result,
+                multiplicative_identity=multiplicative_identity,
             )
 
         if self.positiveDefinite:
@@ -339,6 +341,7 @@ class Interpolation0DFunction(Function):
             "flexible",
         )
         variables = self.get_parameter_list(context, "vars")
+        multiplicative_identity = pt.constant(1.0, dtype=nominal.dtype)
         for descriptor, alpha, high_value, low_value in zip(
             descriptors,
             variables,
@@ -355,6 +358,7 @@ class Interpolation0DFunction(Function):
                 high,
                 low,
                 current=result,
+                multiplicative_identity=multiplicative_identity,
             )
 
         tiny_value = np.finfo(np.dtype(result.dtype)).tiny

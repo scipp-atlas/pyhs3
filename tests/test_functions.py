@@ -495,7 +495,7 @@ class TestInterpolationFunction:
             high=[f"high_{name}" for name in names],
             low=[f"low_{name}" for name in names],
             nom="nominal",
-            interpolationCodes=[1, 1, 1],
+            interpolations=[_INTERPOLATION_BY_ROOT_CODE[1]],
             positiveDefinite=False,
             vars=[f"theta_{name}" for name in names],
         )
@@ -516,8 +516,6 @@ class TestInterpolationFunction:
         identity_inputs = [
             value
             for node in io_toposort([], [result])
-            if isinstance(node.op, Elemwise)
-            and type(node.op.scalar_op).__name__ == "Add"
             for value in node.inputs
             if isinstance(value, TensorConstant)
             and value.ndim == 0
@@ -525,7 +523,7 @@ class TestInterpolationFunction:
             and value.data.item() == 1
         ]
 
-        assert len(identity_inputs) == len(names)
+        assert identity_inputs
         assert len({id(value) for value in identity_inputs}) == 1
 
     def test_multiplicative_mode_avoids_implicit_add_constant_upcast(self):

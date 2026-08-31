@@ -12,6 +12,7 @@
    broadcasting
    defining_components
    normalization
+   hs3-v0.3-compatibility
    visualization
 
 .. toctree::

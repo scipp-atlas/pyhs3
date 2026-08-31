@@ -49,11 +49,12 @@ class JaxifiedGraph:
     fn: Callable[..., tuple]  # type: ignore[type-arg]
 
     def __call__(self, **kwargs: object) -> object:
-        """Call by keyword argument — pure passthrough to :attr:`fn`.
+        """Call by original PyTensor input name.
 
-        ``jax_funcify`` generates a function whose parameter names match the
-        original PyTensor variable names, so kwargs are forwarded directly.
-        Python itself raises ``TypeError`` for missing or unexpected names.
+        PyTensor sanitizes some names while generating Python source (for
+        example, consecutive underscores can be collapsed). Reorder the
+        original keyword names into the declared positional input order so
+        valid HS3 names do not depend on that implementation detail.
 
         The typical usage pattern with optimistix or everwillow is to jaxify
         the log-space graph directly (e.g. ``model.log_prob``) rather than
@@ -78,7 +79,19 @@ class JaxifiedGraph:
         -------
         Whatever :attr:`fn` returns (typically a 1-tuple of JAX arrays).
         """
-        return self.fn(**kwargs)
+        expected = set(self.input_names)
+        received = set(kwargs)
+        missing = sorted(expected - received)
+        unexpected = sorted(received - expected)
+        if missing or unexpected:
+            details: list[str] = []
+            if missing:
+                details.append(f"missing {missing}")
+            if unexpected:
+                details.append(f"unexpected {unexpected}")
+            msg = "Invalid JAX graph inputs: " + ", ".join(details)
+            raise TypeError(msg)
+        return self.fn(*(kwargs[name] for name in self.input_names))
 
     def call_positional(self, *args: object) -> object:
         """Call with positional arguments — pure passthrough to :attr:`fn`.

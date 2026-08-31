@@ -7,8 +7,6 @@ and Functions implementations.
 
 from __future__ import annotations
 
-import logging
-
 import numpy as np
 import pytensor.tensor as pt
 import pytest
@@ -27,6 +25,7 @@ from pyhs3.functions import (
     Functions,
     GenericFunction,
     HistogramFunction,
+    Interpolation0DFunction,
     InterpolationFunction,
     ProcessNormalizationFunction,
     ProductFunction,
@@ -38,6 +37,16 @@ from pyhs3.functions.standard import (
     RooRecursiveFractionFunction,
     _asym_interpolation,
 )
+
+_INTERPOLATION_BY_ROOT_CODE = {
+    0: {"type": "add", "in": "poly1", "out": None},
+    1: {"type": "mult", "in": "exp", "out": None},
+    2: {"type": "add", "in": "poly2", "out": "poly1"},
+    3: {"type": "add", "in": "poly2", "out": "poly1"},
+    4: {"type": "add", "in": "poly6", "out": "poly1"},
+    5: {"type": "mult", "in": "poly6", "out": "exp"},
+    6: {"type": "mult", "in": "poly6", "out": "poly1"},
+}
 
 
 class TestFunction:
@@ -207,6 +216,15 @@ class TestSumFunction:
         assert func.summands == ["a", "b", "c"]
         assert func.parameters == {"a", "b", "c"}
 
+    def test_sum_function_accepts_numeric_summands(self):
+        func = SumFunction(name="offset", summands=[1.0, "x"])
+        x = pt.scalar("x")
+        context = {"x": x, **func.constants}
+        result = func.expression(context)
+
+        assert func.model_dump()["summands"] == [1.0, "x"]
+        assert float(function([x], result)(2.0)) == pytest.approx(3.0)
+
     def test_sum_function_expression_empty_summands(self):
         """Test SumFunction with empty summands returns 0.0."""
         func = SumFunction(name="test_sum", summands=[])
@@ -363,7 +381,7 @@ class TestGenericFunction:
         """Test GenericFunction can be created and configured."""
         func = GenericFunction(name="test_generic", expression="x + y")
         assert func.name == "test_generic"
-        assert func.type == "generic_function"
+        assert func.type == "generic"
         assert func.expression_str == "x + y"
         assert func.parameters == {"x", "y"}
 
@@ -477,7 +495,7 @@ class TestInterpolationFunction:
             high=[f"high_{name}" for name in names],
             low=[f"low_{name}" for name in names],
             nom="nominal",
-            interpolationCodes=[1, 1, 1],
+            interpolations=[_INTERPOLATION_BY_ROOT_CODE[1]],
             positiveDefinite=False,
             vars=[f"theta_{name}" for name in names],
         )
@@ -498,8 +516,6 @@ class TestInterpolationFunction:
         identity_inputs = [
             value
             for node in io_toposort([], [result])
-            if isinstance(node.op, Elemwise)
-            and type(node.op.scalar_op).__name__ == "Add"
             for value in node.inputs
             if isinstance(value, TensorConstant)
             and value.ndim == 0
@@ -507,7 +523,7 @@ class TestInterpolationFunction:
             and value.data.item() == 1
         ]
 
-        assert len(identity_inputs) == len(names)
+        assert identity_inputs
         assert len({id(value) for value in identity_inputs}) == 1
 
     def test_multiplicative_mode_avoids_implicit_add_constant_upcast(self):
@@ -517,7 +533,7 @@ class TestInterpolationFunction:
             high=["high"],
             low=["low"],
             nom="nominal",
-            interpolationCodes=[1],
+            interpolations=[_INTERPOLATION_BY_ROOT_CODE[1]],
             positiveDefinite=False,
             vars=["nuisance"],
         )
@@ -547,7 +563,10 @@ class TestInterpolationFunction:
             high=["high1", "high2"],
             low=["low1", "low2"],
             nom="nominal",
-            interpolationCodes=[0, 1],
+            interpolations=[
+                _INTERPOLATION_BY_ROOT_CODE[0],
+                _INTERPOLATION_BY_ROOT_CODE[1],
+            ],
             positiveDefinite=True,
             vars=["var1", "var2"],
         )
@@ -556,7 +575,10 @@ class TestInterpolationFunction:
         assert func.high == ["high1", "high2"]
         assert func.low == ["low1", "low2"]
         assert func.nom == "nominal"
-        assert func.interpolationCodes == [0, 1]
+        assert [item.key for item in func.interpolations] == [
+            ("add", "poly1", None),
+            ("mult", "exp", None),
+        ]
         assert func.positiveDefinite is True
         expected_params = ["high1", "high2", "low1", "low2", "nominal", "var1", "var2"]
         assert func.parameters == set(expected_params)
@@ -570,7 +592,7 @@ class TestInterpolationFunction:
                     "high": ["h1"],
                     "low": ["l1"],
                     "nom": "n1",
-                    "interpolationCodes": [0],
+                    "interpolations": [_INTERPOLATION_BY_ROOT_CODE[0]],
                     "positiveDefinite": False,
                     "vars": ["x"],
                 },
@@ -582,7 +604,11 @@ class TestInterpolationFunction:
                     "high": ["h1", "h2", "h3"],
                     "low": ["l1", "l2", "l3"],
                     "nom": "nominal",
-                    "interpolationCodes": [0, 1, 2],
+                    "interpolations": [
+                        _INTERPOLATION_BY_ROOT_CODE[0],
+                        _INTERPOLATION_BY_ROOT_CODE[1],
+                        _INTERPOLATION_BY_ROOT_CODE[2],
+                    ],
                     "positiveDefinite": True,
                     "vars": ["x", "y", "z"],
                 },
@@ -594,7 +620,7 @@ class TestInterpolationFunction:
                     "high": [],
                     "low": [],
                     "nom": "nominal",
-                    "interpolationCodes": [],
+                    "interpolations": [],
                     "positiveDefinite": False,
                     "vars": [],
                 },
@@ -609,7 +635,9 @@ class TestInterpolationFunction:
         assert func.high == config["high"]
         assert func.low == config["low"]
         assert func.nom == config["nom"]
-        assert func.interpolationCodes == config["interpolationCodes"]
+        assert [item.model_dump() for item in func.interpolations] == config[
+            "interpolations"
+        ]
         assert func.positiveDefinite == config["positiveDefinite"]
         # Parameters include all dependencies: high, low, nom, and vars
         expected_params = (
@@ -624,7 +652,7 @@ class TestInterpolationFunction:
             high=[],
             low=[],
             nom="nominal",
-            interpolationCodes=[],
+            interpolations=[],
             positiveDefinite=True,
             vars=[],
         )
@@ -641,7 +669,7 @@ class TestInterpolationFunction:
             high=["high_var"],
             low=["low_var"],
             nom="nominal",
-            interpolationCodes=[0],
+            interpolations=[_INTERPOLATION_BY_ROOT_CODE[0]],
             positiveDefinite=False,
             vars=["nuisance_param"],
         )
@@ -668,7 +696,7 @@ class TestInterpolationFunction:
             high=["high_var"],
             low=["low_var"],
             nom="nominal",
-            interpolationCodes=[1],
+            interpolations=[_INTERPOLATION_BY_ROOT_CODE[1]],
             positiveDefinite=False,
             vars=["nuisance_param"],
         )
@@ -696,7 +724,7 @@ class TestInterpolationFunction:
             high=["high_var"],
             low=["low_var"],
             nom="nominal",
-            interpolationCodes=[0],
+            interpolations=[_INTERPOLATION_BY_ROOT_CODE[0]],
             positiveDefinite=True,
             vars=["nuisance_param"],
         )
@@ -725,7 +753,7 @@ class TestInterpolationFunction:
             high=["high_var"],
             low=["low_var"],
             nom="nominal",
-            interpolationCodes=[interp_code],
+            interpolations=[_INTERPOLATION_BY_ROOT_CODE[interp_code]],
             positiveDefinite=False,
             vars=["nuisance_param"],
         )
@@ -751,7 +779,7 @@ class TestInterpolationFunction:
             high=["high_var"],
             low=["low_var"],
             nom="nominal",
-            interpolationCodes=[6],
+            interpolations=[_INTERPOLATION_BY_ROOT_CODE[6]],
             positiveDefinite=False,
             vars=["nuisance_param"],
         )
@@ -782,71 +810,44 @@ class TestInterpolationFunction:
         expected = 10.0 * (1 + alpha * poly)
         np.testing.assert_allclose(result_val, expected, rtol=1e-5)
 
-    def test_interpolation_function_parameter_index_warning(self, caplog):
-        """Test InterpolationFunction logs warning when parameter index exceeds lists."""
-        func = InterpolationFunction(
-            name="test_interp",
-            high=["high_var"],  # Only one element
-            low=["low_var"],  # Only one element
-            nom="nominal",
-            interpolationCodes=[0],  # Only one element
-            positiveDefinite=False,
-            vars=["param1", "param2"],  # Two parameters - exceeds lists!
-        )
+    def test_interpolation_function_rejects_mismatched_lengths(self):
+        """Variation and parameter lists must have identical lengths."""
+        with pytest.raises(ValidationError, match="non-matching lengths"):
+            InterpolationFunction(
+                name="test_interp",
+                high=["high_var"],
+                low=["low_var"],
+                nom="nominal",
+                interpolations=[_INTERPOLATION_BY_ROOT_CODE[0]],
+                positiveDefinite=False,
+                vars=["param1", "param2"],
+            )
 
-        context = {
-            "nominal": pt.constant(10.0),
-            "high_var": pt.constant(12.0),
-            "low_var": pt.constant(8.0),
-            "param1": pt.constant(0.5),
-            "param2": pt.constant(0.3),  # This will trigger the warning
-        }
+    def test_interpolation_function_rejects_legacy_codes(self):
+        """Legacy integer interpolation fields are not part of the wire model."""
+        with pytest.raises(ValidationError, match="interpolationCodes"):
+            InterpolationFunction(
+                name="bad_interp",
+                high=["high_var"],
+                low=["low_var"],
+                nom="nominal",
+                interpolationCodes=[0],
+                positiveDefinite=False,
+                vars=["param"],
+            )
 
-        with caplog.at_level(logging.WARNING):
-            result = func.expression(context)
-            f = function([], result)
-            result_val = f()
-
-        # Should log warning about parameter index exceeding lists
-        assert (
-            "Parameter index 1 exceeds variation lists for function test_interp"
-            in caplog.text
-        )
-
-        # Result should still be computed (only first parameter processed)
-        # Expected: 10.0 + 0.5 * (12.0 - 10.0) = 11.0
-        np.testing.assert_allclose(result_val, 11.0, rtol=1e-10)
-
-    def test_interpolation_function_unknown_code_raises_exception(self):
-        """Test InterpolationFunction raises exception for unknown interpolation codes."""
-        # Test invalid code during initialization
+    def test_interpolation_function_rejects_unknown_structured_form(self):
         with pytest.raises(
-            ValidationError,
-            match=r"Unknown interpolation code 99 in function 'bad_interp'. Valid codes are 0, 1, 2, 3, 4, 5 or 6.",
+            ValidationError, match="Unsupported interpolation descriptor"
         ):
             InterpolationFunction(
                 name="bad_interp",
                 high=["high_var"],
                 low=["low_var"],
                 nom="nominal",
-                interpolationCodes=[99],  # Invalid code
+                interpolations=[{"type": "add", "in": "exp", "out": None}],
                 positiveDefinite=False,
                 vars=["param"],
-            )
-
-        # Test mix of valid and invalid codes
-        with pytest.raises(
-            ValidationError,
-            match=r"Unknown interpolation code -1 in function 'bad_interp2'. Valid codes are 0, 1, 2, 3, 4, 5 or 6.",
-        ):
-            InterpolationFunction(
-                name="bad_interp2",
-                high=["high1", "high2"],
-                low=["low1", "low2"],
-                nom="nominal",
-                interpolationCodes=[0, -1],  # Mix of valid and invalid
-                positiveDefinite=False,
-                vars=["param1", "param2"],
             )
 
     def test_interpolation_function_integration(self):
@@ -860,7 +861,7 @@ class TestInterpolationFunction:
                 "high": ["high_variation"],
                 "low": ["low_variation"],
                 "nom": "nominal_shape",
-                "interpolationCodes": [0],
+                "interpolations": [_INTERPOLATION_BY_ROOT_CODE[0]],
                 "positiveDefinite": False,
                 "vars": ["shape_param"],
             }
@@ -874,7 +875,7 @@ class TestInterpolationFunction:
         assert interp_func.nom == "nominal_shape"
         assert interp_func.high == ["high_variation"]
         assert interp_func.low == ["low_variation"]
-        assert interp_func.interpolationCodes == [0]
+        assert interp_func.interpolations[0].key == ("add", "poly1", None)
         # parameters is now a dict containing all dependencies
         expected_params = {
             "high_variation",
@@ -1256,6 +1257,11 @@ class TestRegisteredFunctions:
                 "interpolation", InterpolationFunction, id="interpolation_function"
             ),
             pytest.param(
+                "interpolation0d",
+                Interpolation0DFunction,
+                id="interpolation0d_function",
+            ),
+            pytest.param(
                 "CMS::process_normalization",
                 ProcessNormalizationFunction,
                 id="process_normalization_function",
@@ -1320,7 +1326,7 @@ class TestFunctions:
                 "high": ["h1"],
                 "low": ["l1"],
                 "nom": "n1",
-                "interpolationCodes": [0],
+                "interpolations": [_INTERPOLATION_BY_ROOT_CODE[0]],
                 "positiveDefinite": True,
                 "vars": ["x"],
             }
@@ -1346,7 +1352,7 @@ class TestFunctions:
                 "high": [],
                 "low": [],
                 "nom": "nominal_param",
-                "interpolationCodes": [],
+                "interpolations": [],
                 "positiveDefinite": False,
                 "vars": [],
             },
@@ -1439,15 +1445,22 @@ class TestFunctionIntegration:
         # Interpolation function depends on vars
         interp_func = InterpolationFunction(
             name="interp",
-            high=[],
-            low=[],
+            high=["high1", "high2"],
+            low=["low1", "low2"],
             nom="nominal",
-            interpolationCodes=[],
+            interpolations=[_INTERPOLATION_BY_ROOT_CODE[0]],
             positiveDefinite=True,
             vars=["param1", "param2"],
         )
-        # InterpolationFunction with empty high/low lists but vars should depend on nominal + vars
-        assert set(interp_func.parameters) == {"nominal", "param1", "param2"}
+        assert set(interp_func.parameters) == {
+            "nominal",
+            "param1",
+            "param2",
+            "high1",
+            "high2",
+            "low1",
+            "low2",
+        }
 
     def test_function_referencing_function_in_workspace(self):
         """Test function referencing another function in workspace (issue #41).
@@ -1967,7 +1980,7 @@ class TestInterpolationFunctionCodes:
             high=["hi"],
             low=["lo"],
             nom="nom",
-            interpolationCodes=[interp_code],
+            interpolations=[_INTERPOLATION_BY_ROOT_CODE[interp_code]],
             positiveDefinite=False,
             vars=["theta"],
         )

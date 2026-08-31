@@ -187,7 +187,11 @@ class BernsteinPolyDist(Distribution):
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of Bernstein polynomial PDF.
         """
-        x = context[self._parameters["x"]]
+        x_name = self._parameters["x"]
+        x = context[x_name]
+        if x_name in context.observables:
+            lower, upper = context.observables[x_name]
+            x = (x - lower) / (upper - lower)
         n = len(self.coefficients) - 1  # polynomial degree
 
         result = pt.constant(0.0)

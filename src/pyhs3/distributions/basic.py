@@ -99,6 +99,19 @@ class GaussianDist(Distribution):
             ),
         )
 
+    def normalization_expression(
+        self, context: Context, observable_name: str
+    ) -> TensorVar | None:
+        """Return the exact Gaussian CDF antiderivative for its observable."""
+        if self._parameters["x"] != observable_name:
+            return None
+        x = context[self._parameters["x"]]
+        mean = context[self._parameters["mean"]]
+        sigma = context[self._parameters["sigma"]]
+        sqrt_two = pt.constant(math.sqrt(2.0), dtype=x.dtype)
+        half = pt.constant(0.5, dtype=x.dtype)
+        return cast(TensorVar, half * pt.erf((x - mean) / (sigma * sqrt_two)))
+
 
 class UniformDist(Distribution):
     r"""

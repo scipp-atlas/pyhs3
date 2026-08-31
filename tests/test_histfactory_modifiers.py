@@ -30,6 +30,31 @@ from pyhs3.distributions.histfactory.modifiers import (
     StatErrorModifier,
 )
 
+# Canonical structured descriptors emitted by current ROOT.  Keep these close
+# to the modifier fixtures so tests exercise the serialized 0.3 interface while
+# retaining the same low-level interpolation algorithms and numeric assertions.
+ADD_LINEAR = {"type": "add", "in": "poly1", "out": None}
+MULT_EXPONENTIAL = {"type": "mult", "in": "exp", "out": None}
+MULT_POLY6_EXPONENTIAL = {"type": "mult", "in": "poly6", "out": "exp"}
+
+
+def _named_constraint_context(
+    parameter: str,
+    value: float,
+    *,
+    name: str = "constraint",
+) -> Context:
+    """Build a bare context containing a named Gaussian constraint expression.
+
+    Workspace-backed tests resolve the referenced distribution through the
+    dependency graph.  Direct modifier tests do not have a workspace, so they
+    provide the already-built expression under the referenced distribution
+    name, which is the direct ``SingleParamConstraint`` contract.
+    """
+    parameter_value = pt.constant(value, dtype="float64")
+    probability = pt.exp(-0.5 * parameter_value**2) / math.sqrt(2.0 * math.pi)
+    return Context({parameter: parameter_value, name: probability})
+
 
 class TestNormFactorModifier:
     """Test NormFactorModifier functionality."""
@@ -68,9 +93,13 @@ class TestNormSysModifier:
 
     def test_normsys_creation(self):
         """Test creating a normsys modifier."""
-        data = NormSysData(hi=1.1, lo=0.9, interpolation="code1")
+        data = NormSysData(hi=1.1, lo=0.9)
         modifier = NormSysModifier(
-            name="lumi", parameter="alpha_lumi", data=data, constraint="Gauss"
+            name="lumi",
+            parameter="alpha_lumi",
+            data=data,
+            interpolation=MULT_EXPONENTIAL,
+            constraint="lumi_constraint",
         )
 
         assert modifier.name == "lumi"
@@ -78,13 +107,18 @@ class TestNormSysModifier:
         assert modifier.type == "normsys"
         assert modifier.is_multiplicative
         assert not modifier.is_additive
-        assert modifier.constraint == "Gauss"
+        assert modifier.constraint == "lumi_constraint"
         assert modifier.auxdata == 0.0
 
     def test_normsys_apply_positive_alpha(self):
         """Test applying normsys modifier with positive alpha."""
-        data = NormSysData(hi=1.2, lo=0.8, interpolation="code1")
-        modifier = NormSysModifier(name="lumi", parameter="alpha_lumi", data=data)
+        data = NormSysData(hi=1.2, lo=0.8)
+        modifier = NormSysModifier(
+            name="lumi",
+            parameter="alpha_lumi",
+            data=data,
+            interpolation=MULT_EXPONENTIAL,
+        )
 
         # Set up context and rates
         context = Context({"alpha_lumi": pt.constant(1.0)})
@@ -99,8 +133,13 @@ class TestNormSysModifier:
 
     def test_normsys_apply_negative_alpha(self):
         """Test applying normsys modifier with negative alpha."""
-        data = NormSysData(hi=1.2, lo=0.8, interpolation="code1")
-        modifier = NormSysModifier(name="lumi", parameter="alpha_lumi", data=data)
+        data = NormSysData(hi=1.2, lo=0.8)
+        modifier = NormSysModifier(
+            name="lumi",
+            parameter="alpha_lumi",
+            data=data,
+            interpolation=MULT_EXPONENTIAL,
+        )
 
         # Set up context and rates
         context = Context({"alpha_lumi": pt.constant(-1.0)})
@@ -113,14 +152,18 @@ class TestNormSysModifier:
         expected = np.array([80.0, 160.0])  # 100*0.8, 200*0.8
         np.testing.assert_allclose(result_val, expected, rtol=1e-6)
 
-    def test_normsys_make_constraint_gauss(self):
-        """Test creating Gaussian constraint."""
+    def test_normsys_make_named_constraint(self):
+        """Test returning a referenced constraint distribution expression."""
         data = NormSysData(hi=1.1, lo=0.9)
         modifier = NormSysModifier(
-            name="lumi", parameter="alpha_lumi", data=data, constraint="Gauss"
+            name="lumi",
+            parameter="alpha_lumi",
+            data=data,
+            interpolation=MULT_POLY6_EXPONENTIAL,
+            constraint="lumi_constraint",
         )
 
-        context = Context({"alpha_lumi": pt.constant(0.0)})
+        context = _named_constraint_context("alpha_lumi", 0.0, name="lumi_constraint")
         sample_data = SampleData(contents=[10.0, 20.0], errors=[1.0, 2.0])
 
         constraint = modifier.make_constraint(context, sample_data)
@@ -130,41 +173,45 @@ class TestNormSysModifier:
         assert isinstance(constraint_val, (float, np.floating, np.ndarray))
         assert constraint_val > 0
 
-    def test_normsys_make_constraint_poisson(self):
-        """Test creating Poisson constraint."""
+    def test_normsys_named_constraint_is_not_a_family_selector(self):
+        """The constraint string is an arbitrary distribution reference."""
         data = NormSysData(hi=1.1, lo=0.9)
         modifier = NormSysModifier(
-            name="lumi", parameter="alpha_lumi", data=data, constraint="Poisson"
+            name="lumi",
+            parameter="alpha_lumi",
+            data=data,
+            interpolation=MULT_POLY6_EXPONENTIAL,
+            constraint="my_poisson_measurement",
         )
 
-        # Create context and sample data
-        context = Context({"alpha_lumi": pt.constant(1.0)})
+        expected = pt.constant(0.37, dtype="float64")
+        context = Context(
+            {"alpha_lumi": pt.constant(1.0), "my_poisson_measurement": expected}
+        )
         sample_data = SampleData(contents=[10.0, 20.0], errors=[1.0, 2.0])
 
         # Test constraint creation
         constraint = modifier.make_constraint(context, sample_data)
         constraint_val = constraint.eval()
 
-        # Should produce a positive constraint value
-        assert constraint_val > 0
+        assert constraint_val == pytest.approx(0.37)
 
-    def test_normsys_make_constraint_lognormal(self):
-        """Test creating LogNormal constraint."""
+    def test_normsys_make_constraint_requires_named_expression(self):
+        """A reference is looked up as-is instead of selecting a built-in family."""
         data = NormSysData(hi=1.1, lo=0.9)
         modifier = NormSysModifier(
-            name="lumi", parameter="alpha_lumi", data=data, constraint="LogNormal"
+            name="lumi",
+            parameter="alpha_lumi",
+            data=data,
+            interpolation=MULT_POLY6_EXPONENTIAL,
+            constraint="missing_constraint",
         )
 
-        # Create context and sample data
         context = Context({"alpha_lumi": pt.constant(1.0)})
         sample_data = SampleData(contents=[10.0, 20.0], errors=[1.0, 2.0])
 
-        # Test constraint creation
-        constraint = modifier.make_constraint(context, sample_data)
-        constraint_val = constraint.eval()
-
-        # Should produce a positive constraint value
-        assert constraint_val > 0
+        with pytest.raises(KeyError):
+            modifier.make_constraint(context, sample_data)
 
 
 class TestHistoSysModifier:
@@ -174,10 +221,13 @@ class TestHistoSysModifier:
         """Test creating a histosys modifier."""
         hi_contents = HistoSysDataContents(contents=[15.0, 25.0])
         lo_contents = HistoSysDataContents(contents=[5.0, 15.0])
-        data = HistoSysData(hi=hi_contents, lo=lo_contents, interpolation="code0")
+        data = HistoSysData(hi=hi_contents, lo=lo_contents)
 
         modifier = HistoSysModifier(
-            name="shape_unc", parameter="alpha_shape", data=data
+            name="shape_unc",
+            parameter="alpha_shape",
+            data=data,
+            interpolation=ADD_LINEAR,
         )
 
         assert modifier.name == "shape_unc"
@@ -202,10 +252,13 @@ class TestHistoSysModifier:
         """Test applying histosys modifier with positive alpha."""
         hi_contents = HistoSysDataContents(contents=[15.0, 25.0])
         lo_contents = HistoSysDataContents(contents=[5.0, 15.0])
-        data = HistoSysData(hi=hi_contents, lo=lo_contents, interpolation="code0")
+        data = HistoSysData(hi=hi_contents, lo=lo_contents)
 
         modifier = HistoSysModifier(
-            name="shape_unc", parameter="alpha_shape", data=data
+            name="shape_unc",
+            parameter="alpha_shape",
+            data=data,
+            interpolation=ADD_LINEAR,
         )
 
         # Set up context and rates
@@ -223,10 +276,13 @@ class TestHistoSysModifier:
         """Test applying histosys modifier with negative alpha."""
         hi_contents = HistoSysDataContents(contents=[15.0, 25.0])
         lo_contents = HistoSysDataContents(contents=[5.0, 15.0])
-        data = HistoSysData(hi=hi_contents, lo=lo_contents, interpolation="code0")
+        data = HistoSysData(hi=hi_contents, lo=lo_contents)
 
         modifier = HistoSysModifier(
-            name="shape_unc", parameter="alpha_shape", data=data
+            name="shape_unc",
+            parameter="alpha_shape",
+            data=data,
+            interpolation=ADD_LINEAR,
         )
 
         # Set up context and rates
@@ -240,18 +296,21 @@ class TestHistoSysModifier:
         expected = np.array([5.0, 15.0])  # Should equal lo values
         np.testing.assert_allclose(result_val, expected)
 
-    def test_histosys_make_constraint_poisson(self):
-        """Test creating Poisson constraint for histosys."""
+    def test_histosys_make_named_constraint(self):
+        """Test returning a referenced constraint expression for histosys."""
         hi_contents = HistoSysDataContents(contents=[15.0, 25.0])
         lo_contents = HistoSysDataContents(contents=[5.0, 15.0])
-        data = HistoSysData(hi=hi_contents, lo=lo_contents, interpolation="code0")
+        data = HistoSysData(hi=hi_contents, lo=lo_contents)
 
         modifier = HistoSysModifier(
-            name="shape_unc", parameter="alpha_shape", data=data, constraint="Poisson"
+            name="shape_unc",
+            parameter="alpha_shape",
+            data=data,
+            interpolation=ADD_LINEAR,
+            constraint="shape_constraint",
         )
 
-        # Create context and sample data
-        context = Context({"alpha_shape": pt.constant(1.0)})
+        context = _named_constraint_context("alpha_shape", 1.0, name="shape_constraint")
         sample_data = SampleData(contents=[10.0, 20.0], errors=[1.0, 2.0])
 
         # Test constraint creation
@@ -261,18 +320,26 @@ class TestHistoSysModifier:
         # Should produce a positive constraint value
         assert constraint_val > 0
 
-    def test_histosys_make_constraint_lognormal(self):
-        """Test creating LogNormal constraint for histosys."""
+    def test_histosys_named_constraint_preserves_reference(self):
+        """Histosys preserves an arbitrary distribution reference."""
         hi_contents = HistoSysDataContents(contents=[15.0, 25.0])
         lo_contents = HistoSysDataContents(contents=[5.0, 15.0])
-        data = HistoSysData(hi=hi_contents, lo=lo_contents, interpolation="code0")
+        data = HistoSysData(hi=hi_contents, lo=lo_contents)
 
         modifier = HistoSysModifier(
-            name="shape_unc", parameter="alpha_shape", data=data, constraint="LogNormal"
+            name="shape_unc",
+            parameter="alpha_shape",
+            data=data,
+            interpolation=ADD_LINEAR,
+            constraint="external_shape_measurement",
         )
 
-        # Create context and sample data
-        context = Context({"alpha_shape": pt.constant(1.0)})
+        context = Context(
+            {
+                "alpha_shape": pt.constant(1.0),
+                "external_shape_measurement": pt.constant(0.25),
+            }
+        )
         sample_data = SampleData(contents=[10.0, 20.0], errors=[1.0, 2.0])
 
         # Test constraint creation
@@ -280,7 +347,7 @@ class TestHistoSysModifier:
         constraint_val = constraint.eval()
 
         # Should produce a positive constraint value
-        assert constraint_val > 0
+        assert constraint_val == pytest.approx(0.25)
 
 
 class TestShapeFactorModifier:
@@ -575,89 +642,65 @@ class TestStatErrorModifier:
 
 
 class TestModifierConstraintTypes:
-    """Test different constraint types for modifiers."""
+    """Named constraint references are independent of distribution family."""
 
-    def test_normsys_poisson_constraint(self):
-        """Test normsys with Poisson constraint."""
-        data = NormSysData(hi=1.1, lo=0.9)
-        modifier = NormSysModifier(
-            name="lumi", parameter="alpha_lumi", data=data, constraint="Poisson"
+    @pytest.mark.parametrize(
+        ("modifier_cls", "data", "interpolation"),
+        [
+            (
+                NormSysModifier,
+                NormSysData(hi=1.1, lo=0.9),
+                MULT_POLY6_EXPONENTIAL,
+            ),
+            (
+                HistoSysModifier,
+                HistoSysData(
+                    hi=HistoSysDataContents(contents=[15.0]),
+                    lo=HistoSysDataContents(contents=[5.0]),
+                ),
+                ADD_LINEAR,
+            ),
+        ],
+    )
+    def test_constraint_reference_returns_named_expression(
+        self, modifier_cls, data, interpolation
+    ):
+        """Both modifier classes return the graph expression stored by name."""
+        parameter = "alpha"
+        reference = "external_measurement"
+        modifier = modifier_cls(
+            name="systematic",
+            parameter=parameter,
+            data=data,
+            interpolation=interpolation,
+            constraint=reference,
         )
-
-        context = Context({"alpha_lumi": pt.constant(1.0)})
+        expected = pt.constant(0.42, dtype="float64")
+        context = Context({parameter: pt.constant(0.0), reference: expected})
         sample_data = SampleData(contents=[10.0], errors=[1.0])
 
-        constraint = modifier.make_constraint(context, sample_data)
-        constraint_val = constraint.eval()
+        constraint_value = float(modifier.make_constraint(context, sample_data).eval())
 
-        assert isinstance(constraint_val, (float, np.floating, np.ndarray))
-        assert constraint_val > 0
+        assert constraint_value == pytest.approx(0.42)
+        assert modifier.dependencies == {parameter, reference}
 
-    def test_normsys_lognormal_constraint(self):
-        """Test normsys with LogNormal constraint."""
-        data = NormSysData(hi=1.1, lo=0.9)
-        modifier = NormSysModifier(
-            name="lumi", parameter="alpha_lumi", data=data, constraint="LogNormal"
-        )
-
-        context = Context(
-            {"alpha_lumi": pt.constant(1.0)}
-        )  # Use positive value for LogNormal
-        sample_data = SampleData(contents=[10.0], errors=[1.0])
-
-        constraint = modifier.make_constraint(context, sample_data)
-        constraint_val = constraint.eval()
-
-        assert isinstance(constraint_val, (float, np.floating, np.ndarray))
-        # For LogNormal, may be very small but should be finite
-        assert np.isfinite(constraint_val)
-
-    def test_histosys_different_constraints(self):
-        """Test histosys with different constraint types."""
+    def test_legacy_family_token_is_an_ordinary_missing_name(self):
+        """Legacy family strings no longer synthesize a constraint distribution."""
         hi_contents = HistoSysDataContents(contents=[15.0])
         lo_contents = HistoSysDataContents(contents=[5.0])
         data = HistoSysData(hi=hi_contents, lo=lo_contents)
-
-        # Test Gaussian constraint (most common case)
-        modifier_gauss = HistoSysModifier(
-            name="shape_unc", parameter="alpha_shape", data=data, constraint="Gauss"
+        modifier = HistoSysModifier(
+            name="shape_unc",
+            parameter="alpha_shape",
+            data=data,
+            interpolation=ADD_LINEAR,
+            constraint="Gauss",
         )
-
         context = Context({"alpha_shape": pt.constant(0.0)})
         sample_data = SampleData(contents=[10.0], errors=[1.0])
 
-        constraint = modifier_gauss.make_constraint(context, sample_data)
-        constraint_val = constraint.eval()
-
-        assert isinstance(constraint_val, (float, np.floating, np.ndarray))
-        assert constraint_val > 0
-
-        # Test Poisson constraint (should work but may be very small for x=0)
-        modifier_poisson = HistoSysModifier(
-            name="shape_unc", parameter="alpha_shape", data=data, constraint="Poisson"
-        )
-
-        constraint_poisson = modifier_poisson.make_constraint(context, sample_data)
-        constraint_val_poisson = constraint_poisson.eval()
-
-        assert isinstance(constraint_val_poisson, (float, np.floating, np.ndarray))
-        # Poisson(x=1.0|mean=1.0) gives positive value
-        assert constraint_val_poisson >= 0
-
-        # Test LogNormal constraint with positive parameter (skip for now due to implementation issues)
-        # modifier_lognormal = HistoSysModifier(
-        #     name="shape_unc",
-        #     parameter="alpha_shape",
-        #     data=data,
-        #     constraint="LogNormal"
-        # )
-        #
-        # context_positive = Context({"alpha_shape": pt.constant(1.0)})
-        # constraint_lognormal = modifier_lognormal.make_constraint(context_positive, sample_data)
-        # constraint_val_lognormal = constraint_lognormal.eval()
-        #
-        # assert isinstance(constraint_val_lognormal, (float, np.floating, np.ndarray))
-        # assert np.isfinite(constraint_val_lognormal)
+        with pytest.raises(KeyError):
+            modifier.make_constraint(context, sample_data)
 
 
 class TestModifierEdgeCases:
@@ -696,14 +739,20 @@ class TestModifierEdgeCases:
 
     def test_interpolation_method_variations(self):
         """Test different interpolation methods for normsys."""
-        data_code1 = NormSysData(hi=1.2, lo=0.8, interpolation="code1")
-        data_code4 = NormSysData(hi=1.2, lo=0.8, interpolation="code4")
+        data_code1 = NormSysData(hi=1.2, lo=0.8)
+        data_code4 = NormSysData(hi=1.2, lo=0.8)
 
         modifier_code1 = NormSysModifier(
-            name="test1", parameter="alpha", data=data_code1
+            name="test1",
+            parameter="alpha",
+            data=data_code1,
+            interpolation=MULT_EXPONENTIAL,
         )
         modifier_code4 = NormSysModifier(
-            name="test4", parameter="alpha", data=data_code4
+            name="test4",
+            parameter="alpha",
+            data=data_code4,
+            interpolation=MULT_POLY6_EXPONENTIAL,
         )
 
         context = Context({"alpha": pt.constant(0.5)})
@@ -740,31 +789,40 @@ class TestModifierEdgeCases:
 class TestLogConstraintParity:
     """log_constraint() == log(make_constraint()) at ordinary parameter values."""
 
-    @pytest.mark.parametrize("constraint_type", ["Gauss", "Poisson", "LogNormal"])
-    def test_normsys(self, constraint_type):
+    @pytest.mark.parametrize(
+        "constraint_name", ["gaussian_measurement", "count_measurement", "calibration"]
+    )
+    def test_normsys(self, constraint_name):
         data = NormSysData(hi=1.1, lo=0.9)
         modifier = NormSysModifier(
-            name="lumi", parameter="alpha_lumi", data=data, constraint=constraint_type
+            name="lumi",
+            parameter="alpha_lumi",
+            data=data,
+            interpolation=MULT_POLY6_EXPONENTIAL,
+            constraint=constraint_name,
         )
-        context = Context({"alpha_lumi": pt.constant(1.0, dtype="float64")})
+        context = _named_constraint_context("alpha_lumi", 1.0, name=constraint_name)
         sample_data = SampleData(contents=[10.0, 20.0], errors=[1.0, 2.0])
 
         prob = float(modifier.make_constraint(context, sample_data).eval())
         log_prob = float(modifier.log_constraint(context, sample_data).eval())
         assert log_prob == pytest.approx(math.log(prob), rel=1e-10)
 
-    @pytest.mark.parametrize("constraint_type", ["Gauss", "Poisson", "LogNormal"])
-    def test_histosys(self, constraint_type):
+    @pytest.mark.parametrize(
+        "constraint_name", ["gaussian_measurement", "count_measurement", "calibration"]
+    )
+    def test_histosys(self, constraint_name):
         hi_contents = HistoSysDataContents(contents=[15.0, 25.0])
         lo_contents = HistoSysDataContents(contents=[5.0, 15.0])
-        data = HistoSysData(hi=hi_contents, lo=lo_contents, interpolation="code0")
+        data = HistoSysData(hi=hi_contents, lo=lo_contents)
         modifier = HistoSysModifier(
             name="shape_unc",
             parameter="alpha_shape",
             data=data,
-            constraint=constraint_type,
+            interpolation=ADD_LINEAR,
+            constraint=constraint_name,
         )
-        context = Context({"alpha_shape": pt.constant(1.0, dtype="float64")})
+        context = _named_constraint_context("alpha_shape", 1.0, name=constraint_name)
         sample_data = SampleData(contents=[10.0, 20.0], errors=[1.0, 2.0])
 
         prob = float(modifier.make_constraint(context, sample_data).eval())
@@ -866,9 +924,13 @@ class TestLogConstraintUnderflow:
         scipy.stats.norm.logpdf(alpha) (the constraint is N(0 | alpha, 1))."""
         data = NormSysData(hi=1.1, lo=0.9)
         modifier = NormSysModifier(
-            name="lumi", parameter="alpha_lumi", data=data, constraint="Gauss"
+            name="lumi",
+            parameter="alpha_lumi",
+            data=data,
+            interpolation=MULT_POLY6_EXPONENTIAL,
+            constraint="lumi_constraint",
         )
-        context = Context({"alpha_lumi": pt.constant(40.0, dtype="float64")})
+        context = _named_constraint_context("alpha_lumi", 40.0, name="lumi_constraint")
         sample_data = SampleData(contents=[10.0, 20.0], errors=[1.0, 2.0])
 
         prob = float(modifier.make_constraint(context, sample_data).eval())

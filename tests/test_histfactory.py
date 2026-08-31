@@ -38,6 +38,15 @@ from pyhs3.distributions.histfactory.modifiers import (
     ShapeSysModifier,
     StatErrorModifier,
 )
+from pyhs3.typing.aliases import TensorVar
+
+ADD_POLY6_LINEAR = {"type": "add", "in": "poly6", "out": "poly1"}
+MULT_POLY6_EXPONENTIAL = {"type": "mult", "in": "poly6", "out": "exp"}
+
+
+def _gaussian_constraint_expression(parameter: TensorVar) -> TensorVar:
+    """Return the standard-normal expression used by direct channel fixtures."""
+    return pt.exp(-0.5 * parameter**2) / math.sqrt(2.0 * math.pi)
 
 
 class TestHistFactoryDist:
@@ -97,7 +106,8 @@ class TestHistFactoryDist:
                         "name": "bkg_norm_sys",
                         "type": "normsys",
                         "parameter": "bkg_norm_sys",
-                        "constraint": "Gauss",
+                        "interpolation": MULT_POLY6_EXPONENTIAL,
+                        "constraint": "bkg_norm_constraint",
                         "data": {"hi": 1.1, "lo": 0.9},
                     }
                 ],
@@ -110,7 +120,7 @@ class TestHistFactoryDist:
         assert dist.name == "test_channel"
         modifier = dist.samples[0].modifiers[0]
         assert modifier.type == "normsys"
-        assert modifier.constraint == "Gauss"
+        assert modifier.constraint == "bkg_norm_constraint"
         assert modifier.data.hi == 1.1
         assert modifier.data.lo == 0.9
 
@@ -126,7 +136,8 @@ class TestHistFactoryDist:
                         "name": "signal_shape_sys",
                         "type": "histosys",
                         "parameter": "signal_shape_sys",
-                        "constraint": "Gauss",
+                        "interpolation": ADD_POLY6_LINEAR,
+                        "constraint": "signal_shape_constraint",
                         "data": {
                             "hi": {"contents": [0.5, 0.3]},
                             "lo": {"contents": [-0.4, -0.2]},
@@ -142,7 +153,7 @@ class TestHistFactoryDist:
         assert dist.name == "test_channel"
         modifier = dist.samples[0].modifiers[0]
         assert modifier.type == "histosys"
-        assert modifier.constraint == "Gauss"
+        assert modifier.constraint == "signal_shape_constraint"
         assert len(modifier.data.hi.contents) == 2
         assert len(modifier.data.lo.contents) == 2
 
@@ -163,7 +174,8 @@ class TestHistFactoryDist:
                         "name": "lumi_sys",
                         "type": "normsys",
                         "parameter": "lumi_sys",
-                        "constraint": "Gauss",
+                        "interpolation": MULT_POLY6_EXPONENTIAL,
+                        "constraint": "lumi_constraint",
                         "data": {"hi": 1.05, "lo": 0.95},
                     },
                 ],
@@ -201,7 +213,8 @@ class TestHistFactoryDist:
                         "name": "bkg_norm_sys",
                         "type": "normsys",
                         "parameter": "bkg_norm_sys",
-                        "constraint": "Gauss",
+                        "interpolation": MULT_POLY6_EXPONENTIAL,
+                        "constraint": "bkg_norm_constraint",
                         "data": {"hi": 1.1, "lo": 0.9},
                     }
                 ],
@@ -389,7 +402,8 @@ class TestPyhfPrecisionValidation:
                         "name": "bkg_norm",
                         "type": "normsys",
                         "parameter": "bkg_norm",
-                        "constraint": "Gauss",
+                        "interpolation": MULT_POLY6_EXPONENTIAL,
+                        "constraint": "bkg_norm_constraint",
                         "data": {"hi": 1.1, "lo": 0.9},
                     }
                 ],
@@ -407,6 +421,7 @@ class TestPyhfPrecisionValidation:
             {
                 "mu": mu_var,
                 "bkg_norm": bkg_norm_var,
+                "bkg_norm_constraint": _gaussian_constraint_expression(bkg_norm_var),
                 "singlechannel_observed": observed_data_var,
             }
         )
@@ -492,7 +507,8 @@ class TestPyhfPrecisionValidation:
                         "name": "alpha",
                         "type": "histosys",
                         "parameter": "alpha",
-                        "constraint": "Gauss",
+                        "interpolation": ADD_POLY6_LINEAR,
+                        "constraint": "alpha_constraint",
                         "data": {
                             "hi": {"contents": [25.0]},
                             "lo": {"contents": [15.0]},
@@ -513,6 +529,7 @@ class TestPyhfPrecisionValidation:
             {
                 "mu": mu_var,
                 "alpha": alpha_var,
+                "alpha_constraint": _gaussian_constraint_expression(alpha_var),
                 "singlechannel_observed": observed_data_var,
             }
         )
@@ -882,7 +899,8 @@ class TestPyhfPrecisionValidation:
                         "name": "bkg_norm_sys",
                         "type": "normsys",
                         "parameter": "bkg_norm_sys",
-                        "constraint": "Gauss",
+                        "interpolation": MULT_POLY6_EXPONENTIAL,
+                        "constraint": "bkg_norm_constraint",
                         "data": {"hi": 1.1, "lo": 0.9},
                     }
                 ],
@@ -896,7 +914,11 @@ class TestPyhfPrecisionValidation:
         observed_data = pt.dvector("observed_data")
 
         context = Context(
-            {"bkg_norm_sys": bkg_norm_sys, "test_channel_observed": observed_data}
+            {
+                "bkg_norm_sys": bkg_norm_sys,
+                "bkg_norm_constraint": _gaussian_constraint_expression(bkg_norm_sys),
+                "test_channel_observed": observed_data,
+            }
         )
 
         # Get the expression
@@ -1176,7 +1198,8 @@ class TestHistFactoryAdditiveModifierPath:
                         "name": "shape_sys",
                         "type": "histosys",
                         "parameter": "alpha_shape",
-                        "constraint": "Gauss",
+                        "interpolation": ADD_POLY6_LINEAR,
+                        "constraint": "shape_constraint",
                         "data": {
                             "hi": {"contents": [55.0, 45.0]},
                             "lo": {"contents": [45.0, 55.0]},
@@ -1201,6 +1224,7 @@ class TestHistFactoryAdditiveModifierPath:
             {
                 "test_channel_observed": observed_data,
                 "alpha_shape": pt.constant(0.5),
+                "shape_constraint": _gaussian_constraint_expression(pt.constant(0.5)),
                 modifier_graph_name: additive_variation,  # Pre-computed result in context
             }
         )
@@ -1229,6 +1253,7 @@ class TestModifierExpressions:
             name="test_normsys",
             parameter="alpha_test",
             data={"hi": 1.1, "lo": 0.9},
+            interpolation=MULT_POLY6_EXPONENTIAL,
         )
 
         # Create context with parameter
@@ -1252,6 +1277,7 @@ class TestModifierExpressions:
         modifier = HistoSysModifier(
             name="test_histosys",
             parameter="alpha_shape",
+            interpolation=ADD_POLY6_LINEAR,
             data={
                 "hi": {"contents": [6.0, 4.0]},
                 "lo": {"contents": [4.0, 6.0]},
@@ -1361,7 +1387,10 @@ class TestModifierExpressions:
     def test_normsys_apply_equals_rates_times_expression(self):
         """apply(ctx, rates) must equal rates * expression(ctx) for NormSysModifier."""
         modifier = NormSysModifier(
-            name="alpha", parameter="alpha", data={"hi": 1.2, "lo": 0.8}
+            name="alpha",
+            parameter="alpha",
+            data={"hi": 1.2, "lo": 0.8},
+            interpolation=MULT_POLY6_EXPONENTIAL,
         )
 
         alpha_var = pt.dscalar("alpha")
@@ -1428,10 +1457,10 @@ class TestModifierExpressions:
 
 
 class TestExtendedLikelihoodConstraintDedup:
-    """Test that extended_likelihood dedupes constraints by parameter name."""
+    """Test that extended_likelihood dedupes named constraint references."""
 
     def test_shared_normsys_parameter_emits_one_constraint(self):
-        """Two normsys modifiers on different samples sharing one parameter
+        """Two normsys modifiers on different samples sharing one reference
         must emit exactly ONE Gaussian factor, not one per modifier.
 
         At alpha=1 the ratio extended_likelihood(alpha=1) / extended_likelihood(alpha=0)
@@ -1447,8 +1476,9 @@ class TestExtendedLikelihoodConstraintDedup:
                         "name": "lumi",
                         "type": "normsys",
                         "parameter": "alpha_lumi",
+                        "interpolation": MULT_POLY6_EXPONENTIAL,
                         "data": {"hi": 1.1, "lo": 0.9},
-                        "constraint": "Gauss",
+                        "constraint": "lumi_constraint",
                     }
                 ],
             },
@@ -1460,8 +1490,9 @@ class TestExtendedLikelihoodConstraintDedup:
                         "name": "lumi",
                         "type": "normsys",
                         "parameter": "alpha_lumi",
+                        "interpolation": MULT_POLY6_EXPONENTIAL,
                         "data": {"hi": 1.1, "lo": 0.9},
-                        "constraint": "Gauss",
+                        "constraint": "lumi_constraint",
                     }
                 ],
             },
@@ -1471,7 +1502,13 @@ class TestExtendedLikelihoodConstraintDedup:
 
         alpha = pt.dscalar("alpha_lumi")
         obs = pt.dvector("ch_observed")
-        context = Context({"alpha_lumi": alpha, "ch_observed": obs})
+        context = Context(
+            {
+                "alpha_lumi": alpha,
+                "lumi_constraint": _gaussian_constraint_expression(alpha),
+                "ch_observed": obs,
+            }
+        )
 
         el_expr = channel.extended_likelihood(context)
         f = function([alpha], el_expr)
@@ -1783,7 +1820,8 @@ class TestHistoSysNominalRates:
                     "name": "alpha",
                     "type": "histosys",
                     "parameter": "alpha",
-                    "constraint": "Gauss",
+                    "interpolation": ADD_POLY6_LINEAR,
+                    "constraint": "alpha_constraint",
                     "data": {
                         "hi": {"contents": [15.0, 25.0]},
                         "lo": {"contents": [5.0, 15.0]},
@@ -1823,7 +1861,8 @@ class TestHistoSysNominalRates:
                         "name": "alpha1",
                         "type": "histosys",
                         "parameter": "alpha1",
-                        "constraint": "Gauss",
+                        "interpolation": ADD_POLY6_LINEAR,
+                        "constraint": "alpha1_constraint",
                         "data": {
                             "hi": {"contents": [15.0]},
                             "lo": {"contents": [5.0]},
@@ -1833,7 +1872,8 @@ class TestHistoSysNominalRates:
                         "name": "alpha2",
                         "type": "histosys",
                         "parameter": "alpha2",
-                        "constraint": "Gauss",
+                        "interpolation": ADD_POLY6_LINEAR,
+                        "constraint": "alpha2_constraint",
                         "data": {
                             "hi": {"contents": [12.0]},
                             "lo": {"contents": [8.0]},
@@ -1865,7 +1905,8 @@ class TestHistoSysNominalRates:
             "name": "alpha",
             "type": "histosys",
             "parameter": "alpha",
-            "constraint": "Gauss",
+            "interpolation": ADD_POLY6_LINEAR,
+            "constraint": "alpha_constraint",
             "data": {
                 "hi": {"contents": [15.0, 25.0]},
                 "lo": {"contents": [5.0, 15.0]},
@@ -1876,7 +1917,8 @@ class TestHistoSysNominalRates:
             "name": "mu",
             "type": "normsys",
             "parameter": "mu",
-            "constraint": "Gauss",
+            "interpolation": MULT_POLY6_EXPONENTIAL,
+            "constraint": "mu_constraint",
             "data": {"hi": 1.2, "lo": 0.8},
         }
 
@@ -2282,7 +2324,8 @@ class TestBarlowBeestonLite:
                         "name": "bkg_norm",
                         "type": "normsys",
                         "parameter": "bkg_norm",
-                        "constraint": "Gauss",
+                        "interpolation": MULT_POLY6_EXPONENTIAL,
+                        "constraint": "bkg_norm_constraint",
                         "data": {"hi": 1.1, "lo": 0.9},
                     },
                     {
@@ -2308,6 +2351,7 @@ class TestBarlowBeestonLite:
             {
                 "mu": pt.constant(1.0),
                 "bkg_norm": pt.constant(0.0),
+                "bkg_norm_constraint": pt.constant(1.0 / np.sqrt(2.0 * np.pi)),
                 "gamma_bin0": pt.constant(1.0),
                 "gamma_bin1": pt.constant(1.0),
             }

@@ -132,10 +132,10 @@ class TestJaxifiedGraphCall:
         assert jnp.isfinite(val[0])
 
     def test_call_raises_on_extra_kwarg(self):
-        """Extra kwargs beyond the graph inputs raise TypeError (Python's own error)."""
+        """Extra kwargs beyond the graph inputs raise TypeError."""
         _, _, _, pdf_expr = _gaussian_pytensor_expr()
         jg = jaxify(pdf_expr)
-        with pytest.raises(TypeError, match="unexpected keyword argument"):
+        with pytest.raises(TypeError, match="unexpected"):
             jg(
                 x=jnp.float64(0.0),
                 mu=jnp.float64(0.0),
@@ -144,11 +144,18 @@ class TestJaxifiedGraphCall:
             )
 
     def test_call_raises_on_missing_kwarg(self):
-        """Missing kwargs raise TypeError (Python's own error for missing args)."""
+        """Missing kwargs raise TypeError."""
         _, _, _, pdf_expr = _gaussian_pytensor_expr()
         jg = jaxify(pdf_expr)
         with pytest.raises(TypeError, match="missing"):
             jg(x=jnp.float64(0.0), mu=jnp.float64(0.0))  # sigma omitted
+
+    def test_call_preserves_names_sanitized_by_jax_funcify(self):
+        value = pt.scalar("datum__observable")
+        jg = jaxify(value + 1.0)
+
+        result = jg(datum__observable=jnp.float64(2.0))
+        assert float(result[0]) == pytest.approx(3.0)
 
     def test_call_positional(self):
         _, _, _, pdf_expr = _gaussian_pytensor_expr()

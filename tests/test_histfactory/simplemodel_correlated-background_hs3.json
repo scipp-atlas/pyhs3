@@ -57,6 +57,11 @@
           "nbins": 2
         }
       ],
+      "default_interpolation": {
+        "in": "poly6",
+        "out": "poly1",
+        "type": "add"
+      },
       "name": "model_singlechannel",
       "samples": [
         {
@@ -90,7 +95,7 @@
               "type": "normfactor"
             },
             {
-              "constraint": "Gauss",
+              "constraint": "correlated_bkg_constraint",
               "data": {
                 "hi": {
                   "contents": [45, 55]
@@ -108,6 +113,13 @@
         }
       ],
       "type": "histfactory_dist"
+    },
+    {
+      "mean": "alpha_correlated_bkg_uncertainty",
+      "name": "correlated_bkg_constraint",
+      "sigma": 1.0,
+      "type": "gaussian_dist",
+      "x": 0.0
     }
   ],
   "domains": [

@@ -16,8 +16,8 @@ from pyhs3.analyses import Analyses, Analysis
 from pyhs3.data import Data, DataType
 from pyhs3.distributions import Distributions, DistributionType, HistFactoryDistChannel
 from pyhs3.distributions.histfactory.modifiers import (
-    ParameterModifier,
     ParametersModifier,
+    SingleParamConstraint,
 )
 from pyhs3.domains import Domain, Domains, DomainType, ProductDomain
 from pyhs3.exceptions import WorkspaceValidationError
@@ -97,7 +97,15 @@ class Workspace(BaseModel):
                 except ValueError as exc:
                     errors.append(str(exc))
 
-        # Validate HFDC constraint consistency across channels
+        # Validate named HFDC references independently of whether a channel is
+        # selected by a likelihood. Invalid foreign keys must fail at import,
+        # not turn into implicit free parameters in an unused subgraph.
+        try:
+            self._validate_all_named_hfdc_constraints()
+        except ValueError as exc:
+            errors.append(str(exc))
+
+        # Validate internal per-bin constraint ownership across each likelihood.
         if self.likelihoods is not None:
             for likelihood in self.likelihoods:
                 try:
@@ -139,78 +147,185 @@ class Workspace(BaseModel):
                 resolved.append(ref)
         return resolved
 
-    @staticmethod
-    def _check_hfdc_modifier(
-        modifier: object,
+    def _constraint_dependency_closure(
+        self, target_name: str
+    ) -> tuple[set[str], list[str] | None]:
+        """Return transitive named dependencies and a reachable cycle, if any.
+
+        Distribution and function references share the workspace namespace in
+        the runtime dependency graph. Unmatched names are leaf parameters (or
+        generated constants) and are included in the closure without further
+        traversal.
+        """
+        entities: dict[str, object] = {}
+        if self.distributions is not None:
+            entities.update({dist.name: dist for dist in self.distributions})
+        if self.functions is not None:
+            entities.update({function.name: function for function in self.functions})
+
+        closure: set[str] = set()
+        visited: set[str] = set()
+        stack: list[str] = []
+        cycle: list[str] | None = None
+
+        def visit(name: str) -> None:
+            nonlocal cycle
+            if cycle is not None:
+                return
+            closure.add(name)
+            entity = entities.get(name)
+            if entity is None or name in visited:
+                return
+            if name in stack:
+                start = stack.index(name)
+                cycle = [*stack[start:], name]
+                return
+            stack.append(name)
+            for dependency in entity.parameters:  # type: ignore[attr-defined]
+                visit(dependency)
+            stack.pop()
+            visited.add(name)
+
+        visit(target_name)
+        closure.discard(target_name)
+        return closure, cycle
+
+    def _validate_named_hfdc_constraint(
+        self,
+        modifier: SingleParamConstraint,
+        channel: HistFactoryDistChannel,
         where: str,
-        channel_name: str,
-        param_constraint: dict[str, tuple[str, str]],
-        shapesys_owners: dict[str, str],
-        staterror_owners: dict[str, str],
+        observable_names: set[str],
+        dependency_cache: dict[str, tuple[set[str], list[str] | None]],
     ) -> None:
-        """Check one modifier's constraint for type consistency and ownership."""
-        if not hasattr(modifier, "constraint") or modifier.constraint is None:
+        """Validate one named modifier constraint against workspace entities."""
+        constraint_name = modifier.constraint
+        if constraint_name is None:
             return
-        constraint = modifier.constraint
-        if isinstance(modifier, ParameterModifier):
-            param = modifier.parameter
-            prev = param_constraint.get(param)
-            if prev is not None and prev[0] != constraint:
+        target = (
+            self.distributions.get(constraint_name)
+            if self.distributions is not None
+            else None
+        )
+        if target is None:
+            msg = (
+                f"'{where}' references unknown constraint distribution "
+                f"'{constraint_name}'"
+            )
+            raise ValueError(msg)
+        if isinstance(target, HistFactoryDistChannel):
+            msg = (
+                f"'{where}' constraint '{constraint_name}' must not reference "
+                "a histfactory_dist"
+            )
+            raise ValueError(msg)
+
+        if constraint_name not in dependency_cache:
+            dependency_cache[constraint_name] = self._constraint_dependency_closure(
+                constraint_name
+            )
+        dependencies, cycle = dependency_cache[constraint_name]
+        if cycle is not None or channel.name in dependencies:
+            path = " -> ".join(
+                cycle or [constraint_name, channel.name, constraint_name]
+            )
+            msg = f"'{where}' constraint '{constraint_name}' creates a circular dependency: {path}"
+            raise ValueError(msg)
+
+        # A composite/function-mediated target that reaches any HistFactory
+        # channel is not an auxiliary constraint distribution either.
+        if self.distributions is not None:
+            hfdc_dependencies = sorted(
+                name
+                for name in dependencies
+                if isinstance(self.distributions.get(name), HistFactoryDistChannel)
+            )
+            if hfdc_dependencies:
                 msg = (
-                    f"Parameter '{param}' has conflicting constraint types: "
-                    f"'{prev[1]}' declared '{prev[0]}', "
-                    f"'{where}' declares '{constraint}'"
+                    f"'{where}' constraint '{constraint_name}' depends on "
+                    f"histfactory_dist '{hfdc_dependencies[0]}'"
                 )
                 raise ValueError(msg)
-            param_constraint[param] = (constraint, where)
-        else:
-            multi_mod = cast(ParametersModifier, modifier)
-            owners = (
-                shapesys_owners if multi_mod.type == "shapesys" else staterror_owners
+
+        if modifier.parameter not in dependencies:
+            msg = (
+                f"'{where}' constraint '{constraint_name}' does not depend on "
+                f"modifier parameter '{modifier.parameter}'"
             )
-            for param in multi_mod.parameters:
-                if param in owners and owners[param] != channel_name:
-                    kind = multi_mod.type
-                    msg = (
-                        f"{kind} parameter '{param}' appears in both "
-                        f"'{owners[param]}' and '{channel_name}'; "
-                        f"{kind} is per-channel and may not be shared."
+            raise ValueError(msg)
+
+        event_dependencies = sorted(dependencies & observable_names)
+        if event_dependencies:
+            msg = (
+                f"'{where}' constraint '{constraint_name}' depends on event "
+                f"observable(s): {', '.join(event_dependencies)}"
+            )
+            raise ValueError(msg)
+
+    def _validate_all_named_hfdc_constraints(self) -> None:
+        """Validate every named HistFactory reference in the workspace."""
+        if self.distributions is None:
+            return
+        observable_names = {
+            axis.name for datum in (self.data or []) for axis in (datum.axes or [])
+        }
+        dependency_cache: dict[str, tuple[set[str], list[str] | None]] = {}
+        for channel in self.distributions:
+            if not isinstance(channel, HistFactoryDistChannel):
+                continue
+            for sample in channel.samples:
+                for modifier in sample.modifiers:
+                    if not isinstance(modifier, SingleParamConstraint):
+                        continue
+                    where = f"{channel.name}/{sample.name}/{modifier.name}"
+                    self._validate_named_hfdc_constraint(
+                        modifier,
+                        channel,
+                        where,
+                        observable_names,
+                        dependency_cache,
                     )
-                    raise ValueError(msg)
-                owners[param] = channel_name
 
     def _validate_hfdc_constraints(self, likelihood: Likelihood) -> None:
-        """Validate constraint consistency across HFDC channels in a likelihood.
+        """Validate named and internal constraints for one likelihood.
 
         Rules enforced:
-        - A nuisance parameter may not have conflicting constraint types (e.g.,
-          Gauss in one channel, LogNormal in another).
         - shapesys parameters must not be shared across channels (per-channel by design).
         - staterror parameters must not be shared across channels (same reason).
 
         Called after FK resolution so likelihood.distributions contains objects.
         """
-        # param -> (constraint_literal, "channel/sample/modifier" description)
-        param_constraint: dict[str, tuple[str, str]] = {}
         shapesys_owners: dict[str, str] = {}
         staterror_owners: dict[str, str] = {}
-
-        for dist_obj in likelihood.distributions:
+        likelihood_distributions = [
+            *likelihood.distributions,
+            *(likelihood.aux_distributions or []),
+        ]
+        for dist_obj in likelihood_distributions:
             if isinstance(dist_obj, str) or not isinstance(
                 dist_obj, HistFactoryDistChannel
             ):
                 continue
             for sample in dist_obj.samples:
                 for modifier in sample.modifiers:
-                    where = f"{dist_obj.name}/{sample.name}/{modifier.name}"
-                    self._check_hfdc_modifier(
-                        modifier,
-                        where,
-                        dist_obj.name,
-                        param_constraint,
-                        shapesys_owners,
-                        staterror_owners,
+                    if isinstance(modifier, SingleParamConstraint):
+                        continue
+                    multi_modifier = cast(ParametersModifier, modifier)
+                    owners = (
+                        shapesys_owners
+                        if multi_modifier.type == "shapesys"
+                        else staterror_owners
                     )
+                    for param in multi_modifier.parameters:
+                        if param in owners and owners[param] != dist_obj.name:
+                            kind = multi_modifier.type
+                            msg = (
+                                f"{kind} parameter '{param}' appears in both "
+                                f"'{owners[param]}' and '{dist_obj.name}'; "
+                                f"{kind} is per-channel and may not be shared."
+                            )
+                            raise ValueError(msg)
+                        owners[param] = dist_obj.name
 
     def _resolve_likelihood_fields(
         self, likelihood: Likelihood, errors: list[str]
@@ -459,6 +574,7 @@ class Workspace(BaseModel):
         self,
         parameter_set: int | str | ParameterSet | None,
         *,
+        base_parameter_set: int | str | ParameterSet | None = None,
         fallback_first: bool = True,
     ) -> ParameterSet:
         """Resolve *parameter_set* to a :class:`~pyhs3.parameter_points.ParameterSet`.
@@ -466,21 +582,47 @@ class Workspace(BaseModel):
         Args:
             parameter_set: Explicit override -- a ``ParameterSet`` instance, an int
                 or str index into ``self.parameter_points``, or ``None`` to fall back.
+            base_parameter_set: Optional complete parameter set on which the
+                selected set is overlaid. This makes partial-snapshot handling
+                explicit instead of assigning implicit inheritance semantics to
+                HS3 parameter points.
             fallback_first: When *parameter_set* is ``None`` and ``fallback_first``
                 is ``True`` (the default), fall back to ``parameter_points[0]``.
                 Pass ``False`` to return an empty default instead (used by the
                 ``Analysis`` path which manages its own ``init`` fallback).
         """
-        if isinstance(parameter_set, ParameterSet):
-            return parameter_set
-        if parameter_set is not None:
+
+        def resolve(
+            reference: int | str | ParameterSet,
+            argument_name: str,
+        ) -> ParameterSet:
+            if isinstance(reference, ParameterSet):
+                return reference
             if not self.parameter_points:
-                msg = f"parameter_set={parameter_set!r} was requested but no parameter_points are available in this workspace"
+                msg = (
+                    f"{argument_name}={reference!r} was requested but no "
+                    "parameter_points are available in this workspace"
+                )
                 raise ValueError(msg)
-            return self.parameter_points[parameter_set]
-        if fallback_first and self.parameter_points:
-            return self.parameter_points[0]
-        return ParameterSet(name="default", parameters=[])
+            return self.parameter_points[reference]
+
+        selected: ParameterSet | None = None
+        if parameter_set is not None:
+            selected = resolve(parameter_set, "parameter_set")
+        elif fallback_first and self.parameter_points:
+            selected = self.parameter_points[0]
+
+        if base_parameter_set is None:
+            return (
+                selected
+                if selected is not None
+                else ParameterSet(name="default", parameters=[])
+            )
+
+        base = resolve(base_parameter_set, "base_parameter_set")
+        if selected is None or selected is base:
+            return base
+        return base.overlay(selected)
 
     def _select_domain(
         self,
@@ -520,6 +662,7 @@ class Workspace(BaseModel):
         *,
         domain: int | str | Domain | None = None,
         parameter_set: int | str | ParameterSet | None = None,
+        base_parameter_set: int | str | ParameterSet | None = None,
         progress: bool = True,
         mode: str = "FAST_RUN",
     ) -> Model:
@@ -551,7 +694,10 @@ class Workspace(BaseModel):
                 a name string to search analyses/likelihoods, or an ``int``
                 domain index for the legacy path.
             domain: Override domain (legacy and Likelihood paths only).
-            parameter_set: Override parameter set (legacy and Likelihood paths only).
+            parameter_set: Override parameter set. It may be partial when
+                ``base_parameter_set`` is also supplied.
+            base_parameter_set: Complete parameter set beneath ``parameter_set``.
+                Parameters omitted by the override are inherited from this base.
             progress: Whether to show a progress bar during graph construction.
             mode: PyTensor compilation mode (default ``"FAST_RUN"``).
 
@@ -560,7 +706,9 @@ class Workspace(BaseModel):
         """
         # Legacy int path: target indexes into workspace domains.
         selected_domain = self._select_domain(domain, default_index=target)
-        parameterset = self._select_parameterset(parameter_set)
+        parameterset = self._select_parameterset(
+            parameter_set, base_parameter_set=base_parameter_set
+        )
         return Model(
             parameterset=parameterset,
             distributions=self.distributions or Distributions(),
@@ -578,6 +726,7 @@ class Workspace(BaseModel):
         target: Analysis,
         *,
         parameter_set: int | str | ParameterSet | None = None,
+        base_parameter_set: int | str | ParameterSet | None = None,
         progress: bool = True,
         mode: str = "FAST_RUN",
     ) -> Model:
@@ -606,12 +755,14 @@ class Workspace(BaseModel):
         # Explicit override takes priority; otherwise use analysis.init param_set or empty default.
         # Do NOT fall back to parameter_points[0] when neither init nor override was given —
         # that would silently impose workspace defaults that the caller did not request.
-        if parameter_set is not None:
-            parameterset = self._select_parameterset(
-                parameter_set, fallback_first=False
-            )
-        else:
-            parameterset = param_set or ParameterSet(name="default", parameters=[])
+        selected_parameter_set = (
+            parameter_set if parameter_set is not None else param_set
+        )
+        parameterset = self._select_parameterset(
+            selected_parameter_set,
+            base_parameter_set=base_parameter_set,
+            fallback_first=False,
+        )
 
         return Model(
             parameterset=parameterset,
@@ -631,11 +782,14 @@ class Workspace(BaseModel):
         *,
         domain: int | str | Domain | None = None,
         parameter_set: int | str | ParameterSet | None = None,
+        base_parameter_set: int | str | ParameterSet | None = None,
         progress: bool = True,
         mode: str = "FAST_RUN",
     ) -> Model:
         selected_domain = self._select_domain(domain)
-        parameterset = self._select_parameterset(parameter_set)
+        parameterset = self._select_parameterset(
+            parameter_set, base_parameter_set=base_parameter_set
+        )
         return Model(
             parameterset=parameterset,
             distributions=self.distributions or Distributions(),
@@ -654,6 +808,7 @@ class Workspace(BaseModel):
         *,
         domain: int | str | Domain | None = None,
         parameter_set: int | str | ParameterSet | None = None,
+        base_parameter_set: int | str | ParameterSet | None = None,
         progress: bool = True,
         mode: str = "FAST_RUN",
     ) -> Model:
@@ -667,6 +822,7 @@ class Workspace(BaseModel):
                 return self.model(
                     analysis,
                     parameter_set=parameter_set,
+                    base_parameter_set=base_parameter_set,
                     progress=progress,
                     mode=mode,
                 )
@@ -677,12 +833,15 @@ class Workspace(BaseModel):
                     likelihood,
                     domain=domain,
                     parameter_set=parameter_set,
+                    base_parameter_set=base_parameter_set,
                     progress=progress,
                     mode=mode,
                 )
         # Legacy fallback: treat target as a domain name.
         selected_domain = self._select_domain(domain, default_index=target)
-        parameterset = self._select_parameterset(parameter_set)
+        parameterset = self._select_parameterset(
+            parameter_set, base_parameter_set=base_parameter_set
+        )
         return Model(
             parameterset=parameterset,
             distributions=self.distributions or Distributions(),

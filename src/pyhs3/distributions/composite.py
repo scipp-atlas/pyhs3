@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+import numpy as np
 import pytensor.tensor as pt
 from pydantic import (
     Field,
@@ -71,6 +72,48 @@ def _stable_logsumexp(x: TensorVar, axis: int) -> TensorVar:
     return cast(TensorVar, pt.squeeze(result, axis=axis))  # type: ignore[no-untyped-call]
 
 
+def _stable_signed_logsum(
+    coefficients: list[TensorVar], log_values: list[TensorVar]
+) -> TensorVar:
+    """Return ``log(sum(c_i * exp(log_value_i)))`` for a positive signed sum.
+
+    The common maximum is chosen from ``log(abs(c_i)) + log_value_i`` while
+    the shifted sum retains each coefficient's sign. Zero coefficients are
+    masked before exponentiation, avoiding ``0 * inf``. A non-positive final
+    sum is outside the density domain and evaluates to ``-inf``.
+    """
+    broadcast_coefficients: list[TensorVar] = []
+    log_magnitudes: list[TensorVar] = []
+    nonzero_masks: list[TensorVar] = []
+    for coefficient, log_value in zip(coefficients, log_values, strict=True):
+        broadcast_coefficient = cast(TensorVar, coefficient + pt.zeros_like(log_value))
+        nonzero = pt.neq(broadcast_coefficient, 0.0)
+        safe_abs = pt.switch(nonzero, pt.abs(broadcast_coefficient), 1.0)
+        neg_inf = pt.full_like(log_value, -np.inf)
+        log_magnitude = pt.switch(
+            nonzero,
+            pt.log(safe_abs) + log_value,
+            neg_inf,
+        )
+        broadcast_coefficients.append(broadcast_coefficient)
+        nonzero_masks.append(nonzero)
+        log_magnitudes.append(log_magnitude)
+
+    stacked_logs = pt.stack(log_values, axis=0)
+    stacked_coefficients = pt.stack(broadcast_coefficients, axis=0)
+    stacked_nonzero = pt.stack(nonzero_masks, axis=0)
+    maximum = pt.max(pt.stack(log_magnitudes, axis=0), axis=0, keepdims=True)  # type: ignore[no-untyped-call]
+    safe_maximum = pt.switch(pt.isfinite(maximum), maximum, 0.0)
+    safe_logs = pt.switch(stacked_nonzero, stacked_logs, safe_maximum)
+    scaled_sum = pt.sum(  # type: ignore[no-untyped-call]
+        stacked_coefficients * pt.exp(safe_logs - safe_maximum), axis=0
+    )
+    positive = scaled_sum > 0.0
+    safe_sum = pt.switch(positive, scaled_sum, 1.0)
+    log_sum = pt.squeeze(safe_maximum, axis=0) + pt.log(safe_sum)  # type: ignore[no-untyped-call]
+    return cast(TensorVar, pt.switch(positive, log_sum, pt.full_like(log_sum, -np.inf)))
+
+
 class MixtureDist(Distribution):
     r"""
     Mixture of probability distributions.
@@ -97,9 +140,10 @@ class MixtureDist(Distribution):
         f(x) = \frac{\sum_{i=1}^{n} c_i \cdot f_i(x)}{\sum_{j \in \text{ref\_coef\_norm}} c_j}
 
     :meth:`log_prob_terms` is the log-space-safe path for an extended mixture:
-    it builds log(Σcᵢfᵢ) via logsumexp over each summand's own log-space
-    expression rather than pt.log of the probability-space sum, so it stays
-    finite even when every component underflows to 0.0.  The base-class
+    it builds log(Σcᵢfᵢ) via a max-shifted signed sum over each summand's own
+    log-space expression rather than pt.log of the probability-space sum, so
+    it supports signed coefficients and stays finite even when every component
+    underflows to 0.0.  The base-class
     :meth:`~pyhs3.distributions.core.Distribution.log_expression` (used for
     non-extended mixtures and standalone evaluation) still round-trips
     through probability-space component tensors and cannot be converted
@@ -145,7 +189,7 @@ class MixtureDist(Distribution):
         """Do not serialize ref_coef_norm if it is unspecified (None)."""
         data = handler(self)
         if self.ref_coef_norm is None:
-            del data["ref_coef_norm"]
+            data.pop("ref_coef_norm", None)
         return data
 
     @field_validator("ref_coef_norm", mode="before")
@@ -273,8 +317,8 @@ class MixtureDist(Distribution):
             self._cached_unnorm_expr = mixturesum
             # Cache the per-summand coefficient nodes (same order as
             # self.summands) so log_prob_terms can build the log-space
-            # equivalent Σᵢ cᵢfᵢ = logsumexp(log cᵢ + log fᵢ) directly, which
-            # stays finite where the probability-space fᵢ underflow to 0.0.
+            # equivalent Σᵢ cᵢfᵢ as a signed, max-shifted sum, which stays
+            # finite where the probability-space fᵢ underflow to 0.0.
             self._cached_coeffs = coeff_tensors
 
             # Handle normalization
@@ -402,8 +446,9 @@ class MixtureDist(Distribution):
         RooFit's sum-of-weights convention: weighting the log(Σᵢcᵢfᵢ) term
         gives Σⱼwⱼ·log(PDF) + (Σwⱼ)·log(nu) - nu.
 
-        log(Σᵢcᵢfᵢ(xⱼ)) is evaluated as logsumexp(log cᵢ + log fᵢ(xⱼ)) using
-        each summand's own log-space expression (``log_expressions``) rather
+        log(Σᵢcᵢfᵢ(xⱼ)) is evaluated with coefficient signs separated from
+        log(abs(cᵢ)) using each summand's own log-space expression
+        (``log_expressions``) rather
         than ``pt.log`` of the probability-space sum
         (:attr:`_cached_unnorm_expr`).  fᵢ(xⱼ) can underflow to 0.0 in
         float64 for xⱼ far in a component's tail, which would make every
@@ -413,16 +458,9 @@ class MixtureDist(Distribution):
         terms are stacked on a new leading axis (shape ``(n_summands, N, M)``
         for ``N`` events and parameter-batch size ``M``, matching the
         per-event shape documented on :class:`LogProbTerms`) and reduced with
-        :func:`_stable_logsumexp` over that axis, giving the ``(N, M)``
-        per-event term.  :func:`_stable_logsumexp` is used instead of
-        ``pt.logsumexp`` because the latter's stability is an emergent
-        property of a graph rewrite that only runs under ``FAST_RUN`` (see
-        :func:`_stable_logsumexp`'s docstring and
-        https://github.com/scipp-atlas/pyhs3/issues/277).  This assumes cᵢ ≥ 0, matching the probabilistic meaning of a mixture
-        weight; :class:`MixtureDist` does not validate coefficient sign, so a
-        negative cᵢ produces NaN here (``pt.log`` of a negative number) just
-        as ``pt.log(Σᵢcᵢfᵢ)`` would if the probability-space sum itself were
-        negative.
+        :func:`_stable_signed_logsum` over that axis, giving the ``(N, M)``
+        per-event term. The final density and expected yield must be positive;
+        invalid parameter points evaluate to ``-inf`` rather than ``NaN``.
 
         The data-only -log(N!) constant is omitted and N_eff = Σwⱼ is used
         for weighted data; both are RooFit conventions adopted because HS3
@@ -447,15 +485,17 @@ class MixtureDist(Distribution):
             )
             raise RuntimeError(msg)
 
-        log_terms = [
-            pt.log(coeff) + log_expressions[summand]
-            for coeff, summand in zip(self._cached_coeffs, self.summands, strict=True)
-        ]
-        per_event_term = _stable_logsumexp(pt.stack(log_terms, axis=0), axis=0)
+        component_logs = [log_expressions[summand] for summand in self.summands]
+        per_event_term = _stable_signed_logsum(self._cached_coeffs, component_logs)
+        positive_yield_term = pt.switch(
+            self._cached_nu_expr > 0.0,
+            -self._cached_nu_expr,
+            pt.full_like(self._cached_nu_expr, -np.inf),
+        )
 
         return LogProbTerms(
             per_event=[per_event_term],
-            channel=[-self._cached_nu_expr],
+            channel=[positive_yield_term],
         )
 
 

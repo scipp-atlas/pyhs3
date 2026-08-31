@@ -156,11 +156,19 @@ class Distribution(Evaluable, ABC):
         # Use the leaf (not the view) as the substitution target so graph_replace
         # propagates through every ExpandDims(leaf) view in the expression.
         leaf = context.parameters[obs_name]
-        upper_t = pt.as_tensor_variable([upper], dtype=leaf.dtype)
-        lower_t = pt.as_tensor_variable([lower], dtype=leaf.dtype)
+        # A scalar padded to a vector carries ``broadcastable=(True,)``. A
+        # one-element Python list instead produces a non-broadcastable axis,
+        # which JAX/Numba correctly refuse to broadcast against an event axis.
+        upper_t = pt.shape_padleft(pt.cast(upper, leaf.dtype))
+        lower_t = pt.shape_padleft(pt.cast(lower, leaf.dtype))
         upper_val = cast(TensorVar, graph_replace(expr, [(leaf, upper_t)]))
         lower_val = cast(TensorVar, graph_replace(expr, [(leaf, lower_t)]))
-        return cast(TensorVar, upper_val - lower_val)
+        # The substituted observable has one integration point on its leading
+        # event axis. Remove that axis so the integral is scalar for scalar
+        # parameters and ``(M,)`` for a parameter batch, matching the result
+        # shape of numerical integration and avoiding runtime-only length-one
+        # broadcasting in JAX/Numba.
+        return cast(TensorVar, pt.squeeze(upper_val - lower_val, axis=0))  # type: ignore[no-untyped-call]
 
     def _matching_observables(
         self, context: Context

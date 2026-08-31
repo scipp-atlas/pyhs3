@@ -89,6 +89,39 @@ class ParameterSet(NamedModel):
         """Iterate over the parameters."""
         return iter(self.parameters)
 
+    def overlay(
+        self,
+        overrides: ParameterSet,
+        *,
+        name: str | None = None,
+    ) -> ParameterSet:
+        """Return a new parameter set with *overrides* layered on this set.
+
+        Parameters present in *overrides* replace the complete corresponding
+        record from this base set, including ``const``, ``nbins``, and ``kind``.
+        Parameters that only occur in the override are appended in override
+        order. Neither input set is mutated.
+
+        This explicit composition supports partial snapshots without assigning
+        inheritance semantics to HS3 parameter points themselves. By default,
+        the result keeps the override set's name.
+        """
+        override_points = overrides.points
+        base_names = set(self.points)
+        parameters = [
+            override_points.get(parameter.name, parameter).model_copy(deep=True)
+            for parameter in self.parameters
+        ]
+        parameters.extend(
+            parameter.model_copy(deep=True)
+            for parameter in overrides.parameters
+            if parameter.name not in base_names
+        )
+        return ParameterSet(
+            name=overrides.name if name is None else name,
+            parameters=parameters,
+        )
+
 
 class ParameterPoints(NamedCollection[ParameterSet]):
     """

@@ -477,7 +477,7 @@ class TestWorkspaceReferentialIntegrity:
         assert "unknown_dist" in error_msg or "unknown_data" in error_msg
 
     def test_validate_unique_axis_names_resolves_string_refs(self):
-        """validate_unique_axis_names(workspace) catches duplicates via FK lookup."""
+        """Matching repeated observable bounds are valid through FK lookup."""
         # Workspace where d1 and d2 each have axis "x_obs" but only d1 is in the
         # likelihood, so workspace construction succeeds.
         ws = Workspace(
@@ -517,8 +517,7 @@ class TestWorkspaceReferentialIntegrity:
         )
         # Likelihood with unresolved string refs to both d1 and d2
         lk = Likelihood(name="test", distributions=["g1", "g1"], data=["d1", "d2"])
-        with pytest.raises(ValueError, match="duplicate observable axis names"):
-            lk.validate_unique_axis_names(ws)
+        lk.validate_unique_axis_names(ws)
 
     def test_validate_unique_axis_names_skips_unresolvable_string_ref(self):
         """String datum ref not found in workspace.data is silently skipped."""
@@ -555,8 +554,8 @@ class TestWorkspaceReferentialIntegrity:
         lk = Likelihood(name="test", distributions=["g1"], data=["nonexistent"])
         lk.validate_unique_axis_names(ws)  # must not raise
 
-    def test_likelihood_duplicate_axis_names_raises(self):
-        """Workspace raises when two data entries share an observable axis name."""
+    def test_likelihood_duplicate_axis_names_are_namespaced(self):
+        """Distinct data objects may reuse an observable axis name."""
         ws_dict = {
             "metadata": {"hs3_version": "0.2"},
             "distributions": [
@@ -601,8 +600,57 @@ class TestWorkspaceReferentialIntegrity:
             ],
             "analyses": [{"name": "A", "likelihood": "L", "domains": ["main"]}],
         }
+        workspace = Workspace(**ws_dict)
+
+        arrays = workspace.likelihoods["L"].data_arrays()
+        assert set(arrays) == {"d1__x_obs", "d2__x_obs"}
+        assert arrays["d1__x_obs"].tolist() == [1.0]
+        assert arrays["d2__x_obs"].tolist() == [2.0]
+
+    def test_likelihood_repeated_axis_conflicting_bounds_raises(self):
+        """One serialized observable name still has one normalization range."""
+        ws_dict = {
+            "metadata": {"hs3_version": "0.2"},
+            "distributions": [
+                {
+                    "name": "g1",
+                    "type": "gaussian_dist",
+                    "x": "x_obs",
+                    "mean": 0.0,
+                    "sigma": 1.0,
+                },
+                {
+                    "name": "g2",
+                    "type": "gaussian_dist",
+                    "x": "x_obs",
+                    "mean": 0.0,
+                    "sigma": 1.0,
+                },
+            ],
+            "domains": [{"name": "main", "type": "product_domain", "axes": []}],
+            "data": [
+                {
+                    "name": "d1",
+                    "type": "unbinned",
+                    "axes": [{"name": "x_obs", "min": -10.0, "max": 10.0}],
+                    "entries": [[1.0]],
+                },
+                {
+                    "name": "d2",
+                    "type": "unbinned",
+                    "axes": [{"name": "x_obs", "min": -20.0, "max": 20.0}],
+                    "entries": [[2.0]],
+                },
+            ],
+            "likelihoods": [
+                {"name": "L", "distributions": ["g1", "g2"], "data": ["d1", "d2"]}
+            ],
+            "analyses": [{"name": "A", "likelihood": "L", "domains": ["main"]}],
+        }
+
         with pytest.raises(
-            WorkspaceValidationError, match="duplicate observable axis names"
+            WorkspaceValidationError,
+            match=r"repeated observable axis names.*conflicting bounds",
         ):
             Workspace(**ws_dict)
 

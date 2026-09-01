@@ -56,7 +56,7 @@ def validate(
     try:
         Workspace(**spec)
     except ValidationError as exc:
-        summary = Workspace._format_validation_error(exc, source, verbose)
+        summary = Workspace.format_validation_error(exc, source, verbose)
         _err_console.print(summary)
         raise typer.Exit(code=1) from None
     except WorkspaceValidationError as exc:

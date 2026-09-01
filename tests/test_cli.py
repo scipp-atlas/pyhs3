@@ -347,6 +347,11 @@ def test_main_module_entrypoint(good_workspace):
     assert exc_info.value.code == 0
 
 
+def test_main_module_import_does_not_invoke_app():
+    """A plain import (__name__ != "__main__") must not call app()."""
+    runpy.run_module("pyhs3.__main__", run_name="pyhs3.__main__")
+
+
 def test_nll_param_override_rejects_observable_name(good_workspace):
     """--param naming an observable must be ignored, never clobber workspace data."""
     result = runner.invoke(app, ["nll", str(good_workspace), "--param", "x_obs=999"])

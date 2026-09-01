@@ -301,12 +301,18 @@ def test_stdout_is_interactive_regular_file(tmp_path):
 
 
 def test_stdout_is_interactive_character_device():
+    """Neither a FIFO nor a regular file falls through to isatty().
+
+    Whether the null device itself reports as a tty is a platform CRT
+    detail (Windows' isatty() returns True for NUL, unlike POSIX), so this
+    checks the delegation itself rather than hardcoding a truth value.
+    """
     with (
         Path(os.devnull).open("w", encoding="utf-8") as f,
         pytest.MonkeyPatch.context() as mp,
     ):
         mp.setattr(sys, "stdout", f)
-        assert stdout_is_interactive() is False
+        assert stdout_is_interactive() == f.isatty()
 
 
 def test_stdin_is_tty_handles_broken_isatty():

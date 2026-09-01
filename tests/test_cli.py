@@ -8,12 +8,20 @@ genuine loading, validation, and NLL computation.
 from __future__ import annotations
 
 import json
+import os
+import runpy
+import sys
+from pathlib import Path
 
 import pytest
+import typer
 from scipy.stats import truncnorm
 from typer.testing import CliRunner
 
 from pyhs3.cli import app
+from pyhs3.cli._shared import _stdin_is_tty, read_spec, stdout_is_interactive
+from pyhs3.cli.infer import _select_target
+from pyhs3.workspace import Workspace
 
 runner = CliRunner()
 
@@ -146,6 +154,20 @@ def test_validate_bad_json(tmp_path):
     assert result.exit_code != 0
 
 
+def test_validate_schema_error(tmp_path):
+    """A distribution missing required fields fails pydantic schema validation
+    (distinct from the FK-resolution WorkspaceValidationError path)."""
+    spec = {
+        "metadata": {"hs3_version": "0.2"},
+        "distributions": [{"name": "g", "type": "gaussian_dist", "x": "x"}],
+    }
+    path = tmp_path / "schema_bad.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    result = runner.invoke(app, ["validate", str(path)])
+    assert result.exit_code == 1
+    assert "validation failed" in result.output.lower()
+
+
 @pytest.mark.parametrize("root", ["[]", "42", '"just a string"'])
 def test_validate_non_object_json_root(tmp_path, root):
     """A JSON root that isn't an object fails cleanly, not with a raw TypeError."""
@@ -266,6 +288,59 @@ def test_nll_from_stdin(good_workspace):
     assert value == pytest.approx(_expected_nll(2.0), rel=1e-6)
 
 
+# ---------------------------------------------------------------------------
+# _shared helpers (unit-level: real fds/streams, no CliRunner substitution)
+# ---------------------------------------------------------------------------
+
+
+def test_stdout_is_interactive_regular_file(tmp_path):
+    path = tmp_path / "out.txt"
+    with path.open("w") as f, pytest.MonkeyPatch.context() as mp:
+        mp.setattr(sys, "stdout", f)
+        assert stdout_is_interactive() is False
+
+
+def test_stdout_is_interactive_character_device():
+    with (
+        Path(os.devnull).open("w", encoding="utf-8") as f,
+        pytest.MonkeyPatch.context() as mp,
+    ):
+        mp.setattr(sys, "stdout", f)
+        assert stdout_is_interactive() is False
+
+
+def test_stdin_is_tty_handles_broken_isatty():
+    class BrokenStdin:
+        def isatty(self) -> bool:
+            msg = "no tty"
+            raise OSError(msg)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(sys, "stdin", BrokenStdin())
+        assert _stdin_is_tty() is False
+
+
+def test_read_spec_stdin_tty_raises():
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("pyhs3.cli._shared._stdin_is_tty", lambda: True)
+        with pytest.raises(typer.BadParameter, match="stdin is a terminal"):
+            read_spec(None)
+
+
+# ---------------------------------------------------------------------------
+# python -m pyhs3
+# ---------------------------------------------------------------------------
+
+
+def test_main_module_entrypoint(good_workspace):
+    """``python -m pyhs3`` wires up the same Typer app as the console script."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(sys, "argv", ["pyhs3", "validate", str(good_workspace)])
+        with pytest.raises(SystemExit) as exc_info:
+            runpy.run_module("pyhs3.__main__", run_name="__main__")
+    assert exc_info.value.code == 0
+
+
 def test_nll_param_override_rejects_observable_name(good_workspace):
     """--param naming an observable must be ignored, never clobber workspace data."""
     result = runner.invoke(app, ["nll", str(good_workspace), "--param", "x_obs=999"])
@@ -274,3 +349,113 @@ def test_nll_param_override_rejects_observable_name(good_workspace):
     assert "x_obs" in result.output
     value = float(result.output.strip().splitlines()[-1])
     assert value == pytest.approx(_expected_nll(2.0), rel=1e-6)
+
+
+def test_nll_param_override_unknown_name_ignored(good_workspace):
+    result = runner.invoke(
+        app, ["nll", str(good_workspace), "--param", "totally_unknown=1.0"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "totally_unknown" in result.output
+    value = float(result.output.strip().splitlines()[-1])
+    assert value == pytest.approx(_expected_nll(2.0), rel=1e-6)
+
+
+def test_nll_param_value_not_a_number(good_workspace):
+    result = runner.invoke(
+        app, ["nll", str(good_workspace), "--param", "mean=notanumber"]
+    )
+    assert result.exit_code != 0
+
+
+def test_nll_params_file_not_object(good_workspace, tmp_path):
+    params_file = tmp_path / "bad_params.json"
+    params_file.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+    result = runner.invoke(
+        app, ["nll", str(good_workspace), "--params-file", str(params_file)]
+    )
+    assert result.exit_code != 0
+
+
+def test_nll_analysis_selects_likelihood_by_name(good_workspace):
+    """--analysis can also name a likelihood directly, bypassing analyses."""
+    result = runner.invoke(app, ["nll", str(good_workspace), "--analysis", "L"])
+    assert result.exit_code == 0, result.output
+    value = float(result.output.strip().splitlines()[-1])
+    assert value == pytest.approx(_expected_nll(2.0), rel=1e-6)
+
+
+def test_nll_analysis_not_found(good_workspace):
+    result = runner.invoke(
+        app, ["nll", str(good_workspace), "--analysis", "nonexistent"]
+    )
+    assert result.exit_code != 0
+    assert "nonexistent" in result.output
+
+
+def test_nll_multiple_analyses_requires_selection(tmp_path):
+    spec = json.loads(json.dumps(_WS_DICT))
+    spec["analyses"].append({**spec["analyses"][0], "name": "B"})
+    path = tmp_path / "two_analyses.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    result = runner.invoke(app, ["nll", str(path)])
+    assert result.exit_code != 0
+    assert "multiple analyses" in result.output
+
+
+def test_nll_no_analyses_uses_sole_likelihood(tmp_path):
+    """With no analyses declared at all, the sole likelihood is used directly."""
+    spec = json.loads(json.dumps(_WS_DICT))
+    del spec["analyses"]
+    path = tmp_path / "no_analyses.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    result = runner.invoke(app, ["nll", str(path)])
+    assert result.exit_code == 0, result.output
+    value = float(result.output.strip().splitlines()[-1])
+    assert value == pytest.approx(_expected_nll(2.0), rel=1e-6)
+
+
+def test_nll_multiple_likelihoods_without_analyses_requires_selection(tmp_path):
+    spec = json.loads(json.dumps(_WS_DICT))
+    del spec["analyses"]
+    spec["likelihoods"] = [
+        {"name": "L1", "distributions": ["gauss1"], "data": ["data1"]},
+        {"name": "L2", "distributions": ["gauss2"], "data": ["data2"]},
+    ]
+    path = tmp_path / "two_likelihoods.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    result = runner.invoke(app, ["nll", str(path)])
+    assert result.exit_code != 0
+    assert "multiple likelihoods" in result.output
+
+
+def test_nll_no_targets_available(tmp_path):
+    spec = json.loads(json.dumps(_WS_DICT))
+    del spec["analyses"]
+    del spec["likelihoods"]
+    path = tmp_path / "no_targets.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    result = runner.invoke(app, ["nll", str(path)])
+    assert result.exit_code != 0
+    assert "no analyses or likelihoods" in result.output
+
+
+def test_select_target_no_analyses_or_likelihoods():
+    """Direct unit test: a workspace with no distributions/likelihoods/analyses
+    at all is still a legal (if useless) Workspace; _select_target must still
+    report a clean error rather than crash."""
+    ws = Workspace(metadata={"hs3_version": "0.2"})
+    with pytest.raises(typer.BadParameter, match="no analyses or likelihoods"):
+        _select_target(ws, None)
+
+
+def test_nll_missing_free_parameter_value(tmp_path):
+    """A free parameter absent from parameter_points, free_params, and
+    --param overrides alike has no value available anywhere."""
+    spec = json.loads(json.dumps(_WS_DICT))
+    spec["parameter_points"][0]["parameters"] = []
+    path = tmp_path / "no_mean_value.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    result = runner.invoke(app, ["nll", str(path)])
+    assert result.exit_code != 0
+    assert "mean" in result.output

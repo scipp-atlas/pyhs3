@@ -312,6 +312,7 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
                     return modifier
         return None
 
+    # Docstring below refs private methods autodoc never renders (known gap: #327).
     def _build_barlow_beeston_lite_dist(
         self, context: Context
     ) -> tuple[GaussianDist | PoissonDist, Context] | None:

@@ -109,3 +109,8 @@ repos:
     hooks:
       - id: rstcheck
         additional_dependencies: ["rstcheck[sphinx,toml]"]
+        # Jinja2 templates Sphinx's autosummary extension renders into RST at
+        # build time, not standalone RST -- e.g. `{{ objname }}` and
+        # Sphinx-only directives like `autoclass` aren't valid outside that
+        # rendering step, so rstcheck can't parse them directly.
+        exclude: ^docs/_templates/

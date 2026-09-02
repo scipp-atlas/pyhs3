@@ -140,6 +140,7 @@ class UniformDist(Distribution):
     x: list[str]
     _normalizable: bool = PrivateAttr(default=False)
 
+    # Docstring refs a private method autodoc never renders (known gap: #327).
     def _resolved_bounds(
         self, context: Context
     ) -> list[tuple[str, TensorVar, TensorVar]]:

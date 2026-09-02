@@ -445,8 +445,8 @@ class Evaluable(NamedModel, ABC):
         then names the result before returning.
 
         ``_expression()`` may return a tensor it does not own — for example a
-        single-summand :class:`~pyhs3.functions.standard.SumFunction` or a
-        single-factor :class:`~pyhs3.functions.standard.ProductFunction` returns
+        single-summand :class:`~pyhs3.functions.SumFunction` or a
+        single-factor :class:`~pyhs3.functions.ProductFunction` returns
         ``context[param]`` directly, which is the *same* tensor object stored in
         ``model.parameters``.  Renaming such a shared tensor in place would
         silently corrupt the parameter it borrows (e.g. ``model.parameters['mu']``

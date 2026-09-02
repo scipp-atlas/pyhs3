@@ -39,7 +39,7 @@ class FastVerticalInterpHistPdf2Dist(Distribution):
         interpolation algorithm, there is no analytic log form to derive yet:
         this class uses the probability-space :meth:`likelihood` as primary
         and inherits the base class's ``pt.log(likelihood())`` fallback for
-        :meth:`~pyhs3.distributions.core.Distribution.log_likelihood`, pending
+        :meth:`~pyhs3.distributions.Distribution.log_likelihood`, pending
         a real morphing implementation.
     """
 
@@ -258,7 +258,7 @@ class FastVerticalInterpHistPdf2D2Dist(Distribution):
         interpolation algorithm, there is no analytic log form to derive yet:
         this class uses the probability-space :meth:`likelihood` as primary
         and inherits the base class's ``pt.log(likelihood())`` fallback for
-        :meth:`~pyhs3.distributions.core.Distribution.log_likelihood`, pending
+        :meth:`~pyhs3.distributions.Distribution.log_likelihood`, pending
         a real morphing implementation.
     """
 

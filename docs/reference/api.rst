@@ -77,6 +77,7 @@ Distributions
 
    Distributions
    Distribution
+   LogProbTerms
    GaussianDist
    UniformDist
    PoissonDist

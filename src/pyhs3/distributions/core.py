@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 @dataclass
 class LogProbTerms:
     """
-    Structured per-channel contributions to :attr:`pyhs3.model.Model.log_prob`.
+    Structured per-channel contributions to :attr:`pyhs3.Model.log_prob`.
 
     Distributions describe *what* they contribute via
     :meth:`Distribution.log_prob_terms`; the model owns the channel-dataset
@@ -371,7 +371,7 @@ class Distribution(Evaluable, ABC):
         """
         Structured contributions of this distribution to the joint log-likelihood.
 
-        Called by :attr:`pyhs3.model.Model.log_prob` for each channel after the
+        Called by :attr:`pyhs3.Model.log_prob` for each channel after the
         model graph is built.  Override when the distribution's terms do not
         all enter the likelihood as a per-event log-density — e.g. once-per-
         channel yield terms (extended :class:`~pyhs3.distributions.MixtureDist`)

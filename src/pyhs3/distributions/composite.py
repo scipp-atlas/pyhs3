@@ -100,7 +100,7 @@ class MixtureDist(Distribution):
     it builds log(Σcᵢfᵢ) via logsumexp over each summand's own log-space
     expression rather than pt.log of the probability-space sum, so it stays
     finite even when every component underflows to 0.0.  The base-class
-    :meth:`~pyhs3.distributions.core.Distribution.log_expression` (used for
+    :meth:`~pyhs3.distributions.Distribution.log_expression` (used for
     non-extended mixtures and standalone evaluation) still round-trips
     through probability-space component tensors and cannot be converted
     until composite distributions receive log-space component context (see
@@ -365,7 +365,7 @@ class MixtureDist(Distribution):
 
         The Poisson yield term enters the likelihood once per channel and
         involves the observed event count, so it is assembled by
-        :meth:`pyhs3.model.Model.log_prob` (which owns the channel-dataset
+        :meth:`pyhs3.Model.log_prob` (which owns the channel-dataset
         pairing) rather than via :meth:`extended_likelihood` (whose result is
         multiplied into the per-event density and would be overcounted when
         summing over events).

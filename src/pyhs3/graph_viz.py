@@ -9,7 +9,7 @@ optional, and re-lays-out the graph afterward so node boxes shrink to fit the
 shorter labels instead of keeping pydotprint's original (now oversized)
 layout.
 
-Used by :meth:`pyhs3.model.Model.visualize_graph`.
+Used by :meth:`pyhs3.Model.visualize_graph`.
 """
 
 from __future__ import annotations

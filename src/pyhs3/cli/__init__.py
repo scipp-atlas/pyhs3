@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import typer
 
-from pyhs3.cli import infer, plot, spec
+from pyhs3.cli import graph, infer, plot, spec
 
 app = typer.Typer(
     name="pyhs3",
@@ -21,6 +21,7 @@ app = typer.Typer(
     add_completion=False,
 )
 
+app.command()(graph.graph)
 app.command()(spec.validate)
 app.command()(spec.inspect)
 app.command()(infer.nll)

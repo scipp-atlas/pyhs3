@@ -7,6 +7,7 @@ computation graph or evaluating any likelihood.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from typing import Annotated, Any
 
 import typer
@@ -25,6 +26,11 @@ from pyhs3.exceptions import WorkspaceValidationError
 from pyhs3.workspace import Workspace
 
 _err_console = Console(stderr=True)
+
+#: Default per-table/section row cap for ``inspect``'s table rendering when
+#: ``--verbose``/``-v`` is not passed. Applies only to table output; JSON
+#: output is never truncated.
+_MAX_ROWS_DEFAULT = 10
 
 
 def validate(
@@ -146,8 +152,29 @@ def _ref_name(ref: Any) -> str:
     return ref if isinstance(ref, str) else ref.name
 
 
-def _render_table(summary: dict[str, Any]) -> None:
-    """Render a human-readable summary of the workspace to stdout."""
+def _add_rows(table: Table, rows: Sequence[tuple[str, ...]], verbose: bool) -> None:
+    """Add ``rows`` to ``table``, capping at ``_MAX_ROWS_DEFAULT`` unless ``verbose``.
+
+    When the cap truncates rows, appends a trailing indicator row noting how
+    many rows were omitted and how to see them all.
+    """
+    limit = len(rows) if verbose else min(len(rows), _MAX_ROWS_DEFAULT)
+    for row in rows[:limit]:
+        table.add_row(*row)
+    remaining = len(rows) - limit
+    if remaining > 0:
+        filler = ("",) * (len(table.columns) - 1)
+        table.add_row(f"… {remaining} more (use -v to show all)", *filler)
+
+
+def _render_table(summary: dict[str, Any], verbose: bool = False) -> None:
+    """Render a human-readable summary of the workspace to stdout.
+
+    When ``verbose`` is ``False`` (the default), each table caps its rows at
+    ``_MAX_ROWS_DEFAULT`` and shows a trailing indicator row when rows were
+    omitted. This caps display only: JSON output (``inspect --json``) is
+    never truncated, regardless of ``verbose``.
+    """
     console = Console()
     version = summary["metadata"]["hs3_version"]
     console.print(f"[bold]HS3 workspace[/bold] (hs3_version {version})")
@@ -155,8 +182,8 @@ def _render_table(summary: dict[str, Any]) -> None:
     dist_table = Table(title="Distributions", title_justify="left")
     dist_table.add_column("name")
     dist_table.add_column("type")
-    for dist in summary["distributions"]:
-        dist_table.add_row(dist["name"], str(dist["type"]))
+    dist_rows = [(dist["name"], str(dist["type"])) for dist in summary["distributions"]]
+    _add_rows(dist_table, dist_rows, verbose)
     console.print(dist_table)
 
     dom_table = Table(title="Domains", title_justify="left")
@@ -164,25 +191,32 @@ def _render_table(summary: dict[str, Any]) -> None:
     dom_table.add_column("parameter")
     dom_table.add_column("min")
     dom_table.add_column("max")
-    for dom in summary["domains"]:
-        for axis in dom["axes"]:
-            dom_table.add_row(
-                dom["name"],
-                axis["name"],
-                _fmt_bound(axis["min"], "-inf"),
-                _fmt_bound(axis["max"], "+inf"),
-            )
+    dom_rows = [
+        (
+            dom["name"],
+            axis["name"],
+            _fmt_bound(axis["min"], "-inf"),
+            _fmt_bound(axis["max"], "+inf"),
+        )
+        for dom in summary["domains"]
+        for axis in dom["axes"]
+    ]
+    _add_rows(dom_table, dom_rows, verbose)
     console.print(dom_table)
 
     data_table = Table(title="Data", title_justify="left")
     data_table.add_column("name")
     data_table.add_column("type")
     data_table.add_column("entries")
-    for datum in summary["data"]:
-        entries = datum["entries"]
-        data_table.add_row(
-            datum["name"], str(datum["type"]), "-" if entries is None else str(entries)
+    data_rows = [
+        (
+            datum["name"],
+            str(datum["type"]),
+            "-" if datum["entries"] is None else str(datum["entries"]),
         )
+        for datum in summary["data"]
+    ]
+    _add_rows(data_table, data_rows, verbose)
     console.print(data_table)
 
     param_table = Table(title="Parameter points", title_justify="left")
@@ -190,21 +224,23 @@ def _render_table(summary: dict[str, Any]) -> None:
     param_table.add_column("parameter")
     param_table.add_column("value")
     param_table.add_column("const")
-    for pset in summary["parameter_points"]:
-        for param in pset["parameters"]:
-            param_table.add_row(
-                pset["name"], param["name"], f"{param['value']:g}", str(param["const"])
-            )
+    param_rows = [
+        (pset["name"], param["name"], f"{param['value']:g}", str(param["const"]))
+        for pset in summary["parameter_points"]
+        for param in pset["parameters"]
+    ]
+    _add_rows(param_table, param_rows, verbose)
     console.print(param_table)
 
     lk_table = Table(title="Likelihoods", title_justify="left")
     lk_table.add_column("name")
     lk_table.add_column("distributions")
     lk_table.add_column("data")
-    for lk in summary["likelihoods"]:
-        lk_table.add_row(
-            lk["name"], ", ".join(lk["distributions"]), ", ".join(lk["data"])
-        )
+    lk_rows = [
+        (lk["name"], ", ".join(lk["distributions"]), ", ".join(lk["data"]))
+        for lk in summary["likelihoods"]
+    ]
+    _add_rows(lk_table, lk_rows, verbose)
     console.print(lk_table)
 
     an_table = Table(title="Analyses", title_justify="left")
@@ -212,13 +248,16 @@ def _render_table(summary: dict[str, Any]) -> None:
     an_table.add_column("likelihood")
     an_table.add_column("parameters of interest")
     an_table.add_column("domains")
-    for an in summary["analyses"]:
-        an_table.add_row(
+    an_rows = [
+        (
             an["name"],
             an["likelihood"],
             ", ".join(an["parameters_of_interest"]),
             ", ".join(an["domains"]),
         )
+        for an in summary["analyses"]
+    ]
+    _add_rows(an_table, an_rows, verbose)
     console.print(an_table)
 
 
@@ -242,12 +281,29 @@ def inspect(
             help="Force JSON (--json) or table (--no-json) output. Default: autodetect from the terminal.",
         ),
     ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help=(
+                "Show every row in table output, without the "
+                f"{_MAX_ROWS_DEFAULT}-row-per-section cap. Has no effect on "
+                "--json output, which is always complete."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Summarize a workspace: distributions, domains, data, likelihoods, analyses.
 
     Prints a Rich table when attached to an interactive terminal and machine
     readable JSON when piped. Override the autodetection with ``--json`` or
     ``--no-json``.
+
+    Table output caps each section at ``_MAX_ROWS_DEFAULT`` rows by default;
+    pass ``--verbose``/``-v`` to show every row. JSON output is always
+    complete and is never truncated by ``--verbose``/``-v`` — it is meant for
+    machine/script consumption, so it must never silently drop entries.
     """
     ws = load_workspace(workspace)
     summary = _summarize(ws)
@@ -258,4 +314,4 @@ def inspect(
     if output_json:
         typer.echo(json.dumps(summary, indent=2))
     else:
-        _render_table(summary)
+        _render_table(summary, verbose)

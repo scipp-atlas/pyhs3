@@ -103,8 +103,8 @@ def plot(
     *,
     data_name: Annotated[
         str,
-        typer.Argument(
-            metavar="DATA_NAME",
+        typer.Option(
+            "--data-name",
             help="Name of the entry in the workspace's data list to plot.",
         ),
     ],

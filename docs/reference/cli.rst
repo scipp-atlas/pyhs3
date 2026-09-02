@@ -147,10 +147,14 @@ Arguments
    ``WORKSPACE`` (optional)
       Path to an HS3 workspace JSON file. Use ``-`` or omit to read from
       stdin.
-   ``NAME`` (required)
-      Name of the distribution to visualize.
 
 Options
+   ``--name TEXT`` (required)
+      Name of the distribution to visualize. An option rather than a second
+      positional argument, so it stays unambiguous when ``WORKSPACE`` is
+      omitted for stdin -- with two positionals, a single value given on the
+      command line would bind to ``WORKSPACE`` first, leaving ``--name``
+      unfilled.
    ``--analysis TEXT``
       Name of the analysis (or likelihood) to build the model from.
       Defaults to the sole one.
@@ -173,10 +177,12 @@ Options
 Builds the model the same way ``nll`` does, then delegates to
 :meth:`~pyhs3.model.Model.visualize_graph` -- see there for what the display
 flags control. Prints the rendered file's path to stdout. Requires the
-``graph`` extra (``pip install 'pyhs3[graph]'``, which installs ``pydot``);
-without it, or if the named distribution doesn't exist in the model, the
-command reports the problem through a clean error and exits non-zero,
-never a raw traceback.
+``graph`` extra (``pip install 'pyhs3[graph]'``, which installs ``pydot``)
+**and** the system Graphviz ``dot`` executable, which pydot cannot install on
+its own (``apt install graphviz``, ``brew install graphviz``, or
+``conda install graphviz``). If either is missing, or the named distribution
+doesn't exist in the model, the command reports the problem through a clean
+error and exits non-zero, never a raw traceback.
 
 ``pyhs3 plot``
 --------------
@@ -187,10 +193,13 @@ Arguments
    ``WORKSPACE`` (optional)
       Path to an HS3 workspace JSON file. Use ``-`` or omit to read from
       stdin.
-   ``DATA_NAME`` (required)
-      Name of the entry in the workspace's ``data`` list to plot.
 
 Options
+   ``--data-name TEXT`` (required)
+      Name of the entry in the workspace's ``data`` list to plot. An option
+      rather than a second positional argument, for the same reason as
+      ``graph``'s ``--name``: it stays unambiguous when ``WORKSPACE`` is
+      omitted for stdin.
    ``--outfile PATH``
       Output file path. Defaults to ``{data-name}.{fmt}`` in the current
       directory.

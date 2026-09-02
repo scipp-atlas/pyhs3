@@ -7,6 +7,7 @@ genuine loading, validation, and NLL computation.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import runpy
@@ -285,6 +286,33 @@ def test_inspect_from_stdin(good_workspace):
     result = runner.invoke(app, ["inspect", "-"], input=good_workspace.read_text())
     assert result.exit_code == 0, result.output
     json.loads(result.output)
+
+
+def test_inspect_table_does_not_interpret_workspace_supplied_rich_markup(tmp_path):
+    """A workspace-supplied name is untrusted input, not table styling.
+
+    Distribution/domain/data/likelihood/analysis names are free-form strings
+    with no pattern constraint; passing one straight to Rich's Table.add_row
+    (which parses `[..]`-bracketed cell content as markup by default) lets a
+    crafted workspace inject formatting or spoof the rendered table instead
+    of just naming a distribution. The literal brackets must survive.
+    """
+    spec = json.loads(json.dumps(_WS_DICT))
+    spec["distributions"].append(
+        {
+            "name": "[bold red]evil[/bold red]",
+            "type": "gaussian_dist",
+            "x": "x_obs",
+            "mean": "mean",
+            "sigma": 1.0,
+        }
+    )
+    path = tmp_path / "markup.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+
+    result = runner.invoke(app, ["inspect", "--no-json", str(path)])
+    assert result.exit_code == 0, result.output
+    assert "[bold red]evil[/bold red]" in result.output
 
 
 def test_inspect_table_truncates_by_default(large_workspace):
@@ -586,9 +614,16 @@ def test_nll_missing_free_parameter_value(tmp_path):
 # plot
 # ---------------------------------------------------------------------------
 
-# matplotlib lives in the `plot` extra, not a core dependency; skip cleanly if
-# an environment running these tests genuinely doesn't have it.
-matplotlib = pytest.importorskip("matplotlib")
+# matplotlib lives in the `plot` extra, not a core dependency; skip the plot
+# tests individually (not via a module-level pytest.importorskip, which would
+# abort collection of this whole file -- including the unrelated validate/
+# inspect/nll/graph/__main__ tests above -- if matplotlib were ever absent).
+# find_spec checks availability without actually importing it.
+_HAS_MATPLOTLIB = importlib.util.find_spec("matplotlib") is not None
+
+requires_matplotlib = pytest.mark.skipif(
+    not _HAS_MATPLOTLIB, reason="matplotlib not installed"
+)
 
 _BINNED_WS_DICT: dict = {
     "metadata": {"hs3_version": "0.2"},
@@ -610,9 +645,12 @@ def binned_workspace(tmp_path):
     return path
 
 
+@requires_matplotlib
 def test_plot_binned_default_outfile(binned_workspace, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    result = runner.invoke(app, ["plot", str(binned_workspace), "hist_data"])
+    result = runner.invoke(
+        app, ["plot", str(binned_workspace), "--data-name", "hist_data"]
+    )
     assert result.exit_code == 0, result.output
     outfile = tmp_path / "hist_data.png"
     assert outfile.exists()
@@ -620,16 +658,39 @@ def test_plot_binned_default_outfile(binned_workspace, tmp_path, monkeypatch):
     assert "hist_data.png" in result.output
 
 
+@requires_matplotlib
+def test_plot_data_name_option_with_piped_stdin(tmp_path, monkeypatch):
+    """--data-name is unambiguous even when WORKSPACE is omitted for stdin.
+
+    Before --data-name was an option, a bare positional DATA_NAME was
+    consumed as the (optional) WORKSPACE positional instead, since Click
+    fills positionals in declaration order regardless of intent -- there was
+    no way to pipe a workspace and supply the data name in one command.
+    """
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        app,
+        ["plot", "--data-name", "hist_data"],
+        input=json.dumps(_BINNED_WS_DICT),
+    )
+    assert result.exit_code == 0, result.output
+    outfile = tmp_path / "hist_data.png"
+    assert outfile.exists()
+    assert outfile.stat().st_size > 0
+
+
+@requires_matplotlib
 def test_plot_unbinned_default_outfile(good_workspace, tmp_path, monkeypatch):
     """data1 in the shared _WS_DICT fixture is 1D UnbinnedData."""
     monkeypatch.chdir(tmp_path)
-    result = runner.invoke(app, ["plot", str(good_workspace), "data1"])
+    result = runner.invoke(app, ["plot", str(good_workspace), "--data-name", "data1"])
     assert result.exit_code == 0, result.output
     outfile = tmp_path / "data1.png"
     assert outfile.exists()
     assert outfile.stat().st_size > 0
 
 
+@requires_matplotlib
 def test_plot_outfile_and_fmt(binned_workspace, tmp_path):
     custom = tmp_path / "custom_name.svg"
     result = runner.invoke(
@@ -637,6 +698,7 @@ def test_plot_outfile_and_fmt(binned_workspace, tmp_path):
         [
             "plot",
             str(binned_workspace),
+            "--data-name",
             "hist_data",
             "--outfile",
             str(custom),
@@ -650,33 +712,41 @@ def test_plot_outfile_and_fmt(binned_workspace, tmp_path):
     assert b"<svg" in custom.read_bytes()[:512]
 
 
+@requires_matplotlib
 def test_plot_missing_data_name(binned_workspace):
-    result = runner.invoke(app, ["plot", str(binned_workspace), "does_not_exist"])
+    result = runner.invoke(
+        app, ["plot", str(binned_workspace), "--data-name", "does_not_exist"]
+    )
     assert result.exit_code != 0
     # A clean CLI error (typer.BadParameter -> SystemExit(2)), not a raw traceback.
     assert isinstance(result.exception, SystemExit)
     assert "does_not_exist" in result.output
 
 
+@requires_matplotlib
 def test_plot_missing_matplotlib(binned_workspace, monkeypatch):
     """Setting sys.modules['matplotlib'] to None forces the next import to
     raise ImportError, exercising the missing-optional-dependency path."""
     monkeypatch.setitem(sys.modules, "matplotlib", None)
-    result = runner.invoke(app, ["plot", str(binned_workspace), "hist_data"])
+    result = runner.invoke(
+        app, ["plot", str(binned_workspace), "--data-name", "hist_data"]
+    )
     assert result.exit_code != 0
     assert isinstance(result.exception, SystemExit)
     assert "pyhs3[plot]" in result.output
 
 
+@requires_matplotlib
 def test_plot_unsupported_fmt(binned_workspace):
     result = runner.invoke(
-        app, ["plot", str(binned_workspace), "hist_data", "--fmt", "bmp"]
+        app, ["plot", str(binned_workspace), "--data-name", "hist_data", "--fmt", "bmp"]
     )
     assert result.exit_code != 0
     assert isinstance(result.exception, SystemExit)
     assert "bmp" in result.output
 
 
+@requires_matplotlib
 def test_plot_binned_2d_heatmap(tmp_path, monkeypatch):
     """2D BinnedData renders as a pcolormesh heatmap (docs/visualization.rst)."""
     spec = {
@@ -709,13 +779,14 @@ def test_plot_binned_2d_heatmap(tmp_path, monkeypatch):
     path = tmp_path / "hist2d.json"
     path.write_text(json.dumps(spec), encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    result = runner.invoke(app, ["plot", str(path), "hist2d"])
+    result = runner.invoke(app, ["plot", str(path), "--data-name", "hist2d"])
     assert result.exit_code == 0, result.output
     outfile = tmp_path / "hist2d.png"
     assert outfile.exists()
     assert outfile.stat().st_size > 0
 
 
+@requires_matplotlib
 def test_plot_binned_3d_not_supported(tmp_path):
     spec = {
         "metadata": {"hs3_version": "0.2"},
@@ -734,12 +805,13 @@ def test_plot_binned_3d_not_supported(tmp_path):
     }
     path = tmp_path / "hist3d.json"
     path.write_text(json.dumps(spec), encoding="utf-8")
-    result = runner.invoke(app, ["plot", str(path), "hist3d"])
+    result = runner.invoke(app, ["plot", str(path), "--data-name", "hist3d"])
     assert result.exit_code != 0
     assert isinstance(result.exception, SystemExit)
     assert "not yet supported" in result.output
 
 
+@requires_matplotlib
 def test_plot_unbinned_2d_not_supported(tmp_path):
     spec = {
         "metadata": {"hs3_version": "0.2"},
@@ -757,12 +829,13 @@ def test_plot_unbinned_2d_not_supported(tmp_path):
     }
     path = tmp_path / "points2d.json"
     path.write_text(json.dumps(spec), encoding="utf-8")
-    result = runner.invoke(app, ["plot", str(path), "points2d"])
+    result = runner.invoke(app, ["plot", str(path), "--data-name", "points2d"])
     assert result.exit_code != 0
     assert isinstance(result.exception, SystemExit)
     assert "not yet supported" in result.output
 
 
+@requires_matplotlib
 def test_plot_point_data_not_supported(tmp_path):
     """PointData is a real HS3 data type plot() doesn't (yet) render."""
     spec = {
@@ -771,7 +844,7 @@ def test_plot_point_data_not_supported(tmp_path):
     }
     path = tmp_path / "point.json"
     path.write_text(json.dumps(spec), encoding="utf-8")
-    result = runner.invoke(app, ["plot", str(path), "single"])
+    result = runner.invoke(app, ["plot", str(path), "--data-name", "single"])
     assert result.exit_code != 0
     assert isinstance(result.exception, SystemExit)
     assert "not yet supported" in result.output
@@ -783,10 +856,32 @@ def test_plot_point_data_not_supported(tmp_path):
 
 
 @pytest.mark.pydot
+def test_graph_name_option_with_piped_stdin(good_workspace, tmp_path, monkeypatch):
+    """--name is unambiguous even when WORKSPACE is omitted for stdin.
+
+    Before --name was an option, a bare positional NAME was consumed as the
+    (optional) WORKSPACE positional instead, since Click fills positionals in
+    declaration order regardless of intent -- there was no way to pipe a
+    workspace and supply the distribution name in one command.
+    """
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        app,
+        ["graph", "--name", "gauss1"],
+        input=good_workspace.read_text(),
+    )
+    assert result.exit_code == 0, result.output
+    output_path = Path(result.output.strip())
+    assert output_path == Path("gauss1_graph.svg")
+    assert (tmp_path / output_path).exists()
+    assert (tmp_path / output_path).stat().st_size > 0
+
+
+@pytest.mark.pydot
 def test_graph_default_location(good_workspace, tmp_path, monkeypatch):
     """No --outfile/--path -> writes '{name}_graph.{fmt}' to the cwd."""
     monkeypatch.chdir(tmp_path)
-    result = runner.invoke(app, ["graph", str(good_workspace), "gauss1"])
+    result = runner.invoke(app, ["graph", str(good_workspace), "--name", "gauss1"])
     assert result.exit_code == 0, result.output
     output_path = Path(result.output.strip())
     assert output_path == Path("gauss1_graph.svg")
@@ -802,6 +897,7 @@ def test_graph_custom_fmt_and_outfile(good_workspace, tmp_path):
         [
             "graph",
             str(good_workspace),
+            "--name",
             "gauss1",
             "--fmt",
             "png",
@@ -817,7 +913,7 @@ def test_graph_custom_fmt_and_outfile(good_workspace, tmp_path):
 
 @pytest.mark.pydot
 def test_graph_nonexistent_distribution(good_workspace):
-    result = runner.invoke(app, ["graph", str(good_workspace), "nonexistent"])
+    result = runner.invoke(app, ["graph", str(good_workspace), "--name", "nonexistent"])
     assert result.exit_code != 0
     assert "nonexistent" in result.output
     assert "Traceback" not in result.output
@@ -831,6 +927,7 @@ def test_graph_analysis_selection(good_workspace, tmp_path):
         [
             "graph",
             str(good_workspace),
+            "--name",
             "gauss1",
             "--analysis",
             "A",
@@ -860,8 +957,32 @@ def test_graph_missing_pydot_dependency(good_workspace, monkeypatch):
     monkeypatch.setattr(
         "pyhs3.model.Model.visualize_graph", fake_visualize_graph, raising=True
     )
-    result = runner.invoke(app, ["graph", str(good_workspace), "gauss1"])
+    result = runner.invoke(app, ["graph", str(good_workspace), "--name", "gauss1"])
     assert result.exit_code != 0
     assert "pydot" in result.output
     assert "pyhs3[graph]" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_graph_missing_dot_executable(good_workspace, monkeypatch):
+    """A missing system Graphviz `dot` executable also surfaces cleanly.
+
+    pydot itself raises a bare ``FileNotFoundError`` (not its own
+    ``PydotException``) when the ``dot`` binary isn't on PATH -- confirmed by
+    calling ``pydot.Dot.write(prog=<nonexistent>)`` directly. pydot is a pure
+    Python wrapper: installing it via `pip install 'pyhs3[graph]'` does not
+    install the system Graphviz package, so this is a distinct, real failure
+    mode from the missing-pydot-package case above.
+    """
+
+    def fake_visualize_graph(_self, _name, *_args, **_kwargs):
+        msg = '[Errno 2] "dot" not found in path.'
+        raise FileNotFoundError(msg)
+
+    monkeypatch.setattr(
+        "pyhs3.model.Model.visualize_graph", fake_visualize_graph, raising=True
+    )
+    result = runner.invoke(app, ["graph", str(good_workspace), "--name", "gauss1"])
+    assert result.exit_code != 0
+    assert "graphviz" in result.output.lower()
     assert "Traceback" not in result.output

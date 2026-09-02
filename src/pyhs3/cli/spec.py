@@ -14,6 +14,7 @@ import typer
 from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from pyhs3.cli._shared import (
     display_name,
@@ -152,7 +153,9 @@ def _ref_name(ref: Any) -> str:
     return ref if isinstance(ref, str) else ref.name
 
 
-def _add_rows(table: Table, rows: Sequence[tuple[str, ...]], verbose: bool) -> None:
+def _add_rows(
+    table: Table, rows: Sequence[tuple[str | Text, ...]], verbose: bool
+) -> None:
     """Add ``rows`` to ``table``, capping at ``_MAX_ROWS_DEFAULT`` unless ``verbose``.
 
     When the cap truncates rows, appends a trailing indicator row noting how
@@ -182,7 +185,9 @@ def _render_table(summary: dict[str, Any], verbose: bool = False) -> None:
     dist_table = Table(title="Distributions", title_justify="left")
     dist_table.add_column("name")
     dist_table.add_column("type")
-    dist_rows = [(dist["name"], str(dist["type"])) for dist in summary["distributions"]]
+    dist_rows = [
+        (Text(dist["name"]), str(dist["type"])) for dist in summary["distributions"]
+    ]
     _add_rows(dist_table, dist_rows, verbose)
     console.print(dist_table)
 
@@ -193,8 +198,8 @@ def _render_table(summary: dict[str, Any], verbose: bool = False) -> None:
     dom_table.add_column("max")
     dom_rows = [
         (
-            dom["name"],
-            axis["name"],
+            Text(dom["name"]),
+            Text(axis["name"]),
             _fmt_bound(axis["min"], "-inf"),
             _fmt_bound(axis["max"], "+inf"),
         )
@@ -210,7 +215,7 @@ def _render_table(summary: dict[str, Any], verbose: bool = False) -> None:
     data_table.add_column("entries")
     data_rows = [
         (
-            datum["name"],
+            Text(datum["name"]),
             str(datum["type"]),
             "-" if datum["entries"] is None else str(datum["entries"]),
         )
@@ -225,7 +230,12 @@ def _render_table(summary: dict[str, Any], verbose: bool = False) -> None:
     param_table.add_column("value")
     param_table.add_column("const")
     param_rows = [
-        (pset["name"], param["name"], f"{param['value']:g}", str(param["const"]))
+        (
+            Text(pset["name"]),
+            Text(param["name"]),
+            f"{param['value']:g}",
+            str(param["const"]),
+        )
         for pset in summary["parameter_points"]
         for param in pset["parameters"]
     ]
@@ -237,7 +247,11 @@ def _render_table(summary: dict[str, Any], verbose: bool = False) -> None:
     lk_table.add_column("distributions")
     lk_table.add_column("data")
     lk_rows = [
-        (lk["name"], ", ".join(lk["distributions"]), ", ".join(lk["data"]))
+        (
+            Text(lk["name"]),
+            Text(", ".join(lk["distributions"])),
+            Text(", ".join(lk["data"])),
+        )
         for lk in summary["likelihoods"]
     ]
     _add_rows(lk_table, lk_rows, verbose)
@@ -250,10 +264,10 @@ def _render_table(summary: dict[str, Any], verbose: bool = False) -> None:
     an_table.add_column("domains")
     an_rows = [
         (
-            an["name"],
-            an["likelihood"],
-            ", ".join(an["parameters_of_interest"]),
-            ", ".join(an["domains"]),
+            Text(an["name"]),
+            Text(an["likelihood"]),
+            Text(", ".join(an["parameters_of_interest"])),
+            Text(", ".join(an["domains"])),
         )
         for an in summary["analyses"]
     ]

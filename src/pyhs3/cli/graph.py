@@ -2,7 +2,8 @@
 
 Renders a distribution's PyTensor computation graph via
 :meth:`pyhs3.model.Model.visualize_graph`, which requires the optional
-``pydot`` dependency (``pip install 'pyhs3[graph]'``).
+``pydot`` dependency (``pip install 'pyhs3[graph]'``) and the system
+Graphviz ``dot`` executable, which pydot cannot install on its own.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ def graph(
     *,
     name: Annotated[
         str,
-        typer.Argument(metavar="NAME", help="Name of the distribution to visualize."),
+        typer.Option("--name", help="Name of the distribution to visualize."),
     ],
     analysis: Annotated[
         str | None,
@@ -93,5 +94,13 @@ def graph(
         raise typer.BadParameter(msg) from exc
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
+    except FileNotFoundError as exc:
+        msg = (
+            "pyhs3 graph requires the Graphviz `dot` executable, which pydot "
+            "cannot install on its own: install Graphviz separately "
+            "(e.g. `apt install graphviz`, `brew install graphviz`, or "
+            "`conda install graphviz`)"
+        )
+        raise typer.BadParameter(msg) from exc
 
     typer.echo(outpath)

@@ -49,19 +49,20 @@ Render a distribution's computation graph
 ``pyhs3 graph`` draws a distribution's PyTensor computation graph -- the
 same figure :meth:`~pyhs3.model.Model.visualize_graph` produces from Python
 -- useful when a model isn't behaving as expected and you want to see the
-graph pyhs3 actually built. It needs the ``graph`` extra:
+graph pyhs3 actually built. It needs the ``graph`` extra and a system
+Graphviz install (see :doc:`../reference/cli` for both):
 
 .. code-block:: console
 
    $ pip install 'pyhs3[graph]'
-   $ pyhs3 graph workspace.json gauss
+   $ pyhs3 graph workspace.json --name gauss
    gauss_graph.svg
 
 Choose the output format and location with ``--fmt``/``--outfile``:
 
 .. code-block:: console
 
-   $ pyhs3 graph workspace.json gauss --fmt png --outfile /tmp/gauss.png
+   $ pyhs3 graph workspace.json --name gauss --fmt png --outfile /tmp/gauss.png
 
 Plot a workspace's data
 --------------------------
@@ -73,7 +74,7 @@ a filled histogram for 1D data, a heatmap for 2D binned data. It needs the
 .. code-block:: console
 
    $ pip install 'pyhs3[plot]'
-   $ pyhs3 plot workspace.json obs
+   $ pyhs3 plot workspace.json --data-name obs
    obs.png
 
 Data with three or more axes, and single-value ``PointData`` entries, aren't

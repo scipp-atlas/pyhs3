@@ -75,7 +75,7 @@ jax = [
   "pytensor[jax]",  # transitively pulls jax + jaxlib
 ]
 graph = [
-  "pydot",
+  "pydot", # also requires the system `dot` executable (Graphviz); not installable via pip
 ]
 plot = [
   "hist[plot] > 2.7.0", # matplotlib alone is insufficient: Hist.plot() requires mplhep

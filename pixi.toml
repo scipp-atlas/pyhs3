@@ -55,6 +55,7 @@ jaxlib = "*"
 
 [feature.plot.dependencies]
 matplotlib-base = "*"
+mplhep = "*"
 
 [feature.test.dependencies]
 pytest = ">=9"

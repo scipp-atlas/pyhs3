@@ -35,3 +35,9 @@
 {% endif %}
 {%- endfor %}
 {% endif %}
+
+{% if attributes %}
+{% for item in attributes %}
+.. autoattribute:: {{ objname }}.{{ item }}
+{%- endfor %}
+{% endif %}

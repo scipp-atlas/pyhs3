@@ -38,6 +38,7 @@ dependencies = [
     'pydantic>=2.12',
     'hist >= 2.7.0',
     'pytensor-distributions >= 0.2.0',
+    'typer',
 ]
 
 [project.optional-dependencies]
@@ -73,9 +74,18 @@ docs = [
 jax = [
   "pytensor[jax]",  # transitively pulls jax + jaxlib
 ]
-develop = [
-  "pyhs3[test,docs,dev,jax]",
+graph = [
+  "pydot", # also requires the system `dot` executable (Graphviz); not installable via pip
 ]
+plot = [
+  "hist[plot] > 2.7.0", # matplotlib alone is insufficient: Hist.plot() requires mplhep
+]
+develop = [
+  "pyhs3[test,docs,dev,jax,graph,plot]",
+]
+
+[project.scripts]
+pyhs3 = "pyhs3.cli:app"
 
 [project.urls]
 Documentation = "https://pyhs3.readthedocs.io/"
@@ -164,6 +174,7 @@ module = [
   "pytensor.compile.function",  # removed in pytensor >= 3; replaced by pytensor.compile.maker
   "pytensor_distributions.*",  # https://github.com/pymc-devs/pytensor-distributions/issues/62
   "pydot.*",  # no type stubs published
+  "matplotlib.*",  # optional `plot` extra, not installed in the default mypy environment
 ]
 ignore_missing_imports = true
 

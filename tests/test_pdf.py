@@ -328,7 +328,7 @@ def test_format_validation_error_handles_empty_loc(tmp_path):
 
     dummy_ve = DummyValidationError(dummy_errors)
 
-    result = Workspace._format_validation_error(
+    result = Workspace.format_validation_error(
         validation_error=dummy_ve,
         path=tmp_path / "config.yaml",
         verbose=True,

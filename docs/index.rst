@@ -7,7 +7,10 @@
    howto/evaluate_model
    howto/fit_model
    howto/debug_model
+   howto/check_a_workspace_from_the_cli
+   howto/evaluate_and_visualize_from_the_cli
    reference/api
+   reference/cli
    explanation/building_a_model
    broadcasting
    defining_components

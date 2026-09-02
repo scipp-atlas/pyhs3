@@ -74,8 +74,11 @@ docs = [
 jax = [
   "pytensor[jax]",  # transitively pulls jax + jaxlib
 ]
+plot = [
+  "hist[plot] > 2.7.0", # matplotlib alone is insufficient: Hist.plot() requires mplhep
+]
 develop = [
-  "pyhs3[test,docs,dev,jax]",
+  "pyhs3[test,docs,dev,jax,plot]",
 ]
 
 [project.scripts]
@@ -168,6 +171,7 @@ module = [
   "pytensor.compile.function",  # removed in pytensor >= 3; replaced by pytensor.compile.maker
   "pytensor_distributions.*",  # https://github.com/pymc-devs/pytensor-distributions/issues/62
   "pydot.*",  # no type stubs published
+  "matplotlib.*",  # optional `plot` extra, not installed in the default mypy environment
 ]
 ignore_missing_imports = true
 

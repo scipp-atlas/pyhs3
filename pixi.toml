@@ -53,6 +53,9 @@ platforms = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64"]
 jax = "*"
 jaxlib = "*"
 
+[feature.plot.dependencies]
+matplotlib-base = "*"
+
 [feature.test.dependencies]
 pytest = ">=9"
 pytest-cov = ">=3"
@@ -151,8 +154,8 @@ codeflash = "*"
 codeflash = { cmd = "codeflash", description = "Run codeflash to identify optimizations" }
 
 [environments]
-docs = ["docs", "jax"]
-dev = ["dev", "jax"]
+docs = ["docs", "jax", "plot"]
+dev = ["dev", "jax", "plot"]
 codeflash = ["test", "codeflash"]
 py312 = ["test", "py312"]
 py313 = ["test", "py313"]

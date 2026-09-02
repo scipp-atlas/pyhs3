@@ -74,11 +74,14 @@ docs = [
 jax = [
   "pytensor[jax]",  # transitively pulls jax + jaxlib
 ]
+graph = [
+  "pydot",
+]
 plot = [
   "hist[plot] > 2.7.0", # matplotlib alone is insufficient: Hist.plot() requires mplhep
 ]
 develop = [
-  "pyhs3[test,docs,dev,jax,plot]",
+  "pyhs3[test,docs,dev,jax,graph,plot]",
 ]
 
 [project.scripts]

@@ -1,7 +1,7 @@
 """Graph-visualization pyhs3 CLI command: ``graph``.
 
 Renders a distribution's PyTensor computation graph via
-:meth:`pyhs3.model.Model.visualize_graph`, which requires the optional
+:meth:`pyhs3.Model.visualize_graph`, which requires the optional
 ``pydot`` dependency (``pip install 'pyhs3[graph]'``) and the system
 Graphviz ``dot`` executable, which pydot cannot install on its own.
 """
@@ -67,13 +67,22 @@ def graph(
         typer.Option("--show-shape", help="Keep shape annotations in node labels."),
     ] = False,
 ) -> None:
+    # This docstring is dumped verbatim into Markdown by
+    # docs/_scripts/generate_cli_docs.py, so its cross-reference below uses
+    # MyST's {role}`target` syntax rather than this codebase's usual RST
+    # :role:`target` syntax -- MyST doesn't parse the colon form inline.
     r"""Render a distribution's computation graph to an image file.
 
     Builds the model the same way ``nll`` does (``--analysis`` selects which
     analysis or likelihood to build from) and delegates to
-    :meth:`~pyhs3.model.Model.visualize_graph`. Prints the path of the
-    rendered file to stdout. Requires the ``pydot`` optional dependency:
-    ``pip install 'pyhs3\[graph]'``.
+    {meth}`~pyhs3.Model.visualize_graph`. Prints the path of the
+    rendered file to stdout. Requires the ``graph`` optional dependency
+    (``pip install 'pyhs3\[graph]'``, which installs ``pydot``) **and** the
+    system Graphviz ``dot`` executable, which pydot cannot install on its own
+    (``apt install graphviz``, ``brew install graphviz``, or
+    ``conda install graphviz``). If either is missing, or the named
+    distribution doesn't exist in the model, this reports the problem
+    through a clean error and exits non-zero, never a raw traceback.
     """
     ws = load_workspace(workspace)
     target = _select_target(ws, analysis)

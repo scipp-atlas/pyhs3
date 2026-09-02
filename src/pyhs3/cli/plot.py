@@ -122,6 +122,15 @@ def plot(
 ) -> None:
     """Render one named data entry from a workspace as a matplotlib figure.
 
+    Requires the ``plot`` extra (``pip install 'pyhs3[plot]'``), which
+    installs ``hist[plot]`` -- matplotlib **and** ``mplhep``, since plotting a
+    ``hist.Hist`` needs both; matplotlib alone is not enough. If matplotlib
+    itself is missing, this reports a clean error rather than a raw
+    traceback; if matplotlib is present but ``mplhep`` specifically is
+    missing (an unusual partial install), plotting can still raise a raw
+    ``ModuleNotFoundError`` -- installing the ``plot`` extra as documented
+    avoids this case entirely.
+
     Only 1D ``BinnedData``/``UnbinnedData`` and 2D ``BinnedData`` are
     supported; other shapes raise a clear error rather than a misleading plot.
     """

@@ -74,6 +74,9 @@ docs = [
 jax = [
   "pytensor[jax]",  # transitively pulls jax + jaxlib
 ]
+graph = [
+  "pydot",
+]
 develop = [
   "pyhs3[test,docs,dev,jax]",
 ]

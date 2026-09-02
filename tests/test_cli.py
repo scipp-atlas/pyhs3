@@ -470,3 +470,93 @@ def test_nll_missing_free_parameter_value(tmp_path):
     result = runner.invoke(app, ["nll", str(path)])
     assert result.exit_code != 0
     assert "mean" in result.output
+
+
+# ---------------------------------------------------------------------------
+# graph
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.pydot
+def test_graph_default_location(good_workspace, tmp_path, monkeypatch):
+    """No --outfile/--path -> writes '{name}_graph.{fmt}' to the cwd."""
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["graph", str(good_workspace), "gauss1"])
+    assert result.exit_code == 0, result.output
+    output_path = Path(result.output.strip())
+    assert output_path == Path("gauss1_graph.svg")
+    assert (tmp_path / output_path).exists()
+    assert (tmp_path / output_path).stat().st_size > 0
+
+
+@pytest.mark.pydot
+def test_graph_custom_fmt_and_outfile(good_workspace, tmp_path):
+    outfile = tmp_path / "custom.png"
+    result = runner.invoke(
+        app,
+        [
+            "graph",
+            str(good_workspace),
+            "gauss1",
+            "--fmt",
+            "png",
+            "--outfile",
+            str(outfile),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == str(outfile)
+    assert outfile.exists()
+    assert outfile.stat().st_size > 0
+
+
+@pytest.mark.pydot
+def test_graph_nonexistent_distribution(good_workspace):
+    result = runner.invoke(app, ["graph", str(good_workspace), "nonexistent"])
+    assert result.exit_code != 0
+    assert "nonexistent" in result.output
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.pydot
+def test_graph_analysis_selection(good_workspace, tmp_path):
+    outfile = tmp_path / "via_analysis.svg"
+    result = runner.invoke(
+        app,
+        [
+            "graph",
+            str(good_workspace),
+            "gauss1",
+            "--analysis",
+            "A",
+            "--outfile",
+            str(outfile),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert outfile.exists()
+    assert outfile.stat().st_size > 0
+
+
+def test_graph_missing_pydot_dependency(good_workspace, monkeypatch):
+    """A missing pydot install surfaces as a clean error, not a raw traceback.
+
+    ``Model.visualize_graph`` itself raises ``ImportError`` when pydot can't be
+    imported (covered directly in ``test_model.py``); this test targets the
+    CLI's own responsibility to catch that and print a clean error instead of
+    a traceback, without needing pydot to actually be absent, so it runs in
+    the default (no-pydot) test environment too.
+    """
+
+    def fake_visualize_graph(_self, _name, *_args, **_kwargs):
+        msg = "Graph visualization requires pydot. Install with: pip install pydot"
+        raise ImportError(msg)
+
+    monkeypatch.setattr(
+        "pyhs3.model.Model.visualize_graph", fake_visualize_graph, raising=True
+    )
+    result = runner.invoke(app, ["graph", str(good_workspace), "gauss1"])
+    assert result.exit_code != 0
+    assert "pydot" in result.output
+    assert "pyhs3[graph]" in result.output
+    assert "Traceback" not in result.output

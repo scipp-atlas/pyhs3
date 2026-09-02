@@ -545,3 +545,122 @@ def test_plot_missing_data_name(binned_workspace):
     # A clean CLI error (typer.BadParameter -> SystemExit(2)), not a raw traceback.
     assert isinstance(result.exception, SystemExit)
     assert "does_not_exist" in result.output
+
+
+def test_plot_missing_matplotlib(binned_workspace, monkeypatch):
+    """Setting sys.modules['matplotlib'] to None forces the next import to
+    raise ImportError, exercising the missing-optional-dependency path."""
+    monkeypatch.setitem(sys.modules, "matplotlib", None)
+    result = runner.invoke(app, ["plot", str(binned_workspace), "hist_data"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, SystemExit)
+    assert "pyhs3[plot]" in result.output
+
+
+def test_plot_unsupported_fmt(binned_workspace):
+    result = runner.invoke(
+        app, ["plot", str(binned_workspace), "hist_data", "--fmt", "bmp"]
+    )
+    assert result.exit_code != 0
+    assert isinstance(result.exception, SystemExit)
+    assert "bmp" in result.output
+
+
+def test_plot_binned_2d_heatmap(tmp_path, monkeypatch):
+    """2D BinnedData renders as a pcolormesh heatmap (docs/visualization.rst)."""
+    spec = {
+        "metadata": {"hs3_version": "0.2"},
+        "data": [
+            {
+                "name": "hist2d",
+                "type": "binned",
+                "contents": [
+                    1.0,
+                    2.0,
+                    3.0,
+                    4.0,
+                    5.0,
+                    6.0,
+                    7.0,
+                    8.0,
+                    9.0,
+                    10.0,
+                    11.0,
+                    12.0,
+                ],
+                "axes": [
+                    {"name": "x", "min": 0.0, "max": 3.0, "nbins": 3},
+                    {"name": "y", "min": 0.0, "max": 4.0, "nbins": 4},
+                ],
+            }
+        ],
+    }
+    path = tmp_path / "hist2d.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["plot", str(path), "hist2d"])
+    assert result.exit_code == 0, result.output
+    outfile = tmp_path / "hist2d.png"
+    assert outfile.exists()
+    assert outfile.stat().st_size > 0
+
+
+def test_plot_binned_3d_not_supported(tmp_path):
+    spec = {
+        "metadata": {"hs3_version": "0.2"},
+        "data": [
+            {
+                "name": "hist3d",
+                "type": "binned",
+                "contents": [1.0] * (2 * 2 * 2),
+                "axes": [
+                    {"name": "x", "min": 0.0, "max": 2.0, "nbins": 2},
+                    {"name": "y", "min": 0.0, "max": 2.0, "nbins": 2},
+                    {"name": "z", "min": 0.0, "max": 2.0, "nbins": 2},
+                ],
+            }
+        ],
+    }
+    path = tmp_path / "hist3d.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    result = runner.invoke(app, ["plot", str(path), "hist3d"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, SystemExit)
+    assert "not yet supported" in result.output
+
+
+def test_plot_unbinned_2d_not_supported(tmp_path):
+    spec = {
+        "metadata": {"hs3_version": "0.2"},
+        "data": [
+            {
+                "name": "points2d",
+                "type": "unbinned",
+                "axes": [
+                    {"name": "x", "min": -10.0, "max": 10.0},
+                    {"name": "y", "min": -10.0, "max": 10.0},
+                ],
+                "entries": [[1.0, 2.0], [3.0, 4.0]],
+            }
+        ],
+    }
+    path = tmp_path / "points2d.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    result = runner.invoke(app, ["plot", str(path), "points2d"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, SystemExit)
+    assert "not yet supported" in result.output
+
+
+def test_plot_point_data_not_supported(tmp_path):
+    """PointData is a real HS3 data type plot() doesn't (yet) render."""
+    spec = {
+        "metadata": {"hs3_version": "0.2"},
+        "data": [{"name": "single", "type": "point", "value": 42.0}],
+    }
+    path = tmp_path / "point.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    result = runner.invoke(app, ["plot", str(path), "single"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, SystemExit)
+    assert "not yet supported" in result.output

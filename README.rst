@@ -204,3 +204,10 @@ This is the same model built using HS3 JSON-like dictionary format:
    <BLANKLINE>
    >>> print("Round-trip model:", model_roundtrip.parameterset.name)
    Round-trip model: default_values
+
+Citation
+--------
+
+If you use ``pyhs3`` in your work, please cite it using the metadata in
+`CITATION.cff <https://github.com/scipp-atlas/pyhs3/blob/main/CITATION.cff>`_.
+GitHub renders this as a "Cite this repository" button on the project page.

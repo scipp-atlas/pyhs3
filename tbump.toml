@@ -35,6 +35,12 @@ search = "Bump version: {current_version} → "
 [[file]]
 src = "README.rst"
 
+[[file]]
+# Bumps `version:` plus the version-pinned `repository-code`/`url` in the
+# citation metadata. All package-version occurrences in the file are intentional,
+# so the default whole-file search is safe.
+src = "CITATION.cff"
+
 [[field]]
 # the name of the field
 name = "candidate"

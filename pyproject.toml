@@ -75,7 +75,7 @@ jax = [
   "pytensor[jax]",  # transitively pulls jax + jaxlib
 ]
 plot = [
-  "matplotlib",
+  "hist[plot] > 2.7.0", # matplotlib alone is insufficient: Hist.plot() requires mplhep
 ]
 develop = [
   "pyhs3[test,docs,dev,jax,plot]",

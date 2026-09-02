@@ -106,6 +106,74 @@ def good_workspace(tmp_path):
     return path
 
 
+def _make_large_ws_dict(n: int) -> dict:
+    """Build an HS3 workspace dict with ``n`` independent Gaussian channels.
+
+    Mirrors ``_WS_DICT``'s two-channel shape (shared ``mean`` parameter, one
+    unbinned observable per channel), scaled up to exercise table-truncation
+    behavior on a workspace with more entries than the default row cap.
+
+    Names are zero-padded (``gauss00``, ``gauss01``, ...) so no name is a
+    substring of another (``gauss1`` would otherwise match ``gauss10``
+    through ``gauss19``), keeping membership checks in tests unambiguous.
+    """
+    distributions = [
+        {
+            "name": f"gauss{i:02d}",
+            "type": "gaussian_dist",
+            "x": f"x{i:02d}_obs",
+            "mean": "mean",
+            "sigma": 1.0,
+        }
+        for i in range(n)
+    ]
+    data = [
+        {
+            "name": f"data{i:02d}",
+            "type": "unbinned",
+            "axes": [{"name": f"x{i:02d}_obs", "min": -10.0, "max": 10.0}],
+            "entries": [[1.0], [2.0], [3.0]],
+        }
+        for i in range(n)
+    ]
+    return {
+        "metadata": {"hs3_version": "0.2"},
+        "distributions": distributions,
+        "domains": [
+            {
+                "name": "main",
+                "type": "product_domain",
+                "axes": [{"name": "mean", "min": -10.0, "max": 10.0}],
+            }
+        ],
+        "data": data,
+        "likelihoods": [
+            {
+                "name": "L",
+                "distributions": [d["name"] for d in distributions],
+                "data": [d["name"] for d in data],
+            }
+        ],
+        "analyses": [
+            {"name": "A", "likelihood": "L", "domains": ["main"], "init": "params"}
+        ],
+        "parameter_points": [
+            {"name": "params", "parameters": [{"name": "mean", "value": 2.0}]}
+        ],
+    }
+
+
+_LARGE_WS_N = 15
+
+
+@pytest.fixture
+def large_workspace(tmp_path):
+    """A workspace with more distributions than the inspect table row cap."""
+    path = tmp_path / "large_workspace.json"
+    path.write_text(json.dumps(_make_large_ws_dict(_LARGE_WS_N)), encoding="utf-8")
+    return path
+
+
 @pytest.fixture
 def bad_workspace(tmp_path):
     """A workspace whose likelihood references a non-existent distribution."""
@@ -217,6 +285,48 @@ def test_inspect_from_stdin(good_workspace):
     result = runner.invoke(app, ["inspect", "-"], input=good_workspace.read_text())
     assert result.exit_code == 0, result.output
     json.loads(result.output)
+
+
+def test_inspect_table_truncates_by_default(large_workspace):
+    """A workspace with more than the row cap shows only some names, plus an indicator."""
+    result = runner.invoke(app, ["inspect", "--no-json", str(large_workspace)])
+    assert result.exit_code == 0, result.output
+    # Scope the name check to the Distributions table: the Likelihoods table's
+    # single row legitimately joins every distribution name into one cell,
+    # regardless of the Distributions table's own row cap.
+    dist_section = result.output.split("Domains")[0]
+    shown = [f"gauss{i:02d}" in dist_section for i in range(_LARGE_WS_N)]
+    assert any(shown)
+    assert not all(shown)
+    assert "more (use -v to show all)" in dist_section
+
+
+def test_inspect_table_verbose_shows_all(large_workspace):
+    """``-v`` shows every distribution and drops the truncation indicator."""
+    result = runner.invoke(app, ["inspect", "--no-json", "-v", str(large_workspace)])
+    assert result.exit_code == 0, result.output
+    for i in range(_LARGE_WS_N):
+        assert f"gauss{i:02d}" in result.output
+    assert "more (use -v to show all)" not in result.output
+
+
+def test_inspect_json_never_truncates(large_workspace):
+    """JSON output stays complete regardless of the table row cap, with or without -v."""
+    result = runner.invoke(app, ["inspect", "--json", str(large_workspace)])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert len(payload["distributions"]) == _LARGE_WS_N
+    dist_names = {d["name"] for d in payload["distributions"]}
+    assert dist_names == {f"gauss{i:02d}" for i in range(_LARGE_WS_N)}
+
+
+def test_inspect_table_small_workspace_unaffected(good_workspace):
+    """A workspace at or below the row cap renders identically to before: no indicator."""
+    result = runner.invoke(app, ["inspect", "--no-json", str(good_workspace)])
+    assert result.exit_code == 0, result.output
+    assert "gauss1" in result.output
+    assert "gauss2" in result.output
+    assert "more (use -v to show all)" not in result.output
 
 
 # ---------------------------------------------------------------------------

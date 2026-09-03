@@ -14,13 +14,10 @@ input is not a terminal, reads the workspace from stdin instead, so ``cat
 workspace.json | pyhs3 validate -`` and ``pyhs3 validate workspace.json`` are
 equivalent.
 
-.. No theme option is set below: preferred=text captures each command's help
-   as a plain, colorless literal-block transcript, so a theme (which colors
-   the console output) has nothing to apply to -- it only takes effect with
-   preferred=svg or html.
 .. typer:: pyhs3.cli:app
    :prog: pyhs3
    :width: 65
-   :preferred: text
+   :preferred: svg
+   :theme: dimmed_monokai
    :make-sections:
    :show-nested:

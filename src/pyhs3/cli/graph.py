@@ -67,15 +67,11 @@ def graph(
         typer.Option("--show-shape", help="Keep shape annotations in node labels."),
     ] = False,
 ) -> None:
-    # This docstring is dumped verbatim into Markdown by
-    # docs/_scripts/generate_cli_docs.py, so its cross-reference below uses
-    # MyST's {role}`target` syntax rather than this codebase's usual RST
-    # :role:`target` syntax -- MyST doesn't parse the colon form inline.
     r"""Render a distribution's computation graph to an image file.
 
     Builds the model the same way ``nll`` does (``--analysis`` selects which
     analysis or likelihood to build from) and delegates to
-    {meth}`~pyhs3.Model.visualize_graph`. Prints the path of the
+    ``Model.visualize_graph``. Prints the path of the
     rendered file to stdout. Requires the ``graph`` optional dependency
     (``pip install 'pyhs3\[graph]'``, which installs ``pydot``) **and** the
     system Graphviz ``dot`` executable, which pydot cannot install on its own

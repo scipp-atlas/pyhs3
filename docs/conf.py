@@ -25,11 +25,11 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx_autodoc_typehints",
     "sphinx_copybutton",
-    "sphinx_click.ext",
     "sphinx_issues",
     "sphinxcontrib.mermaid",
     "sphinxcontrib.bibtex",
     "sphinxcontrib.doxylink",
+    "sphinxcontrib.typer",
     "matplotlib.sphinxext.plot_directive",
 ]
 

@@ -50,7 +50,7 @@ Render a distribution's computation graph
 same figure :meth:`~pyhs3.Model.visualize_graph` produces from Python
 -- useful when a model isn't behaving as expected and you want to see the
 graph pyhs3 actually built. It needs the ``graph`` extra and a system
-Graphviz install (see :doc:`../reference/cli` for both):
+Graphviz install (see :typer:`pyhs3-graph` for both):
 
 .. code-block:: console
 

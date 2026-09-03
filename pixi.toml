@@ -97,7 +97,6 @@ myst-parser = ">=0.13"
 sphinx-copybutton = ">=0.3.2,!=0.5.1"
 sphinx-autodoc-typehints = "*"
 furo = ">=2023.08.17"
-sphinx-click = "*"
 ipywidgets = "*"
 intersphinx-registry = ">=0.2411.17"
 sphinx-issues = "*"
@@ -108,13 +107,16 @@ sphinx-autobuild = "*"
 pydocstyle = "*"
 lychee = ">=0.22.0,<0.23"
 
+[feature.docs.pypi-dependencies]
+# sphinxcontrib-typer has no conda-forge feedstock yet, so it stays on PyPI.
+sphinxcontrib-typer = "*"
+
 [feature.docs.tasks]
 docs-fetch-root-tag = { cmd = "python docs/_scripts/fetch_root_tag.py", description = "Download ROOT Doxygen tag file" }
-docs-generate-cli = { cmd = "python docs/_scripts/generate_cli_docs.py", description = "Generate the pyhs3 CLI reference page from the live app" }
-docs-build = { cmd = "sphinx-build -n -T -b html docs docs/_build/html", depends-on = ["docs-fetch-root-tag", "docs-generate-cli"], description = "Build documentation (static)", inputs = ["src/", "docs/"], outputs = ["docs/_build/html"] }
+docs-build = { cmd = "sphinx-build -n -T -b html docs docs/_build/html", depends-on = ["docs-fetch-root-tag"], description = "Build documentation (static)", inputs = ["src/", "docs/"], outputs = ["docs/_build/html"] }
 docs-linkcheck = { cmd = "lychee docs/", description = "Check documentation for broken links" }
 docs-serve = { cmd = "python -m http.server -d docs/_build/html", depends-on = ["docs-build"], description = "Build and serve documentation" }
-docs-watch = { cmd = "sphinx-autobuild --open-browser -n -T -b html docs docs/_build/html", depends-on = ["docs-fetch-root-tag", "docs-generate-cli"], description = "Build and serve documentation with live reload", inputs = ["docs/"], outputs = ["docs/_build/html"] }
+docs-watch = { cmd = "sphinx-autobuild --open-browser -n -T -b html docs docs/_build/html", depends-on = ["docs-fetch-root-tag"], description = "Build and serve documentation with live reload", inputs = ["docs/"], outputs = ["docs/_build/html"] }
 docs-clean = { cmd = "rm -rf docs/_build", description = "Clean documentation build artifacts", inputs = ["docs/_build"] }
 docs-api = { cmd = "sphinx-apidoc -o docs/api/ --module-first --no-toc --force src/pyhs3", description = "Regenerate API documentation" }
 check-docstrings = { cmd = "pydocstyle src/pyhs3/", description = "Check docstring style" }

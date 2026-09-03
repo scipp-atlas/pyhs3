@@ -61,13 +61,13 @@ docs = [
   "sphinx-copybutton>=0.3.2,!=0.5.1",
   "sphinx_autodoc_typehints",
   "furo>=2023.08.17",
-  "sphinx-click",
   "ipywidgets",
   "intersphinx_registry>=0.2411.17",
   "sphinx-issues",
   "sphinxcontrib-mermaid",
   "sphinxcontrib-bibtex",
   "sphinxcontrib-doxylink",
+  "sphinxcontrib-typer",
   "matplotlib",
   "hist[plot] > 2.7.0", # keep synced with dependencies
 ]
@@ -250,13 +250,15 @@ ignore_directives = [
     "doctest",
     "mermaid",
     "plot", # matplotlib
-    "testsetup"
+    "testsetup",
+    "typer"
 ]
 ignore_roles = [
     "cite:p",
     "cite:ps",
     "external+hs3:ref",
-    "root"
+    "root",
+    "typer"
 ]
 
 [tool.codeflash]

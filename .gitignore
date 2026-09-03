@@ -72,7 +72,6 @@ instance/
 docs/_build/
 **/_generated/
 docs/ROOT.tag
-docs/reference/cli.md
 
 # PyBuilder
 .pybuilder/

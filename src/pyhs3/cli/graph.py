@@ -73,7 +73,7 @@ def graph(
     analysis or likelihood to build from) and delegates to
     ``Model.visualize_graph``. Prints the path of the
     rendered file to stdout. Requires the ``graph`` optional dependency
-    (``pip install 'pyhs3\[graph]'``, which installs ``pydot``) **and** the
+    (``pip install 'pyhs3[graph]'``, which installs ``pydot``) **and** the
     system Graphviz ``dot`` executable, which pydot cannot install on its own
     (``apt install graphviz``, ``brew install graphviz``, or
     ``conda install graphviz``). If either is missing, or the named

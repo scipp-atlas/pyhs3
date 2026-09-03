@@ -49,7 +49,16 @@ def validate(
         ),
     ] = False,
 ) -> None:
-    """Load and validate an HS3 workspace, reporting success or the errors found."""
+    """Load and validate an HS3 workspace, reporting success or the errors found.
+
+    On success, prints ``<source> is a valid HS3 workspace.`` and exits 0. On
+    failure, exits 1: a schema error (a field missing or the wrong type) is
+    reported through ``Workspace.format_validation_error``, and without
+    ``--verbose`` only the first 20 are shown, with the rest summarized by
+    count; an unresolved cross-reference (a likelihood naming a distribution
+    that doesn't exist, for example) is reported through
+    ``pyhs3.exceptions.WorkspaceValidationError``.
+    """
     source = display_name(workspace)
     try:
         spec = read_spec(workspace)

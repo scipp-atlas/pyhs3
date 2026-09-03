@@ -97,7 +97,6 @@ myst-parser = ">=0.13"
 sphinx-copybutton = ">=0.3.2,!=0.5.1"
 sphinx-autodoc-typehints = "*"
 furo = ">=2023.08.17"
-sphinx-click = "*"
 ipywidgets = "*"
 intersphinx-registry = ">=0.2411.17"
 sphinx-issues = "*"
@@ -107,6 +106,10 @@ sphinxcontrib-doxylink = "*"
 sphinx-autobuild = "*"
 pydocstyle = "*"
 lychee = ">=0.22.0,<0.23"
+
+[feature.docs.pypi-dependencies]
+# sphinxcontrib-typer has no conda-forge feedstock yet, so it stays on PyPI.
+sphinxcontrib-typer = "*"
 
 [feature.docs.tasks]
 docs-fetch-root-tag = { cmd = "python docs/_scripts/fetch_root_tag.py", description = "Download ROOT Doxygen tag file" }

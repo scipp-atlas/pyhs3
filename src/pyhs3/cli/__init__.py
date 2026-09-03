@@ -19,6 +19,7 @@ app = typer.Typer(
     help="Command-line tools for HS3 workspaces: validate, inspect, and evaluate.",
     no_args_is_help=True,
     add_completion=False,
+    rich_markup_mode="markdown",
 )
 
 app.command()(graph.graph)

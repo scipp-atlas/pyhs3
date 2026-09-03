@@ -156,10 +156,28 @@ def nll(
 ) -> None:
     """Compute the negative log-likelihood at a point in parameter space.
 
-    Parameter values come from ``--params-file`` (a JSON name->value mapping)
-    and/or repeated ``--param name=value`` options, layered over the
-    workspace's own initial values. Repeated ``--param`` overrides win over the
-    file. The scalar NLL is printed to stdout.
+    The printed value is ``-2 * log_prob`` -- twice the negated joint
+    log-probability -- not the plain ``-log_prob`` some other tools
+    (including RooFit's own ``createNLL()``) report under the same name.
+    Compare against a RooFit/combine-side number with that factor of two in
+    mind.
+
+    Parameter values are layered, later layers winning: the workspace's own
+    ``parameter_points`` (so an analysis without an ``init`` set is still
+    evaluable), then the model's free (non-const) parameter values, then
+    ``--params-file``, then repeated ``--param name=value`` (a name given
+    both in the file and on the command line takes the command-line value).
+    A ``--param`` naming an observable, or naming something that is neither
+    an observable nor a free parameter of the model (a typo, for example),
+    is rejected with a warning and ignored -- it can never override the
+    workspace's actual observed data -- and the command still exits 0. A
+    free parameter with no value available anywhere in this layering raises
+    a fatal error naming it, exiting non-zero.
+
+    ``--analysis`` accepts either an analysis name or a likelihood name
+    directly. With neither given, the workspace's sole analysis is used, or,
+    absent any analyses, its sole likelihood; having more than one of either
+    without ``--analysis`` is a fatal error.
     """
     overrides: dict[str, float] = {}
     if params_file is not None:

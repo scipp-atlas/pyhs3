@@ -8,6 +8,7 @@ exclude-newer = "7d"
 
 [dependencies]
 pyhs3 = { path = "./" }
+uproot = ">=5.7.6,<6"
 
 [package]
 name = "pyhs3"
@@ -15,7 +16,7 @@ version = "latest"
 
 [package.build]
 backend = { name = "pixi-build-python", version = "*" }
-config = { noarch = true }
+config = { noarch = true, ignore-pypi-mapping = false }
 
 [package.host-dependencies]
 uv = "*"
@@ -79,8 +80,8 @@ root_base = ">=6.32.10,<7"
 #[feature.test.target.osx-64.dependencies]
 #root_base = ">=6.32.10,<7"
 #
-#[feature.test.target.osx-arm64.dependencies]
-#root_base = ">=6.32.10,<7"
+[feature.test.target.osx-arm64.dependencies]
+root_base = ">=6.32.10,<7"
 
 [feature.test.tasks]
 test = { cmd = "pytest -m 'not slow and not pydot'", description = "Run quick tests (skip slow and pydot)" }

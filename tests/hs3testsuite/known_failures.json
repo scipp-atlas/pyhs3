@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "suite_commit": "9d04e321ae6fddd283a35507f14ecf852eb7df61",
+  "failures": {
+    "rf103_interprfuncs::twice_delta_nll_scan": {
+      "category": "numerical_mismatch",
+      "reason": "The interpreted-function scan disagrees with the frozen RooFit reference values."
+    },
+    "rf110_normintegration::structure_import": {
+      "category": "unsupported_function",
+      "reason": "pyhs3 does not implement the HS3 integral function."
+    },
+    "rf110_normintegration::twice_delta_nll_scan": {
+      "category": "unsupported_function",
+      "reason": "The likelihood cannot be built without the HS3 integral function."
+    },
+    "rf111_derivatives::structure_import": {
+      "category": "unsupported_function",
+      "reason": "pyhs3 does not implement the HS3 derivative function."
+    },
+    "rf111_derivatives::twice_delta_nll_scan": {
+      "category": "unsupported_function",
+      "reason": "The likelihood cannot be built without the HS3 derivative function."
+    },
+    "rf207_comptools::structure_import": {
+      "category": "unsupported_distribution",
+      "reason": "pyhs3 does not implement chebychev_dist."
+    },
+    "rf207_comptools::twice_delta_nll_scan": {
+      "category": "unsupported_distribution",
+      "reason": "The likelihood cannot be built without chebychev_dist."
+    },
+    "rf208_convolution_fft3::structure_import": {
+      "category": "unsupported_distribution",
+      "reason": "pyhs3 does not implement fft_conv_pdf."
+    },
+    "rf208_convolution_fft3::twice_delta_nll_scan": {
+      "category": "unsupported_distribution",
+      "reason": "The likelihood cannot be built without fft_conv_pdf."
+    },
+    "rf209_anaconv::structure_import": {
+      "category": "unsupported_distribution",
+      "reason": "pyhs3 does not implement the analytical-convolution model and resolution types."
+    },
+    "rf210_angularconv::structure_import": {
+      "category": "unsupported_distribution",
+      "reason": "pyhs3 does not implement fft_conv_pdf."
+    },
+    "rf210_angularconv::twice_delta_nll_scan": {
+      "category": "unsupported_distribution",
+      "reason": "The likelihood cannot be built without fft_conv_pdf."
+    },
+    "rf301_composition::structure_import": {
+      "category": "unsupported_function",
+      "reason": "pyhs3 does not implement the HS3 polynomial function."
+    },
+    "rf301_composition::twice_delta_nll_scan": {
+      "category": "unsupported_function",
+      "reason": "The likelihood cannot be built without the HS3 polynomial function."
+    },
+    "rf302_utilfuncs::structure_import": {
+      "category": "unsupported_function",
+      "reason": "pyhs3 does not implement the HS3 polynomial function."
+    },
+    "rf302_utilfuncs::twice_delta_nll_scan": {
+      "category": "unsupported_function",
+      "reason": "The likelihood cannot be built without the HS3 polynomial function."
+    },
+    "rf303_conditional::structure_import": {
+      "category": "unsupported_function",
+      "reason": "pyhs3 does not implement the HS3 polynomial function."
+    },
+    "rf303_conditional::twice_delta_nll_scan": {
+      "category": "unsupported_function",
+      "reason": "The likelihood cannot be built without the HS3 polynomial function."
+    },
+    "rf305_condcorrprod::structure_import": {
+      "category": "unsupported_function",
+      "reason": "pyhs3 does not implement the HS3 polynomial function."
+    },
+    "rf305_condcorrprod::twice_delta_nll_scan": {
+      "category": "unsupported_function",
+      "reason": "The likelihood cannot be built without the HS3 polynomial function."
+    },
+    "rf308_normintegration2d::structure_import": {
+      "category": "unsupported_function",
+      "reason": "pyhs3 does not implement the HS3 integral function."
+    },
+    "rf308_normintegration2d::twice_delta_nll_scan": {
+      "category": "unsupported_function",
+      "reason": "The likelihood cannot be built without the HS3 integral function."
+    },
+    "rf309_ndimplot::twice_delta_nll_scan": {
+      "category": "evaluation_error",
+      "reason": "The multidimensional likelihood currently produces incompatible event shapes."
+    },
+    "rf703_effpdfprod::structure_import": {
+      "category": "unsupported_distribution",
+      "reason": "pyhs3 does not implement efficiency_product_pdf_dist."
+    },
+    "rf703_effpdfprod::twice_delta_nll_scan": {
+      "category": "unsupported_distribution",
+      "reason": "The likelihood cannot be built without efficiency_product_pdf_dist."
+    }
+  }
+}

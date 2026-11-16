@@ -14,9 +14,11 @@ import runpy
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 import typer
-from scipy.stats import truncnorm
+from scipy.special import gammaln
+from scipy.stats import poisson, truncnorm
 from typer.testing import CliRunner
 
 from pyhs3.cli import app
@@ -415,6 +417,100 @@ def test_nll_no_init_uses_parameter_points(tmp_path):
     value = float(result.output.strip().splitlines()[-1])
     # parameter_points declares mean=2.0, so the NLL matches the mean=2.0 case.
     assert value == pytest.approx(_expected_nll(2.0), rel=1e-6)
+
+
+@pytest.fixture
+def unlisted_width_workspace(tmp_path):
+    """gauss1's sigma is a parameter 'width' in no domain; only 'fixed' makes it const.
+
+    The analysis has no init, so it violates HS3 section 2.7 unless a parameter
+    set that marks width const is selected.
+    """
+    spec = json.loads(json.dumps(_WS_DICT))
+    spec["distributions"][0]["sigma"] = "width"
+    del spec["analyses"][0]["init"]
+    spec["parameter_points"] = [
+        {
+            "name": "params",
+            "parameters": [
+                {"name": "mean", "value": 2.0},
+                {"name": "width", "value": 1.0},
+            ],
+        },
+        {
+            "name": "fixed",
+            "parameters": [
+                {"name": "mean", "value": 2.0},
+                {"name": "width", "value": 1.0, "const": True},
+            ],
+        },
+    ]
+    path = tmp_path / "unlisted_width.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    return path
+
+
+def test_nll_unlisted_parameter_error_suggests_parameter_set_option(
+    unlisted_width_workspace,
+):
+    """The HS3 section 2.7 error from the CLI points at --parameter-set."""
+    result = runner.invoke(app, ["nll", str(unlisted_width_workspace)])
+    assert result.exit_code != 0
+    assert "width" in result.output
+    assert "--parameter-set fixed" in result.output
+
+
+def test_nll_parameter_set_holds_unlisted_parameter_const(unlisted_width_workspace):
+    """--parameter-set selects the parameter point whose const flags apply."""
+    result = runner.invoke(
+        app, ["nll", str(unlisted_width_workspace), "--parameter-set", "fixed"]
+    )
+    assert result.exit_code == 0, result.output
+    value = float(result.output.strip().splitlines()[-1])
+    # width is held at 1.0, the sigma of gauss1 in the two-Gaussian reference.
+    assert value == pytest.approx(_expected_nll(2.0), rel=1e-6)
+
+
+def test_nll_parameter_set_unknown_name(good_workspace):
+    result = runner.invoke(
+        app, ["nll", str(good_workspace), "--parameter-set", "does_not_exist"]
+    )
+    assert result.exit_code != 0
+    assert "does_not_exist" in result.output
+
+
+def test_nll_parameter_set_on_root_exported_histfactory_workspace():
+    """A ROOT export (no analysis init, Lumi const only in parameter points) evaluates with --parameter-set.
+
+    Expected value at mu = gamma = Lumi = 1, computed independently: Poisson main
+    measurement (observed [51, 48], expected [62, 63]) plus the two shapesys
+    Poisson constraints with tau = (nominal / uncertainty)^2 at gamma = 1.
+    """
+    path = (
+        Path(__file__).parent
+        / "test_histfactory"
+        / "simplemodel_uncorrelated-background_hs3.json"
+    )
+    result = runner.invoke(
+        app,
+        [
+            "nll",
+            str(path),
+            "--analysis",
+            "simPdf_obsData",
+            "--parameter-set",
+            "default_values",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    value = float(result.output.strip().splitlines()[-1])
+
+    observed = np.array([51.0, 48.0])
+    expected = np.array([50.0 + 12.0, 52.0 + 11.0])
+    tau = (np.array([50.0, 52.0]) / np.array([3.0, 7.0])) ** 2
+    log_main = poisson.logpmf(observed, expected).sum()
+    log_constraints = (tau * np.log(tau) - tau - gammaln(tau + 1)).sum()
+    assert value == pytest.approx(-2.0 * (log_main + log_constraints), rel=1e-10)
 
 
 def test_nll_from_stdin(good_workspace):

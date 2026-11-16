@@ -20,7 +20,7 @@ from pyhs3.distributions.histfactory.modifiers import (
     ParametersModifier,
 )
 from pyhs3.domains import Domain, Domains, DomainType, ProductDomain
-from pyhs3.exceptions import WorkspaceValidationError
+from pyhs3.exceptions import UnlistedParameterError, WorkspaceValidationError
 from pyhs3.functions import Functions
 from pyhs3.likelihoods import Likelihood, Likelihoods
 from pyhs3.metadata import Metadata
@@ -473,7 +473,7 @@ class Workspace(BaseModel):
         fails before any expression is built.
 
         Raises:
-            WorkspaceValidationError: naming the offending parameters, and any
+            UnlistedParameterError: naming the offending parameters, and any
                 parameter points in which all of them are ``const``.
         """
         graph, _, _ = build_dependency_graph(
@@ -522,7 +522,7 @@ class Workspace(BaseModel):
                 f" All of them are const in {', '.join(repr(c) for c in candidates)}: "
                 f"pass ws.model(analysis, {options}) to use it."
             )
-        raise WorkspaceValidationError(msg)
+        raise UnlistedParameterError(msg, offending, candidates)
 
     def _select_parameterset(
         self,

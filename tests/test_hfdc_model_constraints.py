@@ -12,7 +12,6 @@ nuisance parameter across all HFDC channels.
 from __future__ import annotations
 
 import math
-import types
 
 import numpy as np
 import pytensor
@@ -360,8 +359,9 @@ class TestTryBakeHFDCObserved:
         )
         # Unbinned datum comes first so the loop hits `continue` at least once
         # before finding the matching BinnedData.
-        model._likelihood = types.SimpleNamespace(
-            distributions=["other_dist", sr_channel],
+        model._likelihood = Likelihood(
+            name="L",
+            distributions=["other_dist", sr_channel.name],
             data=[unbinned, binned],
         )
 
@@ -383,9 +383,8 @@ class TestTryBakeHFDCObserved:
             axes=[{"name": "x_SR", "min": 0.0, "max": 10.0, "nbins": 2}],
             contents=[10.0, 20.0],
         )
-        model._likelihood = types.SimpleNamespace(
-            distributions=[sr_channel],
-            data=[binned],
+        model._likelihood = Likelihood(
+            name="L", distributions=[sr_channel.name], data=[binned]
         )
 
         result = model._try_bake_hfdc_observed("other_observed")

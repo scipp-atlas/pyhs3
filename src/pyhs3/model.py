@@ -24,7 +24,6 @@ from rich.progress import (
 )
 
 from pyhs3.context import Context
-from pyhs3.data import BinnedData
 from pyhs3.distributions import Distributions, HistFactoryDistChannel
 from pyhs3.domains import Domain
 from pyhs3.functions import Functions
@@ -405,20 +404,12 @@ class Model:
         the observed bin counts are baked in as compile-time constants so that
         they are invisible to ``explicit_graph_inputs`` and JAX transpilation.
         """
-        if self._likelihood is None or not node_name.endswith("_observed"):
+        if self._likelihood is None:
             return None
-        dist_name = node_name[: -len("_observed")]
-        for dist_obj, datum in zip(
-            self._likelihood.distributions, self._likelihood.data, strict=True
-        ):
-            if isinstance(datum, str) or not isinstance(datum, BinnedData):
-                continue
-            actual_dist_name = dist_obj if isinstance(dist_obj, str) else dist_obj.name
-            if actual_dist_name == dist_name:
-                return pt.constant(
-                    np.asarray(datum.contents, dtype=np.float64), name=node_name
-                )
-        return None
+        datum = self._likelihood.binned_observed_inputs().get(node_name)
+        if datum is None:
+            return None
+        return pt.constant(np.asarray(datum.contents, dtype=np.float64), name=node_name)
 
     def _build_parameter_node(self, node_name: str, context: Context) -> TensorVar:
         """Build a parameter node: baked constant (const=True) or bounded free variable."""
@@ -632,14 +623,7 @@ class Model:
         # resolution and cycle detection retain their existing behavior.
         # Legacy models without a likelihood continue to build every node.
         if self._likelihood is not None:
-            likelihood_roots = [
-                dist if isinstance(dist, str) else dist.name
-                for dist in self._likelihood.distributions
-            ]
-            likelihood_roots.extend(
-                dist if isinstance(dist, str) else dist.name
-                for dist in (self._likelihood.aux_distributions or [])
-            )
+            likelihood_roots = self._likelihood.distribution_names()
             # Workspace construction resolves and validates all likelihood
             # references. Direct Model construction may intentionally leave
             # string references unresolved, however; preserve its historical

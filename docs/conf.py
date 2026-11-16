@@ -53,6 +53,7 @@ exclude_patterns = [
     ".DS_Store",
     ".env",
     ".venv",
+    "plans",
 ]
 
 html_theme = "furo"

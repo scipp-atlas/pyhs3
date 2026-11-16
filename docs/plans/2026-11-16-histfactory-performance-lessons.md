@@ -76,8 +76,16 @@ conditional inverse Hessian.
 
 The likelihood is badly conditioned (strongly correlated normalisation factors). A limited-memory
 quasi-Newton method with a handful of correction pairs cannot represent that curvature; the dense
-642 x 642 inverse Hessian can, and its O(n^2) update costs far less than one likelihood call.
-Scaling each parameter by its prefit width removes a further factor of three.
+642 x 642 inverse Hessian can. Scaling each parameter by its prefit width removes a further factor
+of three.
+
+The dense matrix is not free. Each iteration does several O(n^2) operations on it (the search
+direction, the rank-two update, the projection of active bounds), on the order of a million
+floating-point operations at n = 642, which is comparable to one likelihood call. In the NumPy port
+below the minimiser spends about 0.4 s of its 0.9 s outside the likelihood. histopresto's README
+states the same limit: the dense update dominates above a few hundred parameters. At larger n the
+trade-off between iterations saved and O(n^2) work per iteration has to be measured, for example
+against L-BFGS with a large memory (m = 300 needed 365 iterations here).
 
 MIGRAD itself is not the problem: with the analytic gradient and strategy 0 it needs about as many
 gradient iterations as the JS BFGS (72 against 84) and lands within 0.002 of the same 2NLL. Its
@@ -173,8 +181,28 @@ In order of payoff:
    inputs; ROOT holds them constant. On this workspace that is 101 parameters, and on the
    `simplemodel` test workspace a free `Lumi` makes the fit degenerate (POI runs to its bound).
 
-Feedback for histfactory_js: skip the seed Hessian, or fall back to its diagonal, when it is not
-positive definite; on this workspace it costs a quarter of the fit.
+For histfactory_js: the seed Hessian at the starting point is not positive definite on this
+workspace and costs a quarter of the fit. histopresto's README already lists this as a known
+limitation ("the case on all larger models tried").
+
+## The published code: histopresto
+
+The engine is published as [histopresto](https://github.com/alexander-held/histopresto) (initial
+commit `e64de97`). Its JavaScript core is algorithmically identical to the engine files measured
+here (only the module packaging differs), so the JS numbers above apply to it.
+
+The Python package parses the workspace and builds the same flat arrays in NumPy, then hands them
+to a C kernel (`kernel.c`, loaded with ctypes) that is a statement-by-statement port of the JS:
+`hf_nll` (value and analytic gradient), `hf_minimize` (the dense BFGS) and `hf_hessian` (gradient
+differences) all run in C, so no Python is involved per likelihood call or per iteration. Alex
+reports about a further factor of two over the JS; not measured here.
+
+That is the other end of the design space from item 1 below. histopresto hand-writes the model,
+its gradient and the optimiser for the HistFactory modifier set; pyhs3 has to evaluate arbitrary HS3
+graphs, so it keeps a compiled graph and gets gradients from autodiff. The vectorised kernel shows
+that the graph approach reaches the same per-call order of magnitude (1.3 to 1.9 ms against 0.4 to
+0.85 ms) once the model's structure is data, leaving the optimiser loop as the remaining Python
+cost.
 
 ## Caveats
 

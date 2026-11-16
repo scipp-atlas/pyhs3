@@ -177,9 +177,13 @@ In order of payoff:
    `jax.lax.mul_without_zeros`, which the JAX installed in `py312-jax` does not provide); the
    gradient of `pt.concatenate`
    lowers to a `Split` that fails under JAX with traced sizes; `pt.prod` has no second derivative.
-5. **Decide the semantics of parameters outside the analysis domains.** pyhs3 makes them free
-   inputs; ROOT holds them constant. On this workspace that is 101 parameters, and on the
-   `simplemodel` test workspace a free `Lumi` makes the fit degenerate (POI runs to its bound).
+5. **Enforce the analysis parameter rule.** HS3 section 2.7 requires every likelihood parameter to
+   be "listed in one of the domains referenced, or set to `const` in the parameter point
+   referenced". ROOT 6.40 exports analyses without `init` while leaving `Lumi` and the
+   below-threshold `gamma_stat_*` parameters out of the domains (they are `const: true` in every
+   parameter point), so these workspaces violate the rule. pyhs3 does not check it: with no `init`
+   it uses an empty parameter set and turns all 101 into free inputs. On the `simplemodel` test
+   workspaces a free `Lumi` makes the fit degenerate (the POI runs to its bound).
 
 For histfactory_js: the seed Hessian at the starting point is not positive definite on this
 workspace and costs a quarter of the fit. histopresto's README already lists this as a known

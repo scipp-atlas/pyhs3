@@ -471,6 +471,20 @@ def test_nll_unlisted_parameter_error_suggests_parameter_set_option(
     assert "--parameter-set fixed" in _plain(result.output)
 
 
+def test_nll_unlisted_parameter_without_fixing_set_has_no_option_hint(tmp_path):
+    """With no parameter set that holds width const, the error suggests no --parameter-set."""
+    spec = json.loads(json.dumps(_WS_DICT))
+    spec["distributions"][0]["sigma"] = "width"
+    spec["parameter_points"][0]["parameters"].append({"name": "width", "value": 1.0})
+    path = tmp_path / "unfixable.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+
+    result = runner.invoke(app, ["nll", str(path)])
+    assert result.exit_code != 0
+    assert "width" in _plain(result.output)
+    assert "--parameter-set" not in _plain(result.output)
+
+
 def test_graph_unlisted_parameter_is_a_clean_error(unlisted_width_workspace):
     """graph reports an HS3 section 2.7 violation as a CLI error, not a traceback."""
     result = runner.invoke(

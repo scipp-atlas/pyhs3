@@ -55,6 +55,7 @@ BernsteinPolyDist = mathematical.BernsteinPolyDist
 CrystalBallDist = physics.CrystalBallDist
 AsymmetricCrystalBallDist = physics.AsymmetricCrystalBallDist
 ArgusDist = physics.ArgusDist
+RelativisticBreitWignerDist = physics.RelativisticBreitWignerDist
 
 # CMS-specific distributions
 FastVerticalInterpHistPdf2Dist = cms.FastVerticalInterpHistPdf2Dist
@@ -87,6 +88,7 @@ __all__ = [
     "PolynomialDist",
     "ProductDist",
     "QQZZBackgroundDist",
+    "RelativisticBreitWignerDist",
     "UniformDist",
     "registered_distributions",
 ]
@@ -125,6 +127,7 @@ DistributionType = Annotated[
     | physics.CrystalBallDist
     | physics.AsymmetricCrystalBallDist
     | physics.ArgusDist
+    | physics.RelativisticBreitWignerDist
     # CMS distributions
     | cms.FastVerticalInterpHistPdf2Dist
     | cms.GGZZBackgroundDist

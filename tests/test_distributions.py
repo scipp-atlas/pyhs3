@@ -3692,6 +3692,56 @@ class TestStableLogSumExp:
         assert np.all(np.isfinite(grad_val)), f"gradient has NaN/Inf: {grad_val}"
 
 
+class TestSignedLogSumExp:
+    """``_stable_logsumexp`` with per-term signs computes log(sum(s_i exp(x_i))).
+
+    Mixture coefficients may be negative (HS3 does not restrict their sign and
+    defines c_n = 1 - sum(c_i), which can be negative), so MixtureDist reduces
+    log|c_i| + log f_i with the coefficients' signs.  See
+    https://github.com/scipp-atlas/pyhs3/issues/348.
+    """
+
+    @staticmethod
+    def _compile():
+        x = pt.dvector("x")
+        signs = pt.dvector("signs")
+        return pytensor.function([x, signs], _stable_logsumexp(x, axis=0, signs=signs))
+
+    def test_matches_direct_signed_sum(self):
+        """Mixed signs with a positive total match log(sum(s_i exp(x_i)))."""
+        f = self._compile()
+        x = np.array([-1.0, -2.5, -0.3, -4.0])
+        signs = np.array([1.0, -1.0, 1.0, -1.0])
+        np.testing.assert_allclose(
+            f(x, signs), np.log(np.sum(signs * np.exp(x))), rtol=1e-12
+        )
+
+    def test_all_positive_signs_match_unsigned(self):
+        """With every sign +1 the result equals the unsigned log-sum-exp."""
+        f = self._compile()
+        x = np.array([-700.0, -701.0, -702.5])
+        np.testing.assert_allclose(f(x, np.ones(3)), logsumexp(x), rtol=1e-12)
+
+    def test_stable_for_large_negative_inputs(self):
+        """Terms that underflow individually still give a finite result."""
+        f = self._compile()
+        x = np.array([-1000.0, -1001.0])
+        signs = np.array([1.0, -1.0])
+        expected = -1000.0 + np.log1p(-np.exp(-1.0))
+        np.testing.assert_allclose(f(x, signs), expected, rtol=1e-12)
+
+    def test_negative_total_is_nan(self):
+        """A negative total has no logarithm: NaN, not -inf or a finite value."""
+        f = self._compile()
+        assert np.isnan(f(np.array([-2.0, -1.0]), np.array([1.0, -1.0])))
+
+    def test_zero_sign_term_is_ignored(self):
+        """A zero coefficient (sign 0) contributes nothing."""
+        f = self._compile()
+        x = np.array([-1.0, 5.0])
+        np.testing.assert_allclose(f(x, np.array([1.0, 0.0])), -1.0, rtol=1e-12)
+
+
 class TestMixtureDist:
     """Test MixtureDist implementation with various coefficient scenarios."""
 
@@ -3917,6 +3967,25 @@ class TestMixtureDist:
         assert loaded_dist.summands == dist.summands
         assert loaded_dist.coefficients == dist.coefficients
         assert loaded_dist.ref_coef_norm == dist.ref_coef_norm
+
+    @pytest.mark.parametrize(
+        "dump_kwargs",
+        [{}, {"exclude_none": True}, {"exclude": {"ref_coef_norm"}}],
+        ids=["default", "exclude_none", "exclude_field"],
+    )
+    def test_mixture_dist_dump_without_ref_coef_norm(self, dump_kwargs):
+        """An unset ref_coef_norm is omitted, whichever dump options drop it first."""
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2"],
+            coefficients=["coeff1", "coeff2"],
+            extended=True,
+        )
+
+        dumped = dist.model_dump(**dump_kwargs)
+
+        assert "ref_coef_norm" not in dumped
+        assert dumped["summands"] == ["pdf1", "pdf2"]
 
     def test_mixture_dist_expected_yield(self):
         """Test expected_yield method for extended PDFs."""

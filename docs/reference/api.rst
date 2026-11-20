@@ -94,6 +94,7 @@ Distributions
    CrystalBallDist
    AsymmetricCrystalBallDist
    ArgusDist
+   RelativisticBreitWignerDist
    HistFactoryDistChannel
    FastVerticalInterpHistPdf2Dist
    GGZZBackgroundDist

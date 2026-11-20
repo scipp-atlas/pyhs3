@@ -77,6 +77,14 @@ class UnlistedParameterError(WorkspaceValidationError):
     def __init__(
         self, message: str, parameters: list[str], const_parameter_sets: list[str]
     ) -> None:
+        """Store the message and the data a caller needs to fix the analysis.
+
+        Args:
+            message: Human-readable description of the violation.
+            parameters: The offending parameter names, sorted.
+            const_parameter_sets: Parameter points in which every offending
+                parameter is ``const``.
+        """
         super().__init__(message)
         self.parameters = parameters
         self.const_parameter_sets = const_parameter_sets

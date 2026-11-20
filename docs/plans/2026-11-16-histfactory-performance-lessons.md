@@ -107,10 +107,13 @@ instead of 279 calls and 0.28 s.
 | compile of the value function          | not finished after 51 min (stopped)   |
 | `pyhs3 nll` (build, compile, one call) | not finished after 60 min (timeout)   |
 
-The graph holds the model's structure. `interpolate_code4` builds about 30 nodes per normsys entry,
-including the solve for the six polynomial coefficients from the constant `hi`/`lo` values, so the
-49,737 normsys entries alone account for about 1.5 million nodes. PyTensor's rewrites then
-constant-fold them one by one.
+The graph holds the model's structure. Measured on single-channel workspaces with N modifiers
+(`node_counts.py`), the raw `log_prob` graph grows linearly: 48 apply nodes per normsys modifier and
+165 per histosys modifier, each including its constraint term, and 36 to 37 per additional normsys
+entry when samples share the parameter (the constraint is built once). Each entry carries
+`interpolate_code4`'s solve for the six polynomial coefficients from its constant `hi`/`lo` values,
+so the 49,737 normsys entries alone account for about 1.8 million of the 1.88 million nodes (97%).
+PyTensor's rewrites then constant-fold them one by one.
 
 ### The same model as data: a vectorised kernel
 

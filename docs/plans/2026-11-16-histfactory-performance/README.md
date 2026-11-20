@@ -35,6 +35,9 @@ JAX_PLATFORMS=cpu JAX_ENABLE_X64=1 pixi run -e py312-jax python $D/bench_kernel.
 # kernel + ported BFGS fit, covariance by gradient differences and by autodiff (about 4 min)
 pixi run -e py312 python $D/fit_kernel.py $OUT/hww_toy_coo.json
 
+# graph nodes per normsys/histosys modifier in pyhs3's log_prob (seconds)
+pixi run -e py312 python $D/node_counts.py
+
 # pyhs3 as it stands (on HWW the compile does not finish within an hour)
 pixi run -e py312 python $D/bench_pyhs3.py $OUT/hww_toy_hs3.json simPdf_obsData $OUT
 pixi run -e py312 pyhs3 nll $OUT/hww_toy_hs3.json --analysis simPdf_obsData
@@ -57,3 +60,4 @@ pixi run -e py312 pyhs3 nll $OUT/hww_toy_hs3.json --analysis simPdf_obsData
 | `bfgs.py`                | NumPy port of the JS dense BFGS; gradient-difference Hessian         |
 | `fit_kernel.py`          | kernel + BFGS fit; covariance two ways                               |
 | `bench_pyhs3.py`         | pyhs3 phase timings: build, graph size, compile, L-BFGS-B fit        |
+| `node_counts.py`         | pyhs3 graph nodes per normsys/histosys modifier and per shared entry |

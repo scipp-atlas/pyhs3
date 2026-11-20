@@ -3968,6 +3968,25 @@ class TestMixtureDist:
         assert loaded_dist.coefficients == dist.coefficients
         assert loaded_dist.ref_coef_norm == dist.ref_coef_norm
 
+    @pytest.mark.parametrize(
+        "dump_kwargs",
+        [{}, {"exclude_none": True}, {"exclude": {"ref_coef_norm"}}],
+        ids=["default", "exclude_none", "exclude_field"],
+    )
+    def test_mixture_dist_dump_without_ref_coef_norm(self, dump_kwargs):
+        """An unset ref_coef_norm is omitted, whichever dump options drop it first."""
+        dist = MixtureDist(
+            name="test_mixture",
+            summands=["pdf1", "pdf2"],
+            coefficients=["coeff1", "coeff2"],
+            extended=True,
+        )
+
+        dumped = dist.model_dump(**dump_kwargs)
+
+        assert "ref_coef_norm" not in dumped
+        assert dumped["summands"] == ["pdf1", "pdf2"]
+
     def test_mixture_dist_expected_yield(self):
         """Test expected_yield method for extended PDFs."""
         # Test with N coefficients (extended=True)

@@ -343,6 +343,59 @@ def test_model_from_analysis_unlisted_parameter_error_suggests_parameter_set():
     assert "free_width" not in message
 
 
+def test_model_from_analysis_suggestion_must_hold_every_unlisted_parameter_const():
+    """A suggested parameter set replaces init, so it must make every unlisted parameter const.
+
+    'width' is const in init but 'shift' is not; 'only_shift' marks only shift const and
+    would free width again, so only 'both' is a valid suggestion.
+    """
+    distributions = [
+        {**_WS_DICT["distributions"][0], "sigma": "width"},
+        {**_WS_DICT["distributions"][1], "sigma": "shift"},
+    ]
+    point = {"name": "mean", "value": 2.0}
+    ws = Workspace(
+        **{
+            **_WS_DICT,
+            "distributions": distributions,
+            "analyses": [
+                {"name": "A", "likelihood": "L", "domains": ["main"], "init": "init"}
+            ],
+            "parameter_points": [
+                {
+                    "name": "init",
+                    "parameters": [
+                        point,
+                        {"name": "width", "value": 1.0, "const": True},
+                        {"name": "shift", "value": 2.0},
+                    ],
+                },
+                {
+                    "name": "only_shift",
+                    "parameters": [
+                        point,
+                        {"name": "width", "value": 1.0},
+                        {"name": "shift", "value": 2.0, "const": True},
+                    ],
+                },
+                {
+                    "name": "both",
+                    "parameters": [
+                        point,
+                        {"name": "width", "value": 1.0, "const": True},
+                        {"name": "shift", "value": 2.0, "const": True},
+                    ],
+                },
+            ],
+        }
+    )
+    with pytest.raises(WorkspaceValidationError) as excinfo:
+        ws.model(ws.analyses["A"], progress=False)
+    assert excinfo.value.parameters == ["shift"]
+    assert excinfo.value.const_parameter_sets == ["both"]
+    assert "only_shift" not in str(excinfo.value)
+
+
 def test_model_from_analysis_multi_domain_merges():
     """ws.model(analysis) merges multiple domains into a single ProductDomain."""
     ws_multi = Workspace(

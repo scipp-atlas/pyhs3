@@ -474,7 +474,8 @@ class Workspace(BaseModel):
 
         Raises:
             UnlistedParameterError: naming the offending parameters, and any
-                parameter points in which all of them are ``const``.
+                parameter points in which every parameter outside the domains
+                and data is ``const``.
         """
         graph, _, _ = build_dependency_graph(
             parameterset,
@@ -487,13 +488,17 @@ class Workspace(BaseModel):
             for idx in graph.ancestor_closure(roots)
             if graph[idx]["type"] == "parameter"
         }
-        allowed = (
-            {axis.name for axis in getattr(domain, "axes", [])}
-            | {point.name for point in parameterset if point.const}
-            | set(self._extract_observables(likelihood))
-            | set(likelihood.binned_observed_inputs())
+        # Parameters the domains and data do not account for: each must be const
+        # in the referenced parameter point.
+        unlisted = (
+            parameters
+            - {axis.name for axis in getattr(domain, "axes", [])}
+            - set(self._extract_observables(likelihood))
+            - set(likelihood.binned_observed_inputs())
         )
-        offending = sorted(parameters - allowed)
+        offending = sorted(
+            unlisted - {point.name for point in parameterset if point.const}
+        )
         if not offending:
             return
 
@@ -511,15 +516,18 @@ class Workspace(BaseModel):
             f"in the referenced parameter point. {len(offending)} parameter(s) are "
             f"neither in the domains nor const in {referenced}: {shown}."
         )
+        # A selected parameter set replaces init entirely, so a suggestion must hold
+        # every unlisted parameter const, not only the ones init leaves free.
         candidates = [
             pset.name
             for pset in self.parameter_points or []
-            if {point.name for point in pset if point.const}.issuperset(offending)
+            if {point.name for point in pset if point.const}.issuperset(unlisted)
         ]
         if candidates:
             options = " or ".join(f"parameter_set='{name}'" for name in candidates)
             msg += (
-                f" All of them are const in {', '.join(repr(c) for c in candidates)}: "
+                f" Every parameter outside the domains is const in "
+                f"{', '.join(repr(c) for c in candidates)}: "
                 f"pass ws.model(analysis, {options}) to use it."
             )
         raise UnlistedParameterError(msg, offending, candidates)

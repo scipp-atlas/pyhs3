@@ -70,8 +70,9 @@ class UnlistedParameterError(WorkspaceValidationError):
     Attributes:
         parameters: The offending parameter names, sorted.
         const_parameter_sets: Names of the workspace parameter points in which
-            every offending parameter is ``const``; selecting one of them as the
-            parameter set makes the analysis valid.
+            every parameter outside the analysis domains and data is ``const``;
+            selecting one of them as the parameter set (which replaces ``init``)
+            makes the analysis valid.
     """
 
     def __init__(
@@ -82,8 +83,8 @@ class UnlistedParameterError(WorkspaceValidationError):
         Args:
             message: Human-readable description of the violation.
             parameters: The offending parameter names, sorted.
-            const_parameter_sets: Parameter points in which every offending
-                parameter is ``const``.
+            const_parameter_sets: Parameter points in which every parameter
+                outside the analysis domains and data is ``const``.
         """
         super().__init__(message)
         self.parameters = parameters

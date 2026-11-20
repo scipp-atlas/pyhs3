@@ -816,8 +816,7 @@ class TestHS3GenericExpressionGrammar:
     def test_rootexport_ttHbb_expression(self):
         """An expression exported from a ROOT ttHbb CP workspace."""
         expr_str = (
-            "(-0.00651199*pow(kappa_tprime,2)*pow(cos(avalue*acos(-1)),2))"
-            "+(0.20687677)"
+            "(-0.00651199*pow(kappa_tprime,2)*pow(cos(avalue*acos(-1)),2))+(0.20687677)"
         )
         kappa, avalue = 1.5, 0.3
         expected = (

@@ -5,7 +5,7 @@ rules:
       # workflow's own hard-coded matrix (see the `include:` list above the
       # `checks` job), not attacker-controlled input, so there is no
       # injection risk here. The usual env-var fix is skipped because this
-      # step runs on ubuntu-latest, windows-latest, and macos-14, and their
+      # step runs on ubuntu-latest, windows-latest, and macos-15, and their
       # default shells (bash vs pwsh) use different environment-variable
       # syntax, which would break the Windows and macOS runs.
       - ci.yml:120

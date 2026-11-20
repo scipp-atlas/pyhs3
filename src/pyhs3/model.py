@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import warnings
 from collections.abc import Callable, Mapping
 from functools import cached_property
@@ -12,6 +13,7 @@ import numpy as np
 import numpy.typing as npt
 import pytensor.tensor as pt
 from pytensor.compile.maker import function
+from pytensor.compile.mode import Mode
 from pytensor.graph.traversal import applys_between, explicit_graph_inputs
 from rich.progress import (
     BarColumn,
@@ -23,6 +25,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+from pyhs3.compiled import CompiledNLL, compile_nll
 from pyhs3.context import Context
 from pyhs3.data import BinnedData
 from pyhs3.distributions import Distribution, Distributions, HistFactoryDistChannel
@@ -246,6 +249,89 @@ class Model:
             if not pp.const:
                 result[pp.name] = float(pp.value)
         return result
+
+    def compile_nll(
+        self,
+        *,
+        gradient: bool = True,
+        mode: Mode | str | None = None,
+        cache: bool | str | os.PathLike[str] | None = None,
+    ) -> CompiledNLL:
+        """Compile the negative log-likelihood for a minimizer.
+
+        Returns a :class:`~pyhs3.compiled.CompiledNLL`: ``-sum(log_prob)``
+        and, by default, its gradient, compiled once as a function of a single
+        1-D vector of the free parameters (ordered as
+        :attr:`~pyhs3.compiled.CompiledNLL.parameter_names`).  The observed
+        data and every ``const`` parameter are baked into the compiled
+        function, so each call passes only the free parameters.  The result
+        also carries the starting point (:attr:`free_params`) and the domain
+        bounds of each parameter, ready for SciPy or iminuit.
+
+        This is the recommended way to evaluate a likelihood repeatedly; see
+        :doc:`/howto/fit_model`.
+
+        Args:
+            gradient: Also compile the gradient with respect to the free
+                parameters.  The value and gradient then come from one
+                compiled function.
+            mode: PyTensor compile mode.  The default,
+                :func:`~pyhs3.compiled.default_nll_mode`, is chosen to keep
+                compilation of large workspaces fast; pass ``"FAST_RUN"`` or
+                another mode to override it.
+            cache: Cache the compiled function on disk and reuse it when the
+                same likelihood is compiled again with the same options,
+                pyhs3 and PyTensor versions.  ``True`` uses
+                ``$XDG_CACHE_HOME/pyhs3`` (``~/.cache/pyhs3``); a path uses
+                that directory; ``None`` or ``False`` disables caching.  The
+                cached file refers to PyTensor's compiled C modules, so it is
+                only valid on the machine (and PyTensor compile directory)
+                that wrote it.
+
+        Returns:
+            CompiledNLL: The compiled likelihood.
+
+        Raises:
+            RuntimeError: If the model was built without a likelihood.
+            ValueError: If a free parameter is batched (``kind=pt.vector``);
+                the parameter vector has one entry per scalar parameter.
+        """
+        log_prob = self.log_prob
+        data = self.data
+        start = {**self.nominal_params, **self.free_params}
+        free: list[TensorVar] = []
+        baked: dict[TensorVar, npt.NDArray[np.float64]] = {}
+        names: list[str] = []
+        for input_var in explicit_graph_inputs([log_prob]):
+            var = cast(TensorVar, input_var)
+            if var.name is None:
+                continue
+            if var.name in data:
+                baked[var] = data[var.name]
+            elif var.ndim == 0:
+                free.append(var)
+                names.append(var.name)
+            else:
+                msg = (
+                    f"Free parameter '{var.name}' is batched (ndim={var.ndim}); "
+                    "compile_nll needs scalar free parameters, one entry each "
+                    "in the parameter vector."
+                )
+                raise ValueError(msg)
+        bounds = [
+            self.domain.get(name, (None, None)) if self.domain else (None, None)
+            for name in names
+        ]
+        return compile_nll(
+            log_prob,
+            free,
+            baked,
+            [start[name] for name in names],
+            bounds,
+            gradient=gradient,
+            mode=mode,
+            cache=cache,
+        )
 
     @cached_property
     def log_prob(self) -> TensorVar:

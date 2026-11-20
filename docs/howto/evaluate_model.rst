@@ -207,6 +207,13 @@ from RooFit's.
 Call a compiled likelihood with low overhead
 ---------------------------------------------
 
+To evaluate the full likelihood repeatedly, for example in a fit, use
+:meth:`~pyhs3.Model.compile_nll` (see :doc:`/howto/minimize_nll`). It compiles
+the negative log-likelihood and its gradient as a function of one parameter
+vector, with the data and constant parameters baked in, and handles the input
+order and dtypes described below for you. The rest of this section is for
+compiling individual expressions yourself.
+
 ``model.pdf`` and ``model.logpdf`` take keyword arguments, so each call
 reorders them into the compiled function's positional order before
 evaluating. In a loop that evaluates a small model many times, you avoid

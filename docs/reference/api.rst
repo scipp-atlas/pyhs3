@@ -36,6 +36,7 @@ Modules
    generic_parse
    exceptions
    normalization
+   tensorutils
    transpile
 
 Base Classes

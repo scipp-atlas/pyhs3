@@ -8,7 +8,7 @@ with samples and modifiers as defined in the HS3 specification.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any, Literal, cast
+from typing import Any, ClassVar, Literal, cast
 
 import hist
 import numpy as np
@@ -147,6 +147,11 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     _cached_context: Context | None = PrivateAttr(default=None)
     _cached_expected_rates: TensorVar | None = PrivateAttr(default=None)
     _cached_bin_log_probs: TensorVar | None = PrivateAttr(default=None)
+
+    # Each channel resolves its observed data by its own name
+    # (``<channel>_observed``) and keeps the per-instance caches above, so two
+    # channels never share one built expression.
+    share_identical_expressions: ClassVar[bool] = False
 
     @model_validator(mode="after")
     def _validate_staterror(self) -> HistFactoryDistChannel:

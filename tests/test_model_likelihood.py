@@ -28,6 +28,9 @@ from pytensor.tensor import TensorConstant
 from pyhs3 import Workspace, jaxify
 from pyhs3.data import PointData
 from pyhs3.distributions import Distributions
+from pyhs3.distributions.basic import GaussianDist
+from pyhs3.distributions.composite import MixtureDist, ProductDist
+from pyhs3.distributions.histfactory import HistFactoryDistChannel
 from pyhs3.domains import ProductDomain
 from pyhs3.functions import Functions
 from pyhs3.likelihoods import Likelihood
@@ -1418,11 +1421,12 @@ def test_log_prob_extended_mixture_far_tails_stays_finite():
 
 
 def test_log_prob_has_no_structurally_duplicate_nodes():
-    """Identical subgraphs built by separate distributions appear once in log_prob.
+    """Subexpressions shared by different distributions appear once in log_prob.
 
-    Two summands with the same parameters build the same normalised Gaussian
-    expression twice; log_prob must hand PyTensor a graph in which its merge
-    rewrite has nothing left to merge, and the value must be unchanged.
+    The two summands differ (sigma 1 and 2), so they are not shared as HS3
+    objects, but both build ``x_obs - mean`` and broadcast the same inputs.
+    log_prob must hand PyTensor a graph in which its merge rewrite has
+    nothing left to merge, and the value must be unchanged.
     """
     spec = json.loads(json.dumps(_WS_EXTENDED_MIXTURE))
     spec["distributions"][1] = {
@@ -1430,7 +1434,7 @@ def test_log_prob_has_no_structurally_duplicate_nodes():
         "type": "gaussian_dist",
         "x": "x_obs",
         "mean": "mean",
-        "sigma": 1.0,
+        "sigma": 2.0,
     }
     ws = Workspace(**spec)
     model = ws.model(ws.analyses["A"], progress=False)
@@ -1443,13 +1447,15 @@ def test_log_prob_has_no_structurally_duplicate_nodes():
     assert len(fgraph.apply_nodes) == before
 
     events = [1.0, 2.0, 3.0, 4.0, 5.0]
-    nu = 30.0 + 20.0
     expected = (
         sum(
-            np.log(50.0 * np.exp(_truncnorm_logpdf(x, 2.0, 1.0, -10.0, 10.0)))
+            np.log(
+                30.0 * np.exp(_truncnorm_logpdf(x, 2.0, 1.0, -10.0, 10.0))
+                + 20.0 * np.exp(_truncnorm_logpdf(x, 2.0, 2.0, -10.0, 10.0))
+            )
             for x in events
         )
-        - nu
+        - 50.0
     )
     value = pytensor.function(
         [v for v in inputs if v.name is not None], log_prob, on_unused_input="ignore"
@@ -1460,4 +1466,60 @@ def test_log_prob_has_no_structurally_duplicate_nodes():
             if name in {v.name for v in inputs}
         }
     )
-    np.testing.assert_allclose(value, expected, rtol=1e-10)
+    # The Gaussians are normalised by 64-point Gauss-Legendre quadrature on
+    # [-10, 10], accurate to ~1e-10 relative here.
+    np.testing.assert_allclose(value, expected, rtol=1e-8)
+
+
+def _two_summand_mixture(bkg: dict) -> Workspace:
+    spec = json.loads(json.dumps(_WS_EXTENDED_MIXTURE))
+    spec["distributions"][1] = {"name": "bkg", "type": "gaussian_dist", **bkg}
+    return Workspace(**spec)
+
+
+def test_identical_distributions_share_one_expression():
+    """Distributions equal in every field but ``name`` are built once.
+
+    ``sig`` and ``bkg`` reference the same observable, mean and width, so the
+    second is an alias of the first and reuses its tensors.
+    """
+    ws = _two_summand_mixture({"x": "x_obs", "mean": "mean", "sigma": 1.0})
+    model = ws.model(ws.analyses["A"], progress=False)
+
+    assert model.log_distributions["bkg"] is model.log_distributions["sig"]
+    assert model.distributions["bkg"] is model.distributions["sig"]
+
+
+@pytest.mark.parametrize(
+    "bkg",
+    [
+        {"x": "x_obs", "mean": "mean", "sigma": 2.0},  # different constant
+        {"x": "x_obs", "mean": 0.0, "sigma": 1.0},  # constant instead of parameter
+    ],
+    ids=["different_sigma", "different_mean_reference"],
+)
+def test_distributions_differing_in_a_field_are_built_separately(bkg):
+    """Any differing field (value or reference) means a separate expression."""
+    ws = _two_summand_mixture(bkg)
+    model = ws.model(ws.analyses["A"], progress=False)
+
+    assert model.log_distributions["bkg"] is not model.log_distributions["sig"]
+
+
+@pytest.mark.parametrize(
+    ("cls", "shares"),
+    [
+        (MixtureDist, False),
+        (HistFactoryDistChannel, False),
+        (GaussianDist, True),
+        (ProductDist, True),
+    ],
+)
+def test_distribution_classes_declare_whether_identical_objects_share(cls, shares):
+    """Classes that keep per-object build state opt out of sharing.
+
+    MixtureDist caches its coefficient and yield nodes on the object for
+    log_prob_terms, and HistFactoryDistChannel resolves its observed data by
+    its own name, so an alias would miss that state.
+    """
+    assert cls.share_identical_expressions is shares

@@ -8,7 +8,7 @@ multiple other distributions, including mixtures and products of distributions.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import pytensor.tensor as pt
 from pydantic import (
@@ -139,6 +139,11 @@ class MixtureDist(Distribution):
     # the same coefficient tensors used in the probability-space sum, rather
     # than re-resolving them from a context it is not given.
     _cached_coeffs: list[TensorVar] | None = PrivateAttr(default=None)
+
+    # The caches above are set by this object's own likelihood() call and read
+    # by its log_prob_terms(); an alias sharing another mixture's expression
+    # would never set them.
+    share_identical_expressions: ClassVar[bool] = False
 
     @model_serializer(mode="wrap")
     def serialize_model(self, handler: Callable[[Any], Any]) -> Any:

@@ -188,6 +188,10 @@ class Model:
         # instead of log(exp(...)) so the joint NLL stays finite where the
         # probability-space product would underflow.
         self._hfdc_log_poisson: dict[str, TensorVar] = {}
+        # (log-space, probability-space) expressions of each distinct
+        # distribution, keyed by Distribution.structural_key(), so that
+        # distributions identical apart from their name are built once.
+        self._shared_expressions: dict[str, tuple[TensorVar, TensorVar]] = {}
         # Build dependency graph with proper entity identification
         self._build_dependency_graph(functions, distributions, progress)
 
@@ -550,10 +554,21 @@ class Model:
         """
         dist = distributions[node_name]
         if not isinstance(dist, HistFactoryDistChannel):
+            # A distribution equal to an already built one in every field but
+            # its name builds the identical expression, so reuse those tensors
+            # instead of building (and later merging) a second copy.  The
+            # shared tensors keep the first distribution's name.
+            key = dist.structural_key() if dist.share_identical_expressions else None
+            if key is not None and key in self._shared_expressions:
+                log_expr, full = self._shared_expressions[key]
+                self.log_distributions[node_name] = log_expr
+                return full
             log_expr = dist.log_expression(context)
             self.log_distributions[node_name] = log_expr
             full = cast(TensorVar, pt.exp(log_expr))
             full.name = dist.name  # Evaluable.expression sets the name
+            if key is not None:
+                self._shared_expressions[key] = (log_expr, full)
             return full
 
         # Build the log-space Poisson term and each log-space constraint

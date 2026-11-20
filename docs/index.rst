@@ -13,6 +13,7 @@
    reference/cli
    explanation/building_a_model
    explanation/comparing_nll_with_roofit
+   explanation/duplicate_subexpressions
    broadcasting
    defining_components
    normalization

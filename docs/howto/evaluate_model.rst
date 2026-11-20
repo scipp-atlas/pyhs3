@@ -214,16 +214,19 @@ that cost by compiling the expression once and calling it with positional
 arrays yourself. `Issue #115 <https://github.com/scipp-atlas/pyhs3/issues/115>`_
 measured the effect on a small model: about 8.6 µs per evaluation with
 keyword dicts and Python floats, and about 0.8 µs once the call used
-positional ``numpy`` ``float64`` arrays and ``trust_input=True``. These are
+positional ``numpy`` arrays and ``trust_input=True``. These are
 the issue's numbers for one model on one machine; time your own model before
 relying on them.
 
 pyhs3 compiles its functions with ``trust_input=True``. PyTensor then skips
-input validation, so every input must already be a ``numpy`` array with dtype
-``float64`` and the shape the parameter was built with: a 0-d array for a
-scalar parameter, a 1-d array for a vector one. A Python ``float`` or a wrong
-shape is not rejected with a clear error. It fails inside the compiled code
-or returns wrong values.
+input validation, so every input must already be a ``numpy`` array whose dtype
+equals the input variable's ``.dtype`` and whose shape matches the parameter: a
+0-d array for a scalar parameter, a 1-d array for a vector one. pyhs3 creates
+its inputs with ``pt.scalar`` and ``pt.vector``, so the dtype is PyTensor's
+``config.floatX``, which is ``float64`` by default. Build each argument with
+``np.asarray(value, dtype=var.dtype)``. A Python ``float``, a mismatched dtype,
+or a wrong shape is not rejected with a clear error. It fails inside the
+compiled code or returns wrong values.
 
 Inputs are positional, and the order is not the order of the workspace. For a
 single distribution, :meth:`~pyhs3.Model.pars` returns the names in the order
@@ -235,7 +238,8 @@ the compiled function expects:
     ['sigma', 'mu', 'x']
 
 Compile the log-density with the same inputs and call it with one array per
-name, in that order. Each array here has shape ``()``:
+name, in that order. Each array here has shape ``()`` and the dtype of its
+input variable:
 
 .. doctest:: evaluate-model
 
@@ -246,19 +250,19 @@ name, in that order. Each array here has shape ``()``:
     >>> [v.name for v in inputs] == model.pars("gauss")
     True
     >>> fast_logpdf = function(inputs, log_density, trust_input=True)
-    >>> values = {"x": np.array(0.0), "mu": np.array(0.0), "sigma": np.array(1.0)}
-    >>> fast_logpdf(*(values[name] for name in model.pars("gauss")))  # doctest: +ELLIPSIS
+    >>> values = {"x": 0.0, "mu": 0.0, "sigma": 1.0}
+    >>> args = [np.asarray(values[v.name], dtype=v.dtype) for v in inputs]
+    >>> fast_logpdf(*args)  # doctest: +ELLIPSIS
     array(-0.918938...)
 
-Build the ``values`` dict and the ordered argument list once, outside the
-loop, so the loop body is a single positional call.
+Build the ordered ``args`` list once, outside the loop, so the loop body is a single positional call.
 
 For the joint likelihood, the input order is the order
 ``explicit_graph_inputs`` yields for ``model.log_prob``. Compile ``log_prob``
 with exactly that list. ``fit_model.data`` and ``fit_model.free_params`` supply
-the values. ``fit_model.data`` already holds ``float64`` arrays of shape
-``(n_entries,)``; ``free_params`` holds Python floats, so each becomes a 0-d
-array:
+the values. ``fit_model.data`` already holds arrays of shape ``(n_entries,)``;
+``free_params`` holds Python floats, so each becomes a 0-d array. Casting every
+value to its input variable's dtype covers both:
 
 .. doctest:: fit-example
 
@@ -270,11 +274,9 @@ array:
     >>> sorted(v.name for v in nll_inputs)
     ['mu', 'sigma', 'x']
     >>> fast_log_prob = function(nll_inputs, fit_model.log_prob, trust_input=True)
-    >>> point = {
-    ...     **fit_model.data,
-    ...     **{k: np.asarray(v, dtype=np.float64) for k, v in fit_model.free_params.items()},
-    ... }
-    >>> fast_log_prob(*(point[v.name] for v in nll_inputs)).shape
+    >>> point = {**fit_model.data, **fit_model.free_params}
+    >>> nll_args = [np.asarray(point[v.name], dtype=v.dtype) for v in nll_inputs]
+    >>> fast_log_prob(*nll_args).shape
     (1,)
 
 See :doc:`/howto/fit_model` for passing a jaxified ``log_prob`` to a

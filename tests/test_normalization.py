@@ -14,14 +14,21 @@ from pydantic import (
     PrivateAttr,
 )
 from pytensor.compile.maker import function
+from pytensor.compile.mode import Mode, get_mode
 
 from pyhs3.axes import RegularAxis
 from pyhs3.context import Context
-from pyhs3.distributions.basic import ExponentialDist, GaussianDist, UniformDist
+from pyhs3.distributions.basic import (
+    ExponentialDist,
+    GaussianDist,
+    GenNormalDist,
+    UniformDist,
+)
 from pyhs3.distributions.composite import MixtureDist
 from pyhs3.distributions.core import Distribution
 from pyhs3.distributions.histfactory import HistFactoryDistChannel
 from pyhs3.distributions.mathematical import GenericDist
+from pyhs3.distributions.physics import AsymmetricCrystalBallDist
 from pyhs3.normalization import gauss_legendre_integral
 from pyhs3.typing.aliases import TensorVar
 
@@ -507,3 +514,142 @@ class TestContextObservables:
         context_copy = context.copy()
         assert context_copy.observables == context.observables
         assert "x" in context_copy.observables
+
+
+def _no_fusion_mode() -> Mode:
+    """FAST_RUN rewrites without elemwise fusion, on the C linker.
+
+    Without fusion every Elemwise checks its inputs' static broadcastable
+    flags, so a length-1 axis typed as unknown fails at runtime.
+    """
+    return Mode(
+        linker="cvm",
+        optimizer=get_mode("FAST_RUN").excluding("fusion").provided_optimizer,
+    )
+
+
+def _observable_context(params: dict[str, TensorVar]) -> tuple[Context, TensorVar]:
+    """Context with an unbinned observable ``x`` on [-5, 5] seen as an (N, 1) view."""
+    x = pt.dvector("x")
+    context = Context(
+        parameters={"x": x, **params},
+        observables={"x": (pt.constant(-5.0), pt.constant(5.0))},
+        views={"x": x[:, None]},
+    )
+    return context, x
+
+
+_ANALYTIC = [
+    pytest.param(
+        GenNormalDist(name="d", x="x", mean="mu", alpha="alpha", beta="beta"),
+        {"mu": 0.3, "alpha": 1.2, "beta": 1.7},
+        id="generalized_normal",
+    ),
+    pytest.param(
+        AsymmetricCrystalBallDist(
+            name="d",
+            m="x",
+            m0="mu",
+            sigma_L="sL",
+            sigma_R="sR",
+            alpha_L="aL",
+            alpha_R="aR",
+            n_L="nL",
+            n_R="nR",
+        ),
+        {"mu": 0.2, "sL": 1.1, "sR": 0.9, "aL": 1.4, "aR": 1.6, "nL": 3.0, "nR": 4.0},
+        id="crystalball_doublesided",
+    ),
+]
+
+
+class TestNormalizationStaticShapes:
+    """Normalization integrals carry the static shape of the bounds, not of x."""
+
+    @pytest.mark.parametrize(("dist", "values"), _ANALYTIC)
+    def test_analytic_integral_is_broadcastable(self, dist, values):
+        """F(upper) - F(lower) has only length-1 axes, statically known."""
+        params = {name: pt.dscalar(name) for name in values}
+        context, _ = _observable_context(params)
+        lower, upper = context.observables["x"]
+
+        integral = dist._normalization_integral(context, "x", lower, upper)
+
+        assert integral is not None
+        assert all(size == 1 for size in integral.type.shape)
+
+    @pytest.mark.parametrize(("dist", "values"), _ANALYTIC)
+    def test_analytic_log_expression_evaluates_without_fusion(self, dist, values):
+        """The normalized log-pdf over N > 1 events runs without elemwise fusion."""
+        params = {name: pt.dscalar(name) for name in values}
+        context, x = _observable_context(params)
+        events = np.linspace(-4.0, 4.0, 7)
+
+        log_pdf = dist.log_expression(context)
+        inputs = [x, *params.values()]
+        args = [events, *values.values()]
+        unfused = function(inputs, log_pdf, mode=_no_fusion_mode())(*args)
+        fused = function(inputs, log_pdf, mode="FAST_RUN")(*args)
+
+        assert unfused.shape == (7, 1)
+        np.testing.assert_allclose(unfused, fused, rtol=1e-12)
+
+    def test_quadrature_log_expression_evaluates_without_fusion(self):
+        """The Gauss-Legendre fallback also runs without elemwise fusion."""
+        params = {"mu": pt.dscalar("mu"), "sigma": pt.dscalar("sigma")}
+        context, x = _observable_context(params)
+        dist = GaussianDist(name="g", x="x", mean="mu", sigma="sigma")
+
+        log_pdf = dist.log_expression(context)
+        unfused = function([x, *params.values()], log_pdf, mode=_no_fusion_mode())(
+            np.linspace(-4.0, 4.0, 7), 0.5, 1.3
+        )
+
+        assert unfused.shape == (7, 1)
+        assert np.all(np.isfinite(unfused))
+
+    def test_mixture_of_analytic_summands_evaluates_without_fusion(self):
+        """A mixture subtracting log Z per summand matches the fused result."""
+        values = {
+            "mu": 0.2,
+            "sL": 1.1,
+            "sR": 0.9,
+            "aL": 1.4,
+            "aR": 1.6,
+            "nL": 3.0,
+            "nR": 4.0,
+            "c1": 3.0,
+            "c2": 1.5,
+            "beta": 1.7,
+            "alpha": 1.2,
+        }
+        params = {name: pt.dscalar(name) for name in values}
+        context, x = _observable_context(params)
+        summands = {
+            "cb": AsymmetricCrystalBallDist(
+                name="cb",
+                m="x",
+                m0="mu",
+                sigma_L="sL",
+                sigma_R="sR",
+                alpha_L="aL",
+                alpha_R="aR",
+                n_L="nL",
+                n_R="nR",
+            ),
+            "gn": GenNormalDist(
+                name="gn", x="x", mean="mu", alpha="alpha", beta="beta"
+            ),
+        }
+        log_terms = [
+            pt.log(params[c]) + summands[s].log_expression(context)
+            for s, c in (("cb", "c1"), ("gn", "c2"))
+        ]
+        mixture = pt.logsumexp(pt.stack(log_terms), axis=0)
+
+        inputs = [x, *params.values()]
+        args = [np.linspace(-4.0, 4.0, 7), *values.values()]
+        unfused = function(inputs, mixture, mode=_no_fusion_mode())(*args)
+        fused = function(inputs, mixture, mode="FAST_RUN")(*args)
+
+        np.testing.assert_allclose(unfused, fused, rtol=1e-12)

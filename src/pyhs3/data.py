@@ -87,6 +87,27 @@ class PointData(Datum):
     uncertainty: float | None = Field(default=None, repr=False)
     axes: list[UnbinnedAxis] | None = Field(default=None, repr=False)
 
+    @model_validator(mode="after")
+    def validate_point_axes(self) -> PointData:
+        """Validate that a point has at most one axis, naming its variate."""
+        if self.axes is not None and len(self.axes) != 1:
+            msg = f"Point data '{self.name}' must have exactly one axis, got {len(self.axes)}"
+            raise ValueError(msg)
+        return self
+
+    @property
+    def entries(self) -> list[list[float]] | None:
+        """
+        The point as a one-entry unbinned dataset, shape (1, 1).
+
+        ``None`` without ``axes``: only the axis name identifies which variate
+        of the paired distribution the value belongs to, and HS3 allows
+        ``axes`` to be absent.
+        """
+        if self.axes is None:
+            return None
+        return [[self.value]]
+
 
 class UnbinnedData(Datum):
     """

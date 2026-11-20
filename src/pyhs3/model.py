@@ -301,7 +301,7 @@ class Model:
             if entries is None:
                 # HFDC: log_prob uses the Poisson-only term here; deduplicated
                 # constraint terms are added after the loop.  Non-HFDC distributions
-                # paired with BinnedData are skipped: HS3 does not define the
+                # paired with BinnedData raise: HS3 does not define the
                 # likelihood of a continuous pdf evaluated on binned data
                 # (bin centers vs bin integrals), and ROOT exports do not record
                 # which convention the original fit used.  Native support is
@@ -312,6 +312,26 @@ class Model:
                     # Log-space Poisson term: sum of per-bin log-pmfs, finite even
                     # where the probability-space product underflows to 0.0.
                     terms.append(self._hfdc_log_poisson[dist_name])
+                elif isinstance(datum, BinnedData):
+                    msg = (
+                        f"Distribution '{dist_name}' is paired with binned data "
+                        f"'{datum.name}', but HS3 does not define the likelihood "
+                        f"of a non-HistFactory distribution on binned data "
+                        f"(see https://github.com/hep-statistics-serialization-standard/hep-statistics-serialization-standard/issues/93). "
+                        f"Convert the binned data to unbinned data instead: "
+                        f"entries = bin centres, weights = bin contents."
+                    )
+                    raise ValueError(msg)
+                else:
+                    # Only PointData remains: UnbinnedData always has entries, and
+                    # PointData only has entries when axes name the variate.
+                    msg = (
+                        f"Distribution '{dist_name}' is paired with point data "
+                        f"'{datum.name}', but pyhs3 cannot determine the "
+                        f"distribution's single variate. Give the point data "
+                        f"'axes' naming the variate."
+                    )
+                    raise ValueError(msg)
                 continue
 
             # Resolve weight tensor once for this datum.

@@ -200,4 +200,6 @@ requires, and :doc:`/explanation/building_a_model` for why the joint
 likelihood is exposed in log space rather than probability space. pyhs3
 doesn't ship a minimizer itself; this section stops at producing the
 callable one needs. See :doc:`/howto/fit_model` for minimizing
-``nll_graph`` over ``free_params`` with optimistix.
+``nll_graph`` over ``free_params`` with optimistix. See
+:doc:`/explanation/comparing_nll_with_roofit` if the absolute value differs
+from RooFit's.

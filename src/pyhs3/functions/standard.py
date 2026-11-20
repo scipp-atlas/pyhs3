@@ -421,36 +421,7 @@ class InterpolationFunction(Function):
         nominal = context[self.nom]
         result = nominal
 
-        valid_entries = []
-        for i in range(len(self.vars)):
-            if (
-                i >= len(self.high)
-                or i >= len(self.low)
-                or i >= len(self.interpolationCodes)
-            ):
-                log.warning(
-                    "Parameter index %d exceeds variation lists for function %s",
-                    i,
-                    self.name,
-                )
-                continue
-            valid_entries.append(i)
-
-        # Entries are applied in order (additive codes add to the running total,
-        # multiplicative codes scale it), so interleaved additive and
-        # multiplicative entries do not commute.  Within a consecutive run of the
-        # same kind they do, so each run is evaluated with one vectorised
-        # expression per interpolation code instead of one expression per entry.
-        # This keeps the graph size independent of the number of entries.
-        runs: list[tuple[bool, list[int]]] = []
-        for i in valid_entries:
-            additive = self.interpolationCodes[i] in (0, 2, 3, 4)
-            if runs and runs[-1][0] == additive:
-                runs[-1][1].append(i)
-            else:
-                runs.append((additive, [i]))
-
-        for additive, run in runs:
+        for additive, run in self._entry_runs():
             by_code: dict[int, list[int]] = {}
             for i in run:
                 by_code.setdefault(self.interpolationCodes[i], []).append(i)
@@ -485,6 +456,42 @@ class InterpolationFunction(Function):
             result = pt.maximum(result, 0.0)
 
         return result
+
+    def _entry_runs(self) -> list[tuple[bool, list[int]]]:
+        """Group entry indices into consecutive runs of the same kind.
+
+        Entries are applied in order (additive codes add to the running total,
+        multiplicative codes scale it), so interleaved additive and
+        multiplicative entries do not commute.  Within a consecutive run of the
+        same kind they do, so each run is evaluated with one vectorised
+        expression per interpolation code instead of one expression per entry.
+        This keeps the graph size independent of the number of entries.
+
+        Entries whose index exceeds the ``high``/``low``/``interpolationCodes``
+        lists are skipped with a warning.
+
+        Returns:
+            ``(additive, indices)`` pairs in entry order.
+        """
+        runs: list[tuple[bool, list[int]]] = []
+        for i in range(len(self.vars)):
+            if (
+                i >= len(self.high)
+                or i >= len(self.low)
+                or i >= len(self.interpolationCodes)
+            ):
+                log.warning(
+                    "Parameter index %d exceeds variation lists for function %s",
+                    i,
+                    self.name,
+                )
+                continue
+            additive = self.interpolationCodes[i] in (0, 2, 3, 4)
+            if runs and runs[-1][0] == additive:
+                runs[-1][1].append(i)
+            else:
+                runs.append((additive, [i]))
+        return runs
 
     def _stacked_contribution(
         self,

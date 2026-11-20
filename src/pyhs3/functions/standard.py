@@ -36,6 +36,14 @@ from pyhs3.typing.aliases import TensorVar
 log = logging.getLogger(__name__)
 
 
+def _pad_to_ndim(var: TensorVar, ndim: int) -> TensorVar:
+    """Prepend broadcastable axes to ``var`` until it has ``ndim`` dimensions."""
+    if var.ndim == ndim:
+        return var
+    pattern = ("x",) * (ndim - var.ndim) + tuple(range(var.ndim))
+    return cast(TensorVar, var.dimshuffle(pattern))  # type: ignore[no-untyped-call]
+
+
 def _asym_interpolation(
     theta: TensorVar, kappa_sum: float, kappa_diff: float
 ) -> TensorVar:
@@ -413,11 +421,60 @@ class InterpolationFunction(Function):
         nominal = context[self.nom]
         result = nominal
 
-        # Reuse dtype-matched scalar identities across multiplicative terms.
-        ones_by_dtype: dict[str, TensorVar] = {}
+        for additive, run in self._entry_runs():
+            by_code: dict[int, list[int]] = {}
+            for i in run:
+                by_code.setdefault(self.interpolationCodes[i], []).append(i)
+            terms = [
+                (
+                    len(indices),
+                    self._stacked_contribution(code, indices, nominal, context),
+                )
+                for code, indices in by_code.items()
+            ]
+            if additive:
+                # Each term has shape (K_code, *batch); summing over the entry
+                # axis gives shape (*batch).
+                result = balanced_sum(
+                    [result, *(pt.sum(term, axis=0) for _, term in terms)],  # type: ignore[no-untyped-call]
+                    result,
+                )
+            else:
+                one = pt.constant(1.0, dtype=terms[0][1].dtype)
+                # One n-ary product over every entry's factor (each of shape
+                # (*batch)) rather than pt.prod over the entry axis: the
+                # gradient of pt.prod goes through ProdWithoutZeros, which has
+                # no JAX dispatch and no second derivative.
+                factors: list[TensorVar] = []
+                for n_entries, term in terms:
+                    shifted = one + term
+                    factors.extend(shifted[k] for k in range(n_entries))
+                result = result * pt.mul(factors[0], *factors[1:])
 
-        # Apply interpolation for each nuisance parameter
-        for i, var_name in enumerate(self.vars):
+        # Apply positive definite constraint if requested
+        if self.positiveDefinite:
+            result = pt.maximum(result, 0.0)
+
+        return result
+
+    def _entry_runs(self) -> list[tuple[bool, list[int]]]:
+        """Group entry indices into consecutive runs of the same kind.
+
+        Entries are applied in order (additive codes add to the running total,
+        multiplicative codes scale it), so interleaved additive and
+        multiplicative entries do not commute.  Within a consecutive run of the
+        same kind they do, so each run is evaluated with one vectorised
+        expression per interpolation code instead of one expression per entry.
+        This keeps the graph size independent of the number of entries.
+
+        Entries whose index exceeds the ``high``/``low``/``interpolationCodes``
+        lists are skipped with a warning.
+
+        Returns:
+            ``(additive, indices)`` pairs in entry order.
+        """
+        runs: list[tuple[bool, list[int]]] = []
+        for i in range(len(self.vars)):
             if (
                 i >= len(self.high)
                 or i >= len(self.low)
@@ -429,37 +486,56 @@ class InterpolationFunction(Function):
                     self.name,
                 )
                 continue
+            additive = self.interpolationCodes[i] in (0, 2, 3, 4)
+            if runs and runs[-1][0] == additive:
+                runs[-1][1].append(i)
+            else:
+                runs.append((additive, [i]))
+        return runs
 
-            param_val = context[var_name]
-            low_val = context[self.low[i]]
-            high_val = context[self.high[i]]
-            interp_code = self.interpolationCodes[i]
+    def _stacked_contribution(
+        self,
+        code: int,
+        indices: list[int],
+        nominal: TensorVar,
+        context: Context,
+    ) -> TensorVar:
+        """Evaluate the contributions of several same-code entries at once.
 
-            # Calculate interpolated contribution
-            contribution = self._flexible_interp_single(
-                interp_code=interp_code,
-                low_val=low_val,
-                high_val=high_val,
-                boundary=1.0,
-                nominal=nominal,
-                param_val=param_val,
-            )
+        Stacks the entries' parameters and variations along a new leading axis
+        and evaluates the elementwise interpolation formula once.
 
-            # Add contribution based on interpolation mode
-            if interp_code in [0, 2, 3, 4]:  # Additive modes
-                result = result + contribution
-            else:  # Multiplicative modes (1, 5, 6)
-                one = ones_by_dtype.get(contribution.dtype)
-                if one is None:
-                    one = pt.constant(1.0, dtype=contribution.dtype)
-                    ones_by_dtype[contribution.dtype] = one
-                result = result * (one + contribution)
+        Args:
+            code: Interpolation code shared by all ``indices``.
+            indices: Entry positions in ``vars``/``high``/``low``.
+            nominal: Nominal value, shape ``(*batch)`` or scalar.
+            context: Mapping of names to PyTensor variables.
 
-        # Apply positive definite constraint if requested
-        if self.positiveDefinite:
-            result = pt.maximum(result, 0.0)
-
-        return result
+        Returns:
+            Contributions of shape ``(K, *batch)`` with ``K = len(indices)``;
+            row ``k`` is :meth:`_flexible_interp_single` for ``indices[k]``.
+        """
+        columns = [
+            [context[names[i]] for i in indices]
+            for names in (self.vars, self.low, self.high)
+        ]
+        # Entries may mix scalars and batched (M,) vectors; give them a common
+        # shape before stacking so the leading axis indexes entries only.
+        ndim = max(nominal.ndim, *(var.ndim for column in columns for var in column))
+        padded = [[_pad_to_ndim(var, ndim) for var in column] for column in columns]
+        flat = [var for column in padded for var in column]
+        if len({var.type for var in flat}) > 1:
+            flat = [cast(TensorVar, var) for var in pt.broadcast_arrays(*flat)]
+        k = len(indices)
+        params, lows, highs = (pt.stack(flat[j * k : (j + 1) * k]) for j in range(3))
+        return self._flexible_interp_single(
+            interp_code=code,
+            low_val=lows,
+            high_val=highs,
+            boundary=1.0,
+            nominal=_pad_to_ndim(nominal, ndim),
+            param_val=params,
+        )
 
 
 class ProcessNormalizationFunction(Function):

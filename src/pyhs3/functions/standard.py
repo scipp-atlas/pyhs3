@@ -451,10 +451,17 @@ class InterpolationFunction(Function):
                 # entries makes the gradient graph very slow to compile.  A
                 # factor of exactly zero (a multiplicative yield of zero) gives
                 # a non-finite gradient.
-                for _, term in terms:
-                    result = result * pt.prod(  # type: ignore[no-untyped-call]
-                        one + term, axis=0, no_zeros_in_input=True
-                    )
+                # One n-ary Mul per run: the nominal (or running total) times
+                # every code group's product.  The Python loop only builds a
+                # fixed graph over the few code groups; each pt.prod reduces
+                # all of its group's entries in one vectorised op.
+                result = pt.mul(
+                    result,
+                    *(
+                        pt.prod(one + term, axis=0, no_zeros_in_input=True)  # type: ignore[no-untyped-call]
+                        for _, term in terms
+                    ),
+                )
 
         # Apply positive definite constraint if requested
         if self.positiveDefinite:

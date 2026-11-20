@@ -698,16 +698,14 @@ _WS_AUX: dict = {
 }
 
 
-def test_log_prob_binned_data_has_no_entries_returns_constant_zero():
-    """BinnedData has no entries; lp_terms stays empty → constant 0.0 fallback."""
+def test_log_prob_binned_data_with_non_histfactory_dist_raises():
+    """A continuous pdf paired with BinnedData has no defined likelihood in HS3."""
     ws = Workspace(**_WS_BINNED)
     model = ws.model(ws.likelihoods["L"], progress=False)
-    lp = model.log_prob
-    # All data entries were BinnedData (no entries attribute) → skipped.
-    # lp_terms is empty → pt.constant(0.0) is returned.
-    assert isinstance(lp, TensorConstant)
-    fn = pytensor.function([], lp)
-    assert float(fn()) == pytest.approx(0.0)
+    with pytest.raises(
+        ValueError, match=r"'signal'.*'binned_obs'.*issues/93.*unbinned"
+    ):
+        _ = model.log_prob
 
 
 def test_log_prob_string_datum_skipped_returns_constant_zero():

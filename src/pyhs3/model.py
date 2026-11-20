@@ -36,7 +36,11 @@ from pyhs3.graph_viz import (
 )
 from pyhs3.networks import build_dependency_graph
 from pyhs3.parameter_points import ParameterSet
-from pyhs3.tensorutils import create_bounded_tensor, ensure_array
+from pyhs3.tensorutils import (
+    create_bounded_tensor,
+    ensure_array,
+    merge_duplicate_nodes,
+)
 from pyhs3.typing.aliases import TensorVar
 
 if TYPE_CHECKING:
@@ -414,9 +418,13 @@ class Model:
 
         if not terms:
             return pt.constant(np.float64(0.0))
-        if len(terms) == 1:
-            return terms[0]
-        return cast(TensorVar, pt.add(*terms))  # pylint: disable=no-value-for-parameter
+        joint = (
+            terms[0] if len(terms) == 1 else cast(TensorVar, pt.add(*terms))  # pylint: disable=no-value-for-parameter
+        )
+        # Distributions that share parameters build identical subgraphs (e.g.
+        # mixture summands with the same shape); merge them here so that
+        # PyTensor's rewriter does not have to.
+        return merge_duplicate_nodes(joint)
 
     def _try_bake_hfdc_observed(self, node_name: str) -> TensorVar | None:
         """Return a baked constant for an HFDC ``{name}_observed`` parameter, or None.

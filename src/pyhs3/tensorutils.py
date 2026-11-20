@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import numpy.typing as npt
 import pytensor.tensor as pt
+from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.traversal import io_toposort
 from pytensor.tensor.variable import TensorConstant
 
 from pyhs3.typing.aliases import DomainBounds, TensorVar
@@ -16,6 +18,59 @@ def is_scalar_multiplicative_identity(value: TensorVar) -> bool:
     return (
         isinstance(value, TensorConstant) and value.ndim == 0 and value.data.item() == 1
     )
+
+
+def merge_duplicate_nodes(output: TensorVar) -> TensorVar:
+    """Return ``output`` with every structurally identical subgraph built once.
+
+    Separately built HS3 objects often produce the same subexpression: for
+    example, several summands of a mixture that share their shape parameters
+    each build the same normalised density.  PyTensor's merge rewrite removes
+    such duplicates during compilation, but it does so one node at a time
+    inside the rewriter.  This pass does the same merge in a single
+    bottom-up sweep before compilation: an apply node is kept only if no
+    earlier node has the same ``Op`` applied to the same (already merged)
+    inputs, and constants are identified by type and value.
+
+    Graph inputs (parameters and observables) are kept as the same variable
+    objects, so names and :func:`~pytensor.graph.traversal.explicit_graph_inputs`
+    are unchanged.
+
+    Args:
+        output: Output variable of the graph to merge.
+
+    Returns:
+        A variable computing the same value from the same inputs.  It is
+        ``output`` itself when the graph contains nothing to merge.
+    """
+    replacement: dict[Variable[Any, Any], Variable[Any, Any]] = {}
+    constants: dict[tuple[object, ...], Variable[Any, Any]] = {}
+    kept: dict[tuple[object, ...], Apply[Any]] = {}
+
+    def resolve(var: Variable[Any, Any]) -> Variable[Any, Any]:
+        if var in replacement:
+            return replacement[var]
+        if isinstance(var, Constant):
+            data = np.asarray(var.data)
+            key = (var.type, data.shape, data.tobytes())
+            replacement[var] = constants.setdefault(key, var)
+            return replacement[var]
+        return var
+
+    for node in io_toposort([], [output]):
+        inputs = [resolve(var) for var in node.inputs]
+        key = (node.op, tuple(inputs))
+        match = kept.get(key)
+        if match is None:
+            changed = any(
+                new is not old for new, old in zip(inputs, node.inputs, strict=True)
+            )
+            match = node.clone_with_new_inputs(inputs) if changed else node
+            kept[key] = match
+        for old, new in zip(node.outputs, match.outputs, strict=True):
+            replacement[old] = new
+
+    return cast(TensorVar, resolve(output))
 
 
 def ensure_array(

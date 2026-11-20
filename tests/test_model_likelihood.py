@@ -4,6 +4,8 @@ Tests for ws.model(analysis) / ws.model(likelihood) — joint log-prob interface
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytensor
 import pytest
@@ -18,6 +20,8 @@ try:
 except ImportError:
     _HAS_JAX = False
 
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.basic import MergeOptimizer
 from pytensor.graph.traversal import explicit_graph_inputs
 from pytensor.tensor import TensorConstant
 
@@ -1411,3 +1415,49 @@ def test_log_prob_extended_mixture_far_tails_stays_finite():
     nu = 30.0 + 20.0
     expected = logsumexp([np.log(30.0) + log_sig, np.log(20.0) + log_bkg]) - nu
     assert val == pytest.approx(expected, rel=1e-9)
+
+
+def test_log_prob_has_no_structurally_duplicate_nodes():
+    """Identical subgraphs built by separate distributions appear once in log_prob.
+
+    Two summands with the same parameters build the same normalised Gaussian
+    expression twice; log_prob must hand PyTensor a graph in which its merge
+    rewrite has nothing left to merge, and the value must be unchanged.
+    """
+    spec = json.loads(json.dumps(_WS_EXTENDED_MIXTURE))
+    spec["distributions"][1] = {
+        "name": "bkg",
+        "type": "gaussian_dist",
+        "x": "x_obs",
+        "mean": "mean",
+        "sigma": 1.0,
+    }
+    ws = Workspace(**spec)
+    model = ws.model(ws.analyses["A"], progress=False)
+    log_prob = model.log_prob
+
+    inputs = list(explicit_graph_inputs([log_prob]))
+    fgraph = FunctionGraph(inputs, [log_prob], clone=True)
+    before = len(fgraph.apply_nodes)
+    MergeOptimizer().rewrite(fgraph)
+    assert len(fgraph.apply_nodes) == before
+
+    events = [1.0, 2.0, 3.0, 4.0, 5.0]
+    nu = 30.0 + 20.0
+    expected = (
+        sum(
+            np.log(50.0 * np.exp(_truncnorm_logpdf(x, 2.0, 1.0, -10.0, 10.0)))
+            for x in events
+        )
+        - nu
+    )
+    value = pytensor.function(
+        [v for v in inputs if v.name is not None], log_prob, on_unused_input="ignore"
+    )(
+        **{
+            name: val
+            for name, val in {**model.free_params, **model.data}.items()
+            if name in {v.name for v in inputs}
+        }
+    )
+    np.testing.assert_allclose(value, expected, rtol=1e-10)

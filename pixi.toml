@@ -122,7 +122,7 @@ docs-api = { cmd = "sphinx-apidoc -o docs/api/ --module-first --no-toc --force s
 check-docstrings = { cmd = "pydocstyle src/pyhs3/", description = "Check docstring style" }
 
 [feature.dev.dependencies]
-pre-commit = "*"
+prek = "*"
 pylint = ">=3.2"
 tbump = ">=6.7.0"
 mypy = "*"
@@ -135,10 +135,10 @@ twine = "*"
 pylint-pydantic = "*"
 
 [feature.dev.tasks]
-pre-commit = { cmd = "pre-commit run --all-files", description = "Run pre-commit hooks on all files" }
+pre-commit = { cmd = "prek run --all-files", description = "Run prek hooks on all files" }
 pylint = { cmd = "pylint pyhs3", description = "Run PyLint on pyhs3 package" }
-pre-commit-install = { cmd = "pre-commit install", description = "Install pre-commit git hooks" }
-pre-commit-update = { cmd = "pre-commit autoupdate", description = "Update pre-commit hook versions" }
+pre-commit-install = { cmd = "prek install", description = "Install prek git hooks" }
+pre-commit-update = { cmd = "prek update", description = "Update prek hook versions" }
 build-clean = { cmd = "rm -rf build dist", description = "Clean build artifacts" }
 build = { cmd = "python -m build", depends-on = ["build-clean"], description = "Build SDist and wheel distributions", outputs = ["dist"] }
 build-check = { cmd = "twine check --strict ./dist/*", depends-on = ["build"], description = "Run twine to check" }
@@ -171,6 +171,6 @@ py314-jax = ["test", "py314", "jax"]
 
 [tasks]
 # Composite tasks that span multiple features
-lint = { depends-on = ["pre-commit", "pylint"], description = "Run all linting (pre-commit + pylint)" }
+lint = { depends-on = ["pre-commit", "pylint"], description = "Run all linting (prek + pylint)" }
 check = { depends-on = ["lint", "test"], description = "Quick check: lint + basic tests" }
 check-all = { depends-on = ["lint", "test-all"], description = "Comprehensive check: lint + all tests" }

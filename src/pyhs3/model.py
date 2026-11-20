@@ -24,7 +24,7 @@ from rich.progress import (
 )
 
 from pyhs3.context import Context
-from pyhs3.data import BinnedData, PointData
+from pyhs3.data import BinnedData
 from pyhs3.distributions import Distributions, HistFactoryDistChannel
 from pyhs3.domains import Domain
 from pyhs3.functions import Functions
@@ -323,7 +323,8 @@ class Model:
                         f"entries = bin centres, weights = bin contents."
                     )
                     raise ValueError(msg)
-                elif isinstance(datum, PointData):
+                else:
+                    # Only PointData remains: UnbinnedData always has entries, and
                     # PointData only has entries when axes name the variate.
                     msg = (
                         f"Distribution '{dist_name}' is paired with point data "

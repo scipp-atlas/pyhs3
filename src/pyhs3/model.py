@@ -24,7 +24,7 @@ from rich.progress import (
 )
 
 from pyhs3.context import Context
-from pyhs3.data import BinnedData
+from pyhs3.data import BinnedData, PointData
 from pyhs3.distributions import Distributions, HistFactoryDistChannel
 from pyhs3.domains import Domain
 from pyhs3.functions import Functions
@@ -321,6 +321,15 @@ class Model:
                         f"(see https://github.com/hep-statistics-serialization-standard/hep-statistics-serialization-standard/issues/93). "
                         f"Convert the binned data to unbinned data instead: "
                         f"entries = bin centres, weights = bin contents."
+                    )
+                    raise ValueError(msg)
+                elif isinstance(datum, PointData):
+                    # PointData only has entries when axes name the variate.
+                    msg = (
+                        f"Distribution '{dist_name}' is paired with point data "
+                        f"'{datum.name}', but pyhs3 cannot determine the "
+                        f"distribution's single variate. Give the point data "
+                        f"'axes' naming the variate."
                     )
                     raise ValueError(msg)
                 continue

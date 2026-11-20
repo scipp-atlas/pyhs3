@@ -7,6 +7,7 @@ from __future__ import annotations
 import numpy as np
 import pytensor
 import pytest
+from pydantic import ValidationError
 from scipy.special import logsumexp
 from scipy.stats import norm, truncnorm
 
@@ -21,6 +22,7 @@ from pytensor.graph.traversal import explicit_graph_inputs
 from pytensor.tensor import TensorConstant
 
 from pyhs3 import Workspace, jaxify
+from pyhs3.data import PointData
 from pyhs3.distributions import Distributions
 from pyhs3.domains import ProductDomain
 from pyhs3.functions import Functions
@@ -302,8 +304,8 @@ def test_likelihood_data_arrays_skips_binned_data():
     assert d == {}
 
 
-def test_likelihood_data_arrays_skips_point_data():
-    """PointData has axes=None by default → skipped by data_arrays()."""
+def test_likelihood_data_arrays_skips_point_data_without_axes():
+    """PointData has axes=None by default → no variate name → skipped by data_arrays()."""
     ws = Workspace(
         **{
             **_WS_DICT,
@@ -317,6 +319,14 @@ def test_likelihood_data_arrays_skips_point_data():
     # data1 is PointData with axes=None → skipped; data2 (UnbinnedData) is included
     assert "x_obs" not in d
     assert "y_obs" in d
+
+
+def test_likelihood_data_arrays_includes_point_data_with_axes():
+    """PointData with axes is a one-entry dataset for the axis variate."""
+    ws = Workspace(**_WS_POINT)
+    d = ws.likelihoods["L"].data_arrays()
+    assert list(d) == ["x"]
+    np.testing.assert_array_equal(d["x"], [1.5])
 
 
 def test_log_prob_warns_for_weighted_data():
@@ -696,6 +706,149 @@ _WS_AUX: dict = {
         }
     ],
 }
+
+
+_WS_POINT: dict = {
+    "metadata": {"hs3_version": "0.2"},
+    "distributions": [
+        {"name": "g", "type": "gaussian_dist", "x": "x", "mean": "mu", "sigma": "s"}
+    ],
+    "parameter_points": [
+        {
+            "name": "default",
+            "parameters": [
+                {"name": "mu", "value": 0.0},
+                {"name": "s", "value": 1.0},
+                {"name": "x", "value": 0.0},
+            ],
+        }
+    ],
+    "domains": [
+        {
+            "name": "d",
+            "type": "product_domain",
+            "axes": [
+                {"name": "mu", "min": -5.0, "max": 5.0},
+                {"name": "s", "min": 0.1, "max": 5.0},
+                {"name": "x", "min": -10.0, "max": 10.0},
+            ],
+        }
+    ],
+    "data": [
+        {
+            "name": "obs",
+            "type": "point",
+            "value": 1.5,
+            "axes": [{"name": "x", "min": -10.0, "max": 10.0}],
+        }
+    ],
+    "likelihoods": [{"name": "L", "distributions": ["g"], "data": ["obs"]}],
+    "analyses": [{"name": "A", "likelihood": "L", "domains": ["d"]}],
+}
+
+
+@pytest.mark.parametrize(("mu", "s"), [(0.0, 1.0), (1.0, 2.0)])
+def test_log_prob_point_data_with_axes(mu, s):
+    """Point data with axes evaluates the paired pdf at the point value."""
+    ws = Workspace(**_WS_POINT)
+    model = ws.model(ws.analyses["A"], progress=False)
+    fn = pytensor.function(
+        [v for v in explicit_graph_inputs(model.log_prob)],
+        model.log_prob,
+        on_unused_input="ignore",
+    )
+    inputs = {v.name: v for v in explicit_graph_inputs(model.log_prob)}
+    # Observable x is a (1,) vector; mu and s are scalars.
+    values = {"x": np.array([1.5]), "mu": mu, "s": s}
+    # log_prob has shape (M,) for the parameter batch size; here M == 1.
+    result = fn(*[values[name] for name in inputs]).item()
+    # The 1.5 sits well inside [-10, 10], so the truncation is negligible only
+    # to the extent of the Gaussian tails; compare to the truncated normal.
+    expected = truncnorm.logpdf(
+        1.5, (-10.0 - mu) / s, (10.0 - mu) / s, loc=mu, scale=s
+    )
+    assert result == pytest.approx(expected, rel=1e-6)
+    assert result == pytest.approx(norm.logpdf(1.5, mu, s), abs=1e-4)
+
+
+def test_point_data_with_several_axes_raises_at_construction():
+    axes = [
+        {"name": "x", "min": 0.0, "max": 1.0},
+        {"name": "y", "min": 0.0, "max": 1.0},
+    ]
+    with pytest.raises(ValidationError, match="exactly one axis"):
+        PointData(name="obs", value=1.0, axes=axes)
+    with pytest.raises(ValidationError, match="exactly one axis"):
+        Workspace(
+            **{
+                **_WS_POINT,
+                "data": [{"name": "obs", "type": "point", "value": 1.0, "axes": axes}],
+            }
+        )
+
+
+def test_log_prob_point_data_without_axes_raises():
+    """Without axes pyhs3 cannot determine the paired distribution's variate."""
+    ws = Workspace(
+        **{**_WS_POINT, "data": [{"name": "obs", "type": "point", "value": 1.5}]}
+    )
+    model = ws.model(ws.analyses["A"], progress=False)
+    with pytest.raises(ValueError, match=r"'g'.*'obs'.*single variate.*axes"):
+        _ = model.log_prob
+
+
+def test_log_prob_point_data_as_auxiliary_measurement():
+    """A point datum constrains a nuisance alongside an unbinned channel."""
+    ws = Workspace(
+        **{
+            **_WS_AUX,
+            "distributions": [
+                *_WS_AUX["distributions"][:1],
+                {
+                    "name": "constraint",
+                    "type": "gaussian_dist",
+                    "x": "alpha_obs",
+                    "mean": "alpha",
+                    "sigma": 1.0,
+                },
+            ],
+            "data": [
+                *_WS_AUX["data"],
+                {
+                    "name": "aux",
+                    "type": "point",
+                    "value": 0.5,
+                    "axes": [{"name": "alpha_obs", "min": -5.0, "max": 5.0}],
+                },
+            ],
+            "likelihoods": [
+                {
+                    "name": "L",
+                    "distributions": ["gauss1", "constraint"],
+                    "data": ["data1", "aux"],
+                }
+            ],
+        }
+    )
+    d = ws.likelihoods["L"].data_arrays()
+    np.testing.assert_array_equal(d["alpha_obs"], [0.5])
+    model = ws.model(ws.likelihoods["L"], progress=False)
+    inputs = {v.name: v for v in explicit_graph_inputs(model.log_prob)}
+    fn = pytensor.function(list(inputs.values()), model.log_prob)
+    # Observables are (N,) vectors, parameters are scalars.
+    values = {
+        "x_obs": np.array([1.0, 2.0, 3.0]),
+        "alpha_obs": np.array([0.5]),
+        "mean": 0.5,
+        "alpha": 1.0,
+    }
+    result = fn(*[values[name] for name in inputs]).item()
+    # Each pdf is normalized over its observable's axis bounds.
+    channel = truncnorm.logpdf(
+        [1.0, 2.0, 3.0], (-10.0 - 0.5) / 1.0, (10.0 - 0.5) / 1.0, loc=0.5, scale=1.0
+    ).sum()
+    constraint = truncnorm.logpdf(0.5, (-5.0 - 1.0) / 1.0, (5.0 - 1.0) / 1.0, loc=1.0, scale=1.0)
+    assert result == pytest.approx(channel + constraint, rel=1e-6)
 
 
 def test_log_prob_binned_data_with_non_histfactory_dist_raises():

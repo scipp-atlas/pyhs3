@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 from pydantic import TypeAdapter
 
 from pyhs3.axes import BinnedAxis, UnbinnedAxis
@@ -112,14 +113,13 @@ class TestPointData:
         assert data.axes[0].max == 10.0
 
     def test_point_data_with_multiple_axes(self):
-        """Test PointData with multiple axes."""
+        """PointData with several axes has no unique variate and is rejected."""
         axes = [
             UnbinnedAxis(name="x", min=0.0, max=10.0),
             UnbinnedAxis(name="y", min=-5.0, max=5.0),
         ]
-        data = PointData(name="measurement", type="point", value=1.0, axes=axes)
-        assert data.axes is not None
-        assert len(data.axes) == 2
+        with pytest.raises(ValidationError, match="exactly one axis"):
+            PointData(name="measurement", type="point", value=1.0, axes=axes)
 
 
 class TestUnbinnedData:

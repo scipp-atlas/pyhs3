@@ -15,7 +15,7 @@ import pytest
 from pydantic import ValidationError
 from pytensor import function
 from pytensor.graph.traversal import io_toposort
-from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.rewriting.elemwise import (
     local_upcast_elemwise_constant_inputs,
 )
@@ -495,19 +495,29 @@ class TestInterpolationFunction:
         }
 
         result = func.expression(context)
+
+        def scalar_source(value):
+            # Elemwise broadcasts a scalar constant against the stacked entries
+            # through a DimShuffle; look through it to the constant itself.
+            if value.owner is not None and isinstance(value.owner.op, DimShuffle):
+                return value.owner.inputs[0]
+            return value
+
         identity_inputs = [
-            value
+            source
             for node in io_toposort([], [result])
             if isinstance(node.op, Elemwise)
             and type(node.op.scalar_op).__name__ == "Add"
-            for value in node.inputs
-            if isinstance(value, TensorConstant)
-            and value.ndim == 0
-            and value.dtype == dtype
-            and value.data.item() == 1
+            for source in map(scalar_source, node.inputs)
+            if isinstance(source, TensorConstant)
+            and source.ndim == 0
+            and source.dtype == dtype
+            and source.data.item() == 1
         ]
 
-        assert len(identity_inputs) == len(names)
+        # Same-code entries share one vectorised Add, so at least one identity
+        # appears, and every occurrence is the same dtype-matched constant.
+        assert identity_inputs
         assert len({id(value) for value in identity_inputs}) == 1
 
     def test_multiplicative_mode_avoids_implicit_add_constant_upcast(self):
@@ -2065,6 +2075,210 @@ class TestInterpolationFunctionCodes:
         np.testing.assert_allclose(
             self._evaluate(6, nom, hi, lo, theta), expected, rtol=1e-5
         )
+
+
+def _reference_code5_factor(theta, hi_r, lo_r):
+    """ROOT/pyhf code 5 multiplicative factor, coefficients solved with numpy.
+
+    Solves the six boundary conditions on r(a) = 1 + sum_i c_i a**i at a = +-1
+    (value, first and second derivative matching the exponential extrapolation)
+    instead of reusing pyhs3's precomputed inverse matrix.
+    """
+    if theta >= 1.0:
+        return hi_r**theta
+    if theta <= -1.0:
+        return lo_r ** (-theta)
+    powers = np.arange(1, 7)
+    rows = []
+    for a in (1.0, -1.0):
+        rows.append(a**powers)
+    for a in (1.0, -1.0):
+        rows.append(powers * a ** (powers - 1))
+    for a in (1.0, -1.0):
+        rows.append(powers * (powers - 1) * a ** (powers - 2.0))
+    log_hi, log_lo = np.log(hi_r), np.log(lo_r)
+    rhs = [
+        hi_r - 1.0,
+        lo_r - 1.0,
+        hi_r * log_hi,
+        -lo_r * log_lo,
+        hi_r * log_hi**2,
+        lo_r * log_lo**2,
+    ]
+    coeffs = np.linalg.solve(np.array(rows), np.array(rhs))
+    return 1.0 + float(np.sum(coeffs * theta**powers))
+
+
+def _reference_flexible_interp(codes, nom, his, los, thetas, positive_definite):
+    """Sequential numpy reference for ROOT's FlexibleInterpVar/PiecewiseInterpolation.
+
+    Applies each entry in order: additive codes (0, 2, 3, 4) add a delta to the
+    running total, multiplicative codes (1, 5, 6) multiply it by a factor.
+    """
+    total = nom
+    for code, hi, lo, theta in zip(codes, his, los, thetas, strict=True):
+        if code == 0:
+            total += theta * (hi - nom) if theta >= 0 else theta * (nom - lo)
+        elif code == 1:
+            total *= (hi / nom) ** theta if theta >= 0 else (lo / nom) ** (-theta)
+        elif code in (2, 3):
+            s = 0.5 * (hi + lo) - nom
+            d = 0.5 * (hi - lo)
+            if theta > 1:
+                total += (2 * s + d) * (theta - 1) + (hi - nom)
+            elif theta < -1:
+                total += -(2 * s - d) * (theta + 1) + (lo - nom)
+            else:
+                total += s * theta**2 + d * theta
+        elif code == 4:
+            if theta > 1:
+                total += theta * (hi - nom)
+            elif theta < -1:
+                total += theta * (nom - lo)
+            else:
+                s = 0.5 * (hi - lo)
+                a = (hi + lo - 2 * nom) / 16.0
+                total += theta * (s + theta * a * (15 + theta**2 * (3 * theta**2 - 10)))
+        elif code == 5:
+            total *= _reference_code5_factor(theta, hi / nom, lo / nom)
+        else:  # code 6: poly6 in ratio space
+            hi_r, lo_r = hi / nom, lo / nom
+            if theta > 1:
+                factor = 1 + theta * (hi_r - 1)
+            elif theta < -1:
+                factor = 1 + theta * (1 - lo_r)
+            else:
+                s = 0.5 * (hi_r - lo_r)
+                a = (hi_r + lo_r - 2) / 16.0
+                factor = 1 + theta * (
+                    s + theta * a * (15 + theta**2 * (3 * theta**2 - 10))
+                )
+            total *= factor
+    if positive_definite:
+        total = max(total, 0.0)
+    return total
+
+
+class TestInterpolationFunctionVectorized:
+    """InterpolationFunction evaluates all entries with a fixed-size graph."""
+
+    @staticmethod
+    def _build(codes, positive_definite=False):
+        n = len(codes)
+        return InterpolationFunction(
+            name="interp",
+            high=[f"hi_{i}" for i in range(n)],
+            low=[f"lo_{i}" for i in range(n)],
+            nom="nom",
+            interpolationCodes=codes,
+            positiveDefinite=positive_definite,
+            vars=[f"theta_{i}" for i in range(n)],
+        )
+
+    @staticmethod
+    def _random_entries(n, seed):
+        rng = np.random.default_rng(seed)
+        nom = 10.0
+        his = nom * (1.0 + rng.uniform(0.01, 0.3, n))
+        los = nom * (1.0 - rng.uniform(0.01, 0.3, n))
+        return nom, his, los
+
+    @staticmethod
+    def _constant_context(nom, his, los):
+        context = {"nom": pt.constant(nom)}
+        for i, (hi, lo) in enumerate(zip(his, los, strict=True)):
+            context[f"hi_{i}"] = pt.constant(hi)
+            context[f"lo_{i}"] = pt.constant(lo)
+        return context
+
+    def _graph_size(self, n_entries):
+        nom, his, los = self._random_entries(n_entries, seed=1)
+        context = self._constant_context(nom, his, los)
+        for i in range(n_entries):
+            context[f"theta_{i}"] = pt.dscalar(f"theta_{i}")
+        result = self._build([5] * n_entries).expression(context)
+        return len(io_toposort([], [result]))
+
+    def test_graph_size_does_not_grow_per_entry_formula(self):
+        """Each extra entry adds O(1) gather nodes, not a copy of the formula."""
+        small, large = self._graph_size(5), self._graph_size(50)
+        # The per-entry formula costs ~34 nodes; stacking costs at most a couple.
+        assert (large - small) / 45 <= 3
+
+    @pytest.mark.parametrize(
+        "codes",
+        [
+            [5] * 8,
+            [1] * 8,
+            [0] * 8,
+            [0, 1, 2, 3, 4, 5, 6],
+            # interleaved additive/multiplicative entries are order dependent
+            [0, 5, 0, 1, 4, 6, 2, 5],
+        ],
+    )
+    @pytest.mark.parametrize("positive_definite", [False, True])
+    def test_matches_sequential_reference(self, codes, positive_definite):
+        """Vectorised evaluation equals ROOT's sequential entry-by-entry result."""
+        nom, his, los = self._random_entries(len(codes), seed=2)
+        context = self._constant_context(nom, his, los)
+        thetas = [pt.dscalar(f"theta_{i}") for i in range(len(codes))]
+        for i, theta in enumerate(thetas):
+            context[f"theta_{i}"] = theta
+        func = self._build(codes, positive_definite)
+        fn = function(thetas, func.expression(context))
+        rng = np.random.default_rng(3)
+        for _ in range(20):
+            values = rng.uniform(-2.5, 2.5, len(codes))
+            np.testing.assert_allclose(
+                fn(*values),
+                _reference_flexible_interp(
+                    codes, nom, his, los, values, positive_definite
+                ),
+                rtol=1e-10,
+            )
+
+    def test_batched_parameter_broadcasts(self):
+        """A vector-valued parameter of shape (M,) gives a result of shape (M,)."""
+        codes = [5, 1, 0]
+        nom, his, los = self._random_entries(len(codes), seed=4)
+        context = self._constant_context(nom, his, los)
+        scan = pt.dvector("theta_0")
+        context["theta_0"] = scan
+        context["theta_1"] = pt.constant(0.4)
+        context["theta_2"] = pt.constant(-0.7)
+        fn = function([scan], self._build(codes).expression(context))
+        points = np.linspace(-2.0, 2.0, 7)
+        result = fn(points)
+        assert result.shape == (7,)
+        expected = [
+            _reference_flexible_interp(codes, nom, his, los, [p, 0.4, -0.7], False)
+            for p in points
+        ]
+        np.testing.assert_allclose(result, expected, rtol=1e-10)
+
+    def test_gradient_matches_finite_differences(self):
+        """Gradient with respect to every parameter matches central differences."""
+        codes = [0, 5, 0, 1, 4, 6, 2, 5]
+        nom, his, los = self._random_entries(len(codes), seed=5)
+        context = self._constant_context(nom, his, los)
+        thetas = [pt.dscalar(f"theta_{i}") for i in range(len(codes))]
+        for i, theta in enumerate(thetas):
+            context[f"theta_{i}"] = theta
+        result = self._build(codes).expression(context)
+        grad_fn = function(thetas, pt.grad(result, thetas))
+        values = np.array([0.3, -0.6, 1.4, -1.2, 0.8, -0.2, 0.5, 2.1])
+        step = 1e-6
+        for i in range(len(codes)):
+            up, down = values.copy(), values.copy()
+            up[i] += step
+            down[i] -= step
+            expected = (
+                _reference_flexible_interp(codes, nom, his, los, up, False)
+                - _reference_flexible_interp(codes, nom, his, los, down, False)
+            ) / (2 * step)
+            np.testing.assert_allclose(
+                grad_fn(*values)[i], expected, rtol=1e-6, atol=1e-8
+            )
 
 
 class TestHistogramFunction:

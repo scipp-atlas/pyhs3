@@ -8,7 +8,7 @@ multiple other distributions, including mixtures and products of distributions.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import pytensor.tensor as pt
 from pydantic import (
@@ -30,7 +30,9 @@ if TYPE_CHECKING:
     from pyhs3.distributions import Distributions
 
 
-def _stable_logsumexp(x: TensorVar, axis: int) -> TensorVar:
+def _stable_logsumexp(
+    x: TensorVar, axis: int, signs: TensorVar | None = None
+) -> TensorVar:
     """Numerically stable log-sum-exp, built explicitly instead of via ``pt.logsumexp``.
 
     ``pt.logsumexp`` lowers to the literal ``log(sum(exp(x)))`` graph; the
@@ -45,9 +47,22 @@ def _stable_logsumexp(x: TensorVar, axis: int) -> TensorVar:
     https://github.com/pymc-devs/pytensor/issues/2288 for the tracked
     upstream request for a stable-by-construction ``logsumexp``.
 
+    With ``signs``, the reduction is log(sum(signs * exp(x))): each term
+    enters the sum with the sign of the corresponding entry of ``signs``
+    (+1, -1 or 0), which is how :class:`MixtureDist` handles negative
+    coefficients (``x = log|c| + log f``, ``signs = sign(c)``).  The max
+    shift uses the magnitudes, so every exp(x - m) stays <= 1 and the result
+    is stable in the same regimes.  A negative total gives NaN (log of a
+    negative number), surfacing a density that is negative somewhere; a total
+    of exactly zero gives -inf.  When positive and negative terms nearly
+    cancel, the relative precision of the total is limited by that
+    cancellation, as it is for the probability-space sum.
+
     Args:
         x: Tensor to reduce.
         axis: Axis to reduce over.
+        signs: Optional tensor broadcastable to ``x`` holding the sign of
+            each term.  ``None`` means every term is positive.
 
     Returns:
         log(sum(exp(x), axis=axis)), stable against underflow (large
@@ -65,8 +80,11 @@ def _stable_logsumexp(x: TensorVar, axis: int) -> TensorVar:
     """
     m = pt.max(x, axis=axis, keepdims=True)  # type: ignore[no-untyped-call]
     safe_m = pt.switch(pt.isinf(m), 0.0, m)
+    shifted = pt.exp(x - safe_m)
+    if signs is not None:
+        shifted = signs * shifted
     result = safe_m + pt.log(
-        pt.sum(pt.exp(x - safe_m), axis=axis, keepdims=True)  # type: ignore[no-untyped-call]
+        pt.sum(shifted, axis=axis, keepdims=True)  # type: ignore[no-untyped-call]
     )
     return cast(TensorVar, pt.squeeze(result, axis=axis))  # type: ignore[no-untyped-call]
 
@@ -139,6 +157,11 @@ class MixtureDist(Distribution):
     # the same coefficient tensors used in the probability-space sum, rather
     # than re-resolving them from a context it is not given.
     _cached_coeffs: list[TensorVar] | None = PrivateAttr(default=None)
+
+    # The caches above are set by this object's own likelihood() call and read
+    # by its log_prob_terms(); an alias sharing another mixture's expression
+    # would never set them.
+    share_identical_expressions: ClassVar[bool] = False
 
     @model_serializer(mode="wrap")
     def serialize_model(self, handler: Callable[[Any], Any]) -> Any:
@@ -419,11 +442,15 @@ class MixtureDist(Distribution):
         ``pt.logsumexp`` because the latter's stability is an emergent
         property of a graph rewrite that only runs under ``FAST_RUN`` (see
         :func:`_stable_logsumexp`'s docstring and
-        https://github.com/scipp-atlas/pyhs3/issues/277).  This assumes cᵢ ≥ 0, matching the probabilistic meaning of a mixture
-        weight; :class:`MixtureDist` does not validate coefficient sign, so a
-        negative cᵢ produces NaN here (``pt.log`` of a negative number) just
-        as ``pt.log(Σᵢcᵢfᵢ)`` would if the probability-space sum itself were
-        negative.
+        https://github.com/scipp-atlas/pyhs3/issues/277).
+
+        Coefficients may be negative: HS3 defines the mixture as Σᵢcᵢfᵢ
+        without restricting the sign of cᵢ (and c_n = 1 - Σcᵢ can be negative
+        by construction), and RooFit's RooAddPdf accepts it.  The terms are
+        therefore log|cᵢ| + log fᵢ(xⱼ), reduced with the signs of the cᵢ, so
+        the result equals log(Σᵢcᵢfᵢ(xⱼ)) whenever that sum is positive and
+        is NaN where it is negative (see
+        https://github.com/scipp-atlas/pyhs3/issues/348).
 
         The data-only -log(N!) constant is omitted and N_eff = Σwⱼ is used
         for weighted data; both are RooFit conventions adopted because HS3
@@ -449,10 +476,19 @@ class MixtureDist(Distribution):
             raise RuntimeError(msg)
 
         log_terms = [
-            pt.log(coeff) + log_expressions[summand]
+            pt.log(pt.abs(coeff)) + log_expressions[summand]
             for coeff, summand in zip(self._cached_coeffs, self.summands, strict=True)
         ]
-        per_event_term = _stable_logsumexp(pt.stack(log_terms, axis=0), axis=0)
+        # A coefficient is a scalar or a (M,) batch; broadcast its sign to its
+        # term's (N, M) shape so the signs stack alongside the terms as
+        # (n_summands, N, M).
+        signs = [
+            pt.broadcast_to(pt.sign(coeff), term.shape)
+            for coeff, term in zip(self._cached_coeffs, log_terms, strict=True)
+        ]
+        per_event_term = _stable_logsumexp(
+            pt.stack(log_terms, axis=0), axis=0, signs=pt.stack(signs, axis=0)
+        )
 
         return LogProbTerms(
             per_event=[per_event_term],

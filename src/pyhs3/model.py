@@ -25,7 +25,7 @@ from rich.progress import (
 
 from pyhs3.context import Context
 from pyhs3.data import BinnedData
-from pyhs3.distributions import Distributions, HistFactoryDistChannel
+from pyhs3.distributions import Distribution, Distributions, HistFactoryDistChannel
 from pyhs3.domains import Domain
 from pyhs3.functions import Functions
 from pyhs3.graph_viz import (
@@ -36,7 +36,11 @@ from pyhs3.graph_viz import (
 )
 from pyhs3.networks import build_dependency_graph
 from pyhs3.parameter_points import ParameterSet
-from pyhs3.tensorutils import create_bounded_tensor, ensure_array
+from pyhs3.tensorutils import (
+    create_bounded_tensor,
+    ensure_array,
+    merge_duplicate_nodes,
+)
 from pyhs3.typing.aliases import TensorVar
 
 if TYPE_CHECKING:
@@ -184,6 +188,10 @@ class Model:
         # instead of log(exp(...)) so the joint NLL stays finite where the
         # probability-space product would underflow.
         self._hfdc_log_poisson: dict[str, TensorVar] = {}
+        # (log-space, probability-space) expressions of each distinct
+        # distribution, keyed by Distribution.structural_key(), so that
+        # distributions identical apart from their name are built once.
+        self._shared_expressions: dict[str, tuple[TensorVar, TensorVar]] = {}
         # Build dependency graph with proper entity identification
         self._build_dependency_graph(functions, distributions, progress)
 
@@ -414,9 +422,13 @@ class Model:
 
         if not terms:
             return pt.constant(np.float64(0.0))
-        if len(terms) == 1:
-            return terms[0]
-        return cast(TensorVar, pt.add(*terms))  # pylint: disable=no-value-for-parameter
+        joint = (
+            terms[0] if len(terms) == 1 else cast(TensorVar, pt.add(*terms))  # pylint: disable=no-value-for-parameter
+        )
+        # Distributions that share parameters build identical subgraphs (e.g.
+        # mixture summands with the same shape); merge them here so that
+        # PyTensor's rewriter does not have to.
+        return merge_duplicate_nodes(joint)
 
     def _try_bake_hfdc_observed(self, node_name: str) -> TensorVar | None:
         """Return a baked constant for an HFDC ``{name}_observed`` parameter, or None.
@@ -531,23 +543,52 @@ class Model:
         probability-space graph to keep in sync, and identical free inputs
         for :meth:`pars`).
 
-        For HistFactoryDistChannel, the full expression is assembled directly
-        in log space and stored in ``self.log_distributions`` so that
-        :meth:`logpdf` continues to work as before.  In addition, the
-        Poisson-only log term is stored in ``self._hfdc_log_poisson`` and the
-        deduplicated log-constraint terms are appended to
-        ``self._hfdc_log_constraints`` so that :attr:`log_prob` can combine
-        them without double-counting when multiple channels share a nuisance
-        parameter.
+        HistFactory channels are assembled by
+        :meth:`_build_histfactory_channel_node`; every other distribution by
+        :meth:`_build_generic_distribution_node`.
         """
         dist = distributions[node_name]
-        if not isinstance(dist, HistFactoryDistChannel):
-            log_expr = dist.log_expression(context)
-            self.log_distributions[node_name] = log_expr
-            full = cast(TensorVar, pt.exp(log_expr))
-            full.name = dist.name  # Evaluable.expression sets the name
-            return full
+        if isinstance(dist, HistFactoryDistChannel):
+            return self._build_histfactory_channel_node(node_name, dist, context)
+        return self._build_generic_distribution_node(node_name, dist, context)
 
+    def _build_generic_distribution_node(
+        self, node_name: str, dist: Distribution, context: Context
+    ) -> TensorVar:
+        """Build a non-HistFactory distribution node, sharing identical ones.
+
+        A distribution equal to an already built one in every field but its
+        name (same :meth:`~pyhs3.distributions.Distribution.structural_key`)
+        builds the identical expression, so it reuses those tensors instead
+        of building (and later merging) a second copy.  The shared tensors
+        keep the first distribution's name.
+        """
+        key = dist.structural_key() if dist.share_identical_expressions else None
+        if key is not None and key in self._shared_expressions:
+            log_expr, full = self._shared_expressions[key]
+            self.log_distributions[node_name] = log_expr
+            return full
+        log_expr = dist.log_expression(context)
+        self.log_distributions[node_name] = log_expr
+        full = cast(TensorVar, pt.exp(log_expr))
+        full.name = dist.name  # Evaluable.expression sets the name
+        if key is not None:
+            self._shared_expressions[key] = (log_expr, full)
+        return full
+
+    def _build_histfactory_channel_node(
+        self, node_name: str, dist: HistFactoryDistChannel, context: Context
+    ) -> TensorVar:
+        """Build a HistFactory channel node directly in log space.
+
+        The full expression is assembled in log space and stored in
+        ``self.log_distributions`` so that :meth:`logpdf` continues to work as
+        before.  In addition, the Poisson-only log term is stored in
+        ``self._hfdc_log_poisson`` and the deduplicated log-constraint terms
+        are appended to ``self._hfdc_log_constraints`` so that
+        :attr:`log_prob` can combine them without double-counting when
+        multiple channels share a nuisance parameter.
+        """
         # Build the log-space Poisson term and each log-space constraint
         # factor exactly once, then assemble the model-level deduped
         # constraint list and the full per-channel log expression from those
@@ -560,51 +601,9 @@ class Model:
         log_poisson = dist.log_likelihood(context)
         self._hfdc_log_poisson[node_name] = log_poisson
 
-        # Whether this channel participates in the active likelihood; only then
-        # do its constraints feed the joint log_prob. Legacy models build all
-        # channels, while likelihood-rooted models build only the active
-        # dependency closure selected in _build_dependency_graph.
-        in_likelihood = self._likelihood is None or any(
-            (d if isinstance(d, str) else d.name) == node_name
-            for d in self._likelihood.distributions
+        channel_log_constraints = self._collect_histfactory_log_constraints(
+            node_name, dist, context
         )
-
-        # Single pass over constraint specs builds each log-constraint factor
-        # exactly once.
-        # - channel_seen dedups by parameter for the per-channel sum (matches
-        #   log_extended_likelihood's local dedup),
-        # - self._hfdc_constraint_params_seen dedups across channels for log_prob.
-        channel_seen: set[str] = set()
-        channel_log_constraints: list[TensorVar] = []
-        for dedup_key, modifier, sample_data in dist.constraint_specs():
-            log_constraint = modifier.log_constraint(context, sample_data)
-
-            if dedup_key is None or dedup_key not in channel_seen:
-                if dedup_key is not None:
-                    channel_seen.add(dedup_key)
-                channel_log_constraints.append(log_constraint)
-
-            if in_likelihood:
-                if dedup_key is not None:
-                    if dedup_key in self._hfdc_constraint_params_seen:
-                        continue
-                    self._hfdc_constraint_params_seen.add(dedup_key)
-                self._hfdc_log_constraints.append(log_constraint)
-
-        # BB-lite mode's channel-level constraint (shared gamma parameters
-        # combining all samples' statistical uncertainties) is not a
-        # per-modifier spec, so constraint_specs() cannot yield it -- mirror
-        # log_extended_likelihood's channel-level addition here.  It is
-        # channel-local (like shapesys/staterror dedup_key=None specs above),
-        # so it is always appended, with no cross-channel dedup key.
-        if dist.barlow_beeston_method == "lite":
-            lite_log_constraint = dist._make_barlow_beeston_lite_log_constraint(  # pylint: disable=protected-access
-                context
-            )
-            if lite_log_constraint is not None:
-                channel_log_constraints.append(lite_log_constraint)
-                if in_likelihood:
-                    self._hfdc_log_constraints.append(lite_log_constraint)
 
         # Assemble the full per-channel log expression: summed Poisson log-pmf
         # plus summed log-constraints (mirrors HistFactoryDistChannel.log_expression
@@ -626,6 +625,83 @@ class Model:
         full = cast(TensorVar, pt.exp(log_full))
         full.name = dist.name  # Evaluable.expression sets the name
         return full
+
+    def _collect_histfactory_log_constraints(
+        self, node_name: str, dist: HistFactoryDistChannel, context: Context
+    ) -> list[TensorVar]:
+        """Build a channel's log-constraint terms, each exactly once.
+
+        Returns the channel's own (per-channel deduplicated) log-constraint
+        terms for its full log expression.  When the channel is part of the
+        active likelihood, the terms not already contributed by another
+        channel are also appended to ``self._hfdc_log_constraints`` for
+        :attr:`log_prob`.
+        """
+        # Whether this channel participates in the active likelihood; only then
+        # do its constraints feed the joint log_prob. Legacy models build all
+        # channels, while likelihood-rooted models build only the active
+        # dependency closure selected in _build_dependency_graph.
+        in_likelihood = self._in_likelihood(node_name)
+
+        # Single pass over constraint specs builds each log-constraint factor
+        # exactly once.
+        # - channel_seen dedups by parameter for the per-channel sum (matches
+        #   log_extended_likelihood's local dedup),
+        # - self._hfdc_constraint_params_seen dedups across channels for log_prob.
+        channel_seen: set[str] = set()
+        channel_log_constraints: list[TensorVar] = []
+        for dedup_key, modifier, sample_data in dist.constraint_specs():
+            log_constraint = modifier.log_constraint(context, sample_data)
+
+            if dedup_key is None or dedup_key not in channel_seen:
+                if dedup_key is not None:
+                    channel_seen.add(dedup_key)
+                channel_log_constraints.append(log_constraint)
+
+            if in_likelihood:
+                self._add_global_histfactory_constraint(dedup_key, log_constraint)
+
+        # BB-lite mode's channel-level constraint (shared gamma parameters
+        # combining all samples' statistical uncertainties) is not a
+        # per-modifier spec, so constraint_specs() cannot yield it -- mirror
+        # log_extended_likelihood's channel-level addition here.  It is
+        # channel-local (like shapesys/staterror dedup_key=None specs above),
+        # so it is always appended, with no cross-channel dedup key.
+        if dist.barlow_beeston_method == "lite":
+            lite_log_constraint = dist._make_barlow_beeston_lite_log_constraint(  # pylint: disable=protected-access
+                context
+            )
+            if lite_log_constraint is not None:
+                channel_log_constraints.append(lite_log_constraint)
+                if in_likelihood:
+                    self._hfdc_log_constraints.append(lite_log_constraint)
+
+        return channel_log_constraints
+
+    def _in_likelihood(self, node_name: str) -> bool:
+        """Whether a distribution is paired with data in the active likelihood.
+
+        Models built without a likelihood treat every distribution as active.
+        """
+        return self._likelihood is None or any(
+            (d if isinstance(d, str) else d.name) == node_name
+            for d in self._likelihood.distributions
+        )
+
+    def _add_global_histfactory_constraint(
+        self, dedup_key: str | None, log_constraint: TensorVar
+    ) -> None:
+        """Contribute a HistFactory log-constraint to log_prob at most once.
+
+        Constraints keyed by a nuisance parameter (``dedup_key``) are added the
+        first time any channel builds them; channel-local constraints
+        (``dedup_key is None``) are always added.
+        """
+        if dedup_key is not None:
+            if dedup_key in self._hfdc_constraint_params_seen:
+                return
+            self._hfdc_constraint_params_seen.add(dedup_key)
+        self._hfdc_log_constraints.append(log_constraint)
 
     def _build_dependency_graph(
         self,

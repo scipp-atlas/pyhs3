@@ -57,6 +57,64 @@ The merge is structural, not algebraic. These are kept apart:
 The docstring of :func:`~pyhs3.tensorutils.merge_duplicate_nodes` shows each
 case as a runnable example.
 
+What sharing and merging compute
+--------------------------------
+
+Both steps are common-subexpression elimination: a computation is reused only
+when it has exactly the same inputs, so it is guaranteed to produce the same
+value. Nothing is approximated, reordered or batched.
+
+**Identical HS3 objects.** Take two summands of a mixture that are separate
+distributions with the same arguments:
+
+.. math::
+
+   f_A(x) = \mathrm{CB}(x \mid m_0, \sigma, \alpha, n), \qquad
+   f_B(x) = \mathrm{CB}(x \mid m_0, \sigma, \alpha, n).
+
+Without sharing, the graph evaluates the crystal ball, and its normalization
+integral, twice. With sharing, it evaluates
+:math:`t(x) = \mathrm{CB}(x \mid m_0, \sigma, \alpha, n)` once and uses it for
+both, so the mixture term becomes
+
+.. math::
+
+   \log\big(c_A\, t(x) + c_B\, t(x)\big)
+
+with a single copy of :math:`t`.
+
+**Identical subexpressions.** Take two different distributions that share
+part of their computation:
+
+.. math::
+
+   \log G(x \mid \mu, \sigma_1) = -\frac{(x-\mu)^2}{2\sigma_1^2} - \log Z_1,
+   \qquad
+   \log G(x \mid \mu, \sigma_2) = -\frac{(x-\mu)^2}{2\sigma_2^2} - \log Z_2.
+
+The expressions differ, but both build :math:`u = x - \mu`, :math:`u^2`, and
+the broadcasts of :math:`x` and :math:`\mu` to the event axis. After the merge,
+:math:`u` and :math:`u^2` exist once and feed both; only the parts that
+involve :math:`\sigma_1` or :math:`\sigma_2` stay separate.
+
+**What neither step does.**
+
+- **Batching.** :math:`G(x_1 \mid y_1)` and :math:`G(x_2 \mid y_2)` compute
+  different values, so there is nothing to share. Rewriting them as one
+  vectorized :math:`G([x_1, x_2] \mid [y_1, y_2])` is batching: the arithmetic
+  stays the same, but one vector operation replaces :math:`K` scalar
+  subgraphs, which shrinks the graph further.
+  :class:`~pyhs3.functions.InterpolationFunction` batches its entries this
+  way; batching across distributions is tracked in
+  `issue #18 <https://github.com/scipp-atlas/pyhs3/issues/18>`_.
+- **Algebra.** Expressions that are only mathematically equal stay separate:
+  :math:`x\,y` and :math:`y\,x`, or :math:`c_A\, t + c_B\, t` and
+  :math:`(c_A + c_B)\, t`. PyTensor's canonicalization rewrites handle some
+  of these during compilation.
+
+Sharing and merging remove repeated work and the nodes that carried it;
+batching removes nodes but not work. The two are complementary.
+
 Why pyhs3 does this instead of PyTensor
 ---------------------------------------
 

@@ -51,9 +51,8 @@ def merge_duplicate_nodes(output: TensorVar) -> TensorVar:
     PyTensor's own merge rewrite finds the same duplicates during
     compilation, but it runs inside the rewriter, replacing one node at a
     time on a ``FunctionGraph`` that validates and notifies its features on
-    every replacement.  On the 14-channel bbyy workspace that pass took
-    321 s for 404k nodes; this sweep finds the same 148,786 unique nodes in
-    about 2.5 s.
+    every replacement, so its cost grows with the number of duplicates.  This
+    sweep visits each node once and is much cheaper on large graphs.
 
     Graph inputs (parameters and observables) are kept as the same variable
     objects, so names and :func:`~pytensor.graph.traversal.explicit_graph_inputs`

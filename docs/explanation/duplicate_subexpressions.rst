@@ -4,13 +4,13 @@
 Duplicate Subexpressions in the Model Graph
 ===========================================
 
-A statistical model often contains the same computation many times. In an
-ATLAS di-photon workspace, for example, each channel's mixture has a dozen
-signal components that are separate HS3 distributions with identical
-parameters: the same crystal ball, under a dozen names. pyhs3 builds one
-PyTensor graph for the whole likelihood, so every copy of a computation adds
-nodes that PyTensor has to process before it can compile the graph. pyhs3
-removes these copies in two places, at two levels of detail.
+A statistical model often contains the same computation many times. For
+example, if a workspace has dozens of signal components that are separate HS3
+distributions with identical parameters, they are the same distribution under
+many names. pyhs3 builds one PyTensor graph for the whole likelihood, so every
+copy of a computation adds nodes that PyTensor has to process before it can
+compile the graph. pyhs3 removes these copies in two places, at two levels of
+detail.
 
 Identical HS3 objects
 ---------------------
@@ -67,27 +67,11 @@ notifies its attached features after each replacement. That cost grows with
 the number of duplicates, and on a large workspace it dominates the time
 before C code generation even starts.
 
-On the 14-channel di-photon workspace (``CombinedPdf_combData``), measured
-before either step existed:
-
-.. list-table::
-   :header-rows: 1
-
-   * - quantity
-     - value
-   * - raw ``log_prob`` nodes
-     - 403,838
-   * - unique nodes
-     - 148,786
-   * - PyTensor's ``MergeOptimizer`` on that graph
-     - 321 s
-   * - one sweep of :func:`~pyhs3.tensorutils.merge_duplicate_nodes`
-     - 2.5 s
-
-With interpolation functions vectorised, the same workspace builds 247,227
-raw nodes, of which 23,356 are unique. Sharing identical distributions
-reduces the raw graph to 70,757 nodes and the graph build from 21.4 s to
-7.5 s; the sweep then removes the remaining 47,401 duplicates in 0.3 s.
+pyhs3 avoids that cost in two ways. Sharing identical distributions never
+builds the copies in the first place. The single sweep of
+:func:`~pyhs3.tensorutils.merge_duplicate_nodes` visits each node once and
+replaces nothing in place, so it is much cheaper than the rewrite on large
+graphs.
 
 Both steps leave the graph's inputs, their names and the computed values
 unchanged; they only change how many nodes compute those values.

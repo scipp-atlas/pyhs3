@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import runpy
 import sys
 from pathlib import Path
@@ -450,14 +451,55 @@ def unlisted_width_workspace(tmp_path):
     return path
 
 
+def _plain(output: str) -> str:
+    """Rich error panel text without colour codes, box borders, or line wrapping.
+
+    Rich wraps long messages inside a box and adds ANSI colour when the
+    environment forces it (as CI does), so a phrase can be split across lines.
+    """
+    without_ansi = re.sub(r"\x1b\[[0-9;]*m", "", output)
+    return " ".join(re.sub(r"[│╭╮╰╯─]", " ", without_ansi).split())
+
+
 def test_nll_unlisted_parameter_error_suggests_parameter_set_option(
     unlisted_width_workspace,
 ):
     """The HS3 section 2.7 error from the CLI points at --parameter-set."""
     result = runner.invoke(app, ["nll", str(unlisted_width_workspace)])
     assert result.exit_code != 0
-    assert "width" in result.output
-    assert "--parameter-set fixed" in result.output
+    assert "width" in _plain(result.output)
+    assert "--parameter-set fixed" in _plain(result.output)
+
+
+def test_graph_unlisted_parameter_is_a_clean_error(unlisted_width_workspace):
+    """graph reports an HS3 section 2.7 violation as a CLI error, not a traceback."""
+    result = runner.invoke(
+        app, ["graph", str(unlisted_width_workspace), "--name", "gauss1"]
+    )
+    assert result.exit_code == 2, result.output  # Click's usage-error exit code
+    assert "--parameter-set fixed" in _plain(result.output)
+
+
+def test_graph_parameter_set_builds_model(unlisted_width_workspace, monkeypatch):
+    """graph accepts --parameter-set, so the suggested fix works for it too."""
+    rendered: list[str] = []
+    monkeypatch.setattr(
+        "pyhs3.model.Model.visualize_graph",
+        lambda _self, name, **_kwargs: rendered.append(name) or f"{name}_graph.svg",
+    )
+    result = runner.invoke(
+        app,
+        [
+            "graph",
+            str(unlisted_width_workspace),
+            "--name",
+            "gauss1",
+            "--parameter-set",
+            "fixed",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert rendered == ["gauss1"]
 
 
 def test_nll_parameter_set_holds_unlisted_parameter_const(unlisted_width_workspace):

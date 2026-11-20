@@ -481,15 +481,25 @@ class MixtureDist(Distribution):
             raise RuntimeError(msg)
 
         log_terms = [log_expressions[summand] for summand in self.summands]
-        # A coefficient is a scalar or a (M,) batch; broadcast it to its
-        # term's (N, M) shape so the weights stack alongside the terms as
-        # (n_summands, N, M).
-        weights = [
-            pt.broadcast_to(coeff, term.shape)
-            for coeff, term in zip(self._cached_coeffs, log_terms, strict=True)
+        # Each log f_i has the per-event shape (N, M); each coefficient is a
+        # scalar or a (M,) batch.  Pad the coefficients with leading
+        # broadcastable axes to the terms' rank, (1, 1) or (1, M), and give
+        # them a common shape among themselves only, so that their stack
+        # (n_summands, 1, 1 or M) broadcasts against the stacked terms
+        # (n_summands, N, M).  Broadcasting each coefficient to its term's
+        # full shape would need that term's symbolic shape, which is slow to
+        # build for large expressions.
+        ndim = max(term.ndim for term in log_terms)
+        coeffs = [
+            coeff.dimshuffle(("x",) * (ndim - coeff.ndim) + tuple(range(coeff.ndim)))  # type: ignore[no-untyped-call]
+            if coeff.ndim < ndim
+            else coeff
+            for coeff in self._cached_coeffs
         ]
+        if len({coeff.type for coeff in coeffs}) > 1:
+            coeffs = list(pt.broadcast_arrays(*coeffs))
         per_event_term = _stable_logsumexp(
-            pt.stack(log_terms, axis=0), axis=0, weights=pt.stack(weights, axis=0)
+            pt.stack(log_terms, axis=0), axis=0, weights=pt.stack(coeffs, axis=0)
         )
 
         return LogProbTerms(

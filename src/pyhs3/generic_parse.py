@@ -196,10 +196,10 @@ class _SympyBuilder:
             raise ValueError(msg)
         return cast(sp.Basic, method(node))
 
-    def _build_Expression(self, node: ast.Expression) -> sp.Basic:  # noqa: N802
+    def _build_Expression(self, node: ast.Expression) -> sp.Basic:
         return self.build(node.body)
 
-    def _build_Constant(self, node: ast.Constant) -> sp.Basic:  # noqa: N802
+    def _build_Constant(self, node: ast.Constant) -> sp.Basic:
         # bool is a subclass of int, but TRUE/FALSE are the only boolean literals
         if type(node.value) is int:
             return sp.Integer(node.value)
@@ -208,13 +208,13 @@ class _SympyBuilder:
         msg = f"unsupported literal {node.value!r}"
         raise ValueError(msg)
 
-    def _build_Name(self, node: ast.Name) -> sp.Basic:  # noqa: N802
+    def _build_Name(self, node: ast.Name) -> sp.Basic:
         # ``sp.false`` is falsy, so test membership rather than use ``or``
         if node.id in _CONSTANTS:
             return _CONSTANTS[node.id]
         return sp.Symbol(node.id)
 
-    def _build_BinOp(self, node: ast.BinOp) -> sp.Basic:  # noqa: N802
+    def _build_BinOp(self, node: ast.BinOp) -> sp.Basic:
         left, right = self.build(node.left), self.build(node.right)
         if isinstance(node.op, ast.Add):
             return left + right
@@ -229,7 +229,7 @@ class _SympyBuilder:
         msg = f"unsupported operator '{type(node.op).__name__}'"
         raise ValueError(msg)
 
-    def _build_UnaryOp(self, node: ast.UnaryOp) -> sp.Basic:  # noqa: N802
+    def _build_UnaryOp(self, node: ast.UnaryOp) -> sp.Basic:
         operand = self.build(node.operand)
         if isinstance(node.op, ast.USub):
             return -operand
@@ -240,11 +240,11 @@ class _SympyBuilder:
         msg = f"unsupported operator '{type(node.op).__name__}'"
         raise ValueError(msg)
 
-    def _build_BoolOp(self, node: ast.BoolOp) -> sp.Basic:  # noqa: N802
+    def _build_BoolOp(self, node: ast.BoolOp) -> sp.Basic:
         operands = [_as_boolean(self.build(value)) for value in node.values]
         return sp.And(*operands) if isinstance(node.op, ast.And) else sp.Or(*operands)
 
-    def _build_Compare(self, node: ast.Compare) -> sp.Basic:  # noqa: N802
+    def _build_Compare(self, node: ast.Compare) -> sp.Basic:
         operands = [self.build(node.left), *map(self.build, node.comparators)]
         pairs = []
         for op, left, right in zip(node.ops, operands, operands[1:]):
@@ -254,7 +254,7 @@ class _SympyBuilder:
             pairs.append(_COMPARISONS[type(op)](left, right))
         return sp.And(*pairs)
 
-    def _build_Call(self, node: ast.Call) -> sp.Basic:  # noqa: N802
+    def _build_Call(self, node: ast.Call) -> sp.Basic:
         if not isinstance(node.func, ast.Name) or node.keywords:
             msg = "unsupported function call"
             raise ValueError(msg)

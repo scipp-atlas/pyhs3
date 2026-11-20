@@ -7,10 +7,11 @@ standard and CMS-specific distribution implementations.
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import pytensor.tensor as pt
 from pydantic import PrivateAttr
@@ -74,6 +75,45 @@ class Distribution(Evaluable, ABC):
     """
 
     _normalizable: bool = PrivateAttr(default=True)
+
+    #: Whether two distributions of this class that are equal in every field
+    #: except ``name`` may share one built expression (see
+    #: :meth:`structural_key`).  Classes that keep per-object state while
+    #: their expression is built must set this to ``False``: an alias reuses
+    #: the first object's tensors and never builds, so its own state would be
+    #: missing.
+    share_identical_expressions: ClassVar[bool] = True
+
+    def structural_key(self) -> str:
+        """Identity of this distribution's expression, independent of its name.
+
+        Two distributions with the same key reference the same parameters,
+        functions and constants in the same fields, so in one model they
+        build identical expressions.  The key is the class name plus the
+        JSON dump of every field except ``name``.
+
+        Examples:
+            Equal fields under different names give the same key:
+
+            >>> from pyhs3.distributions import GaussianDist
+            >>> a = GaussianDist(name="sig", x="m", mean="mu", sigma=1.0)
+            >>> b = GaussianDist(name="bkg", x="m", mean="mu", sigma=1.0)
+            >>> a.structural_key() == b.structural_key()
+            True
+
+            A different value, or a constant in place of a parameter
+            reference, gives a different key:
+
+            >>> c = GaussianDist(name="bkg", x="m", mean="mu", sigma=2.0)
+            >>> d = GaussianDist(name="bkg", x="m", mean=0.0, sigma=1.0)
+            >>> a.structural_key() in {c.structural_key(), d.structural_key()}
+            False
+
+        Returns:
+            str: The structural key.
+        """
+        fields = self.model_dump(mode="json", exclude={"name"})
+        return f"{type(self).__name__}:{json.dumps(fields, sort_keys=True)}"
 
     @abstractmethod
     def likelihood(self, context: Context) -> TensorVar:

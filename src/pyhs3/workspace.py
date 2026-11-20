@@ -20,11 +20,12 @@ from pyhs3.distributions.histfactory.modifiers import (
     ParametersModifier,
 )
 from pyhs3.domains import Domain, Domains, DomainType, ProductDomain
-from pyhs3.exceptions import WorkspaceValidationError
+from pyhs3.exceptions import UnlistedParameterError, WorkspaceValidationError
 from pyhs3.functions import Functions
 from pyhs3.likelihoods import Likelihood, Likelihoods
 from pyhs3.metadata import Metadata
 from pyhs3.model import Model
+from pyhs3.networks import build_dependency_graph
 from pyhs3.parameter_points import ParameterPoints, ParameterSet
 
 log = logging.getLogger(__name__)
@@ -455,6 +456,82 @@ class Workspace(BaseModel):
             for axis in datum.axes or []
         }
 
+    def _check_analysis_parameters(
+        self,
+        analysis: Analysis,
+        likelihood: Likelihood,
+        domain: Domain,
+        parameterset: ParameterSet,
+    ) -> None:
+        """Enforce HS3 section 2.7 for an analysis before building its model.
+
+        Every parameter of the likelihood's distributions must be listed in one of
+        the analysis domains or be ``const`` in the referenced parameter point
+        (``parameterset``: the analysis ``init``, or the caller's override).
+        Observables and the observed-data inputs of binned channels are data, not
+        parameters. The check walks the structural dependency graph only, so it
+        fails before any expression is built.
+
+        Raises:
+            UnlistedParameterError: naming the offending parameters, and any
+                parameter points in which every parameter outside the domains
+                and data is ``const``.
+        """
+        graph, _, _ = build_dependency_graph(
+            parameterset,
+            self.functions or Functions(),
+            self.distributions or Distributions(),
+        )
+        roots = [name for name in likelihood.distribution_names() if name in graph]
+        parameters = {
+            graph[idx]["name"]
+            for idx in graph.ancestor_closure(roots)
+            if graph[idx]["type"] == "parameter"
+        }
+        # Parameters the domains and data do not account for: each must be const
+        # in the referenced parameter point.
+        unlisted = (
+            parameters
+            - {axis.name for axis in getattr(domain, "axes", [])}
+            - set(self._extract_observables(likelihood))
+            - set(likelihood.binned_observed_inputs())
+        )
+        offending = sorted(
+            unlisted - {point.name for point in parameterset if point.const}
+        )
+        if not offending:
+            return
+
+        shown = ", ".join(offending[:5])
+        if len(offending) > 5:
+            shown += f", ... ({len(offending) - 5} more)"
+        referenced = (
+            f"the referenced parameter point '{parameterset.name}'"
+            if parameterset.parameters
+            else "a referenced parameter point (the analysis has no init)"
+        )
+        msg = (
+            f"Analysis '{analysis.name}' violates HS3 section 2.7: every parameter of "
+            f"the likelihood must be listed in one of the analysis domains or be const "
+            f"in the referenced parameter point. {len(offending)} parameter(s) are "
+            f"neither in the domains nor const in {referenced}: {shown}."
+        )
+        # A selected parameter set replaces init entirely, so a suggestion must hold
+        # every unlisted parameter const, not only the ones init leaves free.
+        candidates = [
+            pset.name
+            for pset in self.parameter_points or []
+            if {point.name for point in pset if point.const}.issuperset(unlisted)
+        ]
+        if candidates:
+            options = " or ".join(f"parameter_set='{name}'" for name in candidates)
+            msg += (
+                f" Every parameter outside the domains is const in "
+                f"{', '.join(repr(c) for c in candidates)}: "
+                f"pass ws.model(analysis, {options}) to use it."
+            )
+        raise UnlistedParameterError(msg, offending, candidates)
+
     def _select_parameterset(
         self,
         parameter_set: int | str | ParameterSet | None,
@@ -612,6 +689,10 @@ class Workspace(BaseModel):
             )
         else:
             parameterset = param_set or ParameterSet(name="default", parameters=[])
+
+        self._check_analysis_parameters(
+            target, likelihood_obj, analysis_domain, parameterset
+        )
 
         return Model(
             parameterset=parameterset,

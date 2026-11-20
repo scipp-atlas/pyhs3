@@ -58,6 +58,39 @@ class WorkspaceValidationError(HS3Exception):
     """
 
 
+class UnlistedParameterError(WorkspaceValidationError):
+    """
+    Raised when an analysis violates HS3 section 2.7.
+
+    Every parameter of an analysis's likelihood must be listed in one of the
+    analysis domains or be ``const`` in the referenced parameter point. ROOT
+    exports commonly reference no parameter point (no ``init``) while marking
+    parameters such as ``Lumi`` const in every parameter point.
+
+    Attributes:
+        parameters: The offending parameter names, sorted.
+        const_parameter_sets: Names of the workspace parameter points in which
+            every parameter outside the analysis domains and data is ``const``;
+            selecting one of them as the parameter set (which replaces ``init``)
+            makes the analysis valid.
+    """
+
+    def __init__(
+        self, message: str, parameters: list[str], const_parameter_sets: list[str]
+    ) -> None:
+        """Store the message and the data a caller needs to fix the analysis.
+
+        Args:
+            message: Human-readable description of the violation.
+            parameters: The offending parameter names, sorted.
+            const_parameter_sets: Parameter points in which every parameter
+                outside the analysis domains and data is ``const``.
+        """
+        super().__init__(message)
+        self.parameters = parameters
+        self.const_parameter_sets = const_parameter_sets
+
+
 class DuplicateEntityError(HS3Exception):
     """
     Raised when two distinct entities share a single name in the dependency graph.

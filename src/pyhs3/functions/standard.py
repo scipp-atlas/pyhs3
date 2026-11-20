@@ -478,7 +478,7 @@ class InterpolationFunction(Function):
                 for n_entries, term in terms:
                     shifted = one + term
                     factors.extend(shifted[k] for k in range(n_entries))
-                result = result * pt.mul(*factors)
+                result = result * pt.mul(factors[0], *factors[1:])
 
         # Apply positive definite constraint if requested
         if self.positiveDefinite:

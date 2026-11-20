@@ -14,11 +14,10 @@ from typing import TYPE_CHECKING, cast
 
 import pytensor.tensor as pt
 from pydantic import PrivateAttr
-from pytensor.graph.replace import clone_replace
 
 from pyhs3.base import Evaluable
 from pyhs3.context import Context
-from pyhs3.normalization import gauss_legendre_integral
+from pyhs3.normalization import gauss_legendre_integral, substitute_variable
 from pyhs3.typing.aliases import TensorVar
 
 if TYPE_CHECKING:
@@ -159,18 +158,13 @@ class Distribution(Evaluable, ABC):
         leaf = context.parameters[obs_name]
         upper_t = pt.as_tensor_variable([upper], dtype=leaf.dtype)
         lower_t = pt.as_tensor_variable([lower], dtype=leaf.dtype)
-        # rebuild_strict=False re-infers every downstream type from the (1,)
-        # bound, so the integral's former event axis is statically length 1
-        # (broadcastable).  An in-place replacement (graph_replace) would keep
-        # the observable's unknown length, and the graph would then only run
-        # if elemwise fusion happened to hide the runtime broadcast
-        # (https://github.com/scipp-atlas/pyhs3/issues/346).
-        upper_val = cast(
-            TensorVar, clone_replace(expr, [(leaf, upper_t)], rebuild_strict=False)
-        )
-        lower_val = cast(
-            TensorVar, clone_replace(expr, [(leaf, lower_t)], rebuild_strict=False)
-        )
+        # substitute_variable rebuilds only the nodes downstream of x and
+        # infers their types again from the (1,) bound, so the integral's
+        # former event axis is statically length 1 (broadcastable,
+        # https://github.com/scipp-atlas/pyhs3/issues/346), while the
+        # antiderivative's parameter-only parts stay shared by both bounds.
+        upper_val = substitute_variable(expr, leaf, upper_t)
+        lower_val = substitute_variable(expr, leaf, lower_t)
         return cast(TensorVar, upper_val - lower_val)
 
     def _matching_observables(

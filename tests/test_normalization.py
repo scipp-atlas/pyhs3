@@ -15,6 +15,7 @@ from pydantic import (
 )
 from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode, get_mode
+from pytensor.graph.traversal import io_toposort
 
 from pyhs3.axes import RegularAxis
 from pyhs3.context import Context
@@ -29,7 +30,7 @@ from pyhs3.distributions.core import Distribution
 from pyhs3.distributions.histfactory import HistFactoryDistChannel
 from pyhs3.distributions.mathematical import GenericDist
 from pyhs3.distributions.physics import AsymmetricCrystalBallDist
-from pyhs3.normalization import gauss_legendre_integral
+from pyhs3.normalization import gauss_legendre_integral, substitute_variable
 from pyhs3.typing.aliases import TensorVar
 
 
@@ -579,6 +580,33 @@ class TestNormalizationStaticShapes:
         assert all(size == 1 for size in integral.type.shape)
 
     @pytest.mark.parametrize(("dist", "values"), _ANALYTIC)
+    def test_analytic_integral_shares_observable_independent_nodes(self, dist, values):
+        """F(upper) and F(lower) share the antiderivative's parameter-only nodes.
+
+        Only the nodes downstream of x are rebuilt per bound, so the integral
+        has n_free + 2 * n_dependent + 1 nodes (the 1 is the subtraction)
+        rather than two full copies of the antiderivative.
+        """
+        params = {name: pt.dscalar(name) for name in values}
+        context, x = _observable_context(params)
+        lower, upper = context.observables["x"]
+
+        antiderivative = dist.normalization_expression(context, "x")
+        depends_on_x = {x}
+        n_free = n_dependent = 0
+        for node in io_toposort([], [antiderivative]):
+            if any(var in depends_on_x for var in node.inputs):
+                depends_on_x.update(node.outputs)
+                n_dependent += 1
+            else:
+                n_free += 1
+
+        integral = dist._normalization_integral(context, "x", lower, upper)
+
+        assert n_free > 0
+        assert len(io_toposort([], [integral])) == n_free + 2 * n_dependent + 1
+
+    @pytest.mark.parametrize(("dist", "values"), _ANALYTIC)
     def test_analytic_log_expression_evaluates_without_fusion(self, dist, values):
         """The normalized log-pdf over N > 1 events runs without elemwise fusion."""
         params = {name: pt.dscalar(name) for name in values}
@@ -653,3 +681,39 @@ class TestNormalizationStaticShapes:
         fused = function(inputs, mixture, mode="FAST_RUN")(*args)
 
         np.testing.assert_allclose(unfused, fused, rtol=1e-12)
+
+
+class TestSubstituteVariable:
+    """substitute_variable rebuilds only what depends on the replaced variable."""
+
+    def test_downstream_types_are_reinferred(self):
+        """Replacing an unknown-length vector by a length-1 one makes the result broadcastable."""
+        x = pt.dvector("x")
+        s = pt.dscalar("s")
+        expr = pt.exp(x[:, None] * s)  # (?, 1)
+
+        result = substitute_variable(expr, x, pt.as_tensor_variable([3.0]))
+
+        assert result.type.shape == (1, 1)
+        np.testing.assert_allclose(function([s], result)(0.5), [[np.exp(1.5)]])
+
+    def test_independent_nodes_are_shared(self):
+        """Nodes that do not depend on the replaced variable are reused, not copied."""
+        x = pt.dvector("x")
+        s = pt.dscalar("s")
+        scale = pt.exp(s) * 2.0  # independent of x
+        expr = x * scale
+
+        result = substitute_variable(expr, x, pt.as_tensor_variable([3.0]))
+
+        # x * scale broadcasts scale through an ExpandDims node, which is
+        # independent of x and therefore the very same node in both graphs.
+        assert result.owner.inputs[1] is expr.owner.inputs[1]
+
+    def test_variable_not_in_graph_returns_output(self):
+        """Without the variable in the graph the output is returned unchanged."""
+        x = pt.dvector("x")
+        s = pt.dscalar("s")
+        expr = pt.exp(s)
+
+        assert substitute_variable(expr, x, pt.as_tensor_variable([3.0])) is expr

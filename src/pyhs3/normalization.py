@@ -6,11 +6,13 @@ Provides Gauss-Legendre quadrature for computing normalization integrals symboli
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import pytensor.tensor as pt
+from pytensor.graph.basic import Variable
 from pytensor.graph.replace import graph_replace
+from pytensor.graph.traversal import io_toposort
 
 from pyhs3.typing.aliases import TensorVar
 
@@ -19,6 +21,47 @@ _GL_ORDER = 64
 _GL_NODES, _GL_WEIGHTS = np.polynomial.legendre.leggauss(_GL_ORDER)
 _GL_NODES_T = pt.constant(_GL_NODES)
 _GL_WEIGHTS_T = pt.constant(_GL_WEIGHTS)
+
+
+def substitute_variable(
+    output: TensorVar, variable: TensorVar, replacement: TensorVar
+) -> TensorVar:
+    """Return ``output`` with ``variable`` replaced by ``replacement``.
+
+    Only the nodes that depend on ``variable`` are rebuilt, each through its
+    ``Op``'s ``make_node`` so that its output type is inferred again from the
+    new inputs; every other node is reused as it is.
+
+    This differs from PyTensor's two built-in substitutions:
+
+    - ``graph_replace`` rebuilds only the dependent nodes too, but keeps
+      their original output types.  Replacing an observable of unknown
+      length ``(?,)`` by a ``(1,)`` bound therefore leaves an axis typed as
+      unknown that holds length 1, which PyTensor refuses to broadcast at
+      runtime (https://github.com/scipp-atlas/pyhs3/issues/346).
+    - ``clone_replace(..., rebuild_strict=False)`` infers the types again but
+      copies the whole graph, including the nodes that never depended on
+      ``variable``, so an antiderivative evaluated at two bounds carries
+      two copies of its parameter-only parts.
+
+    Args:
+        output: Expression to substitute into.
+        variable: Variable to replace (e.g. an observable's leaf vector).
+        replacement: Variable to use instead; may have a different static
+            shape, e.g. ``(1,)`` for ``(?,)``.
+
+    Returns:
+        The substituted expression, or ``output`` itself if it does not
+        depend on ``variable``.
+    """
+    rebuilt: dict[Variable[Any, Any], Variable[Any, Any]] = {variable: replacement}
+    for node in io_toposort([], [output]):
+        if any(var in rebuilt for var in node.inputs):
+            new_node = node.op.make_node(
+                *(rebuilt.get(var, var) for var in node.inputs)
+            )
+            rebuilt.update(zip(node.outputs, new_node.outputs, strict=True))
+    return cast(TensorVar, rebuilt.get(output, output))
 
 
 def gauss_legendre_integral(

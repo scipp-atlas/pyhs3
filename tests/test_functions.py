@@ -2256,6 +2256,31 @@ class TestInterpolationFunctionVectorized:
         ]
         np.testing.assert_allclose(result, expected, rtol=1e-10)
 
+    def test_gradient_graph_has_no_per_entry_scatter(self):
+        """The gradient of many multiplicative entries has no IncSubtensor.
+
+        Splitting the stacked factors into one row per entry makes autodiff
+        scatter each row's gradient back with an IncSubtensor; with
+        thousands of entries that graph is very slow to compile.  Reducing
+        over the entry axis keeps the gradient elementwise.
+        """
+        n_entries = 50
+        nom, his, los = self._random_entries(n_entries, seed=6)
+        context = self._constant_context(nom, his, los)
+        thetas = [pt.dscalar(f"theta_{i}") for i in range(n_entries)]
+        for i, theta in enumerate(thetas):
+            context[f"theta_{i}"] = theta
+        result = self._build([5] * n_entries).expression(context)
+
+        grads = pt.grad(result, thetas)
+
+        scatter = [
+            node
+            for node in io_toposort([], grads)
+            if type(node.op).__name__ in {"IncSubtensor", "AdvancedIncSubtensor"}
+        ]
+        assert scatter == []
+
     def test_gradient_matches_finite_differences(self):
         """Gradient with respect to every parameter matches central differences."""
         codes = [0, 5, 0, 1, 4, 6, 2, 5]

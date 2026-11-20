@@ -441,15 +441,27 @@ class InterpolationFunction(Function):
                 )
             else:
                 one = pt.constant(1.0, dtype=terms[0][1].dtype)
-                # One n-ary product over every entry's factor (each of shape
-                # (*batch)) rather than pt.prod over the entry axis: the
-                # gradient of pt.prod goes through ProdWithoutZeros, which has
-                # no JAX dispatch and no second derivative.
-                factors: list[TensorVar] = []
-                for n_entries, term in terms:
-                    shifted = one + term
-                    factors.extend(shifted[k] for k in range(n_entries))
-                result = result * pt.mul(factors[0], *factors[1:])
+                # Product over the entry axis of each (K_code, *batch) factor
+                # tensor, giving shape (*batch).  no_zeros_in_input=True makes
+                # the gradient the elementwise prod / factor instead of going
+                # through ProdWithoutZeros (no JAX dispatch, no second
+                # derivative).  Splitting the factors into one row per entry
+                # would avoid that too, but autodiff then scatters every row's
+                # gradient back with an IncSubtensor, which with thousands of
+                # entries makes the gradient graph very slow to compile.  A
+                # factor of exactly zero (a multiplicative yield of zero) gives
+                # a non-finite gradient.
+                # One n-ary Mul per run: the nominal (or running total) times
+                # every code group's product.  The Python loop only builds a
+                # fixed graph over the few code groups; each pt.prod reduces
+                # all of its group's entries in one vectorised op.
+                result = pt.mul(
+                    result,
+                    *(
+                        pt.prod(one + term, axis=0, no_zeros_in_input=True)  # type: ignore[no-untyped-call]
+                        for _, term in terms
+                    ),
+                )
 
         # Apply positive definite constraint if requested
         if self.positiveDefinite:

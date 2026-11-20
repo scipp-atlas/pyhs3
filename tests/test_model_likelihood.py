@@ -1523,3 +1523,62 @@ def test_distribution_classes_declare_whether_identical_objects_share(cls, share
     its own name, so an alias would miss that state.
     """
     assert cls.share_identical_expressions is shares
+
+
+def _extended_mixture_model(c_sig: float, c_bkg: float):
+    spec = json.loads(json.dumps(_WS_EXTENDED_MIXTURE))
+    for parameter in spec["parameter_points"][0]["parameters"]:
+        if parameter["name"] == "c_sig":
+            parameter["value"] = c_sig
+        if parameter["name"] == "c_bkg":
+            parameter["value"] = c_bkg
+    spec["domains"][0]["axes"][2]["min"] = -100.0
+    ws = Workspace(**spec)
+    model = ws.model(ws.analyses["A"], progress=False)
+    inputs = {v.name: v for v in explicit_graph_inputs([model.log_prob]) if v.name}
+    fn = pytensor.function(list(inputs.values()), model.log_prob)
+    return model, inputs, fn
+
+
+def test_log_prob_extended_mixture_negative_coefficient_positive_density():
+    """A negative coefficient with a positive total density gives the linear-sum value.
+
+    HS3 defines the mixture as sum_i c_i f_i without restricting the sign of
+    c_i (https://github.com/scipp-atlas/pyhs3/issues/348); ROOT's RooAddPdf
+    accepts it too.
+    """
+    model, _, fn = _extended_mixture_model(c_sig=30.0, c_bkg=-0.2)
+    events = [1.0, 2.0, 3.0, 4.0, 5.0]
+    expected = _extended_mixture_logprob(events, mean=2.0, c_sig=30.0, c_bkg=-0.2)
+    assert np.isfinite(expected)
+
+    value = float(fn(**model.data, **model.nominal_params).item())
+
+    assert value == pytest.approx(expected, rel=1e-10)
+
+
+def test_log_prob_extended_mixture_negative_density_is_nan():
+    """Where sum_i c_i f_i(x) < 0 for an event the log-likelihood is NaN."""
+    model, _, fn = _extended_mixture_model(c_sig=1.0, c_bkg=-5.0)
+
+    value = float(fn(**model.data, **model.nominal_params).item())
+
+    assert np.isnan(value)
+
+
+def test_log_prob_extended_mixture_negative_coefficient_gradient():
+    """The gradient with respect to a negative coefficient matches finite differences."""
+    model, inputs, _ = _extended_mixture_model(c_sig=30.0, c_bkg=-0.2)
+    grad_fn = pytensor.function(
+        list(inputs.values()), pytensor.grad(model.log_prob.sum(), inputs["c_bkg"])
+    )
+    events = [1.0, 2.0, 3.0, 4.0, 5.0]
+    step = 1e-6
+    expected = (
+        _extended_mixture_logprob(events, mean=2.0, c_sig=30.0, c_bkg=-0.2 + step)
+        - _extended_mixture_logprob(events, mean=2.0, c_sig=30.0, c_bkg=-0.2 - step)
+    ) / (2 * step)
+
+    value = float(grad_fn(**model.data, **model.nominal_params))
+
+    assert value == pytest.approx(expected, rel=1e-6)

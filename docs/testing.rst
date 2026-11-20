@@ -73,6 +73,69 @@ Run specific tests:
 
    nox -s tests -- tests/test_distributions.py
 
+HS3TestSuite Conformance
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The external `HS3TestSuite <https://github.com/hep-statistics-serialization-standard/HS3TestSuite>`_
+checks pyhs3 against RooFit-generated reference values stored with the suite.
+ROOT is not run during these tests: each tested suite revision is a frozen
+comparison with the RooFit values and tolerances committed at that revision.
+
+The suite is intentionally pinned to an exact commit. To run the current pin
+locally, check out that commit and point the test harness at it:
+
+.. code-block:: bash
+
+   hs3suite_checkout="$(mktemp -d)"
+   git clone https://github.com/hep-statistics-serialization-standard/HS3TestSuite.git \
+       "$hs3suite_checkout"
+   git -C "$hs3suite_checkout" checkout --detach \
+       9d04e321ae6fddd283a35507f14ecf852eb7df61
+   export HS3TESTSUITE_ROOT="$hs3suite_checkout"
+   export HS3TESTSUITE_REPORT_DIR="$(mktemp -d)"
+   export PYTENSOR_FLAGS="base_compiledir=$(mktemp -d)"
+   pixi run -e py312 test-hs3suite
+
+The integration test is skipped when ``HS3TESTSUITE_ROOT`` is not set, so the
+normal local and platform test matrix does not fetch external test data.
+Machine-readable results and a Markdown summary are written to
+``HS3TESTSUITE_REPORT_DIR`` when it is set.
+
+The upstream snapshot is recorded in ``tests/hs3testsuite/pin.json`` and
+unsupported checks are recorded in ``tests/hs3testsuite/known_failures.json``
+as strict expected failures. A supported check that regresses fails normally,
+and an expected failure that starts passing is an unexpected pass and also
+fails. A known failure that moves to a different stage, such as from numerical
+comparison to workspace import, is also a regression. This forces the ledger
+to describe the currently pinned suite rather than silently accumulating stale
+entries.
+
+Updating the suite pin is a deliberate compatibility review, because the HS3
+specification, fixtures, schemas, and RooFit reference values evolve. In a
+dedicated pull request:
+
+1. Check out the candidate HS3TestSuite commit explicitly; never use a moving
+   branch or tag in CI.
+2. Audit changes to schemas, fixture and check identifiers, feature tags,
+   tolerances, and RooFit reference vectors.
+3. Run the candidate checkout without modifying the tracked pin or ledger:
+
+   .. code-block:: bash
+
+      pixi run -e py312 python tools/audit_hs3testsuite.py \
+          --suite-root /path/to/HS3TestSuite \
+          --output-dir /tmp/pyhs3-hs3-audit
+
+   This explicit audit mode records the candidate commit and manifest digest in
+   its reports without weakening the exact-pin check used by CI. Compare its
+   JSON and Markdown reports with the report from the current pin.
+4. Review every added or removed check and every pass-to-fail or fail-to-pass
+   transition. New expected failures require an explicit reason in the ledger;
+   newly supported checks must be removed from it.
+5. Update the upstream commit and manifest digest in the pin file, the CI
+   checkout ref, this page's local checkout command, and the strict
+   expected-failure ledger together. CI must validate that exact snapshot.
+
 Test Organization
 -----------------
 

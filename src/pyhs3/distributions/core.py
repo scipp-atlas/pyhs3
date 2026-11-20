@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytensor.tensor as pt
 from pydantic import PrivateAttr
-from pytensor.graph.replace import graph_replace
+from pytensor.graph.replace import clone_replace
 
 from pyhs3.base import Evaluable
 from pyhs3.context import Context
@@ -153,13 +153,24 @@ class Distribution(Evaluable, ABC):
         expr = self.normalization_expression(context, obs_name)  # pylint: disable=assignment-from-none
         if expr is None:
             return None
-        # Use the leaf (not the view) as the substitution target so graph_replace
-        # propagates through every ExpandDims(leaf) view in the expression.
+        # Use the leaf (not the view) as the substitution target so the
+        # replacement propagates through every ExpandDims(leaf) view in the
+        # expression.
         leaf = context.parameters[obs_name]
         upper_t = pt.as_tensor_variable([upper], dtype=leaf.dtype)
         lower_t = pt.as_tensor_variable([lower], dtype=leaf.dtype)
-        upper_val = cast(TensorVar, graph_replace(expr, [(leaf, upper_t)]))
-        lower_val = cast(TensorVar, graph_replace(expr, [(leaf, lower_t)]))
+        # rebuild_strict=False re-infers every downstream type from the (1,)
+        # bound, so the integral's former event axis is statically length 1
+        # (broadcastable).  An in-place replacement (graph_replace) would keep
+        # the observable's unknown length, and the graph would then only run
+        # if elemwise fusion happened to hide the runtime broadcast
+        # (https://github.com/scipp-atlas/pyhs3/issues/346).
+        upper_val = cast(
+            TensorVar, clone_replace(expr, [(leaf, upper_t)], rebuild_strict=False)
+        )
+        lower_val = cast(
+            TensorVar, clone_replace(expr, [(leaf, lower_t)], rebuild_strict=False)
+        )
         return cast(TensorVar, upper_val - lower_val)
 
     def _matching_observables(

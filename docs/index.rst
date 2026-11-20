@@ -12,6 +12,7 @@
    reference/api
    reference/cli
    explanation/building_a_model
+   explanation/comparing_nll_with_roofit
    broadcasting
    defining_components
    normalization

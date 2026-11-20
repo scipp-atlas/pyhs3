@@ -1582,3 +1582,27 @@ def test_log_prob_extended_mixture_negative_coefficient_gradient():
     value = float(grad_fn(**model.data, **model.nominal_params))
 
     assert value == pytest.approx(expected, rel=1e-6)
+
+
+def test_log_prob_extended_mixture_zero_coefficient_gradient_is_finite():
+    """The gradient at a coefficient of exactly zero is finite and correct.
+
+    d/dc_b [sum_j log(c_s f_s(x_j) + c_b f_b(x_j)) - (c_s + c_b)]
+        = sum_j f_b(x_j) / (c_s f_s(x_j) + c_b f_b(x_j)) - 1,
+    which is finite at c_b = 0 (e.g. a spurious-signal yield whose nuisance
+    parameter starts at zero).  Writing the term with log|c_b| would give
+    1/c_b * 0 = NaN there.
+    """
+    model, inputs, _ = _extended_mixture_model(c_sig=30.0, c_bkg=0.0)
+    grad_fn = pytensor.function(
+        list(inputs.values()), pytensor.grad(model.log_prob.sum(), inputs["c_bkg"])
+    )
+    events = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    f_sig = np.exp([_truncnorm_logpdf(x, 2.0, 1.0, -10.0, 10.0) for x in events])
+    f_bkg = np.exp([_truncnorm_logpdf(x, 0.0, 2.0, -10.0, 10.0) for x in events])
+    expected = float(np.sum(f_bkg / (30.0 * f_sig)) - 1.0)
+
+    value = float(grad_fn(**model.data, **model.nominal_params))
+
+    assert np.isfinite(value)
+    assert value == pytest.approx(expected, rel=1e-8)

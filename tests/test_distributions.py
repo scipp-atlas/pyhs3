@@ -3693,11 +3693,11 @@ class TestStableLogSumExp:
 
 
 class TestSignedLogSumExp:
-    """``_stable_logsumexp`` with per-term signs computes log(sum(s_i exp(x_i))).
+    """``_stable_logsumexp`` with weights computes log(sum(w_i exp(x_i))).
 
-    Mixture coefficients may be negative (HS3 does not restrict their sign and
-    defines c_n = 1 - sum(c_i), which can be negative), so MixtureDist reduces
-    log|c_i| + log f_i with the coefficients' signs.  See
+    Mixture coefficients may be negative or zero (HS3 does not restrict their
+    sign and defines c_n = 1 - sum(c_i), which can be negative), so
+    MixtureDist reduces log f_i with the coefficients as linear weights.  See
     https://github.com/scipp-atlas/pyhs3/issues/348.
     """
 
@@ -3705,7 +3705,31 @@ class TestSignedLogSumExp:
     def _compile():
         x = pt.dvector("x")
         signs = pt.dvector("signs")
-        return pytensor.function([x, signs], _stable_logsumexp(x, axis=0, signs=signs))
+        return pytensor.function(
+            [x, signs], _stable_logsumexp(x, axis=0, weights=signs)
+        )
+
+    def test_matches_direct_weighted_sum(self):
+        """Arbitrary weights match log(sum(w_i exp(x_i)))."""
+        f = self._compile()
+        x = np.array([-1.0, -2.5, -0.3])
+        weights = np.array([30.0, -0.2, 4.5])
+        np.testing.assert_allclose(
+            f(x, weights), np.log(np.sum(weights * np.exp(x))), rtol=1e-12
+        )
+
+    def test_gradient_at_zero_weight_is_finite(self):
+        """d/dw_k log(sum w_i exp(x_i)) = exp(x_k) / sum, also at w_k = 0."""
+        x = pt.dvector("x")
+        w = pt.dvector("w")
+        result = _stable_logsumexp(x, axis=0, weights=w)
+        grad = pytensor.function([x, w], pytensor.grad(result, w))
+        xv = np.array([-1.0, -2.5])
+        wv = np.array([3.0, 0.0])
+
+        np.testing.assert_allclose(
+            grad(xv, wv), np.exp(xv) / np.sum(wv * np.exp(xv)), rtol=1e-12
+        )
 
     def test_matches_direct_signed_sum(self):
         """Mixed signs with a positive total match log(sum(s_i exp(x_i)))."""

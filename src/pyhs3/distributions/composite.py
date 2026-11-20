@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 
 def _stable_logsumexp(
-    x: TensorVar, axis: int, signs: TensorVar | None = None
+    x: TensorVar, axis: int, weights: TensorVar | None = None
 ) -> TensorVar:
     """Numerically stable log-sum-exp, built explicitly instead of via ``pt.logsumexp``.
 
@@ -47,12 +47,15 @@ def _stable_logsumexp(
     https://github.com/pymc-devs/pytensor/issues/2288 for the tracked
     upstream request for a stable-by-construction ``logsumexp``.
 
-    With ``signs``, the reduction is log(sum(signs * exp(x))): each term
-    enters the sum with the sign of the corresponding entry of ``signs``
-    (+1, -1 or 0), which is how :class:`MixtureDist` handles negative
-    coefficients (``x = log|c| + log f``, ``signs = sign(c)``).  The max
-    shift uses the magnitudes, so every exp(x - m) stays <= 1 and the result
-    is stable in the same regimes.  A negative total gives NaN (log of a
+    With ``weights``, the reduction is log(sum(weights * exp(x))): each term
+    enters the sum multiplied by the corresponding entry of ``weights``, which
+    may be negative or zero.  This is how :class:`MixtureDist` evaluates
+    log(sum_i c_i f_i) with ``x = log f`` and ``weights = c``.  The max shift
+    uses ``x`` only, so every exp(x - m) stays <= 1 and the result is stable
+    in the same regimes, while the weights enter linearly: the derivative
+    with respect to a weight is exp(x - m) / sum, finite even where the
+    weight is exactly zero (unlike writing the term as log|w| + x, whose
+    derivative 1/w is infinite there).  A negative total gives NaN (log of a
     negative number), surfacing a density that is negative somewhere; a total
     of exactly zero gives -inf.  When positive and negative terms nearly
     cancel, the relative precision of the total is limited by that
@@ -61,8 +64,8 @@ def _stable_logsumexp(
     Args:
         x: Tensor to reduce.
         axis: Axis to reduce over.
-        signs: Optional tensor broadcastable to ``x`` holding the sign of
-            each term.  ``None`` means every term is positive.
+        weights: Optional tensor broadcastable to ``x`` holding each term's
+            weight.  ``None`` means every weight is one.
 
     Returns:
         log(sum(exp(x), axis=axis)), stable against underflow (large
@@ -81,8 +84,8 @@ def _stable_logsumexp(
     m = pt.max(x, axis=axis, keepdims=True)  # type: ignore[no-untyped-call]
     safe_m = pt.switch(pt.isinf(m), 0.0, m)
     shifted = pt.exp(x - safe_m)
-    if signs is not None:
-        shifted = signs * shifted
+    if weights is not None:
+        shifted = weights * shifted
     result = safe_m + pt.log(
         pt.sum(shifted, axis=axis, keepdims=True)  # type: ignore[no-untyped-call]
     )
@@ -447,10 +450,12 @@ class MixtureDist(Distribution):
         Coefficients may be negative: HS3 defines the mixture as Σᵢcᵢfᵢ
         without restricting the sign of cᵢ (and c_n = 1 - Σcᵢ can be negative
         by construction), and RooFit's RooAddPdf accepts it.  The terms are
-        therefore log|cᵢ| + log fᵢ(xⱼ), reduced with the signs of the cᵢ, so
-        the result equals log(Σᵢcᵢfᵢ(xⱼ)) whenever that sum is positive and
-        is NaN where it is negative (see
-        https://github.com/scipp-atlas/pyhs3/issues/348).
+        therefore log fᵢ(xⱼ), reduced with the cᵢ as linear weights, so the
+        result equals log(Σᵢcᵢfᵢ(xⱼ)) whenever that sum is positive and is NaN
+        where it is negative (see
+        https://github.com/scipp-atlas/pyhs3/issues/348).  Keeping cᵢ linear
+        also keeps the gradient with respect to cᵢ finite at cᵢ = 0, the
+        usual starting point of e.g. a spurious-signal yield.
 
         The data-only -log(N!) constant is omitted and N_eff = Σwⱼ is used
         for weighted data; both are RooFit conventions adopted because HS3
@@ -475,19 +480,16 @@ class MixtureDist(Distribution):
             )
             raise RuntimeError(msg)
 
-        log_terms = [
-            pt.log(pt.abs(coeff)) + log_expressions[summand]
-            for coeff, summand in zip(self._cached_coeffs, self.summands, strict=True)
-        ]
-        # A coefficient is a scalar or a (M,) batch; broadcast its sign to its
-        # term's (N, M) shape so the signs stack alongside the terms as
+        log_terms = [log_expressions[summand] for summand in self.summands]
+        # A coefficient is a scalar or a (M,) batch; broadcast it to its
+        # term's (N, M) shape so the weights stack alongside the terms as
         # (n_summands, N, M).
-        signs = [
-            pt.broadcast_to(pt.sign(coeff), term.shape)
+        weights = [
+            pt.broadcast_to(coeff, term.shape)
             for coeff, term in zip(self._cached_coeffs, log_terms, strict=True)
         ]
         per_event_term = _stable_logsumexp(
-            pt.stack(log_terms, axis=0), axis=0, signs=pt.stack(signs, axis=0)
+            pt.stack(log_terms, axis=0), axis=0, weights=pt.stack(weights, axis=0)
         )
 
         return LogProbTerms(

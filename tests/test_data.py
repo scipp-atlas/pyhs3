@@ -9,8 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from pydantic import ValidationError
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from pyhs3.axes import BinnedAxis, UnbinnedAxis
 from pyhs3.data import (

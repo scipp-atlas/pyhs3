@@ -753,7 +753,7 @@ def test_log_prob_point_data_with_axes(mu, s):
     ws = Workspace(**_WS_POINT)
     model = ws.model(ws.analyses["A"], progress=False)
     fn = pytensor.function(
-        [v for v in explicit_graph_inputs(model.log_prob)],
+        list(explicit_graph_inputs(model.log_prob)),
         model.log_prob,
         on_unused_input="ignore",
     )
@@ -764,9 +764,7 @@ def test_log_prob_point_data_with_axes(mu, s):
     result = fn(*[values[name] for name in inputs]).item()
     # The 1.5 sits well inside [-10, 10], so the truncation is negligible only
     # to the extent of the Gaussian tails; compare to the truncated normal.
-    expected = truncnorm.logpdf(
-        1.5, (-10.0 - mu) / s, (10.0 - mu) / s, loc=mu, scale=s
-    )
+    expected = truncnorm.logpdf(1.5, (-10.0 - mu) / s, (10.0 - mu) / s, loc=mu, scale=s)
     assert result == pytest.approx(expected, rel=1e-6)
     assert result == pytest.approx(norm.logpdf(1.5, mu, s), abs=1e-4)
 
@@ -847,7 +845,9 @@ def test_log_prob_point_data_as_auxiliary_measurement():
     channel = truncnorm.logpdf(
         [1.0, 2.0, 3.0], (-10.0 - 0.5) / 1.0, (10.0 - 0.5) / 1.0, loc=0.5, scale=1.0
     ).sum()
-    constraint = truncnorm.logpdf(0.5, (-5.0 - 1.0) / 1.0, (5.0 - 1.0) / 1.0, loc=1.0, scale=1.0)
+    constraint = truncnorm.logpdf(
+        0.5, (-5.0 - 1.0) / 1.0, (5.0 - 1.0) / 1.0, loc=1.0, scale=1.0
+    )
     assert result == pytest.approx(channel + constraint, rel=1e-6)
 
 

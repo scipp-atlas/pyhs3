@@ -19,7 +19,6 @@ from pydantic import (
     field_validator,
     model_serializer,
 )
-from pytensor.graph.traversal import explicit_graph_inputs
 
 from pyhs3.base import balanced_sum
 from pyhs3.context import Context
@@ -558,14 +557,17 @@ class ProductDist(Distribution):
         """
         Split factors into per-event shape terms and per-channel constraints.
 
-        Factors that depend on an observable (detected by a pt.vector free
-        input — observable arrays are built as pt.vector, NP scalars as
-        pt.scalar) delegate to their own log_prob_terms, so e.g. an extended
-        mixture inside a product contributes its yield term correctly.
+        Factors that depend on an observable delegate to their own
+        log_prob_terms, so e.g. an extended mixture inside a product
+        contributes its yield term correctly.  Such a factor carries the
+        event axis: observables enter as ``(N, 1)`` views, so its expression
+        has a leading axis that is not length-1.  Batched parameters enter as
+        ``(1, M)`` views, so a factor of parameters alone is a scalar or has
+        a length-1 leading axis.
 
-        Factors that depend only on scalar nuisance parameters are constraint
-        PDFs and are returned as named constraints for the model to add once
-        globally.  This prevents the N-fold overcounting that occurs when
+        Factors that depend only on nuisance parameters (scalar or batched)
+        are constraint PDFs and are returned as named constraints for the
+        model to add once globally.  This prevents the N-fold overcounting that occurs when
         naively summing log(shape x Π_j constr_j) over N events, which
         multiplies each constr_j term by N rather than counting it once.
 
@@ -579,11 +581,9 @@ class ProductDist(Distribution):
         terms = LogProbTerms()
         for factor_name in self.factors:
             factor_expr = expressions[factor_name]
-            free_inputs = [
-                v for v in explicit_graph_inputs([factor_expr]) if v.name is not None
-            ]
-            # Observable-dependent factors have at least one vector (rank-1) input.
-            is_shape = any(v.type.ndim >= 1 for v in free_inputs)
+            # Observable-dependent factors carry the event axis (axis 0); a
+            # batched parameter's (1, M) view only adds a length-1 axis 0.
+            is_shape = factor_expr.ndim >= 1 and not factor_expr.type.broadcastable[0]
 
             if is_shape:
                 factor_terms = distributions[factor_name].log_prob_terms(

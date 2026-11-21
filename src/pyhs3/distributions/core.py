@@ -40,13 +40,14 @@ class LogProbTerms:
             input, broadcasting to shape (N, M) for N events and parameter
             batch size M.  The model sums these over the event axis (applying
             per-event weights when present).
-        channel: Scalar terms added once per channel, broadcasting onto the
-            (M,) parameter batch axis (e.g. the -nu yield term of an extended
-            mixture).
-        constraints: Log-terms keyed by factor name, depending only on scalar
-            nuisance parameters.  The model adds each name exactly once
-            globally, so constraints shared across channels are not
-            double-counted.
+        channel: Terms added once per channel (e.g. the -nu yield term of an
+            extended mixture): scalars, or (1, M) when built from batched
+            parameters; the model combines them onto the (M,) parameter batch
+            axis.
+        constraints: Log-terms keyed by factor name, depending only on
+            nuisance parameters (scalars, or (1, M) when batched).  The model
+            adds each name exactly once globally, so constraints shared
+            across channels are not double-counted.
     """
 
     per_event: list[TensorVar] = field(default_factory=list)

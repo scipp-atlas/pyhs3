@@ -52,6 +52,23 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+def _drop_view_axis(term: TensorVar) -> TensorVar:
+    """Return a likelihood term as a scalar or an ``(M,)`` vector.
+
+    Batched non-observable parameters reach distributions as ``(1, M)``
+    views so that they broadcast against ``(N, 1)`` observables.  Per-event
+    terms lose that leading axis when summed over events, but terms that are
+    not summed (once-per-channel yields, constraints) keep it as ``(1, M)``,
+    and adding them to an ``(M,)`` term would give ``(1, M)``.  Dropping the
+    length-1 axis lets every term broadcast to the ``(M,)`` result; ``()``
+    and ``(M,)`` terms are returned unchanged.
+    """
+    if term.ndim == 2:
+        # Fails at graph construction if the leading axis is not length 1.
+        return cast(TensorVar, pt.squeeze(term, axis=0))  # type: ignore[no-untyped-call]
+    return term
+
+
 class Model:
     """
     Probabilistic model with compiled tensor operations.
@@ -514,6 +531,7 @@ class Model:
 
         if not terms:
             return pt.constant(np.float64(0.0))
+        terms = [_drop_view_axis(term) for term in terms]
         joint = (
             terms[0] if len(terms) == 1 else cast(TensorVar, pt.add(*terms))  # pylint: disable=no-value-for-parameter
         )

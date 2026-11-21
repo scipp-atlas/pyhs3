@@ -1627,14 +1627,65 @@ def test_log_prob_extended_mixture_batched_and_scalar_coefficients():
 
     values = fn(**{**model.data, **model.nominal_params, "c_sig": scan})
 
-    # One value per scan point.  log_prob documents shape (M,) but returns
-    # (1, M) here because batched non-observable parameters are (1, M) views;
-    # that is tracked separately, so only the values are checked.
-    assert values.size == 3
-    values = np.ravel(values)
+    assert values.shape == (3,)
     expected = [
         _extended_mixture_logprob(events, mean=2.0, c_sig=c, c_bkg=20.0) for c in scan
     ]
     # Gaussians are normalised by 64-point Gauss-Legendre quadrature on
     # [-10, 10], accurate to ~1e-10 relative against the exact reference.
     np.testing.assert_allclose(values, expected, rtol=1e-8)
+
+
+class TestLogProbBatchedShape:
+    """log_prob is (M,) for M parameter points, whichever term a batched parameter enters.
+
+    Batched non-observable parameters reach distributions as (1, M) views;
+    every likelihood term must still combine into a 1-D (M,) result
+    (https://github.com/scipp-atlas/pyhs3/issues/358).
+    """
+
+    @staticmethod
+    def _evaluate(spec: dict, values: dict[str, object]) -> np.ndarray:
+        ws = Workspace(**json.loads(json.dumps(spec)))
+        model = ws.model(ws.analyses["A"], progress=False)
+        inputs = [v for v in explicit_graph_inputs([model.log_prob]) if v.name]
+        fn = pytensor.function(inputs, model.log_prob)
+        return fn(**{**model.data, **model.nominal_params, **values})
+
+    @pytest.mark.parametrize(
+        ("spec", "name", "scan"),
+        [
+            pytest.param(_WS_DICT, "mean", [-0.5, 0.3, 1.2], id="shape"),
+            pytest.param(_WS_EXTENDED_MIXTURE, "c_sig", [10.0, 30.0, 55.0], id="yield"),
+            pytest.param(
+                _WS_PRODUCT_CONSTRAINT,
+                "alpha",
+                [-1.0, 0.5, 2.0],
+                id="product_constraint",
+            ),
+            pytest.param(_WS_AUX, "alpha", [-1.0, 0.5, 2.0], id="aux_constraint"),
+        ],
+    )
+    def test_batched_parameter_gives_one_value_per_point(self, spec, name, scan):
+        ws = Workspace(**json.loads(json.dumps(spec)))
+        point = next(iter(ws.parameter_points))
+        point[name].kind = pt.vector
+        with pytest.warns(UserWarning, match="kind override vector"):
+            model = ws.model(ws.analyses["A"], progress=False)
+        inputs = [v for v in explicit_graph_inputs([model.log_prob]) if v.name]
+        fn = pytensor.function(inputs, model.log_prob)
+
+        values = fn(**{**model.data, **model.nominal_params, name: np.array(scan)})
+
+        assert model.log_prob.type.ndim == 1
+        assert values.shape == (len(scan),)
+        expected = [self._evaluate(spec, {name: np.float64(v)}).item() for v in scan]
+        np.testing.assert_allclose(values, expected, rtol=1e-12)
+
+    @pytest.mark.parametrize(
+        "spec",
+        [_WS_DICT, _WS_EXTENDED_MIXTURE, _WS_PRODUCT_CONSTRAINT, _WS_AUX],
+        ids=["shape", "yield", "product_constraint", "aux_constraint"],
+    )
+    def test_scalar_parameters_give_shape_one(self, spec):
+        assert self._evaluate(spec, {}).shape == (1,)

@@ -218,7 +218,10 @@ describe a single parameter vector; stack vectors as rows to build a batch.
 One compiled likelihood accepts any batch size, but XLA compiles it once per
 batch size ``K``, at the first call with that ``K``, so keep ``K`` fixed
 across calls. With ``cache=True`` that XLA compile is also cached across
-sessions.
+sessions. On a 14-channel unbinned workspace with about 170 free parameters,
+one batched ``value_and_grad`` for 9 points took 3.6 ms against 14.5 ms for 9
+one-point calls, and 20 ms against 102 ms for 64 points; the first call for
+each batch size took about 20 s.
 
 Choose the compile mode
 -----------------------

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib.util
+
 import numpy as np
 import pytensor
 import pytensor.tensor as pt
@@ -175,6 +177,19 @@ class TestCompiledNLLValues:
         assert np.isfinite(nll.value(x))
         with pytest.raises(RuntimeError, match="gradient=False"):
             nll.value_and_grad(x)
+
+
+class TestCompiledNLLBackend:
+    def test_unknown_backend_is_rejected(self, model):
+        with pytest.raises(ValueError, match="backend"):
+            model.compile_nll(backend="numba")
+
+    @pytest.mark.skipif(
+        importlib.util.find_spec("jax") is not None, reason="JAX is installed"
+    )
+    def test_jax_backend_without_jax_raises(self, model):
+        with pytest.raises(ImportError, match="JAX"):
+            model.compile_nll(backend="jax")
 
 
 class TestCompiledNLLFuse:

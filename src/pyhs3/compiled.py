@@ -16,7 +16,7 @@ import pickle
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import IO, Any, Literal, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -27,15 +27,26 @@ from pytensor.compile.mode import Mode, get_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
 from pytensor.graph.basic import Constant, Variable
+from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import io_toposort
 from pytensor.link.c.basic import OpWiseCLinker
 
 from pyhs3._version import version as pyhs3_version
+from pyhs3.transpile import jaxify
 from pyhs3.typing.aliases import TensorVar
+
+try:  # JAX is an optional dependency, needed only for backend="jax".
+    import jax
+    from jax import export as jax_export
+except ImportError:  # pragma: no cover - exercised by the non-JAX CI variants
+    jax = None
+    jax_export = None
 
 log = logging.getLogger(__name__)
 
 Bounds = tuple[float | None, float | None]
+Backend = Literal["c", "jax"]
+EvalFn = Callable[[npt.NDArray[np.float64]], list[npt.NDArray[np.float64]]]
 
 
 def default_nll_mode(*, fuse: bool = False) -> Mode:
@@ -271,6 +282,7 @@ def compile_nll(
     bounds: Sequence[Bounds],
     *,
     gradient: bool = True,
+    backend: Backend = "c",
     fuse: bool = False,
     mode: Mode | str | None = None,
     cache: bool | str | os.PathLike[str] | None = None,
@@ -287,6 +299,8 @@ def compile_nll(
         initial: Starting value per free parameter.
         bounds: ``(lower, upper)`` per free parameter.
         gradient: Also compile the gradient with respect to ``free``.
+        backend: ``"c"`` for PyTensor's C linker, ``"jax"`` to transpile to
+            JAX and compile with XLA.
         fuse: Keep the elemwise-fusion rewrites in the default mode (see
             :func:`default_nll_mode`).
         mode: PyTensor mode; ``default_nll_mode(fuse=fuse)`` if ``None``.
@@ -296,6 +310,19 @@ def compile_nll(
     Returns:
         CompiledNLL: The compiled likelihood.
     """
+    if backend not in ("c", "jax"):
+        msg = f"Unknown backend {backend!r}; use 'c' or 'jax'."
+        raise ValueError(msg)
+    if backend == "jax" and (fuse or mode is not None):
+        msg = "fuse= and mode= configure the C backend; they cannot be used with backend='jax'."
+        raise ValueError(msg)
+    if mode is not None and fuse:
+        msg = "fuse=True selects the default mode with fusion; do not combine it with mode=."
+        raise ValueError(msg)
+    if backend == "jax" and jax is None:
+        msg = "compile_nll(backend='jax') requires JAX. Install with `pip install pyhs3[jax]`."
+        raise ImportError(msg)
+
     dtype = str(config.floatX)
     nll = -pt.sum(log_prob)  # type: ignore[no-untyped-call]
     outputs: list[TensorVar] = [nll]
@@ -320,67 +347,184 @@ def compile_nll(
         for var, value in baked.items()
     )
     names = [var.name or f"x[{index}]" for index, var in enumerate(free)]
-    if mode is not None and fuse:
-        msg = "fuse=True selects the default mode with fusion; do not combine it with mode=."
-        raise ValueError(msg)
-    compile_mode = default_nll_mode(fuse=fuse) if mode is None else mode
 
-    def build() -> Callable[[npt.NDArray[np.float64]], list[npt.NDArray[np.float64]]]:
-        return cast(
-            Callable[[npt.NDArray[np.float64]], list[npt.NDArray[np.float64]]],
-            function(
-                [x],
-                outputs,
-                givens=givens,
-                mode=compile_mode,
-                on_unused_input="ignore",
-                trust_input=True,
-            ),
+    builder: _CBuilder | _JaxBuilder
+    if backend == "jax":
+        builder = _JaxBuilder(outputs, givens, x, len(free), gradient=gradient)
+    else:
+        builder = _CBuilder(
+            outputs,
+            givens,
+            x,
+            default_nll_mode(fuse=fuse) if mode is None else mode,
+        )
+
+    def make(fn: EvalFn, *, from_cache: bool = False) -> CompiledNLL:
+        return CompiledNLL(
+            fn,
+            names,
+            initial,
+            bounds,
+            dtype,
+            has_gradient=gradient,
+            from_cache=from_cache,
         )
 
     if not cache:
-        return CompiledNLL(
-            build(), names, initial, bounds, dtype, has_gradient=gradient
-        )
+        return make(builder.build())
 
     cache_dir = _default_cache_dir() if cache is True else Path(cache)
     key = hashlib.sha256(
         "|".join(
             [
+                backend,
                 _graph_fingerprint([*outputs, *(new for _, new in givens)]),
                 repr(names),
                 _mode_key(mode, fuse=fuse),
                 str(gradient),
                 pyhs3_version,
                 pytensor.__version__,
+                jax.__version__ if backend == "jax" and jax is not None else "",
             ]
         ).encode()
     ).hexdigest()
-    path = cache_dir / f"nll-{key}.pkl"
+    path = cache_dir / f"nll-{key}.{builder.suffix}"
     if path.exists():
-        with path.open("rb") as handle:
-            fn = pickle.load(handle)
+        fn = builder.load(path.read_bytes())
         log.debug("Loaded compiled likelihood from %s", path)
-        return CompiledNLL(
-            fn, names, initial, bounds, dtype, has_gradient=gradient, from_cache=True
-        )
+        return make(fn, from_cache=True)
 
-    fn = build()
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    # Each writer pickles into its own temporary file in the cache directory
-    # and publishes it with an atomic rename, so concurrent writers never
-    # share or remove each other's temporary files and readers never see a
-    # partial file.
+    fn = builder.build()
+    _publish(path, builder.dump)
+    log.debug("Cached compiled likelihood at %s", path)
+    return make(fn)
+
+
+def _publish(path: Path, write: Callable[[IO[bytes]], None]) -> None:
+    """Write a cache file atomically.
+
+    Each writer writes into its own temporary file in the cache directory and
+    publishes it with an atomic rename, so concurrent writers never share or
+    remove each other's temporary files and readers never see a partial
+    file.  The temporary file is removed if writing fails.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
-        dir=cache_dir, prefix=f"{path.stem}.", suffix=".tmp", delete=False
+        dir=path.parent, prefix=f"{path.stem}.", suffix=".tmp", delete=False
     ) as sink:
         tmp = Path(sink.name)
         try:
-            pickle.dump(fn, sink)
+            write(sink)
         except BaseException:
             sink.close()
             tmp.unlink(missing_ok=True)
             raise
     tmp.replace(path)
-    log.debug("Cached compiled likelihood at %s", path)
-    return CompiledNLL(fn, names, initial, bounds, dtype, has_gradient=gradient)
+
+
+class _CBuilder:
+    """Compile with a PyTensor C mode; cache entries are pickled functions."""
+
+    suffix = "pkl"
+
+    def __init__(
+        self,
+        outputs: list[TensorVar],
+        givens: list[tuple[Variable[Any, Any], Variable[Any, Any]]],
+        x: TensorVar,
+        mode: Mode | str,
+    ) -> None:
+        self._outputs = outputs
+        self._givens = givens
+        self._x = x
+        self._mode = mode
+        self._fn: EvalFn | None = None
+
+    def build(self) -> EvalFn:
+        self._fn = cast(
+            EvalFn,
+            function(
+                [self._x],
+                self._outputs,
+                givens=self._givens,
+                mode=self._mode,
+                on_unused_input="ignore",
+                trust_input=True,
+            ),
+        )
+        return self._fn
+
+    def dump(self, sink: IO[bytes]) -> None:
+        pickle.dump(self._fn, sink)
+
+    def load(self, data: bytes) -> EvalFn:
+        return cast(EvalFn, pickle.loads(data))
+
+
+class _JaxBuilder:
+    """Transpile to JAX and compile with XLA; cache entries are ``jax.export`` modules.
+
+    The transpiled function is exported (``jax.export``) and compiled ahead
+    of time from the exported module, both when it is freshly built and when
+    it is loaded from the cache, so the XLA compilation happens in
+    :func:`compile_nll`, not on the first evaluation.  Loading a cached
+    module skips the PyTensor-to-JAX transpilation and tracing; XLA still
+    compiles it.  pyhs3 does not enable JAX's persistent compilation cache:
+    with jaxlib 0.9 on macOS, loading CPU executables from it crashed (bus
+    error).  Both paths compile the same exported module, so if JAX's cache
+    works on your platform, setting ``jax_compilation_cache_dir`` yourself
+    also skips the XLA step on later runs.
+    """
+
+    suffix = "jaxexport"
+
+    def __init__(
+        self,
+        outputs: list[TensorVar],
+        givens: list[tuple[Variable[Any, Any], Variable[Any, Any]]],
+        x: TensorVar,
+        n_free: int,
+        *,
+        gradient: bool,
+    ) -> None:
+        # Likelihoods need double precision; JAX defaults to float32.  This
+        # is a process-wide JAX setting.
+        jax.config.update("jax_enable_x64", True)
+        self._outputs = outputs
+        self._givens = givens
+        self._x = x
+        self._spec = jax.ShapeDtypeStruct((n_free,), np.float64)
+        self._gradient = gradient
+        self._exported: Any = None
+
+    def _compile(self, exported: Any) -> EvalFn:
+        """Compile an exported module ahead of time and wrap it for CompiledNLL."""
+        self._exported = exported
+        compiled = jax.jit(exported.call).lower(self._spec).compile()
+        gradient = self._gradient
+
+        def evaluate(x: npt.NDArray[np.float64]) -> list[npt.NDArray[np.float64]]:
+            # One output vector: [nll] or [nll, *grad], shape (1,) or (1 + P,).
+            out = np.asarray(compiled(x))
+            return [out[0], out[1:]] if gradient else [out[0]]
+
+        return evaluate
+
+    def build(self) -> EvalFn:
+        nll, *rest = cast(
+            list[TensorVar], clone_replace(self._outputs, replace=self._givens)
+        )
+        joint = (
+            pt.concatenate([nll[None], rest[0]])  # type: ignore[no-untyped-call]
+            if self._gradient
+            else nll[None]
+        )
+        graph = jaxify(cast(TensorVar, joint), inputs=[self._x])
+        traced = jax.jit(lambda xv: cast(Sequence[Any], graph.call_positional(xv))[0])
+        return self._compile(jax_export.export(traced)(self._spec))
+
+    def dump(self, sink: IO[bytes]) -> None:
+        sink.write(self._exported.serialize())
+
+    def load(self, data: bytes) -> EvalFn:
+        return self._compile(jax_export.deserialize(bytearray(data)))

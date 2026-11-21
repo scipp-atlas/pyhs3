@@ -73,6 +73,7 @@ docs = [
 ]
 jax = [
   "pytensor[jax]",  # transitively pulls jax + jaxlib
+  "flatbuffers",  # serialization of jax.export modules (compile_nll cache)
 ]
 graph = [
   "pydot", # also requires the system `dot` executable (Graphviz); not installable via pip

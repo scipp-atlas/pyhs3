@@ -37,19 +37,37 @@ log = logging.getLogger(__name__)
 Bounds = tuple[float | None, float | None]
 
 
-def default_nll_mode() -> Mode:
+def default_nll_mode(*, fuse: bool = False) -> Mode:
     """PyTensor mode :meth:`pyhs3.Model.compile_nll` uses by default.
 
     The op-wise C linker with the ``FAST_RUN`` rewrites, excluding the
-    in-place rewrites.  On large workspaces this compiles markedly faster
-    than the fused C (``cvm``) or Numba linkers, whose single fused kernel
-    makes the C or LLVM compiler slow and memory-hungry, and the in-place
-    rewrites add compile time without speeding up evaluation of a likelihood.
+    in-place rewrites and, unless ``fuse=True``, the elemwise-fusion rewrites.
+
+    - Fusion merges elementwise operations into ``Composite`` ops, each a
+      distinct kernel that the C compiler builds separately; on large
+      workspaces there are thousands of them, and compiling them dominates
+      the cold compile time.  Without fusion, elementwise operations are
+      generic, so one compiled module serves many nodes.  Fused kernels
+      evaluate faster, though: on a 14-channel unbinned workspace (about 170
+      free parameters) the value and gradient compiled in 279 s without
+      fusion and 700 s with it, while one evaluation inside a fit took about
+      16.6 ms without fusion and 8.7 ms with it.  ``fuse=False`` therefore
+      favours the time to a first result, ``fuse=True`` long fitting
+      campaigns (with the compiled function cached on disk).
+    - The in-place rewrites add compile time without speeding up evaluation
+      of a likelihood.
+
+    Args:
+        fuse: Keep the elemwise-fusion rewrites.
+
+    Returns:
+        Mode: The PyTensor compile mode.
     """
+    excluded = ["inplace"] if fuse else ["inplace", "fusion"]
     return Mode(
         linker=OpWiseCLinker(),  # type: ignore[no-untyped-call]
         optimizer=get_mode("FAST_RUN")  # type: ignore[no-untyped-call]
-        .excluding("inplace")
+        .excluding(*excluded)
         .provided_optimizer,
     )
 
@@ -92,10 +110,10 @@ def _graph_fingerprint(outputs: Sequence[Variable[Any, Any]]) -> str:
     return hasher.hexdigest()
 
 
-def _mode_key(mode: Mode | str | None) -> str:
+def _mode_key(mode: Mode | str | None, *, fuse: bool) -> str:
     """Stable description of a compile mode for the cache key."""
     if mode is None:
-        return "default_nll_mode"
+        return f"default_nll_mode(fuse={fuse})"
     if isinstance(mode, str):
         return mode
     query = mode.provided_optimizer
@@ -239,6 +257,7 @@ def compile_nll(
     bounds: Sequence[Bounds],
     *,
     gradient: bool = True,
+    fuse: bool = False,
     mode: Mode | str | None = None,
     cache: bool | str | os.PathLike[str] | None = None,
 ) -> CompiledNLL:
@@ -254,7 +273,9 @@ def compile_nll(
         initial: Starting value per free parameter.
         bounds: ``(lower, upper)`` per free parameter.
         gradient: Also compile the gradient with respect to ``free``.
-        mode: PyTensor mode; :func:`default_nll_mode` if ``None``.
+        fuse: Keep the elemwise-fusion rewrites in the default mode (see
+            :func:`default_nll_mode`).
+        mode: PyTensor mode; ``default_nll_mode(fuse=fuse)`` if ``None``.
         cache: ``True`` for the default cache directory, a path for a
             specific one, ``None``/``False`` for no on-disk cache.
 
@@ -280,7 +301,10 @@ def compile_nll(
         for var, value in baked.items()
     )
     names = [var.name or f"x[{index}]" for index, var in enumerate(free)]
-    compile_mode = default_nll_mode() if mode is None else mode
+    if mode is not None and fuse:
+        msg = "fuse=True selects the default mode with fusion; do not combine it with mode=."
+        raise ValueError(msg)
+    compile_mode = default_nll_mode(fuse=fuse) if mode is None else mode
 
     def build() -> Callable[[npt.NDArray[np.float64]], list[npt.NDArray[np.float64]]]:
         return cast(
@@ -306,7 +330,7 @@ def compile_nll(
             [
                 _graph_fingerprint([*outputs, *(new for _, new in givens)]),
                 repr(names),
-                _mode_key(mode),
+                _mode_key(mode, fuse=fuse),
                 str(gradient),
                 pyhs3_version,
                 pytensor.__version__,

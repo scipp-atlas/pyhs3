@@ -144,7 +144,20 @@ it.
 Choose the compile mode
 -----------------------
 
-By default ``compile_nll`` uses :func:`~pyhs3.compiled.default_nll_mode`, which
-keeps compiling large workspaces fast. Pass ``mode=`` with any PyTensor mode,
-for example ``mode="FAST_RUN"``, to override it. ``gradient=False`` compiles
-the value only, for minimizers that do not use a gradient.
+By default ``compile_nll`` compiles without PyTensor's elemwise fusion, which
+keeps the first compile of a large workspace short. Fused kernels evaluate
+faster, so for a long fitting campaign (many fits or a fine profile scan),
+pass ``fuse=True``, ideally together with ``cache=True`` so you pay the longer
+compile once. On a 14-channel unbinned workspace with about 170 free
+parameters, the first compile of the value and gradient took 279 s without
+fusion and 700 s with it, and one evaluation inside a fit took about 16.6 ms
+without fusion and 8.7 ms with it. Time your own workspace before choosing.
+
+.. code-block:: python
+
+    nll = model.compile_nll(fuse=True, cache=True)
+
+Pass ``mode=`` with any PyTensor mode, for example ``mode="FAST_RUN"``, to
+replace the default (see :func:`~pyhs3.compiled.default_nll_mode`); it cannot
+be combined with ``fuse=True``. ``gradient=False`` compiles the value only, for
+minimizers that do not use a gradient.

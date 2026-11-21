@@ -254,6 +254,7 @@ class Model:
         self,
         *,
         gradient: bool = True,
+        fuse: bool = False,
         mode: Mode | str | None = None,
         cache: bool | str | os.PathLike[str] | None = None,
     ) -> CompiledNLL:
@@ -275,10 +276,14 @@ class Model:
             gradient: Also compile the gradient with respect to the free
                 parameters.  The value and gradient then come from one
                 compiled function.
-            mode: PyTensor compile mode.  The default,
-                :func:`~pyhs3.compiled.default_nll_mode`, is chosen to keep
-                compilation of large workspaces fast; pass ``"FAST_RUN"`` or
-                another mode to override it.
+            fuse: Keep PyTensor's elemwise-fusion rewrites.  Fused kernels
+                evaluate about twice as fast but make the first compile of a
+                large workspace about 2.5 times slower; see
+                :func:`~pyhs3.compiled.default_nll_mode`.  Use ``fuse=True``
+                for long fitting campaigns, ideally with ``cache=True``.
+            mode: PyTensor compile mode, replacing the default
+                ``default_nll_mode(fuse=fuse)``; e.g. ``"FAST_RUN"``.  Cannot
+                be combined with ``fuse=True``.
             cache: Cache the compiled function on disk and reuse it when the
                 same likelihood is compiled again with the same options,
                 pyhs3 and PyTensor versions.  ``True`` uses
@@ -294,7 +299,8 @@ class Model:
         Raises:
             RuntimeError: If the model was built without a likelihood.
             ValueError: If a free parameter is batched (``kind=pt.vector``);
-                the parameter vector has one entry per scalar parameter.
+                the parameter vector has one entry per scalar parameter.  Also
+                if ``fuse=True`` is combined with ``mode=``.
         """
         log_prob = self.log_prob
         data = self.data
@@ -329,6 +335,7 @@ class Model:
             [start[name] for name in names],
             bounds,
             gradient=gradient,
+            fuse=fuse,
             mode=mode,
             cache=cache,
         )

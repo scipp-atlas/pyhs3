@@ -159,6 +159,23 @@ class TestCompiledNLLValues:
             nll.value_and_grad(x)
 
 
+class TestCompiledNLLFuse:
+    def test_fuse_gives_the_same_value_and_gradient(self, model):
+        """Fusion changes how the graph is compiled, not what it computes."""
+        unfused = model.compile_nll()
+        fused = model.compile_nll(fuse=True)
+        x = unfused.to_vector({"mu": 0.7, "sigma": 1.4})
+
+        value, grad = fused.value_and_grad(x)
+
+        assert value == pytest.approx(unfused.value(x), rel=1e-12)
+        np.testing.assert_allclose(grad, unfused.grad(x), rtol=1e-10)
+
+    def test_fuse_cannot_be_combined_with_mode(self, model):
+        with pytest.raises(ValueError, match="fuse=True"):
+            model.compile_nll(fuse=True, mode="FAST_RUN")
+
+
 class TestCompiledNLLErrors:
     def test_batched_free_parameter_is_rejected(self):
         ws = _workspace()
@@ -195,11 +212,14 @@ class TestCompiledNLLCache:
         ws.model(ws.analyses["A"], progress=False).compile_nll(
             cache=tmp_path, gradient=False
         )
+        ws.model(ws.analyses["A"], progress=False).compile_nll(
+            cache=tmp_path, fuse=True
+        )
         other = _workspace()
         other.parameter_points["init"]["sigma"].const = True
         other.model(other.analyses["A"], progress=False).compile_nll(cache=tmp_path)
 
-        assert len(list(tmp_path.iterdir())) == 3
+        assert len(list(tmp_path.iterdir())) == 4
 
 
 class TestCompiledNLLFit:

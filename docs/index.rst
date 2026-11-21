@@ -6,6 +6,7 @@
    howto/load_workspace
    howto/evaluate_model
    howto/fit_model
+   howto/minimize_nll
    howto/debug_model
    howto/check_a_workspace_from_the_cli
    howto/evaluate_and_visualize_from_the_cli

@@ -25,6 +25,7 @@ Modules
    :toctree: _generated/
    :nosignatures:
 
+   compiled
    distributions
    functions
    axes

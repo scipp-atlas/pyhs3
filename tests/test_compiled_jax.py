@@ -15,6 +15,8 @@ jax = pytest.importorskip("jax")
 # Reuse the workspace builder and reference of the C-backend tests.
 from test_compiled import _EVENTS, _reference_nll, _workspace
 
+from pyhs3.compiled import BatchedCompiledNLL, CompiledNLL
+
 
 @pytest.fixture(autouse=True)
 def isolated_xla_cache():
@@ -198,3 +200,103 @@ class TestJaxCompilationCacheAcrossSessions:
         assert (first_cached, second_cached) == ("False", "True")
         assert float(second_value) == float(first_value)
         assert float(second_value) == pytest.approx(_reference_nll(0.7, 1.4), rel=1e-8)
+
+
+@pytest.fixture
+def batch(model):
+    """Three parameter vectors, shape (K, P) = (3, 2), as {name: value} rows."""
+    nll = model.compile_nll(backend="jax")
+    rows = [
+        {"mu": 0.7, "sigma": 1.4},
+        {"mu": 1.0, "sigma": 2.0},
+        {"mu": 2.0, "sigma": 1.0},
+    ]
+    return np.stack([nll.to_vector(row) for row in rows]), nll
+
+
+class TestJaxBatched:
+    def test_returns_a_batched_compiled_nll(self, model):
+        nll = model.compile_nll(backend="jax", batched=True)
+        assert isinstance(nll, BatchedCompiledNLL)
+        assert isinstance(nll, CompiledNLL)
+
+    def test_rows_match_the_one_point_function(self, model, batch):
+        X, one = batch
+        nll = model.compile_nll(backend="jax", batched=True)
+
+        values, grads = nll.value_and_grad(X)
+
+        assert nll.parameter_names == one.parameter_names
+        assert values.shape == (3,)
+        assert grads.shape == (3, 2)
+        for row, value, grad in zip(X, values, grads, strict=True):
+            assert value == pytest.approx(one.value(row), rel=1e-12)
+            np.testing.assert_allclose(grad, one.grad(row), rtol=1e-10)
+        np.testing.assert_allclose(nll.value(X), values, rtol=0)
+        np.testing.assert_allclose(nll.grad(X), grads, rtol=0)
+
+    def test_any_batch_size(self, model, batch):
+        """One compiled likelihood evaluates any number of rows."""
+        X, one = batch
+        nll = model.compile_nll(backend="jax", batched=True)
+        big = np.tile(X, (4, 1))  # (12, 2)
+
+        assert nll.value(X[:1]).shape == (1,)
+        values = nll.value(big)
+
+        assert values.shape == (12,)
+        np.testing.assert_allclose(values, [one.value(row) for row in big], rtol=1e-12)
+
+    def test_value_only(self, model, batch):
+        X, one = batch
+        nll = model.compile_nll(backend="jax", batched=True, gradient=False)
+        np.testing.assert_allclose(
+            nll.value(X), [one.value(row) for row in X], rtol=1e-12
+        )
+        with pytest.raises(RuntimeError, match="gradient=False"):
+            nll.value_and_grad(X)
+
+    def test_no_free_parameters(self):
+        ws = _workspace()
+        for name in ("mu", "sigma"):
+            ws.parameter_points["init"][name].const = True
+        nll = ws.model(ws.analyses["A"], progress=False).compile_nll(
+            backend="jax", batched=True
+        )
+
+        values, grads = nll.value_and_grad(np.empty((3, 0)))
+
+        np.testing.assert_allclose(values, [_reference_nll(1.0, 2.0)] * 3, rtol=1e-8)
+        assert grads.shape == (3, 0)
+
+    def test_one_vector_is_rejected(self, model):
+        nll = model.compile_nll(backend="jax", batched=True)
+        with pytest.raises(ValueError, match=r"\(K, 2\)"):
+            nll.value(nll.initial)
+
+    def test_requires_the_jax_backend(self, model):
+        with pytest.raises(ValueError, match="batched=True"):
+            model.compile_nll(batched=True)
+
+    def test_cache_round_trip(self, tmp_path, batch):
+        X, _ = batch
+        ws = _workspace()
+        first = ws.model(ws.analyses["A"], progress=False).compile_nll(
+            backend="jax", batched=True, cache=tmp_path
+        )
+        second = ws.model(ws.analyses["A"], progress=False).compile_nll(
+            backend="jax", batched=True, cache=tmp_path
+        )
+
+        assert (first.from_cache, second.from_cache) == (False, True)
+        np.testing.assert_allclose(second.value(X), first.value(X), rtol=1e-14)
+
+    def test_batched_and_one_point_cache_entries_differ(self, tmp_path):
+        ws = _workspace()
+        ws.model(ws.analyses["A"], progress=False).compile_nll(
+            backend="jax", cache=tmp_path
+        )
+        ws.model(ws.analyses["A"], progress=False).compile_nll(
+            backend="jax", batched=True, cache=tmp_path
+        )
+        assert len([p for p in tmp_path.iterdir() if p.is_file()]) == 2

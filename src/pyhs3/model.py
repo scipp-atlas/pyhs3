@@ -271,6 +271,7 @@ class Model:
         self,
         *,
         gradient: bool = True,
+        backend: Literal["c", "jax"] = "c",
         fuse: bool = False,
         mode: Mode | str | None = None,
         cache: bool | str | os.PathLike[str] | None = None,
@@ -293,14 +294,23 @@ class Model:
             gradient: Also compile the gradient with respect to the free
                 parameters.  The value and gradient then come from one
                 compiled function.
-            fuse: Keep PyTensor's elemwise-fusion rewrites.  Fused kernels
+            backend: ``"c"`` (default) compiles with PyTensor's C linker.
+                ``"jax"`` transpiles the graph to JAX and compiles it with
+                XLA, which needs the optional JAX dependency
+                (``pip install pyhs3[jax]``) and enables JAX's float64 mode
+                (a process-wide JAX setting).  On a 14-channel unbinned
+                workspace (about 170 free parameters) the JAX backend
+                reached a first result in about 94 s instead of 279 s and
+                evaluated the value and gradient in 1.4 ms instead of
+                16.6 ms.
+            fuse: Keep PyTensor's elemwise-fusion rewrites (C backend only).  Fused kernels
                 evaluate about twice as fast but make the first compile of a
                 large workspace about 2.5 times slower; see
                 :func:`~pyhs3.compiled.default_nll_mode`.  Use ``fuse=True``
                 for long fitting campaigns, ideally with ``cache=True``.
             mode: PyTensor compile mode, replacing the default
-                ``default_nll_mode(fuse=fuse)``; e.g. ``"FAST_RUN"``.  Cannot
-                be combined with ``fuse=True``.
+                ``default_nll_mode(fuse=fuse)``; e.g. ``"FAST_RUN"`` (C
+                backend only).  Cannot be combined with ``fuse=True``.
             cache: Cache the compiled function on disk and reuse it when the
                 same likelihood is compiled again with the same options,
                 pyhs3 and PyTensor versions.  ``True`` uses
@@ -308,7 +318,13 @@ class Model:
                 that directory; ``None`` or ``False`` disables caching.  The
                 cached file refers to PyTensor's compiled C modules, so it is
                 only valid on the machine (and PyTensor compile directory)
-                that wrote it.
+                that wrote it.  With ``backend="jax"`` the cache holds a
+                serialized ``jax.export`` module, whose loading skips the
+                PyTensor-to-JAX transpilation, and JAX's persistent
+                compilation cache in its ``xla`` subdirectory holds the XLA
+                executable.  JAX's cache directory is a process-wide setting:
+                pyhs3 sets ``jax_compilation_cache_dir`` only if it is unset,
+                so a directory you configured yourself is kept.
 
         Returns:
             CompiledNLL: The compiled likelihood.
@@ -317,7 +333,9 @@ class Model:
             RuntimeError: If the model was built without a likelihood.
             ValueError: If a free parameter is batched (``kind=pt.vector``);
                 the parameter vector has one entry per scalar parameter.  Also
-                if ``fuse=True`` is combined with ``mode=``.
+                for an unknown backend, for ``fuse=True`` combined with
+                ``mode=``, and for ``fuse``/``mode`` with ``backend="jax"``.
+            ImportError: If ``backend="jax"`` and JAX is not installed.
         """
         log_prob = self.log_prob
         data = self.data
@@ -351,6 +369,7 @@ class Model:
             [start[name] for name in names],
             bounds,
             gradient=gradient,
+            backend=backend,
             fuse=fuse,
             mode=mode,
             cache=cache,

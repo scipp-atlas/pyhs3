@@ -50,8 +50,12 @@ python = "<3.15,>=3.14"
 platforms = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64"]
 
 [feature.jax.dependencies]
-jax = "*"
-jaxlib = "*"
+# >=0.10: loading CPU executables from the persistent compilation cache
+# crashes on 0.9 (macOS)
+jax = ">=0.10"
+jaxlib = ">=0.10"
+# serialization of jax.export modules (compile_nll(backend="jax", cache=...))
+python-flatbuffers = "*"
 
 [feature.plot.dependencies]
 matplotlib-base = "*"

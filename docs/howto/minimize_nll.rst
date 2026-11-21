@@ -154,6 +154,48 @@ across sessions:
 
     nll = model.compile_nll(cache=True)
 
+Compile with JAX for large workspaces
+-------------------------------------
+
+With the optional JAX dependency installed (``pip install pyhs3[jax]``),
+``backend="jax"`` transpiles the likelihood to JAX and compiles it with XLA
+instead of PyTensor's C backend. The result is the same ``CompiledNLL``, so the
+SciPy and iminuit calls above do not change:
+
+.. code-block:: python
+
+    nll = model.compile_nll(backend="jax", cache=True)
+
+``compile_nll`` returns once XLA has compiled the function, so the first
+evaluation is not slower than the others. The backend switches JAX to float64
+(``jax_enable_x64``), a process-wide JAX setting, because a likelihood needs
+double precision. ``fuse`` and ``mode`` configure the C backend and cannot be
+combined with ``backend="jax"``.
+
+With ``cache=True`` the cache stores the exported JAX module, and JAX's
+persistent compilation cache in its ``xla`` subdirectory stores the compiled
+XLA executable, so a later run skips both the transpilation and the XLA
+compile. JAX keeps one compilation cache directory per process: if you set
+``jax_compilation_cache_dir`` yourself, ``compile_nll`` keeps your directory.
+On a 14-channel unbinned workspace with about 170 free parameters, the value
+and gradient took:
+
+.. list-table::
+   :header-rows: 1
+
+   * - backend
+     - first ``compile_nll``
+     - cached ``compile_nll``
+     - one ``value_and_grad``
+   * - ``"c"`` (default)
+     - 279 s
+     - 20 s
+     - 16.6 ms
+   * - ``"jax"``
+     - 95 s
+     - 11 s
+     - 1.4 ms
+
 Choose the compile mode
 -----------------------
 

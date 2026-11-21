@@ -43,6 +43,28 @@ Run tests with coverage reporting:
 
    pytest --cov=pyhs3
 
+Parallel Test Execution
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``pixi`` test tasks (``test``, ``test-cov``, ``test-all``) run with
+``pytest-xdist`` (``-n auto``), one worker per CPU core:
+
+.. code-block:: bash
+
+   pixi run test
+
+Run the quick tests in a single process, or override the worker count:
+
+.. code-block:: bash
+
+   pixi run test-serial
+   pixi run test -n 4
+   pixi run test -n 0
+
+Workers share PyTensor's compile cache, so the first run after a clean cache
+compiles functions under a file lock and gains less from parallelism than later
+runs do.
+
 Using hatch
 ~~~~~~~~~~~
 

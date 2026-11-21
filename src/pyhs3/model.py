@@ -275,6 +275,7 @@ class Model:
         fuse: bool = False,
         mode: Mode | str | None = None,
         cache: bool | str | os.PathLike[str] | None = None,
+        batched: bool = False,
     ) -> CompiledNLL:
         """Compile the negative log-likelihood for a minimizer.
 
@@ -325,6 +326,12 @@ class Model:
                 executable.  JAX's cache directory is a process-wide setting:
                 pyhs3 sets ``jax_compilation_cache_dir`` only if it is unset,
                 so a directory you configured yourself is kept.
+            batched: Evaluate many parameter vectors per call
+                (``backend="jax"`` only).  Returns a
+                :class:`~pyhs3.compiled.BatchedCompiledNLL`, whose methods take
+                a ``(K, P)`` array with one parameter vector per row and
+                return values ``(K,)`` and gradients ``(K, P)``; XLA compiles
+                once per batch size ``K``, at the first call with that size.
 
         Returns:
             CompiledNLL: The compiled likelihood.
@@ -334,7 +341,8 @@ class Model:
             ValueError: If a free parameter is batched (``kind=pt.vector``);
                 the parameter vector has one entry per scalar parameter.  Also
                 for an unknown backend, for ``fuse=True`` combined with
-                ``mode=``, and for ``fuse``/``mode`` with ``backend="jax"``.
+                ``mode=``, for ``fuse``/``mode`` with ``backend="jax"``, and
+                for ``batched=True`` without ``backend="jax"``.
             ImportError: If ``backend="jax"`` and JAX is not installed.
         """
         log_prob = self.log_prob
@@ -373,6 +381,7 @@ class Model:
             fuse=fuse,
             mode=mode,
             cache=cache,
+            batched=batched,
         )
 
     @cached_property

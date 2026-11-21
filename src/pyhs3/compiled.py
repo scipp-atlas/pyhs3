@@ -249,8 +249,12 @@ class CompiledNLL:
             raise ValueError(msg)
         return array
 
+    def _check_argument(self, x: npt.ArrayLike) -> npt.NDArray[np.float64]:
+        """Validate the argument of :meth:`value` and :meth:`value_and_grad`."""
+        return self._check(x)
+
     def _evaluate(self, x: npt.ArrayLike) -> list[npt.NDArray[np.float64]]:
-        array = self._check(x)
+        array = self._check_argument(x)
         key = array.tobytes()
         if key != self._last_x:
             self._last_out = self._fn(array)
@@ -274,6 +278,59 @@ class CompiledNLL:
         return float(out[0]), np.array(out[1])
 
 
+class BatchedCompiledNLL(CompiledNLL):
+    """Negative log-likelihood evaluated at a batch of parameter vectors.
+
+    Build it with ``Model.compile_nll(backend="jax", batched=True)``.
+    :meth:`value`, :meth:`grad` and :meth:`value_and_grad` take a ``(K, P)``
+    array, one parameter vector per row with columns ordered as
+    :attr:`parameter_names`, for any batch size ``K``, and return one result
+    per row: :meth:`value` gives shape ``(K,)`` and :meth:`grad` ``(K, P)``.
+    :attr:`initial`, :attr:`bounds`, :meth:`to_vector` and :meth:`to_dict`
+    describe one parameter vector, as on :class:`CompiledNLL`; stack such
+    vectors as rows to build a batch.
+
+    XLA compiles the function once per batch size, at the first call with
+    that ``K``; later calls with the same ``K`` reuse it.
+
+    Example:
+        A grid of 9 values of one parameter, the others at their initial
+        values:
+
+        .. code-block:: python
+
+            nll = model.compile_nll(backend="jax", batched=True)
+            X = np.tile(nll.initial, (9, 1))  # (K, P)
+            X[:, nll.parameter_names.index("mu")] = np.linspace(0.0, 4.0, 9)
+            values, grads = nll.value_and_grad(X)  # (9,), (9, P)
+    """
+
+    def _check_argument(self, x: npt.ArrayLike) -> npt.NDArray[np.float64]:
+        array = np.asarray(x, dtype=self._dtype)
+        if array.ndim != 2 or array.shape[1] != len(self.parameter_names):
+            msg = (
+                f"Parameter batch has shape {array.shape}; expected "
+                f"(K, {len(self.parameter_names)}), one parameter vector per row "
+                "ordered as parameter_names."
+            )
+            raise ValueError(msg)
+        return array
+
+    def value(self, x: npt.ArrayLike) -> npt.NDArray[np.float64]:  # type: ignore[override]
+        """Negative log-likelihood per row of ``x``, shape ``(K,)``."""
+        return np.array(self._evaluate(x)[0])
+
+    def value_and_grad(  # type: ignore[override]
+        self, x: npt.ArrayLike
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+        """Negative log-likelihood ``(K,)`` and gradient ``(K, P)`` per row of ``x``."""
+        if not self.has_gradient:
+            msg = "This likelihood was compiled with gradient=False."
+            raise RuntimeError(msg)
+        out = self._evaluate(x)
+        return np.array(out[0]), np.array(out[1])
+
+
 def compile_nll(
     log_prob: TensorVar,
     free: Sequence[TensorVar],
@@ -286,6 +343,7 @@ def compile_nll(
     fuse: bool = False,
     mode: Mode | str | None = None,
     cache: bool | str | os.PathLike[str] | None = None,
+    batched: bool = False,
 ) -> CompiledNLL:
     """Compile ``-sum(log_prob)`` as a function of one vector of ``free`` scalars.
 
@@ -306,6 +364,8 @@ def compile_nll(
         mode: PyTensor mode; ``default_nll_mode(fuse=fuse)`` if ``None``.
         cache: ``True`` for the default cache directory, a path for a
             specific one, ``None``/``False`` for no on-disk cache.
+        batched: Evaluate a ``(K, P)`` batch of parameter vectors per call
+            (``backend="jax"`` only); returns a :class:`BatchedCompiledNLL`.
 
     Returns:
         CompiledNLL: The compiled likelihood.
@@ -315,6 +375,9 @@ def compile_nll(
         raise ValueError(msg)
     if backend == "jax" and (fuse or mode is not None):
         msg = "fuse= and mode= configure the C backend; they cannot be used with backend='jax'."
+        raise ValueError(msg)
+    if batched and backend != "jax":
+        msg = "batched=True requires backend='jax'."
         raise ValueError(msg)
     if mode is not None and fuse:
         msg = "fuse=True selects the default mode with fusion; do not combine it with mode=."
@@ -350,7 +413,9 @@ def compile_nll(
 
     builder: _CBuilder | _JaxBuilder
     if backend == "jax":
-        builder = _JaxBuilder(outputs, givens, x, len(free), gradient=gradient)
+        builder = _JaxBuilder(
+            outputs, givens, x, len(free), gradient=gradient, batched=batched
+        )
     else:
         builder = _CBuilder(
             outputs,
@@ -360,7 +425,7 @@ def compile_nll(
         )
 
     def make(fn: EvalFn, *, from_cache: bool = False) -> CompiledNLL:
-        return CompiledNLL(
+        return (BatchedCompiledNLL if batched else CompiledNLL)(
             fn,
             names,
             initial,
@@ -382,6 +447,7 @@ def compile_nll(
                 repr(names),
                 _mode_key(mode, fuse=fuse),
                 str(gradient),
+                str(batched),
                 pyhs3_version,
                 pytensor.__version__,
                 jax.__version__ if backend == "jax" and jax is not None else "",
@@ -501,6 +567,7 @@ class _JaxBuilder:
         n_free: int,
         *,
         gradient: bool,
+        batched: bool,
     ) -> None:
         # Likelihoods need double precision; JAX defaults to float32.  This
         # is a process-wide JAX setting.
@@ -508,20 +575,31 @@ class _JaxBuilder:
         self._outputs = outputs
         self._givens = givens
         self._x = x
-        self._spec = jax.ShapeDtypeStruct((n_free,), np.float64)
+        # Batched input is (K, P) with a symbolic batch size, so one exported
+        # module serves every K.
+        shape = jax_export.symbolic_shape(f"K, {n_free}") if batched else (n_free,)
+        self._spec = jax.ShapeDtypeStruct(shape, np.float64)
         self._gradient = gradient
+        self._batched = batched
         self._exported: Any = None
 
     def _compile(self, exported: Any) -> EvalFn:
-        """Compile an exported module ahead of time and wrap it for CompiledNLL."""
+        """Compile an exported module and wrap it for CompiledNLL.
+
+        A one-point module is compiled ahead of time.  XLA needs concrete
+        shapes, so a batched module is compiled by ``jax.jit`` once per batch
+        size, at the first call with that size.
+        """
         self._exported = exported
-        compiled = jax.jit(exported.call).lower(self._spec).compile()
+        call = jax.jit(exported.call)
+        compiled = call if self._batched else call.lower(self._spec).compile()
         gradient = self._gradient
 
         def evaluate(x: npt.NDArray[np.float64]) -> list[npt.NDArray[np.float64]]:
-            # One output vector: [nll] or [nll, *grad], shape (1,) or (1 + P,).
+            # [nll] or [nll, *grad] on the last axis: shape (1 + P,), or
+            # (K, 1 + P) for a (K, P) batch.
             out = np.asarray(compiled(x))
-            return [out[0], out[1:]] if gradient else [out[0]]
+            return [out[..., 0], out[..., 1:]] if gradient else [out[..., 0]]
 
         return evaluate
 
@@ -535,7 +613,13 @@ class _JaxBuilder:
             else nll[None]
         )
         graph = jaxify(cast(TensorVar, joint), inputs=[self._x])
-        traced = jax.jit(lambda xv: cast(Sequence[Any], graph.call_positional(xv))[0])
+
+        def one_point(xv: Any) -> Any:
+            return cast(Sequence[Any], graph.call_positional(xv))[0]
+
+        # A batch maps the one-point function over the rows; this has to
+        # happen before export, since JAX cannot vmap an exported module.
+        traced = jax.jit(jax.vmap(one_point) if self._batched else one_point)
         return self._compile(jax_export.export(traced)(self._spec))
 
     def dump(self, sink: IO[bytes]) -> None:

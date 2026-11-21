@@ -196,6 +196,30 @@ and gradient took:
      - 11 s
      - 1.4 ms
 
+Evaluate many parameter points at once
+--------------------------------------
+
+For a grid scan, or a minimizer that advances many fits in lockstep, pass
+``batched=True`` together with ``backend="jax"``. The methods then take a
+``(K, P)`` array, one parameter vector per row with columns ordered as
+``nll.parameter_names``, and return one value per row: ``value`` gives shape
+``(K,)`` and ``grad`` gives ``(K, P)``. The example below evaluates nine values
+of ``mu`` with every other parameter at its initial value:
+
+.. code-block:: python
+
+    nll = model.compile_nll(backend="jax", batched=True, cache=True)
+    X = np.tile(nll.initial, (9, 1))  # (9, P): nine copies of the start point
+    X[:, nll.parameter_names.index("mu")] = np.linspace(0.0, 4.0, 9)
+    values, grads = nll.value_and_grad(X)  # (9,), (9, P)
+
+``nll.initial``, ``nll.bounds``, ``nll.to_vector`` and ``nll.to_dict`` still
+describe a single parameter vector; stack vectors as rows to build a batch.
+One compiled likelihood accepts any batch size, but XLA compiles it once per
+batch size ``K``, at the first call with that ``K``, so keep ``K`` fixed
+across calls. With ``cache=True`` that XLA compile is also cached across
+sessions.
+
 Choose the compile mode
 -----------------------
 

@@ -191,6 +191,17 @@ extra (``pip install pyhs3[jax]``):
     >>> print(f"-2 log L = {float(nll_value[0]):.4f}")  # doctest: +ELLIPSIS
     -2 log L = ...
 
+.. warning::
+
+    The object ``pyhs3.jaxify`` returns is not jitted. Calling it directly
+    runs JAX eagerly, one operation at a time. On a large likelihood (about
+    23,000 operations) one such call took 1.25 s, against 1.4 ms once wrapped
+    in ``jax.jit``. Wrap it for any repeated evaluation, such as a fit or a
+    scan, for example ``nll = jax.jit(lambda params: nll_graph(**fit_model.data, **params)[0])``.
+    The single call above is fine without ``jax.jit``, since jitting would add
+    compile time and save nothing. :meth:`~pyhs3.Model.compile_nll` compiles
+    and bakes in the data for you; see :doc:`/howto/minimize_nll`.
+
 ``fit_model.free_params`` gives every non-constant parameter's starting value
 from the workspace, and ``fit_model.data`` gives the observed arrays each
 distribution needs, so the two dicts together are exactly what a jaxified

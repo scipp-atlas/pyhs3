@@ -22,6 +22,7 @@ shape optimistix minimizes over) and returns a true scalar:
 
 .. code-block:: python
 
+    import jax
     import jax.numpy as jnp
     import optimistix as optx
 
@@ -29,10 +30,17 @@ shape optimistix minimizes over) and returns a true scalar:
     y0 = jnp.array([fit_model.free_params[name] for name in param_names])
 
 
+    @jax.jit
     def nll(values, args):
         del args  # required by optimistix's signature; unused here
         kwargs = dict(zip(param_names, values, strict=True))
         return nll_graph(**fit_model.data, **kwargs)[0].squeeze()
+
+The ``@jax.jit`` decorator is required for a fit, not an optimization. The
+object ``pyhs3.jaxify`` returns is not jitted, so without it each call runs
+JAX one operation at a time (see :doc:`/howto/evaluate_model`). For a faster
+alternative that needs no JAX, see :meth:`~pyhs3.Model.compile_nll` and
+:doc:`/howto/minimize_nll`.
 
 ``nll_graph`` returns a shape-``(1,)`` array (:attr:`~pyhs3.Model.log_prob`'s
 own shape convention); ``.squeeze()`` reduces it to the true scalar
@@ -76,6 +84,7 @@ into ``nll`` as a second argument instead of including it in ``y0``:
     nuisance_y0 = jnp.array([fit_model.free_params[name] for name in nuisance_names])
 
 
+    @jax.jit
     def profile_nll(nuisance_values, mu_value):
         kwargs = dict(zip(nuisance_names, nuisance_values, strict=True))
         kwargs["mu"] = mu_value
@@ -97,8 +106,6 @@ is itself a pure JAX function, so the entire scan — including the
 minimization at each point — can be vectorized with ``jax.vmap``:
 
 .. code-block:: python
-
-    import jax
 
     scan_points = jnp.array([-1.0, 0.0, 1.0, 2.0])
 

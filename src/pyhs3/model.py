@@ -308,15 +308,17 @@ class Model:
         free: list[TensorVar] = []
         baked: dict[TensorVar, npt.NDArray[np.float64]] = {}
         names: list[str] = []
-        for input_var in explicit_graph_inputs([log_prob]):
-            var = cast(TensorVar, input_var)
-            if var.name is None:
-                continue
+        inputs = [
+            cast(TensorVar, var)
+            for var in explicit_graph_inputs([log_prob])
+            if var.name is not None
+        ]
+        for var in inputs:
             if var.name in data:
                 baked[var] = data[var.name]
             elif var.ndim == 0:
                 free.append(var)
-                names.append(var.name)
+                names.append(cast(str, var.name))
             else:
                 msg = (
                     f"Free parameter '{var.name}' is batched (ndim={var.ndim}); "
@@ -324,10 +326,7 @@ class Model:
                     "in the parameter vector."
                 )
                 raise ValueError(msg)
-        bounds = [
-            self.domain.get(name, (None, None)) if self.domain else (None, None)
-            for name in names
-        ]
+        bounds = [self.domain.get(name, (None, None)) for name in names]
         return compile_nll(
             log_prob,
             free,

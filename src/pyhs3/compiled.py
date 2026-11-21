@@ -13,6 +13,7 @@ import hashlib
 import logging
 import os
 import pickle
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
@@ -176,6 +177,19 @@ class CompiledNLL:
         has_gradient: bool,
         from_cache: bool = False,
     ) -> None:
+        """Wrap a compiled function of the parameter vector.
+
+        Args:
+            fn: Compiled function taking the ``(P,)`` parameter vector and
+                returning ``[nll]``, or ``[nll, grad]`` if ``has_gradient``.
+            parameter_names: Names of the ``P`` free parameters, in vector
+                order.
+            initial: Starting value per parameter.
+            bounds: ``(lower, upper)`` per parameter; ``None`` if unbounded.
+            dtype: Dtype of the parameter vector expected by ``fn``.
+            has_gradient: Whether ``fn`` also returns the gradient.
+            from_cache: Whether ``fn`` was loaded from the on-disk cache.
+        """
         self._fn = fn
         #: Free parameter names, in the order of every parameter vector.
         self.parameter_names: tuple[str, ...] = tuple(parameter_names)
@@ -282,15 +296,20 @@ def compile_nll(
     Returns:
         CompiledNLL: The compiled likelihood.
     """
+    dtype = str(config.floatX)
     nll = -pt.sum(log_prob)  # type: ignore[no-untyped-call]
     outputs: list[TensorVar] = [nll]
     if gradient:
         # Differentiate with respect to the original scalars and stack, rather
         # than with respect to x[i], which would scatter each component back
-        # into x with an IncSubtensor.
-        outputs.append(pt.stack(cast(list[TensorVar], grad(nll, list(free)))))
+        # into x with an IncSubtensor.  With no free parameters the gradient
+        # is an empty (0,) vector.
+        outputs.append(
+            pt.stack(cast(list[TensorVar], grad(nll, list(free))))
+            if free
+            else cast(TensorVar, pt.zeros((0,), dtype=dtype))
+        )
 
-    dtype = str(config.floatX)
     x = cast(TensorVar, pt.vector("x", dtype=dtype))
     givens: list[tuple[Variable[Any, Any], Variable[Any, Any]]] = [
         (var, x[index])  # pylint: disable=unsubscriptable-object
@@ -341,16 +360,27 @@ def compile_nll(
     if path.exists():
         with path.open("rb") as handle:
             fn = pickle.load(handle)
-        log.info("Loaded compiled likelihood from %s", path)
+        log.debug("Loaded compiled likelihood from %s", path)
         return CompiledNLL(
             fn, names, initial, bounds, dtype, has_gradient=gradient, from_cache=True
         )
 
     fn = build()
     cache_dir.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    with tmp.open("wb") as sink:
-        pickle.dump(fn, sink)
+    # Each writer pickles into its own temporary file in the cache directory
+    # and publishes it with an atomic rename, so concurrent writers never
+    # share or remove each other's temporary files and readers never see a
+    # partial file.
+    with tempfile.NamedTemporaryFile(
+        dir=cache_dir, prefix=f"{path.stem}.", suffix=".tmp", delete=False
+    ) as sink:
+        tmp = Path(sink.name)
+        try:
+            pickle.dump(fn, sink)
+        except BaseException:
+            sink.close()
+            tmp.unlink(missing_ok=True)
+            raise
     tmp.replace(path)
-    log.info("Cached compiled likelihood at %s", path)
+    log.debug("Cached compiled likelihood at %s", path)
     return CompiledNLL(fn, names, initial, bounds, dtype, has_gradient=gradient)

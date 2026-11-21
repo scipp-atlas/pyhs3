@@ -137,6 +137,19 @@ options and the same pyhs3 and PyTensor versions then loads it in seconds;
 PyTensor's compiled C modules, so it is only valid on the machine that wrote
 it.
 
+.. doctest:: minimize-nll
+
+    >>> import tempfile
+    >>> with tempfile.TemporaryDirectory() as cache_dir:
+    ...     first = model.compile_nll(cache=cache_dir)
+    ...     second = model.compile_nll(cache=cache_dir)
+    ...
+    >>> first.from_cache, second.from_cache
+    (False, True)
+
+In your own scripts, ``cache=True`` keeps the files in the default directory
+across sessions:
+
 .. code-block:: python
 
     nll = model.compile_nll(cache=True)

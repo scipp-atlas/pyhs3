@@ -302,10 +302,12 @@ class Model:
                 cached file refers to PyTensor's compiled C modules, so it is
                 only valid on the machine (and PyTensor compile directory)
                 that wrote it.  With ``backend="jax"`` the cache holds a
-                serialized ``jax.export`` module: loading it skips the
-                PyTensor-to-JAX transpilation, while XLA still compiles it
-                (configure JAX's own ``jax_compilation_cache_dir`` to cache
-                that step too, where it works on your platform).
+                serialized ``jax.export`` module, whose loading skips the
+                PyTensor-to-JAX transpilation, and JAX's persistent
+                compilation cache in its ``xla`` subdirectory holds the XLA
+                executable.  JAX's cache directory is a process-wide setting:
+                pyhs3 sets ``jax_compilation_cache_dir`` only if it is unset,
+                so a directory you configured yourself is kept.
 
         Returns:
             CompiledNLL: The compiled likelihood.

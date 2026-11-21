@@ -172,9 +172,13 @@ evaluation is not slower than the others. The backend switches JAX to float64
 double precision. ``fuse`` and ``mode`` configure the C backend and cannot be
 combined with ``backend="jax"``.
 
-With ``cache=True`` the cache stores the exported JAX module, so a later run
-skips the transpilation and only XLA compiles it again. On a 14-channel
-unbinned workspace with about 170 free parameters, the value and gradient took:
+With ``cache=True`` the cache stores the exported JAX module, and JAX's
+persistent compilation cache in its ``xla`` subdirectory stores the compiled
+XLA executable, so a later run skips both the transpilation and the XLA
+compile. JAX keeps one compilation cache directory per process: if you set
+``jax_compilation_cache_dir`` yourself, ``compile_nll`` keeps your directory.
+On a 14-channel unbinned workspace with about 170 free parameters, the value
+and gradient took:
 
 .. list-table::
    :header-rows: 1
@@ -188,8 +192,8 @@ unbinned workspace with about 170 free parameters, the value and gradient took:
      - 20 s
      - 16.6 ms
    * - ``"jax"``
-     - 98 s
-     - 28 s
+     - 95 s
+     - 11 s
      - 1.4 ms
 
 Choose the compile mode

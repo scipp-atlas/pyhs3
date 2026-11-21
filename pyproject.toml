@@ -73,6 +73,7 @@ docs = [
 ]
 jax = [
   "pytensor[jax]",  # transitively pulls jax + jaxlib
+  "jax >= 0.10",  # persistent compilation cache crashes on 0.9 (macOS)
   "flatbuffers",  # serialization of jax.export modules (compile_nll cache)
 ]
 graph = [

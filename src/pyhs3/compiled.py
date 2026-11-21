@@ -388,6 +388,8 @@ def compile_nll(
             ]
         ).encode()
     ).hexdigest()
+    if backend == "jax":
+        _use_xla_cache(cache_dir / "xla")
     path = cache_dir / f"nll-{key}.{builder.suffix}"
     if path.exists():
         fn = builder.load(path.read_bytes())
@@ -398,6 +400,20 @@ def compile_nll(
     _publish(path, builder.dump)
     log.debug("Cached compiled likelihood at %s", path)
     return make(fn)
+
+
+def _use_xla_cache(directory: Path) -> None:
+    """Point JAX's persistent compilation cache at ``directory`` unless one is set.
+
+    JAX keeps one persistent compilation cache per process, set up at the
+    first compile after ``jax_compilation_cache_dir`` is set; changing the
+    option afterwards has no effect.  pyhs3 therefore never replaces a
+    directory that is already set, whether by the user or by an earlier
+    :func:`compile_nll` call.
+    """
+    assert jax is not None
+    if jax.config.jax_compilation_cache_dir is None:
+        jax.config.update("jax_compilation_cache_dir", str(directory))
 
 
 def _publish(path: Path, write: Callable[[IO[bytes]], None]) -> None:
@@ -469,11 +485,10 @@ class _JaxBuilder:
     it is loaded from the cache, so the XLA compilation happens in
     :func:`compile_nll`, not on the first evaluation.  Loading a cached
     module skips the PyTensor-to-JAX transpilation and tracing; XLA still
-    compiles it.  pyhs3 does not enable JAX's persistent compilation cache:
-    with jaxlib 0.9 on macOS, loading CPU executables from it crashed (bus
-    error).  Both paths compile the same exported module, so if JAX's cache
-    works on your platform, setting ``jax_compilation_cache_dir`` yourself
-    also skips the XLA step on later runs.
+    compiles it, and :func:`compile_nll` points JAX's persistent compilation
+    cache at the pyhs3 cache (see :func:`_use_xla_cache`) so that later
+    sessions load the XLA executable instead.  Both paths compile the same
+    exported module, so they share that executable.
     """
 
     suffix = "jaxexport"

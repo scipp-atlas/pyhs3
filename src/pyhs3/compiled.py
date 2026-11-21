@@ -52,8 +52,10 @@ EvalFn = Callable[[npt.NDArray[np.float64]], list[npt.NDArray[np.float64]]]
 def default_nll_mode(*, fuse: bool = False) -> Mode:
     """PyTensor mode :meth:`pyhs3.Model.compile_nll` uses by default.
 
-    The op-wise C linker with the ``FAST_RUN`` rewrites, excluding the
-    in-place rewrites and, unless ``fuse=True``, the elemwise-fusion rewrites.
+    The op-wise C linker with the rewrites of PyTensor's C mode (``"CVM"``),
+    excluding the in-place rewrites and, unless ``fuse=True``, the
+    elemwise-fusion rewrites.  ``"FAST_RUN"`` is not used: PyTensor resolves
+    it to its Numba mode, whose rewrite set targets the Numba linker.
 
     - Fusion merges elementwise operations into ``Composite`` ops, each a
       distinct kernel that the C compiler builds separately; on large
@@ -78,7 +80,7 @@ def default_nll_mode(*, fuse: bool = False) -> Mode:
     excluded = ["inplace"] if fuse else ["inplace", "fusion"]
     return Mode(
         linker=OpWiseCLinker(),  # type: ignore[no-untyped-call]
-        optimizer=get_mode("FAST_RUN")  # type: ignore[no-untyped-call]
+        optimizer=get_mode("CVM")  # type: ignore[no-untyped-call]
         .excluding(*excluded)
         .provided_optimizer,
     )

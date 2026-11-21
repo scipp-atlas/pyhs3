@@ -298,7 +298,7 @@ Context Management
 
 Located in ``src/pyhs3/context.py``:
 
-- Manages PyTensor compilation modes (FAST_RUN, FAST_COMPILE)
+- Manages PyTensor compilation modes (CVM, FAST_COMPILE)
 - Handles optimization flags
 - Configures numerical stability settings
 

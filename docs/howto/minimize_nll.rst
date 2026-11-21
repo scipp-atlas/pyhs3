@@ -239,7 +239,8 @@ without fusion and 8.7 ms with it. Time your own workspace before choosing.
 
     nll = model.compile_nll(fuse=True, cache=True)
 
-Pass ``mode=`` with any PyTensor mode, for example ``mode="FAST_RUN"``, to
-replace the default (see :func:`~pyhs3.compiled.default_nll_mode`); it cannot
-be combined with ``fuse=True``. ``gradient=False`` compiles the value only, for
+Pass ``mode=`` with any PyTensor mode, for example ``mode="CVM"``, to replace
+the default (see :func:`~pyhs3.compiled.default_nll_mode`); it cannot be
+combined with ``fuse=True``. PyTensor resolves ``mode="FAST_RUN"`` to its
+Numba backend, which does not finish compiling large workspaces. ``gradient=False`` compiles the value only, for
 minimizers that do not use a gradient.

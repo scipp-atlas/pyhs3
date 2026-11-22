@@ -241,6 +241,8 @@ without fusion and 8.7 ms with it. Time your own workspace before choosing.
 
 Pass ``mode=`` with any PyTensor mode, for example ``mode="CVM"``, to replace
 the default (see :func:`~pyhs3.compiled.default_nll_mode`); it cannot be
-combined with ``fuse=True``. PyTensor resolves ``mode="FAST_RUN"`` to its
-Numba backend, which does not finish compiling large workspaces. ``gradient=False`` compiles the value only, for
+combined with ``fuse=True``. With PyTensor's ``config.linker`` set to
+``"auto"`` (the default) or ``"numba"``, ``mode="FAST_RUN"`` compiles with
+Numba, which does not finish compiling large workspaces; with ``"cvm"`` it is
+the same as ``mode="CVM"``. ``gradient=False`` compiles the value only, for
 minimizers that do not use a gradient.

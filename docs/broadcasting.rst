@@ -106,10 +106,14 @@ You can inspect the model to understand its parameter structure:
 Behavior Difference: Scalar vs Vector Parameters
 ------------------------------------------------
 
-When you pass a vector to a scalar parameter, :meth:`~pyhs3.Model.pdf` and
-:meth:`~pyhs3.Model.logpdf` raise a ``ValueError`` naming the parameter:
+In the scalar ``model``, every parameter is a 0-dimensional input. Below,
+``x`` has shape ``(3,)`` while ``mu`` and ``sigma`` each have shape ``()``.
+The scalar model does not broadcast over ``x``: its compiled function takes
+exactly one value of ``x``. For this dimensionality mismatch,
+:meth:`~pyhs3.Model.pdf` and :meth:`~pyhs3.Model.logpdf` raise a
+``ValueError`` naming the parameter:
 
-.. code-block:: pycon
+.. doctest::
 
     >>> import numpy as np
     >>> result = model.pdf(
@@ -123,7 +127,7 @@ When you pass a vector to a scalar parameter, :meth:`~pyhs3.Model.pdf` and
 this check, so the same call through them returns the density at the first
 element only:
 
-.. code-block:: pycon
+.. doctest::
 
     >>> parameters = {"x": [0.0, 1.0, 2.0], "mu": 0.0, "sigma": 1.0}
     >>> print(f"{model.pdf_unsafe('model', **parameters):.8f}")

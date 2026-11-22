@@ -134,8 +134,10 @@ class Model:
             progress (bool): Whether to show progress bar during dependency graph construction.
             mode (str): PyTensor compilation mode. Defaults to "CVM".
                        Options: "CVM" (apply all rewrites, use C implementations),
-                       "FAST_RUN" (all rewrites; PyTensor resolves it to Numba, which
-                       does not finish compiling large workspaces),
+                       "FAST_RUN" (all rewrites; with PyTensor's config.linker
+                       "auto" (the default) or "numba" it compiles with Numba, which
+                       does not finish compiling large workspaces, and with "cvm"
+                       it is "CVM"),
                        "FAST_COMPILE" (few rewrites, Python implementations),
                        "NUMBA" (compile using Numba), "JAX" (compile using JAX),
                        "PYTORCH" (compile using PyTorch), "DebugMode" (debugging),

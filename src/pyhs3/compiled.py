@@ -54,8 +54,10 @@ def default_nll_mode(*, fuse: bool = False) -> Mode:
 
     The op-wise C linker with the rewrites of PyTensor's C mode (``"CVM"``),
     excluding the in-place rewrites and, unless ``fuse=True``, the
-    elemwise-fusion rewrites.  ``"FAST_RUN"`` is not used: PyTensor resolves
-    it to its Numba mode, whose rewrite set targets the Numba linker.
+    elemwise-fusion rewrites.  ``"FAST_RUN"`` is not used: with PyTensor's
+    ``config.linker`` set to ``"auto"`` (the default) or ``"numba"`` it
+    resolves to the Numba mode, whose rewrite set targets the Numba linker;
+    only with ``"cvm"`` does it resolve to ``"CVM"``.
 
     - Fusion merges elementwise operations into ``Composite`` ops, each a
       distinct kernel that the C compiler builds separately; on large

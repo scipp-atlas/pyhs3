@@ -195,7 +195,7 @@ class TestCompiledNLLBackend:
 class TestDefaultNLLMode:
     @pytest.mark.parametrize("fuse", [False, True])
     def test_uses_the_c_rewrite_set(self, fuse):
-        """Rewrites come from the C mode, not the Numba mode "FAST_RUN" resolves to."""
+        """Rewrites come from the C mode, not the Numba mode "FAST_RUN" resolves to by default."""
         query = default_nll_mode(fuse=fuse).provided_optimizer
         assert "fast_run" in query.include
         assert "numba" not in query.include

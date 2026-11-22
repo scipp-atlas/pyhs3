@@ -172,8 +172,9 @@ class TestModelModes:
 class TestDefaultCompileMode:
     """The default mode compiles with the C virtual machine, not Numba.
 
-    PyTensor resolves ``"FAST_RUN"`` to its Numba linker, which does not
-    finish compiling large workspaces
+    With PyTensor's default ``config.linker="auto"``, ``"FAST_RUN"``
+    resolves to its Numba linker, which does not finish compiling large
+    workspaces
     (https://github.com/scipp-atlas/pyhs3/issues/367).
     """
 

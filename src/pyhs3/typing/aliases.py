@@ -12,7 +12,7 @@ from pytensor.tensor.variable import TensorVariable
 
 type TensorVar = TensorVariable[TensorType, Apply[Any]]
 type EntityType = Literal[
-    "distribution", "function", "parameter", "modifier", "constant"
+    "distribution", "function", "parameter", "modifier", "constant", "family"
 ]
 type DomainBounds = tuple[float | None, float | None]
 

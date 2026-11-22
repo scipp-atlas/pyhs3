@@ -31,13 +31,14 @@ from pyhs3.data import BinnedData
 from pyhs3.distributions import Distribution, Distributions, HistFactoryDistChannel
 from pyhs3.domains import Domain
 from pyhs3.functions import Functions
+from pyhs3.functions.core import BatchableFunction
 from pyhs3.graph_viz import (
     DEFAULT_OP_PARAMS,
     ConstArrayMode,
     OpParamMode,
     render_graph,
 )
-from pyhs3.networks import build_dependency_graph
+from pyhs3.networks import build_dependency_graph, plan_function_families
 from pyhs3.parameter_points import ParameterSet
 from pyhs3.tensorutils import (
     create_bounded_tensor,
@@ -860,13 +861,7 @@ class Model:
             self.parameterset, functions, distributions
         )
 
-        sorted_nodes = graph.topological_sort()
-
-        # A likelihood-rooted model only needs the distributions that
-        # participate in that likelihood and their transitive dependencies.
-        # The complete structural graph is still built first so dependency
-        # resolution and cycle detection retain their existing behavior.
-        # Legacy models without a likelihood continue to build every node.
+        likelihood_roots: list[str] = []
         if self._likelihood is not None:
             likelihood_roots = [
                 dist if isinstance(dist, str) else dist.name
@@ -876,6 +871,32 @@ class Model:
                 dist if isinstance(dist, str) else dist.name
                 for dist in (self._likelihood.aux_distributions or [])
             )
+
+        # Batchable functions of one type that feed the same root distribution
+        # become one family node, built by a single batch_expressions call, so
+        # the graph does not grow with the number of such functions.  Families
+        # are scoped by root (the likelihood's distributions, else every
+        # distribution) so that one distribution's pdf only evaluates its own
+        # functions.
+        families = {
+            family.name: family
+            for family in plan_function_families(
+                graph,
+                functions,
+                likelihood_roots or [dist.name for dist in distributions],
+            )
+        }
+        functions_by_name = {function.name: function for function in functions}
+        family_outputs: dict[str, TensorVar] = {}
+
+        sorted_nodes = graph.topological_sort()
+
+        # A likelihood-rooted model only needs the distributions that
+        # participate in that likelihood and their transitive dependencies.
+        # The complete structural graph is still built first so dependency
+        # resolution and cycle detection retain their existing behavior.
+        # Legacy models without a likelihood continue to build every node.
+        if self._likelihood is not None:
             # Workspace construction resolves and validates all likelihood
             # references. Direct Model construction may intentionally leave
             # string references unresolved, however; preserve its historical
@@ -912,7 +933,12 @@ class Model:
             for node_idx in sorted_nodes:
                 node_data = graph[node_idx]
                 node_type: Literal[
-                    "parameter", "constant", "function", "distribution", "modifier"
+                    "parameter",
+                    "constant",
+                    "function",
+                    "distribution",
+                    "modifier",
+                    "family",
                 ] = node_data["type"]
                 node_name = node_data["name"]
 
@@ -938,8 +964,30 @@ class Model:
                 elif node_type == "constant":
                     built = self._build_constant_node(node_name, constants_map)
                     self.parameters[node_name] = built
+                elif node_type == "family":
+                    # Builds every member; each member node below picks up
+                    # its own expression.  A family is not itself a value, so
+                    # it is not added to the context.
+                    family = families[node_name]
+                    family_outputs.update(
+                        family.kind.batch_expressions(
+                            [
+                                cast(BatchableFunction, functions_by_name[name])
+                                for name in family.members
+                            ],
+                            context,
+                            functions_by_name,
+                        )
+                    )
+                    progress_bar.advance(task)
+                    continue
                 elif node_type == "function":
-                    built = self._build_function_node(node_name, functions, context)
+                    family_built = family_outputs.pop(node_name, None)
+                    built = (
+                        self._build_function_node(node_name, functions, context)
+                        if family_built is None
+                        else family_built
+                    )
                     self.functions[node_name] = built
                 elif node_type == "modifier":
                     built = self._build_modifier_node(node_name, modifiers_map, context)

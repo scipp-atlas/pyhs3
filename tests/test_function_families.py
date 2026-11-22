@@ -1,0 +1,358 @@
+"""Unit tests for evaluating many InterpolationFunctions as one batched family."""
+
+from __future__ import annotations
+
+import logging
+
+import numpy as np
+import pytensor
+import pytensor.tensor as pt
+import pytest
+from pytensor.graph.traversal import io_toposort
+from pytensor.tensor.subtensor import AdvancedIncSubtensor1, IncSubtensor
+
+from pyhs3.distributions import Distributions
+from pyhs3.functions import Functions, InterpolationFunction, ProductFunction
+from pyhs3.functions.core import BatchableFunction
+from pyhs3.networks import build_dependency_graph, plan_function_families
+from pyhs3.parameter_points import ParameterSet
+
+_NOMINALS = [10.0, 3.0, 0.5, 7.0]
+
+
+def _interp(name, codes, nom, entries, positive_definite=False):
+    """InterpolationFunction whose i-th entry is ``entries[i]`` with hi/lo names."""
+    return InterpolationFunction(
+        name=name,
+        high=[f"{name}_hi_{i}" for i in range(len(codes))],
+        low=[f"{name}_lo_{i}" for i in range(len(codes))],
+        nom=nom,
+        interpolationCodes=codes,
+        positiveDefinite=positive_definite,
+        vars=entries,
+    )
+
+
+class _Setup:
+    """Members, a context of tensors, and the free scalar inputs."""
+
+    def __init__(self, members, products, *, symbolic_variations=False, seed=0):
+        rng = np.random.default_rng(seed)
+        self.members = members
+        self.functions = {f.name: f for f in [*members, *products]}
+        self.inputs: list[pt.TensorVariable] = []
+        self.context: dict[str, pt.TensorVariable] = {}
+        for k, member in enumerate(members):
+            nom = _NOMINALS[k % len(_NOMINALS)]
+            self.context.setdefault(member.nom, pt.constant(nom, name=member.nom))
+            for i in range(len(member.vars)):
+                hi = nom * (1.0 + rng.uniform(0.02, 0.3))
+                lo = nom * (1.0 - rng.uniform(0.02, 0.3))
+                for name, value in ((member.high[i], hi), (member.low[i], lo)):
+                    if symbolic_variations:
+                        var = pt.dscalar(name)
+                        self.inputs.append(var)
+                        self.context[name] = var
+                        self.values = getattr(self, "values", {})
+                        self.values[name] = value
+                    else:
+                        self.context[name] = pt.constant(value, name=name)
+        self.values = getattr(self, "values", {})
+        for product in products:
+            for factor in product.factors:
+                if isinstance(factor, str) and factor not in self.context:
+                    self._add_free(factor, rng)
+            for key, tensor in product.constants.items():
+                self.context[key] = tensor
+            self.context[product.name] = product.expression(self.context)
+        for member in members:
+            for var in member.vars:
+                if var not in self.context:
+                    self._add_free(var, rng)
+
+    def _add_free(self, name, rng):
+        var = pt.dscalar(name)
+        self.inputs.append(var)
+        self.context[name] = var
+        self.values[name] = rng.uniform(-2.0, 2.0)
+
+    def evaluate(self, outputs):
+        fn = pytensor.function(
+            self.inputs, outputs, mode="FAST_COMPILE", on_unused_input="ignore"
+        )
+        return fn(**self.values)
+
+
+def _per_function(setup):
+    return [m.expression(setup.context) for m in setup.members]
+
+
+def _batched(setup):
+    outputs = InterpolationFunction.batch_expressions(
+        setup.members, setup.context, setup.functions
+    )
+    return [outputs[m.name] for m in setup.members]
+
+
+def _product_entries(prefix, n, params, betas):
+    """``n`` ProductFunctions ``param * beta`` named ``{prefix}_{i}``."""
+    products = [
+        ProductFunction(
+            name=f"{prefix}_{i}", factors=[params[i % len(params)], betas[i]]
+        )
+        for i in range(n)
+    ]
+    return products, [p.name for p in products]
+
+
+class TestBatchableInterface:
+    def test_interpolation_function_is_batchable(self):
+        assert issubclass(InterpolationFunction, BatchableFunction)
+
+
+class TestBatchedInterpolationMatchesPerFunction:
+    @pytest.mark.parametrize(
+        "codes",
+        [
+            pytest.param([[5, 5, 1], [1], [5, 5, 5, 5]], id="multiplicative"),
+            pytest.param([[0, 0], [2, 3], [4]], id="additive"),
+            pytest.param([[6, 6], [0, 2], [1, 5, 5], []], id="mixed_kinds_and_empty"),
+        ],
+    )
+    @pytest.mark.parametrize("positive_definite", [False, True])
+    def test_product_entries(self, codes, positive_definite):
+        """Entries ``NP * const`` across several functions, shared NPs."""
+        params = ["alpha_a", "alpha_b", "alpha_c"]
+        members, products = [], []
+        for k, member_codes in enumerate(codes):
+            prods, names = _product_entries(
+                f"f{k}_entry",
+                len(member_codes),
+                params,
+                [1.0 + 0.1 * i for i in range(len(member_codes))],
+            )
+            products += prods
+            members.append(
+                _interp(f"f{k}", member_codes, f"nom_{k}", names, positive_definite)
+            )
+        setup = _Setup(members, products)
+
+        np.testing.assert_allclose(
+            setup.evaluate(_batched(setup)),
+            setup.evaluate(_per_function(setup)),
+            rtol=1e-12,
+        )
+
+    def test_direct_parameter_entries(self):
+        members = [
+            _interp("f0", [5, 1], "nom_0", ["alpha_a", "alpha_b"]),
+            _interp("f1", [5], "nom_1", ["alpha_a"]),
+        ]
+        setup = _Setup(members, [])
+        np.testing.assert_allclose(
+            setup.evaluate(_batched(setup)),
+            setup.evaluate(_per_function(setup)),
+            rtol=1e-12,
+        )
+
+    def test_entries_with_several_free_factors(self):
+        """An entry that is not ``NP * const`` is stacked as its expression."""
+        products = [ProductFunction(name="mixed", factors=["alpha_a", "alpha_b", 2.0])]
+        members = [
+            _interp("f0", [5, 5], "nom_0", ["mixed", "alpha_c"]),
+            _interp("f1", [1], "nom_1", ["alpha_a"]),
+        ]
+        setup = _Setup(members, products)
+        np.testing.assert_allclose(
+            setup.evaluate(_batched(setup)),
+            setup.evaluate(_per_function(setup)),
+            rtol=1e-12,
+        )
+
+    def test_symbolic_variations(self):
+        """Non-constant high/low values are stacked instead of tabulated."""
+        members = [
+            _interp("f0", [5, 1], "nom_0", ["alpha_a", "alpha_b"]),
+            _interp("f1", [0], "nom_1", ["alpha_a"]),
+        ]
+        setup = _Setup(members, [], symbolic_variations=True)
+        np.testing.assert_allclose(
+            setup.evaluate(_batched(setup)),
+            setup.evaluate(_per_function(setup)),
+            rtol=1e-12,
+        )
+
+    def test_gradient_matches(self):
+        params = ["alpha_a", "alpha_b"]
+        prods0, names0 = _product_entries("e0", 3, params, [1.0, 0.5, 2.0])
+        prods1, names1 = _product_entries("e1", 2, params, [1.5, 1.0])
+        members = [
+            _interp("f0", [5, 1, 5], "nom_0", names0),
+            _interp("f1", [0, 0], "nom_1", names1),
+        ]
+        setup = _Setup(members, [*prods0, *prods1])
+        free = [v for v in setup.inputs if v.name in params]
+
+        def gradient(outputs):
+            return pt.grad(pt.sum(pt.stack(outputs) ** 2), free)
+
+        np.testing.assert_allclose(
+            setup.evaluate(gradient(_batched(setup))),
+            setup.evaluate(gradient(_per_function(setup))),
+            rtol=1e-10,
+        )
+
+
+class TestBatchedInterpolationFallback:
+    def test_interleaved_kinds_use_the_per_function_path(self, caplog):
+        """Additive and multiplicative entries that interleave do not commute."""
+        members = [
+            _interp("f0", [0, 5, 0], "nom_0", ["alpha_a", "alpha_b", "alpha_c"]),
+            _interp("f1", [5], "nom_1", ["alpha_a"]),
+        ]
+        setup = _Setup(members, [])
+        with caplog.at_level(logging.DEBUG, logger="pyhs3.functions.standard"):
+            batched = _batched(setup)
+        assert "f0" in caplog.text
+        np.testing.assert_allclose(
+            setup.evaluate(batched), setup.evaluate(_per_function(setup)), rtol=1e-12
+        )
+
+    def test_batched_parameter_uses_the_per_function_path(self, caplog):
+        members = [
+            _interp("f0", [5], "nom_0", ["alpha_a"]),
+            _interp("f1", [5], "nom_1", ["alpha_b"]),
+        ]
+        setup = _Setup(members, [])
+        scan = pt.dvector("alpha_a")
+        setup.inputs = [scan if v.name == "alpha_a" else v for v in setup.inputs]
+        setup.context["alpha_a"] = scan
+        setup.values["alpha_a"] = np.array([-1.0, 0.0, 1.5])
+        with caplog.at_level(logging.DEBUG, logger="pyhs3.functions.standard"):
+            batched = _batched(setup)
+        assert "f0" in caplog.text
+        result = setup.evaluate(batched)
+        expected = setup.evaluate(_per_function(setup))
+        for got, want in zip(result, expected, strict=True):
+            np.testing.assert_allclose(got, want, rtol=1e-12)
+
+
+class TestBatchedInterpolationGraph:
+    @staticmethod
+    def _gradient_ops(n_functions):
+        params = ["alpha_a", "alpha_b", "alpha_c"]
+        members, products = [], []
+        for k in range(n_functions):
+            prods, names = _product_entries(f"e{k}", 4, params, [1.0, 0.9, 1.1, 1.2])
+            products += prods
+            members.append(_interp(f"f{k}", [5, 1, 5, 1], f"nom_{k}", names))
+        setup = _Setup(members, products)
+        outputs = _batched(setup)
+        free = [v for v in setup.inputs if v.name in params]
+        grads = pt.grad(pt.sum(pt.stack(outputs)), free)
+        return io_toposort([], [*outputs, *grads])
+
+    def test_graph_size_does_not_grow_per_function(self):
+        """Each extra function adds O(1) nodes, not a copy of the formula."""
+        small, large = len(self._gradient_ops(5)), len(self._gradient_ops(50))
+        assert (large - small) / 45 <= 6
+
+    def test_gradient_scatters_do_not_grow_per_function(self):
+        """Outputs are split, not indexed, so the gradient has no per-function scatter.
+
+        The remaining scatters come from the gather from the parameter vector
+        and from slicing it into one block per interpolation code.
+        """
+
+        def scatters(n_functions):
+            ops = [type(node.op) for node in self._gradient_ops(n_functions)]
+            return ops.count(IncSubtensor) + ops.count(AdvancedIncSubtensor1)
+
+        assert scatters(20) == scatters(5)
+        assert scatters(5) <= 4
+
+
+def _planning_inputs():
+    """Two channels: f0/f1 feed g0, f2/f3 feed g1; f4 depends on f0 (a member)."""
+    functions = Functions(
+        [
+            _interp("f0", [5], "nom_0", ["alpha_a"]),
+            _interp("f1", [1], "nom_1", ["alpha_b"]),
+            _interp("f2", [5], "nom_2", ["alpha_c"]),
+            _interp("f3", [5], "nom_3", ["alpha_a"]),
+            _interp("f4", [5], "nom_4", ["f0"]),
+            ProductFunction(name="mean0", factors=["f0", "f1", "f4"]),
+            ProductFunction(name="mean1", factors=["f2", "f3"]),
+        ]
+    )
+    distributions = Distributions(
+        [
+            {
+                "name": "g0",
+                "type": "gaussian_dist",
+                "x": "x0",
+                "mean": "mean0",
+                "sigma": 1.0,
+            },
+            {
+                "name": "g1",
+                "type": "gaussian_dist",
+                "x": "x1",
+                "mean": "mean1",
+                "sigma": 1.0,
+            },
+        ]
+    )
+    graph, _, _ = build_dependency_graph(
+        ParameterSet(name="p", parameters=[]), functions, distributions
+    )
+    return graph, functions
+
+
+class TestPlanFunctionFamilies:
+    def test_one_family_per_type_and_channel(self):
+        graph, functions = _planning_inputs()
+        families = plan_function_families(graph, functions, ["g0", "g1"])
+        members = sorted(sorted(f.members) for f in families)
+        assert members == [["f0", "f1"], ["f2", "f3"]]
+        assert all(f.kind is InterpolationFunction for f in families)
+
+    def test_members_depend_only_on_their_family(self):
+        graph, functions = _planning_inputs()
+        families = plan_function_families(graph, functions, ["g0", "g1"])
+        for family in families:
+            assert graph[family.name]["type"] == "family"
+            for member in family.members:
+                assert graph.predecessors(member) == [family.name]
+            inputs = set(graph.predecessors(family.name))
+            assert {"alpha_a"} <= inputs
+            assert not inputs & set(family.members)
+
+    def test_member_of_a_member_is_excluded(self, caplog):
+        """f4 reads f0's output, so batching it with f0 would form a cycle."""
+        graph, functions = _planning_inputs()
+        with caplog.at_level(logging.DEBUG, logger="pyhs3.networks"):
+            families = plan_function_families(graph, functions, ["g0", "g1"])
+        assert all("f4" not in f.members for f in families)
+        assert "f4" in caplog.text
+        graph.topological_sort()  # still acyclic
+
+    def test_single_instance_is_not_a_family(self):
+        """A channel with one batchable function gains nothing from a family."""
+        functions = Functions([_interp("f0", [5], "nom_0", ["alpha_a"])])
+        distributions = Distributions(
+            [
+                {
+                    "name": "g0",
+                    "type": "gaussian_dist",
+                    "x": "x0",
+                    "mean": "f0",
+                    "sigma": 1.0,
+                }
+            ]
+        )
+        graph, _, _ = build_dependency_graph(
+            ParameterSet(name="p", parameters=[]), functions, distributions
+        )
+        assert plan_function_families(graph, functions, ["g0"]) == []
+        assert graph.predecessors("f0") != []

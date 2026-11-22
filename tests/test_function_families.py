@@ -11,6 +11,7 @@ import pytest
 from pytensor.graph.traversal import io_toposort
 from pytensor.tensor.subtensor import AdvancedIncSubtensor1, IncSubtensor
 
+from pyhs3.compiled import default_nll_mode
 from pyhs3.distributions import Distributions
 from pyhs3.functions import Functions, InterpolationFunction, ProductFunction
 from pyhs3.functions.core import BatchableFunction
@@ -356,3 +357,36 @@ class TestPlanFunctionFamilies:
         )
         assert plan_function_families(graph, functions, ["g0"]) == []
         assert graph.predecessors("f0") != []
+
+
+class TestFamiliesUnderTheDefaultNLLMode:
+    def test_gradient_of_two_families_sharing_parameters(self):
+        """compile_nll's default C mode gives the same gradient as Python mode.
+
+        With the Numba rewrite set on the C linker, an in-place IndexedElemwise
+        made two families scatter their gradients into one shared buffer,
+        doubling the result (fixed by building default_nll_mode from "CVM").
+        """
+        groups = [
+            [_interp(f"g{g}f{k}", [0], f"nom_{g}_{k}", ["alpha_a"]) for k in range(2)]
+            for g in range(2)
+        ]
+        setup = _Setup([m for group in groups for m in group], [])
+        outputs = []
+        for members in groups:
+            batched = InterpolationFunction.batch_expressions(
+                members, setup.context, setup.functions
+            )
+            outputs += [batched[m.name] for m in members]
+        free = [v for v in setup.inputs if v.name == "alpha_a"]
+        grads = pt.grad(pt.sum(pt.log(pt.stack(outputs))), free)
+        args = [setup.values[v.name] for v in setup.inputs]
+
+        def evaluate(mode):
+            return pytensor.function(
+                setup.inputs, grads, mode=mode, on_unused_input="ignore"
+            )(*args)
+
+        np.testing.assert_allclose(
+            evaluate(default_nll_mode()), evaluate("FAST_COMPILE"), rtol=1e-10
+        )

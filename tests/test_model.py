@@ -228,6 +228,21 @@ class TestInputShapeValidation:
         with pytest.raises(ValueError, match=r"'x'.*1-dimensional.*\(\)"):
             model.pdf("gauss", x=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0))
 
+    @pytest.mark.parametrize(
+        "x",
+        [
+            pytest.param(0.0, id="float"),
+            pytest.param([0.0], id="list"),
+            pytest.param(np.array(0), id="int_array"),
+            pytest.param(np.array(0.0, dtype=np.float32), id="float32_array"),
+        ],
+    )
+    @pytest.mark.parametrize("method", ["pdf", "logpdf"])
+    def test_non_float64_array_raises_type_error(self, simple_workspace, method, x):
+        model = simple_workspace.model(0)
+        with pytest.raises(TypeError, match=r"Parameter 'x' of 'gauss'.*float64"):
+            getattr(model, method)("gauss", x=x, mu=np.array(0.0), sigma=np.array(1.0))
+
     def test_matching_shapes_evaluate(self, simple_workspace):
         model = simple_workspace.model(0)
         value = model.pdf(

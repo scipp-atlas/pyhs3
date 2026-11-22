@@ -1135,7 +1135,8 @@ class Model:
             npt.NDArray[np.float64]: The evaluated PDF value.
 
         Raises:
-            TypeError: If any parameter value is not a numpy array.
+            TypeError: If any parameter value is not a numpy array of the
+                compiled input's dtype (float64).
             ValueError: If an array's dimensionality differs from its
                 compiled input's (e.g. a vector passed for a scalar parameter).
 
@@ -1150,7 +1151,7 @@ class Model:
         # Use compiled function for better performance
         func = self._get_compiled_function(name)
         positional_values = self._reorder_params(name, parametervalues)
-        self._check_input_ndims(name, positional_values)
+        self._check_inputs(name, positional_values)
         return func(*positional_values)
 
     def logpdf_unsafe(
@@ -1211,7 +1212,8 @@ class Model:
             npt.NDArray[np.float64]: The log of the PDF.
 
         Raises:
-            TypeError: If any parameter value is not a numpy array.
+            TypeError: If any parameter value is not a numpy array of the
+                compiled input's dtype (float64).
             ValueError: If an array's dimensionality differs from its
                 compiled input's (e.g. a vector passed for a scalar parameter).
 
@@ -1225,7 +1227,7 @@ class Model:
         """
         func = self._get_compiled_log_function(name)
         positional_values = self._reorder_params(name, parametervalues)
-        self._check_input_ndims(name, positional_values)
+        self._check_inputs(name, positional_values)
         return func(*positional_values)
 
     def pars(self, name: str) -> list[str]:
@@ -1272,24 +1274,39 @@ class Model:
         """
         return [names.index(par) for par in self.pars(name)]
 
-    def _check_input_ndims(
-        self, name: str, values: Sequence[npt.NDArray[np.float64]]
-    ) -> None:
-        """Raise if an array's dimensionality differs from its compiled input's.
+    def _check_inputs(self, name: str, values: Sequence[object]) -> None:
+        """Raise if an argument is not an array of its compiled input's dtype and ndim.
 
         The compiled functions skip PyTensor's input validation
-        (``trust_input=True``), and the C backend reads only the first element
-        of an array passed for a scalar input instead of raising.
+        (``trust_input=True``): the C backend reads only the first element of
+        an array passed for a scalar input instead of raising, and rejects
+        other types with messages that do not name the parameter.
 
         Args:
             name: Distribution name; its function must already be compiled.
             values: Parameter values in the order of :meth:`pars`.
+
+        Raises:
+            TypeError: If an argument is not a numpy array of the input's dtype.
+            ValueError: If an array's dimensionality differs from the input's.
         """
         for var, value in zip(self._compiled_inputs[name], values, strict=True):
-            if np.ndim(value) != var.ndim:
+            if not isinstance(value, np.ndarray) or value.dtype != var.dtype:
+                got = (
+                    f"{value.dtype} array"
+                    if isinstance(value, np.ndarray)
+                    else type(value).__name__
+                )
+                msg = (
+                    f"Parameter '{var.name}' of '{name}' expects a numpy array of "
+                    f"dtype {var.dtype}, got {got}; use np.asarray(value, "
+                    f"dtype=np.{var.dtype}) or the _unsafe variant."
+                )
+                raise TypeError(msg)
+            if value.ndim != var.ndim:
                 msg = (
                     f"Parameter '{var.name}' of '{name}' expects a "
-                    f"{var.ndim}-dimensional array, got shape {np.shape(value)}."
+                    f"{var.ndim}-dimensional array, got shape {value.shape}."
                 )
                 raise ValueError(msg)
 

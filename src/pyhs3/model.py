@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import warnings
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -119,7 +119,7 @@ class Model:
         domain: Domain,
         functions: Functions,
         progress: bool = True,
-        mode: str = "FAST_RUN",
+        mode: str = "CVM",
         observables: dict[str, tuple[float, float]] | None = None,
         likelihood: Likelihood | None = None,
     ):
@@ -132,8 +132,12 @@ class Model:
             domain (Domain): Domain constraints for parameters.
             functions (Functions): Set of functions that compute parameter values.
             progress (bool): Whether to show progress bar during dependency graph construction.
-            mode (str): PyTensor compilation mode. Defaults to "FAST_RUN".
-                       Options: "FAST_RUN" (apply all rewrites, use C implementations),
+            mode (str): PyTensor compilation mode. Defaults to "CVM".
+                       Options: "CVM" (apply all rewrites, use C implementations),
+                       "FAST_RUN" (all rewrites; with PyTensor's config.linker
+                       "auto" (the default) or "numba" it compiles with Numba, which
+                       does not finish compiling large workspaces, and with "cvm"
+                       it is "CVM"),
                        "FAST_COMPILE" (few rewrites, Python implementations),
                        "NUMBA" (compile using Numba), "JAX" (compile using JAX),
                        "PYTORCH" (compile using PyTorch), "DebugMode" (debugging),
@@ -310,7 +314,7 @@ class Model:
                 :func:`~pyhs3.compiled.default_nll_mode`.  Use ``fuse=True``
                 for long fitting campaigns, ideally with ``cache=True``.
             mode: PyTensor compile mode, replacing the default
-                ``default_nll_mode(fuse=fuse)``; e.g. ``"FAST_RUN"`` (C
+                ``default_nll_mode(fuse=fuse)``; e.g. ``"CVM"`` (C
                 backend only).  Cannot be combined with ``fuse=True``.
             cache: Cache the compiled function on disk and reuse it when the
                 same likelihood is compiled again with the same options,
@@ -1087,9 +1091,10 @@ class Model:
         Evaluates the PDF with automatic type conversion (convenience method).
 
         This method automatically converts parameter values to numpy arrays before
-        evaluation. Use this for convenience in testing or interactive use.
-
-        For performance-critical code, prefer :meth:`pdf` with pre-converted numpy arrays.
+        evaluation and, unlike :meth:`pdf`, does not check that each array has
+        the dimensionality of its compiled input.  An array passed for a scalar
+        parameter is then not rejected: the default C backend reads only its
+        first element.  Use this for convenience in testing or interactive use.
 
         Args:
             name (str): Name of the distribution to evaluate.
@@ -1110,7 +1115,8 @@ class Model:
         converted_params = {
             key: ensure_array(value) for key, value in parametervalues.items()
         }
-        return self.pdf(name, **converted_params)
+        func = self._get_compiled_function(name)
+        return func(*self._reorder_params(name, converted_params))
 
     def pdf(
         self, name: str, **parametervalues: npt.NDArray[np.float64]
@@ -1130,6 +1136,8 @@ class Model:
 
         Raises:
             TypeError: If any parameter value is not a numpy array.
+            ValueError: If an array's dimensionality differs from its
+                compiled input's (e.g. a vector passed for a scalar parameter).
 
         See Also:
             :meth:`pdf_unsafe`: Convenience version with automatic type conversion
@@ -1142,6 +1150,7 @@ class Model:
         # Use compiled function for better performance
         func = self._get_compiled_function(name)
         positional_values = self._reorder_params(name, parametervalues)
+        self._check_input_ndims(name, positional_values)
         return func(*positional_values)
 
     def logpdf_unsafe(
@@ -1153,9 +1162,11 @@ class Model:
         Evaluates the log PDF with automatic type conversion (convenience method).
 
         This method automatically converts parameter values to numpy arrays before
-        evaluation. Use this for convenience in testing or interactive use.
-
-        For performance-critical code, prefer :meth:`logpdf` with pre-converted numpy arrays.
+        evaluation and, unlike :meth:`logpdf`, does not check that each array
+        has the dimensionality of its compiled input.  An array passed for a
+        scalar parameter is then not rejected: the default C backend reads only
+        its first element.  Use this for convenience in testing or interactive
+        use.
 
         Args:
             name (str): Name of the distribution to evaluate.
@@ -1175,7 +1186,8 @@ class Model:
         converted_params = {
             key: ensure_array(value) for key, value in parametervalues.items()
         }
-        return self.logpdf(name, **converted_params)
+        func = self._get_compiled_log_function(name)
+        return func(*self._reorder_params(name, converted_params))
 
     def logpdf(
         self, name: str, **parametervalues: npt.NDArray[np.float64]
@@ -1200,6 +1212,8 @@ class Model:
 
         Raises:
             TypeError: If any parameter value is not a numpy array.
+            ValueError: If an array's dimensionality differs from its
+                compiled input's (e.g. a vector passed for a scalar parameter).
 
         See Also:
             :meth:`logpdf_unsafe`: Convenience version with automatic type conversion
@@ -1211,6 +1225,7 @@ class Model:
         """
         func = self._get_compiled_log_function(name)
         positional_values = self._reorder_params(name, parametervalues)
+        self._check_input_ndims(name, positional_values)
         return func(*positional_values)
 
     def pars(self, name: str) -> list[str]:
@@ -1256,6 +1271,27 @@ class Model:
 
         """
         return [names.index(par) for par in self.pars(name)]
+
+    def _check_input_ndims(
+        self, name: str, values: Sequence[npt.NDArray[np.float64]]
+    ) -> None:
+        """Raise if an array's dimensionality differs from its compiled input's.
+
+        The compiled functions skip PyTensor's input validation
+        (``trust_input=True``), and the C backend reads only the first element
+        of an array passed for a scalar input instead of raising.
+
+        Args:
+            name: Distribution name; its function must already be compiled.
+            values: Parameter values in the order of :meth:`pars`.
+        """
+        for var, value in zip(self._compiled_inputs[name], values, strict=True):
+            if np.ndim(value) != var.ndim:
+                msg = (
+                    f"Parameter '{var.name}' of '{name}' expects a "
+                    f"{var.ndim}-dimensional array, got shape {np.shape(value)}."
+                )
+                raise ValueError(msg)
 
     def _reorder_params(
         self,

@@ -75,7 +75,7 @@ first domain and first parameter set:
    <BLANKLINE>
    >>> print(model)  # doctest: +ELLIPSIS
    Model(
-       mode: FAST_RUN
+       mode: CVM
        parameters: 3 (...)
        distributions: 1 (gauss)
        functions: 0 ()

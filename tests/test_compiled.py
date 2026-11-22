@@ -192,6 +192,15 @@ class TestCompiledNLLBackend:
             model.compile_nll(backend="jax")
 
 
+class TestDefaultNLLMode:
+    @pytest.mark.parametrize("fuse", [False, True])
+    def test_uses_the_c_rewrite_set(self, fuse):
+        """Rewrites come from the C mode, not the Numba mode "FAST_RUN" resolves to by default."""
+        query = default_nll_mode(fuse=fuse).provided_optimizer
+        assert "fast_run" in query.include
+        assert "numba" not in query.include
+
+
 class TestCompiledNLLFuse:
     def test_fuse_gives_the_same_value_and_gradient(self, model):
         """Fusion changes how the graph is compiled, not what it computes."""

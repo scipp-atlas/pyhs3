@@ -112,7 +112,7 @@ This is how you use the ``pyhs3`` Python API to build a statistical model direct
    <BLANKLINE>
    >>> print(model)
    Model(
-       mode: FAST_RUN
+       mode: CVM
        parameters: 3 (sigma, mu, x)
        distributions: 1 (model)
        functions: 0 ()
@@ -178,7 +178,7 @@ This is the same model built using HS3 JSON-like dictionary format:
    <BLANKLINE>
    >>> print(model)
    Model(
-       mode: FAST_RUN
+       mode: CVM
        parameters: 3 (sigma, mu, x)
        distributions: 1 (model)
        functions: 0 ()

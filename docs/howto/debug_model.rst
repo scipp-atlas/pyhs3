@@ -100,7 +100,7 @@ in PyTensor.
 Recreate a model in a slower, more explicit compilation mode
 ------------------------------------------------------------------
 
-The default compilation mode (``"FAST_RUN"``) optimizes for evaluation
+The default compilation mode (``"CVM"``) optimizes for evaluation
 speed at the cost of compile time and debuggability. Two stricter modes help
 when you suspect a numerical or graph-construction bug rather than a
 modeling mistake:

@@ -289,9 +289,16 @@ Located in ``src/pyhs3/networks.py``:
 
 1. Parse all components (distributions, functions, parameters)
 2. Build dependency graph with rustworkx
-3. Topologically sort to determine evaluation order
-4. Convert to PyTensor ops maintaining dependencies
-5. Compile for efficient evaluation
+3. Plan function families: instances of a
+   :class:`~pyhs3.functions.core.BatchableFunction` type that feed the same
+   root distribution become one ``"family"`` node, and each member is rewired
+   to depend on it (``plan_function_families``; see
+   :doc:`explanation/batched_families`)
+4. Topologically sort to determine evaluation order, keeping only the nodes the
+   likelihood needs
+5. Convert to PyTensor ops maintaining dependencies; a family node builds all
+   its members with one ``batch_expressions`` call
+6. Compile for efficient evaluation
 
 Context Management
 ~~~~~~~~~~~~~~~~~~
@@ -422,8 +429,10 @@ Example skeleton:
 Adding New Functions
 ~~~~~~~~~~~~~~~~~~~~
 
-1. Create class inheriting from ``Function``
-2. Implement ``_to_pytensor`` method
+1. Create class inheriting from ``Function``, or from ``BatchableFunction`` if
+   many instances can be evaluated together (see :doc:`defining_components`)
+2. Implement the ``_expression`` method (and ``batch_expressions`` for a
+   batchable type)
 3. Add to ``Functions.model_validate`` discriminator
 4. Write unit tests
 5. Update documentation

@@ -15,6 +15,7 @@
    explanation/building_a_model
    explanation/comparing_nll_with_roofit
    explanation/duplicate_subexpressions
+   explanation/batched_families
    broadcasting
    defining_components
    normalization

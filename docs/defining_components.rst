@@ -443,6 +443,84 @@ Without an analytical expression, pyhs3 uses 64-point Gauss-Legendre quadrature 
 
 For complete details, see :doc:`/normalization`.
 
+Batching Many Instances of a Function
+-------------------------------------
+
+A workspace can hold hundreds of instances of one function type, such as one
+:class:`~pyhs3.functions.InterpolationFunction` per sample and systematic. Built
+one at a time, each instance is its own subgraph, and compile time grows with
+their number. A function type that inherits
+:class:`~pyhs3.functions.core.BatchableFunction` instead lets the model build
+all instances that feed one likelihood channel with a single vectorised
+expression, which pyhs3 calls a *family*. pyhf's combined modifiers
+(``histosys_combined`` and similar) do the same for each modifier type.
+:doc:`explanation/batched_families` explains the design and its effect on
+compile time.
+
+Besides ``_expression``, a batchable type implements the classmethod
+:meth:`~pyhs3.functions.core.BatchableFunction.batch_expressions`. It receives
+the members, the context of built tensors, and every function of the model by
+name, and returns one expression per member name:
+
+.. doctest:: batchable
+
+    >>> from typing import Literal
+    >>> import numpy as np
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> from pyhs3.functions.core import BatchableFunction
+    >>> class ScaledFunction(BatchableFunction):
+    ...     type: Literal["scaled"] = "scaled"
+    ...     x: str
+    ...     factor: float
+    ...     def _expression(self, context):
+    ...         return context[self.x] * self.factor
+    ...     @classmethod
+    ...     def batch_expressions(cls, members, context, functions):
+    ...         # Stack the inputs into one (F,) vector, scale by a constant (F,)
+    ...         # table, and split back into one scalar per member.
+    ...         x = pt.stack([context[m.x] for m in members])
+    ...         scaled = x * np.array([m.factor for m in members])
+    ...         pieces = pt.split(scaled, [1] * len(members), n_splits=len(members))
+    ...         return {m.name: p.reshape(()) for m, p in zip(members, pieces)}
+    ...
+    >>> members = [
+    ...     ScaledFunction(name="a", x="u", factor=2.0),
+    ...     ScaledFunction(name="b", x="v", factor=3.0),
+    ... ]
+    >>> u, v = pt.dscalar("u"), pt.dscalar("v")
+    >>> outputs = ScaledFunction.batch_expressions(members, {"u": u, "v": v}, {})
+    >>> f = pytensor.function([u, v], [outputs["a"], outputs["b"]], mode="FAST_COMPILE")
+    >>> [float(y) for y in f(1.5, 4.0)]
+    [3.0, 12.0]
+
+The contract and the graph rules that keep a family fast:
+
+- **Equal results:** each returned expression equals the member's own
+  ``expression(context)``. For a member you cannot batch (for example one with
+  a non-scalar input), return its own ``expression(context)`` and log the
+  reason at debug level.
+- **Fixed graph size:** build a fixed number of operations however many members
+  there are, and keep constant tables in numpy rather than in the graph.
+- **One Split for the outputs:** read the per-member outputs with a single
+  ``pt.split``, not by indexing ``result[i]`` per member. The gradient of a
+  ``Split`` is one ``Join``, while per-member indexing adds one scattered
+  ``IncSubtensor`` per member to the gradient, which makes PyTensor's rewrites
+  slow on large models.
+
+Registration is unchanged: register the type as in `Registration and
+Discovery`_. The model finds batchable types itself, groups the instances that
+feed each likelihood distribution into one family, and builds each family
+once; an instance that depends on another member of its group is built on its
+own. To see which instances were batched and which were not, enable debug
+logging for pyhs3:
+
+.. code-block:: python
+
+    import logging
+
+    logging.getLogger("pyhs3").setLevel(logging.DEBUG)
+
 Best Practices
 --------------
 

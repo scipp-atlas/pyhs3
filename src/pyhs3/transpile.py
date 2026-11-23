@@ -42,9 +42,9 @@ class JaxifiedGraph:
     and positional calls via :meth:`call_positional`.
 
     Calling a ``JaxifiedGraph`` does not jit it: JAX runs the graph eagerly,
-    one operation at a time. On a large likelihood (about 23,000 operations)
-    that took 1.25 s per call, against 1.4 ms once wrapped in ``jax.jit``.
-    Wrap it for any repeated evaluation::
+    one operation at a time, which on a large likelihood is orders of
+    magnitude slower than the same call wrapped in ``jax.jit``.  Wrap it for
+    any repeated evaluation::
 
         jg = jaxify(model.log_prob)
         nll = jax.jit(lambda params: -jg(**params)[0])
@@ -123,8 +123,9 @@ def jaxify(
     """Convert a PyTensor expression into a JAX-callable :class:`JaxifiedGraph`.
 
     The returned callable is not jitted: calling it runs JAX eagerly, one
-    operation at a time. On a large likelihood that took 1.25 s per call,
-    against 1.4 ms once wrapped in ``jax.jit``. Jit it for repeated calls::
+    operation at a time, which on a large likelihood is orders of magnitude
+    slower than the same call wrapped in ``jax.jit``. Jit it for repeated
+    calls::
 
         jg = jaxify(model.log_prob)
         nll = jax.jit(lambda params: -jg(**params)[0])

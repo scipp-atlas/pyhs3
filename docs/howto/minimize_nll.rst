@@ -177,24 +177,9 @@ persistent compilation cache in its ``xla`` subdirectory stores the compiled
 XLA executable, so a later run skips both the transpilation and the XLA
 compile. JAX keeps one compilation cache directory per process: if you set
 ``jax_compilation_cache_dir`` yourself, ``compile_nll`` keeps your directory.
-On a 14-channel unbinned workspace with about 170 free parameters, the value
-and gradient took:
-
-.. list-table::
-   :header-rows: 1
-
-   * - backend
-     - first ``compile_nll``
-     - cached ``compile_nll``
-     - one ``value_and_grad``
-   * - ``"c"`` (default)
-     - 279 s
-     - 20 s
-     - 16.6 ms
-   * - ``"jax"``
-     - 95 s
-     - 11 s
-     - 1.4 ms
+On large workspaces the JAX backend compiles faster than the C backend and
+evaluates the value and gradient several times faster; time both on your own
+workspace.
 
 Evaluate many parameter points at once
 --------------------------------------
@@ -218,10 +203,8 @@ describe a single parameter vector; stack vectors as rows to build a batch.
 One compiled likelihood accepts any batch size, but XLA compiles it once per
 batch size ``K``, at the first call with that ``K``, so keep ``K`` fixed
 across calls. With ``cache=True`` that XLA compile is also cached across
-sessions. On a 14-channel unbinned workspace with about 170 free parameters,
-one batched ``value_and_grad`` for 9 points took 3.6 ms against 14.5 ms for 9
-one-point calls, and 20 ms against 102 ms for 64 points; the first call for
-each batch size took about 20 s.
+sessions. One batched call costs much less than the same number of one-point
+calls, and the saving per point grows with the batch size.
 
 Choose the compile mode
 -----------------------
@@ -230,10 +213,9 @@ By default ``compile_nll`` compiles without PyTensor's elemwise fusion, which
 keeps the first compile of a large workspace short. Fused kernels evaluate
 faster, so for a long fitting campaign (many fits or a fine profile scan),
 pass ``fuse=True``, ideally together with ``cache=True`` so you pay the longer
-compile once. On a 14-channel unbinned workspace with about 170 free
-parameters, the first compile of the value and gradient took 279 s without
-fusion and 700 s with it, and one evaluation inside a fit took about 16.6 ms
-without fusion and 8.7 ms with it. Time your own workspace before choosing.
+compile once. On large workspaces, fusion makes the first compile several
+times slower and each evaluation faster. Time your own workspace
+before choosing.
 
 .. code-block:: python
 

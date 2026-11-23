@@ -303,14 +303,12 @@ class Model:
                 ``"jax"`` transpiles the graph to JAX and compiles it with
                 XLA, which needs the optional JAX dependency
                 (``pip install pyhs3[jax]``) and enables JAX's float64 mode
-                (a process-wide JAX setting).  On a 14-channel unbinned
-                workspace (about 170 free parameters) the JAX backend
-                reached a first result in about 94 s instead of 279 s and
-                evaluated the value and gradient in 1.4 ms instead of
-                16.6 ms.
+                (a process-wide JAX setting).  On large workspaces it
+                compiles faster than the C backend and evaluates the value
+                and gradient several times faster.
             fuse: Keep PyTensor's elemwise-fusion rewrites (C backend only).  Fused kernels
-                evaluate about twice as fast but make the first compile of a
-                large workspace about 2.5 times slower; see
+                evaluate faster but make the first compile of a large
+                workspace several times slower; see
                 :func:`~pyhs3.compiled.default_nll_mode`.  Use ``fuse=True``
                 for long fitting campaigns, ideally with ``cache=True``.
             mode: PyTensor compile mode, replacing the default

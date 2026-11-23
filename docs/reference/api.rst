@@ -62,6 +62,7 @@ Functions
 
    Functions
    Function
+   BatchableFunction
    ProductFunction
    SumFunction
    GenericFunction

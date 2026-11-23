@@ -447,20 +447,27 @@ Batching Many Instances of a Function
 -------------------------------------
 
 A workspace can hold hundreds of instances of one function type, such as one
-:class:`~pyhs3.functions.InterpolationFunction` per sample and systematic. Built
-one at a time, each instance is its own subgraph, and compile time grows with
-their number. A function type that inherits
-:class:`~pyhs3.functions.core.BatchableFunction` instead lets the model build
-all instances that feed one likelihood channel with a single vectorised
-expression, which pyhs3 calls a *family*. pyhf's combined modifiers
-(``histosys_combined`` and similar) do the same for each modifier type.
-:doc:`explanation/batched_families` explains the design and its effect on
-compile time.
+:class:`~pyhs3.functions.InterpolationFunction` per sample and systematic. A
+function type that inherits :class:`~pyhs3.functions.BatchableFunction` lets
+the model build all instances that feed one likelihood channel with a single
+vectorised expression, which pyhs3 calls a *family*, so that compile time does
+not grow with their number. :doc:`explanation/batched_families` explains the
+design.
 
 Besides ``_expression``, a batchable type implements the classmethod
-:meth:`~pyhs3.functions.core.BatchableFunction.batch_expressions`. It receives
-the members, the context of built tensors, and every function of the model by
-name, and returns one expression per member name:
+:meth:`~pyhs3.functions.BatchableFunction.batch_expressions`. It receives:
+
+- ``members``: the instances of exactly this class in one family, in a fixed
+  order;
+- ``context``: a built tensor for every name the members' parameter fields
+  reference;
+- ``functions``: the model's function definitions (``Function`` objects, not
+  tensors) by name, for a member whose inputs are themselves functions and
+  whose structure you want to inspect.
+
+It returns a dict with one entry per member name, each an expression with the
+same shape as that member's own ``expression(context)``. Here each member is
+a scalar:
 
 .. doctest:: batchable
 
@@ -468,7 +475,7 @@ name, and returns one expression per member name:
     >>> import numpy as np
     >>> import pytensor
     >>> import pytensor.tensor as pt
-    >>> from pyhs3.functions.core import BatchableFunction
+    >>> from pyhs3.functions import BatchableFunction
     >>> class ScaledFunction(BatchableFunction):
     ...     type: Literal["scaled"] = "scaled"
     ...     x: str
@@ -489,36 +496,50 @@ name, and returns one expression per member name:
     ...     ScaledFunction(name="b", x="v", factor=3.0),
     ... ]
     >>> u, v = pt.dscalar("u"), pt.dscalar("v")
-    >>> outputs = ScaledFunction.batch_expressions(members, {"u": u, "v": v}, {})
+    >>> context = {"u": u, "v": v}
+    >>> outputs = ScaledFunction.batch_expressions(members, context, {})
     >>> f = pytensor.function([u, v], [outputs["a"], outputs["b"]], mode="FAST_COMPILE")
     >>> [float(y) for y in f(1.5, 4.0)]
     [3.0, 12.0]
 
+Nothing checks at run time that the batched outputs equal each member's own
+expression, so compare them yourself, as here and in your tests:
+
+.. doctest:: batchable
+
+    >>> g = pytensor.function(
+    ...     [u, v], [m.expression(context) for m in members], mode="FAST_COMPILE"
+    ... )
+    >>> [float(y) for y in g(1.5, 4.0)]
+    [3.0, 12.0]
+
 The contract and the graph rules that keep a family fast:
 
-- **Equal results:** each returned expression equals the member's own
-  ``expression(context)``. For a member you cannot batch (for example one with
-  a non-scalar input), return its own ``expression(context)`` and log the
+- **Equal results:** each returned expression has the value of the member's
+  own ``expression(context)``. For a member you cannot batch (for example one
+  with a non-scalar input), return its own ``expression(context)`` and log the
   reason at debug level.
+- **Every member:** return an entry for every member; the model raises a
+  ``RuntimeError`` naming any member that is missing.
 - **Fixed graph size:** build a fixed number of operations however many members
-  there are, and keep constant tables in numpy rather than in the graph.
+  there are. Build per-member constant tables as one numpy array from Python
+  values, rather than stacking many scalar constant tensors.
 - **One Split for the outputs:** read the per-member outputs with a single
-  ``pt.split``, not by indexing ``result[i]`` per member. The gradient of a
-  ``Split`` is one ``Join``, while per-member indexing adds one scattered
-  ``IncSubtensor`` per member to the gradient, which makes PyTensor's rewrites
-  slow on large models.
+  ``pt.split``, not by indexing ``result[i]`` per member; see
+  :doc:`explanation/batched_families` for why.
 
-Registration is unchanged: register the type as in `Registration and
-Discovery`_. The model finds batchable types itself, groups the instances that
-feed each likelihood distribution into one family, and builds each family
-once; an instance that depends on another member of its group is built on its
-own. To see which instances were batched and which were not, enable debug
-logging for pyhs3:
+The model finds batchable types by inheritance, wherever their instances
+appear among a model's functions, and needs no other registration. It groups
+the instances of each class that feed one root distribution into one family;
+a group needs at least two members, and an instance that depends on another
+member of its group is built on its own. To see which instances were built on
+their own instead of in a family, and why, enable debug logging for pyhs3:
 
 .. code-block:: python
 
     import logging
 
+    logging.basicConfig()
     logging.getLogger("pyhs3").setLevel(logging.DEBUG)
 
 Best Practices

@@ -141,7 +141,7 @@ def _workspace() -> pyhs3.Workspace:
 @pytest.fixture
 def unbatched(monkeypatch):
     """Build models without families, as the per-function reference."""
-    monkeypatch.setattr(model_module, "plan_function_families", lambda *_a, **_k: [])
+    monkeypatch.setattr(model_module, "plan_families", lambda *_a, **_k: [])
 
 
 def _model():

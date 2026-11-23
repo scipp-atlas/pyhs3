@@ -290,10 +290,11 @@ Located in ``src/pyhs3/networks.py`` (steps 1 to 3) and
 
 1. Parse all components (distributions, functions, parameters)
 2. Build dependency graph with rustworkx
-3. Plan function families: instances of a
-   :class:`~pyhs3.functions.BatchableFunction` type that feed the same root
-   distribution become one ``"family"`` node, and each member is rewired to
-   depend on it (``plan_function_families``; see
+3. Plan families: instances of a
+   :class:`~pyhs3.functions.BatchableFunction` or
+   :class:`~pyhs3.distributions.BatchableDistribution` type that feed the same
+   root distribution become one ``"family"`` node, and each member is rewired
+   to depend on it (``plan_families``; see
    :doc:`explanation/batched_families`). Each group's exclusion check runs on
    the graph as already rewired by earlier families, which is what keeps
    families of different types out of a cycle, so do not compute the ancestry
@@ -301,7 +302,8 @@ Located in ``src/pyhs3/networks.py`` (steps 1 to 3) and
 4. Topologically sort to determine evaluation order, keeping only the nodes the
    likelihood needs when the model has one
 5. Convert to PyTensor ops maintaining dependencies; a family node builds all
-   its members with one ``batch_expressions`` call
+   its members with one ``batch_expressions`` (functions) or
+   ``batch_log_expressions`` (distributions) call
 6. Compile for efficient evaluation
 
 Context Management

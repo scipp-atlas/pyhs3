@@ -64,12 +64,11 @@ def default_nll_mode(*, fuse: bool = False) -> Mode:
       workspaces there are thousands of them, and compiling them dominates
       the cold compile time.  Without fusion, elementwise operations are
       generic, so one compiled module serves many nodes.  Fused kernels
-      evaluate faster, though: on a 14-channel unbinned workspace (about 170
-      free parameters) the value and gradient compiled in 279 s without
-      fusion and 700 s with it, while one evaluation inside a fit took about
-      16.6 ms without fusion and 8.7 ms with it.  ``fuse=False`` therefore
-      favours the time to a first result, ``fuse=True`` long fitting
-      campaigns (with the compiled function cached on disk).
+      evaluate faster, though: on large workspaces fusion makes the first
+      compile several times slower and each evaluation faster.
+      ``fuse=False`` therefore favours the time to a first result,
+      ``fuse=True`` long fitting campaigns (with the compiled function cached
+      on disk).
     - The in-place rewrites add compile time without speeding up evaluation
       of a likelihood.
 

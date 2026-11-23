@@ -194,9 +194,9 @@ extra (``pip install pyhs3[jax]``):
 .. warning::
 
     The object ``pyhs3.jaxify`` returns is not jitted. Calling it directly
-    runs JAX eagerly, one operation at a time. On a large likelihood (about
-    23,000 operations) one such call took 1.25 s, against 1.4 ms once wrapped
-    in ``jax.jit``. Wrap it for any repeated evaluation, such as a fit or a
+    runs JAX eagerly, one operation at a time, which on a large likelihood is
+    orders of magnitude slower than the same call wrapped in ``jax.jit``.
+    Wrap it for any repeated evaluation, such as a fit or a
     scan, for example ``nll = jax.jit(lambda params: nll_graph(**fit_model.data, **params)[0])``.
     The single call above is fine without ``jax.jit``, since jitting would add
     compile time and save nothing. :meth:`~pyhs3.Model.compile_nll` compiles
@@ -229,12 +229,12 @@ compiling individual expressions yourself.
 reorders them into the compiled function's positional order before
 evaluating. In a loop that evaluates a small model many times, you avoid
 that cost by compiling the expression once and calling it with positional
-arrays yourself. `Issue #115 <https://github.com/scipp-atlas/pyhs3/issues/115>`_
-measured the effect on a small model: about 8.6 µs per evaluation with
-keyword dicts and Python floats, and about 0.8 µs once the call used
-positional ``numpy`` arrays and ``trust_input=True``. These are
-the issue's numbers for one model on one machine; time your own model before
-relying on them.
+arrays yourself. On a small model, where the evaluation itself is cheap, the
+per-call overhead of keyword dicts and Python floats can dominate; calling the
+compiled function with positional ``numpy`` arrays and ``trust_input=True``
+removes most of it (see `issue #115
+<https://github.com/scipp-atlas/pyhs3/issues/115>`_). Time your own model
+before relying on it.
 
 pyhs3 compiles its functions with ``trust_input=True``. PyTensor then skips
 input validation, so every input must already be a ``numpy`` array whose dtype

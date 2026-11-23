@@ -443,16 +443,36 @@ Without an analytical expression, pyhs3 uses 64-point Gauss-Legendre quadrature 
 
 For complete details, see :doc:`/normalization`.
 
-Batching Many Instances of a Function
--------------------------------------
+Batching Many Instances of a Component
+--------------------------------------
 
-A workspace can hold hundreds of instances of one function type, such as one
-:class:`~pyhs3.functions.InterpolationFunction` per sample and systematic. A
-function type that inherits :class:`~pyhs3.functions.BatchableFunction` lets
-the model build all instances that feed one likelihood channel with a single
-vectorised expression, which pyhs3 calls a *family*, so that compile time does
-not grow with their number. :doc:`explanation/batched_families` explains the
-design.
+A workspace can hold hundreds of instances of one function or distribution
+type, such as one :class:`~pyhs3.functions.InterpolationFunction` per sample
+and systematic, or one Gaussian constraint per nuisance parameter. A type that
+inherits :class:`~pyhs3.functions.BatchableFunction` or
+:class:`~pyhs3.distributions.BatchableDistribution` lets the model build all
+instances that feed one likelihood channel with a single vectorised
+expression, which pyhs3 calls a *family*, so that compile time does not grow
+with their number. :doc:`explanation/batched_families` explains the design.
+
+The model finds batchable types by inheritance, wherever their instances
+appear among a model's functions or distributions, and needs no other
+registration. It groups the instances of each class that feed one root
+distribution into one family; a group needs at least two members, and an
+instance that depends on another member of its group is built on its own. To
+see which instances were built on their own instead of in a family, and why,
+enable debug logging for pyhs3:
+
+.. code-block:: python
+
+    import logging
+
+    logging.basicConfig()
+    logging.getLogger("pyhs3").setLevel(logging.DEBUG)
+
+Functions
+~~~~~~~~~
+
 
 Besides ``_expression``, a batchable type implements the classmethod
 :meth:`~pyhs3.functions.BatchableFunction.batch_expressions`. It receives:
@@ -528,19 +548,80 @@ The contract and the graph rules that keep a family fast:
   ``pt.split``, not by indexing ``result[i]`` per member; see
   :doc:`explanation/batched_families` for why.
 
-The model finds batchable types by inheritance, wherever their instances
-appear among a model's functions, and needs no other registration. It groups
-the instances of each class that feed one root distribution into one family;
-a group needs at least two members, and an instance that depends on another
-member of its group is built on its own. To see which instances were built on
-their own instead of in a family, and why, enable debug logging for pyhs3:
+Distributions
+~~~~~~~~~~~~~
 
-.. code-block:: python
+A distribution type whose math is elementwise in every parameter needs no
+batching code of its own: inheriting
+:class:`~pyhs3.distributions.BatchableDistribution` is a promise that
+``likelihood``, ``log_likelihood`` and ``normalization_expression`` (if
+defined) still compute the right values when each parameter is replaced by a
+tensor of several members' values, broadcast against the observable. The
+inherited :meth:`~pyhs3.distributions.BatchableDistribution.batch_log_expressions`
+then evaluates the class's own ``log_expression`` once for the whole family,
+normalization included, and splits the result back into one log density per
+member, of shape ``(N, 1)`` for an observable with ``N`` events, or a scalar
+for a distribution of parameters only (a constraint).
 
-    import logging
+Formulas built from elementwise PyTensor operations (``+``, ``*``, ``pt.exp``,
+``pt.switch``, and so on) keep that promise. A formula that reduces over an
+axis, indexes or reshapes its inputs, or depends on Python-level control flow
+on parameter values does not, and its type should not inherit
+``BatchableDistribution``. Members are batched together when their fields name
+the same non-scalar inputs, such as one observable, and differ only in scalar
+parameters; a type used both as a shape and as a constraint forms one batch of
+each, and a member that matches no other is built on its own, logged at debug
+level. Because a member is one row of its batch, :meth:`~pyhs3.Model.pdf` of
+that member takes the inputs of every member batched with it.
 
-    logging.basicConfig()
-    logging.getLogger("pyhs3").setLevel(logging.DEBUG)
+No built-in distribution opts in. On large workspaces, batching
+its crystal-ball shapes made the JAX compile faster but the cold C compile
+slower, and batching its Gaussian constraints slowed C evaluation without any
+gain; :doc:`explanation/batched_families` gives the measurements and the
+reason. Before opting in a type of your own, measure the cold compile and the
+evaluation time with both backends on your workspaces.
+
+For example, an exponential decay with an analytic normalization:
+
+.. doctest:: batchable
+
+    >>> from pyhs3.context import Context
+    >>> from pyhs3.distributions import BatchableDistribution
+    >>> class DecayDist(BatchableDistribution):
+    ...     type: Literal["decay"] = "decay"
+    ...     x: str
+    ...     rate: str
+    ...     def likelihood(self, context):
+    ...         return pt.exp(-context[self.rate] * context[self.x])
+    ...     def log_likelihood(self, context):
+    ...         return -context[self.rate] * context[self.x]
+    ...     def normalization_expression(self, context, observable_name):
+    ...         rate = context[self.rate]
+    ...         return -pt.exp(-rate * context[observable_name]) / rate
+    ...
+    >>> x = pt.dvector("x")
+    >>> rates = {"r0": pt.dscalar("r0"), "r1": pt.dscalar("r1")}
+    >>> context = Context(
+    ...     parameters={"x": x, **rates},
+    ...     observables={"x": (pt.constant(0.0), pt.constant(10.0))},
+    ...     views={"x": x[:, None]},  # observables enter as (N, 1) views
+    ... )
+    >>> decays = [DecayDist(name=f"d{k}", x="x", rate=f"r{k}") for k in range(2)]
+    >>> batched = DecayDist.batch_log_expressions(decays, context)
+    >>> f = pytensor.function(
+    ...     [x, *rates.values()],
+    ...     [batched["d0"], batched["d1"], *(d.log_expression(context) for d in decays)],
+    ...     mode="FAST_COMPILE",
+    ... )
+    >>> b0, b1, own0, own1 = f(np.array([0.5, 2.0, 4.0]), 0.3, 1.2)
+    >>> b0.shape
+    (3, 1)
+    >>> bool(np.allclose(b0, own0) and np.allclose(b1, own1))
+    True
+
+As for functions, compare the batched log densities with each member's own
+``log_expression`` in your tests, as above: nothing checks the elementwise
+promise at run time.
 
 Best Practices
 --------------

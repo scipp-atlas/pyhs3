@@ -29,16 +29,17 @@ from pyhs3.compiled import CompiledNLL, compile_nll
 from pyhs3.context import Context
 from pyhs3.data import BinnedData
 from pyhs3.distributions import Distribution, Distributions, HistFactoryDistChannel
+from pyhs3.distributions.core import BatchableDistribution
 from pyhs3.domains import Domain
 from pyhs3.functions import Functions
-from pyhs3.functions.core import BatchableFunction
+from pyhs3.functions.core import BatchableFunction, Function
 from pyhs3.graph_viz import (
     DEFAULT_OP_PARAMS,
     ConstArrayMode,
     OpParamMode,
     render_graph,
 )
-from pyhs3.networks import build_dependency_graph, plan_function_families
+from pyhs3.networks import Family, build_dependency_graph, plan_families
 from pyhs3.parameter_points import ParameterSet
 from pyhs3.tensorutils import (
     create_bounded_tensor,
@@ -710,11 +711,18 @@ class Model:
             self.log_distributions[node_name] = log_expr
             return full
         log_expr = dist.log_expression(context)
-        self.log_distributions[node_name] = log_expr
-        full = cast(TensorVar, pt.exp(log_expr))
-        full.name = dist.name  # Evaluable.expression sets the name
+        full = self._register_log_expression(node_name, log_expr)
         if key is not None:
             self._shared_expressions[key] = (log_expr, full)
+        return full
+
+    def _register_log_expression(
+        self, node_name: str, log_expr: TensorVar
+    ) -> TensorVar:
+        """Record a distribution's log-space expression and return ``pt.exp`` of it."""
+        self.log_distributions[node_name] = log_expr
+        full = cast(TensorVar, pt.exp(log_expr))
+        full.name = node_name  # Evaluable.expression sets the name
         return full
 
     def _build_histfactory_channel_node(
@@ -872,17 +880,17 @@ class Model:
                 for dist in (self._likelihood.aux_distributions or [])
             )
 
-        # Batchable functions of one type that feed the same root distribution
-        # become one family node, built by a single batch_expressions call, so
-        # the graph does not grow with the number of such functions.  Families
-        # are scoped by root (the likelihood's distributions, else every
-        # distribution) so that one distribution's pdf only evaluates its own
-        # functions.
+        # Batchable functions or distributions of one type that feed the same
+        # root distribution become one family node, built by a single
+        # batch_expressions / batch_log_expressions call, so the graph does not
+        # grow with the number of such entities.  Families are scoped by root
+        # (the likelihood's distributions, else every distribution) so that one
+        # distribution's pdf only evaluates its own channel's family.
         families = {
             family.name: family
-            for family in plan_function_families(
+            for family in plan_families(
                 graph,
-                functions,
+                [*functions, *distributions],
                 likelihood_roots or [dist.name for dist in distributions],
             )
         }
@@ -969,25 +977,13 @@ class Model:
                     # its own expression.  A family is not itself a value, so
                     # it is not added to the context.
                     family = families[node_name]
-                    outputs = family.kind.batch_expressions(
-                        [
-                            cast(BatchableFunction, functions_by_name[name])
-                            for name in family.members
-                        ],
-                        context,
-                        functions_by_name,
-                    )
-                    missing = [name for name in family.members if name not in outputs]
-                    if missing:
-                        msg = (
-                            f"{family.kind.__name__}.batch_expressions returned no "
-                            f"expression for {missing}; it must return one per member."
+                    family_outputs.update(
+                        self._build_function_family(family, context, functions_by_name)
+                        if issubclass(family.kind, BatchableFunction)
+                        else self._build_distribution_family(
+                            family, context, distributions
                         )
-                        raise RuntimeError(msg)
-                    for name in family.members:
-                        # Named like Evaluable.expression names its result.
-                        outputs[name].name = name
-                        family_outputs[name] = outputs[name]
+                    )
                     progress_bar.advance(task)
                     continue
                 elif node_type == "function":
@@ -1002,8 +998,13 @@ class Model:
                     built = self._build_modifier_node(node_name, modifiers_map, context)
                     self.modifiers[node_name] = built
                 else:  # node_type == "distribution"
-                    built = self._build_distribution_node(
-                        node_name, distributions, context
+                    # A family member's log-space expression is already
+                    # recorded by _build_distribution_family.
+                    family_built = family_outputs.pop(node_name, None)
+                    built = (
+                        self._build_distribution_node(node_name, distributions, context)
+                        if family_built is None
+                        else family_built
                     )
                     self.distributions[node_name] = built
 
@@ -1012,6 +1013,83 @@ class Model:
                 context.add_parameter(node_name, built)
 
                 progress_bar.advance(task)
+
+    @staticmethod
+    def _check_family_outputs(
+        family: Family, outputs: Mapping[str, TensorVar], members: Sequence[str]
+    ) -> None:
+        """Raise if a family's batch call left out any of ``members``."""
+        missing = [name for name in members if name not in outputs]
+        if missing:
+            msg = (
+                f"{family.kind.__name__} family returned no expression for "
+                f"{missing}; it must return one per member."
+            )
+            raise RuntimeError(msg)
+
+    def _build_function_family(
+        self,
+        family: Family,
+        context: Context,
+        functions_by_name: Mapping[str, Function],
+    ) -> dict[str, TensorVar]:
+        """Build a function family with one ``batch_expressions`` call."""
+        outputs = cast(type[BatchableFunction], family.kind).batch_expressions(
+            [cast(BatchableFunction, functions_by_name[n]) for n in family.members],
+            context,
+            functions_by_name,
+        )
+        self._check_family_outputs(family, outputs, family.members)
+        for name in family.members:
+            # Named like Evaluable.expression names its result.
+            outputs[name].name = name
+        return {name: outputs[name] for name in family.members}
+
+    def _build_distribution_family(
+        self, family: Family, context: Context, distributions: Distributions
+    ) -> dict[str, TensorVar]:
+        """Build a distribution family with one ``batch_log_expressions`` call.
+
+        Structural sharing applies as in :meth:`_build_generic_distribution_node`:
+        a member identical to an already built distribution, or to an earlier
+        member, reuses that distribution's tensors (and name) instead of
+        becoming another row of the batch.  Records each member's log-space
+        expression and returns the probability-space ones (``pt.exp`` of it).
+        """
+        built: dict[str, TensorVar] = {}
+        first_with_key: dict[str, str] = {}
+        aliases: dict[str, str] = {}
+        rows: list[BatchableDistribution] = []
+        keys: dict[str, str | None] = {}
+        for name in family.members:
+            dist = cast(BatchableDistribution, distributions[name])
+            key = dist.structural_key() if dist.share_identical_expressions else None
+            keys[name] = key
+            if key is not None and key in self._shared_expressions:
+                log_expr, built[name] = self._shared_expressions[key]
+                self.log_distributions[name] = log_expr
+            elif key is not None and key in first_with_key:
+                aliases[name] = first_with_key[key]
+            else:
+                if key is not None:
+                    first_with_key[key] = name
+                rows.append(dist)
+        if rows:
+            outputs = cast(
+                type[BatchableDistribution], family.kind
+            ).batch_log_expressions(rows, context)
+            self._check_family_outputs(family, outputs, [d.name for d in rows])
+            for dist in rows:
+                log_expr = outputs[dist.name]
+                log_expr.name = dist.name
+                built[dist.name] = self._register_log_expression(dist.name, log_expr)
+                key = keys[dist.name]
+                if key is not None:
+                    self._shared_expressions[key] = (log_expr, built[dist.name])
+        for name, first in aliases.items():
+            self.log_distributions[name] = self.log_distributions[first]
+            built[name] = built[first]
+        return built
 
     def _compile_expression(
         self,

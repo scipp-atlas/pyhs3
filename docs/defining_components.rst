@@ -205,7 +205,8 @@ Registration and Discovery
 
 **Option 1: Manual Registration**
 
-Add your components to the appropriate registry:
+Add your components to the appropriate registry, keyed by the value of the
+class's ``type`` field:
 
 .. code-block:: python
 
@@ -217,6 +218,12 @@ Add your components to the appropriate registry:
     from pyhs3.functions import registered_functions
 
     registered_functions["weighted_product"] = WeightedProductFunction
+
+A workspace looks each entry's ``type`` up in these registries when it
+validates, so register your classes before you load a workspace that uses them.
+An unregistered ``type`` fails validation with a message that lists the
+registered types. Instances you construct in Python skip the lookup, so
+``Distributions([CustomGaussianDist(...)])`` works without registering.
 
 **Option 2: Plugin System** (if available)
 

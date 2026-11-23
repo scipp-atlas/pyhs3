@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import Field
+from pydantic import Field, SerializeAsAny
 
 # Import modules instead of individual classes
-from pyhs3.collections import NamedCollection
+from pyhs3.collections import NamedCollection, dispatch_on_type
 from pyhs3.distributions import (
     basic,
     cms,
@@ -104,36 +104,12 @@ registered_distributions: dict[str, type[Distribution]] = {
     **cms.distributions,
 }
 
-# Type alias for all distribution types using discriminated union
+# Any registered distribution type, looked up by ``type`` when validated; see
+# :func:`~pyhs3.collections.dispatch_on_type`. SerializeAsAny dumps each item
+# with its own class's fields rather than only the base class's.
 DistributionType = Annotated[
-    # Basic distributions
-    basic.GaussianDist
-    | basic.UniformDist
-    | basic.PoissonDist
-    | basic.ExponentialDist
-    | basic.LogNormalDist
-    | basic.GenNormalDist
-    | basic.LandauDist
-    # Composite distributions
-    | composite.MixtureDist
-    | composite.ProductDist
-    # HistFactory distributions
-    | histfactory.HistFactoryDistChannel
-    # Mathematical distributions
-    | mathematical.GenericDist
-    | mathematical.PolynomialDist
-    | mathematical.BernsteinPolyDist
-    # Physics distributions
-    | physics.CrystalBallDist
-    | physics.AsymmetricCrystalBallDist
-    | physics.ArgusDist
-    | physics.RelativisticBreitWignerDist
-    # CMS distributions
-    | cms.FastVerticalInterpHistPdf2Dist
-    | cms.GGZZBackgroundDist
-    | cms.QQZZBackgroundDist
-    | cms.FastVerticalInterpHistPdf2D2Dist,
-    Field(discriminator="type"),
+    SerializeAsAny[Distribution],
+    dispatch_on_type(Distribution, registered_distributions),
 ]
 
 

@@ -5,7 +5,7 @@ Building many functions of one type as a family
 ===============================================
 
 Large workspaces repeat the same kind of function many times. A combined
-measurement with fourteen channels can hold over four hundred
+measurement over many channels can hold hundreds of
 :class:`~pyhs3.functions.InterpolationFunction` instances, one per sample and
 systematic, each with its own nominal value, variations, and nuisance
 parameters. This page explains how pyhs3 builds such functions as one
@@ -18,8 +18,8 @@ Why one subgraph per function is slow
 
 :class:`~pyhs3.Model` turns a workspace into a PyTensor graph by walking the
 workspace's dependency graph in topological order and building each HS3 object
-into a shared context. Built one at a time, four hundred interpolation
-functions become four hundred subgraphs that differ only in their constants.
+into a shared context. Built one at a time, hundreds of interpolation
+functions become hundreds of subgraphs that differ only in their constants.
 The cost does not come from evaluating them: PyTensor rewrites and compiles
 every node of the graph, so a graph that grows with the number of functions
 compiles for minutes.
@@ -116,36 +116,9 @@ rewrites:
 Effect on a large workspace
 ---------------------------
 
-On a fourteen-channel unbinned workspace with about 170 free parameters and
-420 interpolation functions, the C and JAX builds with families agreed with
-the JAX build without families to 2e-13 in the negative log-likelihood and to
-3e-13 (absolute) in every gradient component, compared parameter by
-parameter, at the start point and at three displaced points:
-
-.. list-table::
-   :header-rows: 1
-
-   * -
-     - without families
-     - with families
-   * - ``log_prob`` nodes (after merging duplicates)
-     - 16,593
-     - 9,316
-   * - model build
-     - 7.3 s
-     - 3.9 s
-   * - ``compile_nll()`` (C, cold compile)
-     - 266 s
-     - 180 s
-   * - one ``value_and_grad`` (C)
-     - 15.7 ms
-     - 8.5 ms
-   * - ``compile_nll(backend="jax")``
-     - 88 s
-     - 40 s
-   * - one ``value_and_grad`` (JAX)
-     - 1.5 ms
-     - 1.1 ms
-
-A single family shared across all channels would save little more: 178 s for
-the C compile and 36 s for the JAX compile, against 180 s and 40 s per channel.
+On large workspaces dominated by interpolation functions, families shrink the
+graph that PyTensor rewrites and compiles substantially. That shortens the
+model build, the compile, and each evaluation, on both the C and the JAX
+backend, while the likelihood and its gradient agree with the per-function
+build to rounding. Scoping families per channel instead of sharing one family
+across the whole model costs little extra compile time.

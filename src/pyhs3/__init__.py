@@ -8,12 +8,9 @@ from __future__ import annotations
 
 from pyhs3._version import version as __version__
 from pyhs3.compiled import CompiledNLL
-from pyhs3.logging import setup
 from pyhs3.model import Model
 from pyhs3.transpile import JaxifiedGraph, jaxify
 from pyhs3.workspace import Workspace
-
-setup()
 
 __all__ = [
     "CompiledNLL",

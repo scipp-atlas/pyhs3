@@ -290,10 +290,11 @@ Located in ``src/pyhs3/networks.py`` (steps 1 to 3) and
 
 1. Parse all components (distributions, functions, parameters)
 2. Build dependency graph with rustworkx
-3. Plan function families: instances of a
-   :class:`~pyhs3.functions.BatchableFunction` type that feed the same root
-   distribution become one ``"family"`` node, and each member is rewired to
-   depend on it (``plan_function_families``; see
+3. Plan families: instances of a
+   :class:`~pyhs3.functions.BatchableFunction` or
+   :class:`~pyhs3.distributions.BatchableDistribution` type that feed the same
+   root distribution become one ``"family"`` node, and each member is rewired
+   to depend on it (``plan_families``; see
    :doc:`explanation/batched_families`). Each group's exclusion check runs on
    the graph as already rewired by earlier families, which is what keeps
    families of different types out of a cycle, so do not compute the ancestry
@@ -301,7 +302,8 @@ Located in ``src/pyhs3/networks.py`` (steps 1 to 3) and
 4. Topologically sort to determine evaluation order, keeping only the nodes the
    likelihood needs when the model has one
 5. Convert to PyTensor ops maintaining dependencies; a family node builds all
-   its members with one ``batch_expressions`` call
+   its members with one ``batch_expressions`` (functions) or
+   ``batch_log_expressions`` (distributions) call
 6. Compile for efficient evaluation
 
 Context Management
@@ -437,9 +439,11 @@ Adding New Functions
    many instances can be evaluated together (see :doc:`defining_components`)
 2. Implement the ``_expression`` method (and ``batch_expressions`` for a
    batchable type)
-3. Add the class to the ``FunctionType`` union in
-   ``src/pyhs3/functions/__init__.py`` and to its module's ``functions``
-   registry
+3. Add the class to its module's ``functions`` registry. Workspaces look each
+   entry's ``type`` up in ``registered_functions`` in
+   ``src/pyhs3/functions/__init__.py``, which merges only the modules it
+   imports, so for a new module also import it there and merge its
+   ``functions`` into ``registered_functions``
 4. Write unit tests
 5. Update documentation
 

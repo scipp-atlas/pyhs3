@@ -10,9 +10,9 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from pydantic import Field
+from pydantic import Field, SerializeAsAny
 
-from pyhs3.collections import NamedCollection
+from pyhs3.collections import NamedCollection, dispatch_on_type
 from pyhs3.exceptions import custom_error_msg
 from pyhs3.functions import core, standard
 from pyhs3.functions.core import Function
@@ -35,16 +35,11 @@ registered_functions: dict[str, type[Function]] = {
     **standard.functions,
 }
 
-# Type alias for all function types using discriminated union
+# Any registered function type, looked up by ``type`` when validated; see
+# :func:`~pyhs3.collections.dispatch_on_type`. SerializeAsAny dumps each item
+# with its own class's fields rather than only the base class's.
 FunctionType = Annotated[
-    SumFunction
-    | ProductFunction
-    | GenericFunction
-    | InterpolationFunction
-    | ProcessNormalizationFunction
-    | CMSAsymPowFunction
-    | RooRecursiveFractionFunction,
-    Field(discriminator="type"),
+    SerializeAsAny[Function], dispatch_on_type(Function, registered_functions)
 ]
 
 

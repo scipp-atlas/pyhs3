@@ -99,6 +99,7 @@ Distributions
 
    Distributions
    Distribution
+   BatchableDistribution
    LogProbTerms
    GaussianDist
    UniformDist

@@ -130,7 +130,7 @@ parameter, at the start point and at three displaced points:
      - with families
    * - ``log_prob`` nodes (after merging duplicates)
      - 16,593
-     - 8,896
+     - 9,316
    * - model build
      - 7.3 s
      - 3.9 s
@@ -139,13 +139,13 @@ parameter, at the start point and at three displaced points:
      - 180 s
    * - one ``value_and_grad`` (C)
      - 15.7 ms
-     - 9.3 ms
+     - 8.5 ms
    * - ``compile_nll(backend="jax")``
      - 88 s
      - 40 s
    * - one ``value_and_grad`` (JAX)
      - 1.5 ms
-     - 1.3 ms
+     - 1.1 ms
 
 A single family shared across all channels would save little more: 178 s for
 the C compile and 36 s for the JAX compile, against 180 s and 40 s per channel.

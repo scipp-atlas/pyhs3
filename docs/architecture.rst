@@ -439,9 +439,11 @@ Adding New Functions
    many instances can be evaluated together (see :doc:`defining_components`)
 2. Implement the ``_expression`` method (and ``batch_expressions`` for a
    batchable type)
-3. Add the class to the ``FunctionType`` union in
-   ``src/pyhs3/functions/__init__.py`` and to its module's ``functions``
-   registry
+3. Add the class to its module's ``functions`` registry. Workspaces look each
+   entry's ``type`` up in ``registered_functions`` in
+   ``src/pyhs3/functions/__init__.py``, which merges only the modules it
+   imports, so for a new module also import it there and merge its
+   ``functions`` into ``registered_functions``
 4. Write unit tests
 5. Update documentation
 

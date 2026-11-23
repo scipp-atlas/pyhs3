@@ -446,7 +446,10 @@ class Model:
             if isinstance(datum, str):
                 continue
             entries = getattr(datum, "entries", None)
-            dist_name = dist_obj if isinstance(dist_obj, str) else dist_obj.name
+            # zip() joins str and Distribution to object for mypy; narrow on the class.
+            dist_name = (
+                dist_obj.name if isinstance(dist_obj, Distribution) else str(dist_obj)
+            )
 
             if entries is None:
                 # HFDC: log_prob uses the Poisson-only term here; deduplicated
@@ -587,7 +590,9 @@ class Model:
         ):
             if isinstance(datum, str) or not isinstance(datum, BinnedData):
                 continue
-            actual_dist_name = dist_obj if isinstance(dist_obj, str) else dist_obj.name
+            actual_dist_name = (
+                dist_obj.name if isinstance(dist_obj, Distribution) else str(dist_obj)
+            )
             if actual_dist_name == dist_name:
                 return pt.constant(
                     np.asarray(datum.contents, dtype=np.float64), name=node_name

@@ -205,18 +205,35 @@ Registration and Discovery
 
 **Option 1: Manual Registration**
 
-Add your components to the appropriate registry:
+Add your components to the appropriate registry, keyed by the value of the
+class's ``type`` field: ``pyhs3.functions.registered_functions`` for functions,
+``pyhs3.distributions.registered_distributions`` for distributions. A workspace
+that names that ``type`` then loads your class:
 
-.. code-block:: python
+.. doctest:: registration
 
-    # For distributions
-    from pyhs3.distributions import registered_distributions
+    >>> from typing import Literal
+    >>> import pyhs3
+    >>> from pyhs3.functions import Function, registered_functions
+    >>> class DoubledFunction(Function):
+    ...     type: Literal["doubled"] = "doubled"
+    ...     x: str
+    ...     def _expression(self, context):
+    ...         return 2.0 * context[self.x]
+    ...
+    >>> registered_functions["doubled"] = DoubledFunction
+    >>> ws = pyhs3.Workspace(
+    ...     metadata={"hs3_version": "0.2"},
+    ...     functions=[{"name": "twice_mu", "type": "doubled", "x": "mu"}],
+    ... )
+    >>> type(ws.functions["twice_mu"]).__name__
+    'DoubledFunction'
 
-    registered_distributions["custom_gaussian"] = CustomGaussianDist
-    # For functions
-    from pyhs3.functions import registered_functions
-
-    registered_functions["weighted_product"] = WeightedProductFunction
+A workspace looks each entry's ``type`` up in these registries when it
+validates, so register your classes before you load a workspace that uses them.
+An unregistered ``type`` fails validation with a message that lists the
+registered types. Instances you construct in Python skip the lookup, so
+``Distributions([CustomGaussianDist(...)])`` works without registering.
 
 **Option 2: Plugin System** (if available)
 

@@ -1,0 +1,190 @@
+.. diataxis: explanation
+.. status: implemented
+
+Building many functions or distributions of one type as a family
+================================================================
+
+Large workspaces repeat the same kind of component many times. A combined
+measurement over many channels can hold hundreds of
+:class:`~pyhs3.functions.InterpolationFunction` instances, one per sample and
+systematic, several crystal-ball signal shapes per channel, and a Gaussian
+constraint per nuisance parameter. This page explains how pyhs3 builds such
+components as one vectorised computation per likelihood channel, and why.
+:class:`~pyhs3.Model` does this for every batchable function and distribution
+type without any option to set or turn off, and the likelihood it builds has
+the same value to rounding. Among pyhs3's own types, interpolation functions
+are batchable; no built-in distribution is, for the reasons given in `Why no
+built-in distribution opts in`_.
+
+Why one subgraph per function is slow
+-------------------------------------
+
+:class:`~pyhs3.Model` turns a workspace into a PyTensor graph by walking the
+workspace's dependency graph in topological order and building each HS3 object
+into a shared context. Built one at a time, hundreds of interpolation
+functions become hundreds of subgraphs that differ only in their constants.
+The cost does not come from evaluating them: PyTensor rewrites and compiles
+every node of the graph, so a graph that grows with the number of functions
+compiles for minutes.
+
+PyTensor does not merge such subgraphs into a vectorised one itself: it has
+no rewrite that turns many scalar computations of the same form into one
+computation over a vector (see `pytensor discussion #1984
+<https://github.com/pymc-devs/pytensor/discussions/1984>`_).
+
+Families in the dependency graph
+--------------------------------
+
+The dependency graph already records every function's type and inputs before
+anything is built, so pyhs3 groups functions there rather than rediscovering
+the structure from the built graph. After building the dependency graph,
+``pyhs3.networks.plan_families`` groups the instances of each
+:class:`~pyhs3.functions.BatchableFunction` and
+:class:`~pyhs3.distributions.BatchableDistribution` type by the first *root*
+distribution that depends on them: the likelihood's distributions and
+auxiliary distributions, in order, or every distribution when the model has no
+likelihood. Instances are grouped by their exact class, and each group of two
+or more becomes one *family* node: its inputs are the union of its members'
+inputs, and every member is rewired to depend on the family alone. When the
+model's walk reaches the family node, one call to
+:meth:`~pyhs3.functions.BatchableFunction.batch_expressions` (for functions)
+or :meth:`~pyhs3.distributions.BatchableDistribution.batch_log_expressions`
+(for distributions) builds all members, and each member node takes its own
+expression from the result, named after the member.
+
+pyhf follows the same pattern for modifiers. Each modifier type pairs a builder,
+which collects the data of every instance into arrays, with a combined applier
+that evaluates all instances at once (for example ``histosys_combined``). In
+pyhs3, the planner groups the instances and the batchable type supplies the
+combined evaluation.
+
+Families are scoped per root distribution rather than shared across the whole
+model, so that :meth:`~pyhs3.Model.pdf` of one distribution evaluates its own
+channel's family. A function that several channels share joins the family of
+the first channel that uses it, which the other channels' graphs then include.
+A function that depends on another member of its group stays out of the
+family, since the family would otherwise depend on itself; for the same
+reason each group is checked against the graph as already rewired by earlier
+families, which keeps families of different types from depending on each other
+in a cycle.
+
+Families change the structure of the graph, not its inputs: the same
+parameters stay free. :attr:`~pyhs3.compiled.CompiledNLL.parameter_names` orders
+them by graph traversal, as always, so index a parameter vector through those
+names rather than by position.
+
+How the interpolation family evaluates
+--------------------------------------
+
+For interpolation functions, every entry of every member becomes one element
+of a flat entry axis:
+
+- Each entry's parameter is gathered from one stacked vector. An entry written
+  as a :class:`~pyhs3.functions.ProductFunction` of one free parameter and
+  constants shares that parameter's element, scaled by the product of the
+  constants; any other scalar entry is its own element.
+- Entries are sorted by interpolation code, so each code's contributions are
+  one contiguous slice evaluated once, and the slices are concatenated. Every
+  code from 0 to 6 is batched, using the same per-code formula as the
+  per-function path.
+- Contributions are padded into a table of shape ``(F, E_max)``, with ``F``
+  members and ``E_max`` the largest number of entries in one member, and
+  reduced over the entry axis: a product for multiplicative members (codes 1,
+  5, 6) and a sum for additive ones (codes 0, 2, 3, 4), each reading only its
+  own members' entries. ``positiveDefinite`` is applied per member.
+- The ``(F,)`` result is split into one scalar per member with a single
+  ``Split``.
+
+Because the family uses the same formulas but reassociates sums and products,
+it agrees with the per-function path to rounding rather than bit for bit.
+Whether a nominal value or variation is a constant, and so becomes part of a
+numpy table, is read from the built tensors. A ``ProductFunction`` entry, in
+contrast, is re-expressed from its factors rather than read from its built
+tensor, so the family has to change together with ``ProductFunction``.
+
+A member is built with its own expression, and logged at debug level, if any
+of its inputs is not a scalar or if its entries mix additive and
+multiplicative codes. A model built with batched (``kind=pt.vector``)
+parameters therefore gets no interpolation families.
+
+Two graph patterns matter for compile time, both found by profiling PyTensor's
+rewrites:
+
+- Indexing the result once per member (``result[i]``) puts one scattered
+  ``IncSubtensor`` per member into the gradient. PyTensor's
+  ``pre_local_IncSubtensor_serialize`` rewrite then spends most of the rewrite
+  time combining them. The gradient of a single ``Split`` is one ``Join``.
+- Assembling the contributions with ``set_subtensor`` on a zero vector adds
+  more ``IncSubtensor`` chains; sorting entries by code and concatenating
+  avoids them.
+
+Effect on a large workspace
+---------------------------
+
+On large workspaces dominated by interpolation functions, families shrink the
+graph that PyTensor rewrites and compiles substantially. That shortens the
+model build, the compile, and each evaluation, on both the C and the JAX
+backend, while the likelihood and its gradient agree with the per-function
+build to rounding. Scoping families per channel instead of sharing one family
+across the whole model costs little extra compile time.
+
+How distribution families evaluate
+----------------------------------
+
+A distribution family reuses each distribution's own formulas instead of a
+batched reimplementation. Inheriting
+:class:`~pyhs3.distributions.BatchableDistribution` asserts that a type's
+likelihood, log-likelihood and analytic normalization are elementwise in their
+parameters. The family replaces every parameter that differs between members
+by a stack of the members' values and evaluates one member's
+``log_expression`` on those stacks.
+
+The stack goes onto the parameter-batch axis that pyhs3's shapes already
+carry. An observable enters a distribution as an ``(N, 1)`` view, whose last
+axis batches parameter points and has length 1 for scalar parameters. With the
+members stacked to shape ``(1, K)`` there, the log density comes out
+``(N, K)``, and splitting along that axis gives each member its own ``(N, 1)``
+result. Normalization needs no special handling: an analytic antiderivative is
+elementwise anyway, and Gauss-Legendre quadrature substitutes its nodes for the
+observable and sums over axis 0, which the member axis leaves alone. A stack
+along a new leading axis would collide with that quadrature axis instead. For
+constraints on parameters, which have no observable, the stack is simply
+``(K,)``.
+
+Within a family, members are batched together only when their fields name
+the same non-scalar inputs: a type used both as a shape on an observable and as
+a constraint on a parameter forms one batch of shapes and one of constraints.
+A member that no other member matches, for example one with a batched
+(``kind=pt.vector``) parameter, is built on its own and logged at debug level.
+Two distributions that are identical in every field but their name still share
+one expression, as without families; only the distinct ones become rows of a
+batch.
+
+Because a member's log density is one row of its batch's computation,
+:meth:`~pyhs3.Model.pdf` of that member takes the inputs of every member
+batched with it, and :meth:`~pyhs3.Model.pars` lists them.
+
+Why no built-in distribution opts in
+------------------------------------
+
+The distribution formulas in pyhs3 are elementwise, so built-in types could
+opt in, but on large workspaces batching them traded one backend against the
+other rather than helping both, while the likelihood and its gradient stayed
+the same to rounding.
+
+Batching crystal-ball shapes makes the JAX compile faster, because XLA's work
+grows with the size of the graph, but makes the cold C compile slower. The C
+backend compiles one module per distinct operation and input type. As scalars,
+a crystal ball's parameter-only expressions (its tail constants and
+normalization terms) reuse modules that the rest of the graph already
+compiles; stacked into a ``(1, K)`` vector they need a new set of their own,
+roughly one fixed cost per distribution type and family size. Interpolation
+families do not have this cost, because without them every function's stack
+of entries already had its own length; batching removed that variety.
+Gaussian constraints are a handful of cheap scalar operations each, so
+stacking and splitting them costs more evaluation time on C than it saves,
+with no gain on JAX.
+
+A distribution type of your own can still opt in (see
+:doc:`/defining_components`); measure the cold compile and the evaluation
+time on both backends for your workspaces before you do.

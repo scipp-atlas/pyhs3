@@ -228,3 +228,38 @@ combined with ``fuse=True``. With PyTensor's ``config.linker`` set to
 Numba, which does not finish compiling large workspaces; with ``"cvm"`` it is
 the same as ``mode="CVM"``. ``gradient=False`` compiles the value only, for
 minimizers that do not use a gradient.
+
+Fix a C compile error with Apple's clang
+----------------------------------------
+
+On macOS, PyTensor's C backend uses whichever ``clang++`` it finds:
+``pytensor.config.cxx`` shows which one. conda-forge's ``pytensor`` package
+installs its own ``clang++``, which an activated conda or pixi environment
+provides; otherwise, for example after ``pip install pyhs3``, it is Apple's
+``/usr/bin/clang++``. For a large workspace, ``compile_nll`` with Apple's
+compiler can stop with:
+
+.. code-block:: text
+
+    fatal error: bracket nesting level exceeded maximum of 256
+
+The gradient of a parameter that many terms depend on sums all their
+contributions in one operation, and the C code PyTensor generates for a very
+wide sum nests deeper than Apple clang's default limit. Raise the limit before
+the first compile, either in the environment:
+
+.. code-block:: bash
+
+    PYTENSOR_FLAGS="gcc__cxxflags=-fbracket-depth=4096" python your_fit.py
+
+or in Python, before calling ``compile_nll``:
+
+.. code-block:: python
+
+    import pytensor
+
+    pytensor.config.gcc__cxxflags = "-fbracket-depth=4096"
+
+Alternatively, run in an activated conda or pixi environment with
+conda-forge's ``pytensor``, whose ``clang++`` compiles these workspaces as is,
+or use ``backend="jax"``, which does not go through the C compiler.

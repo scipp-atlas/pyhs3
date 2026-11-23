@@ -431,7 +431,7 @@ class MixtureDist(Distribution):
         log(Σᵢcᵢfᵢ(xⱼ)) is evaluated as logsumexp(log cᵢ + log fᵢ(xⱼ)) using
         each summand's own log-space expression (``log_expressions``) rather
         than ``pt.log`` of the probability-space sum
-        (:attr:`_cached_unnorm_expr`).  fᵢ(xⱼ) can underflow to 0.0 in
+        (``_cached_unnorm_expr``).  fᵢ(xⱼ) can underflow to 0.0 in
         float64 for xⱼ far in a component's tail, which would make every
         cᵢfᵢ(xⱼ) — and hence their sum — exactly 0.0 and ``pt.log`` of it
         ``-inf``, even though log fᵢ(xⱼ) itself is finite.  Building the sum
@@ -439,11 +439,11 @@ class MixtureDist(Distribution):
         terms are stacked on a new leading axis (shape ``(n_summands, N, M)``
         for ``N`` events and parameter-batch size ``M``, matching the
         per-event shape documented on :class:`LogProbTerms`) and reduced with
-        :func:`_stable_logsumexp` over that axis, giving the ``(N, M)``
-        per-event term.  :func:`_stable_logsumexp` is used instead of
+        ``_stable_logsumexp`` over that axis, giving the ``(N, M)``
+        per-event term.  ``_stable_logsumexp`` is used instead of
         ``pt.logsumexp`` because the latter's stability is an emergent
         property of a graph rewrite that only runs under ``FAST_RUN`` (see
-        :func:`_stable_logsumexp`'s docstring and
+        ``_stable_logsumexp``'s docstring and
         https://github.com/scipp-atlas/pyhs3/issues/277).
 
         Coefficients may be negative: HS3 defines the mixture as Σᵢcᵢfᵢ

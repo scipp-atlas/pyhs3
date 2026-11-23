@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 from abc import ABC
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any, TypeVar
 
-from pydantic import BaseModel, Field, PrivateAttr, RootModel
+from pydantic import (
+    BaseModel,
+    Field,
+    PrivateAttr,
+    RootModel,
+    ValidationInfo,
+    ValidatorFunctionWrapHandler,
+    WrapValidator,
+)
+from pydantic_core import PydanticCustomError
 
 
 class NamedModel(BaseModel, ABC):
@@ -16,6 +25,46 @@ class NamedModel(BaseModel, ABC):
 
 
 T = TypeVar("T", bound=NamedModel)
+
+
+def dispatch_on_type(
+    base: type[BaseModel], registry: Mapping[str, type[BaseModel]]
+) -> WrapValidator:
+    """Validate a mapping as the class that ``registry`` names for its ``type``.
+
+    The registry is read at validation time, so a class added to it after
+    import is loadable from JSON without redefining any type alias. Instances of
+    ``base`` pass through unchanged.
+
+    An unknown ``type`` raises a ``union_tag_invalid`` error carrying ``tag``
+    and ``expected_tags``, the same error a pydantic discriminated union raises,
+    so :func:`~pyhs3.exceptions.custom_error_msg` can reword it.
+
+    The selected class is validated with the caller's validation ``context``.
+    Pydantic does not tell validators whether the caller asked for
+    ``strict=True``, so the selected class validates in its own configured
+    mode.
+    """
+
+    def _validator(
+        value: Any, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
+    ) -> Any:
+        if isinstance(value, base):
+            return value
+        if isinstance(value, Mapping):
+            tag = value.get("type")
+            cls = registry.get(tag) if isinstance(tag, str) else None
+            if cls is None:
+                error_type = "union_tag_invalid"
+                raise PydanticCustomError(
+                    error_type,
+                    "Input tag '{tag}' found using 'type' does not match any of the expected tags: {expected_tags}",
+                    {"tag": tag, "expected_tags": ", ".join(map(repr, registry))},
+                )
+            return cls.model_validate(value, context=info.context)
+        return handler(value)
+
+    return WrapValidator(_validator)
 
 
 class NamedCollection(RootModel[list[T]]):

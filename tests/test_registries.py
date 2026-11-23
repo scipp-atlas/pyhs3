@@ -9,7 +9,7 @@ from typing import Literal
 import numpy as np
 import pytensor.tensor as pt
 import pytest
-from pydantic import ValidationError
+from pydantic import ValidationError, ValidationInfo, field_validator
 
 import pyhs3
 from pyhs3.distributions import (
@@ -40,6 +40,18 @@ class FlatDist(Distribution):
 
     def likelihood(self, context):
         return pt.ones_like(context[self.x])
+
+
+class ContextAwareFunction(ScaledFunction):
+    """Records the validation context its field validator receives."""
+
+    type: Literal["context_aware"] = "context_aware"
+
+    @field_validator("factor")
+    @classmethod
+    def _record_context(cls, factor: float, info: ValidationInfo) -> float:
+        cls.last_context = info.context
+        return factor
 
 
 @pytest.fixture
@@ -150,3 +162,11 @@ class TestInstances:
     def test_a_non_mapping_is_rejected(self):
         with pytest.raises(ValidationError, match="Distribution"):
             Distributions(["g"])
+
+    def test_validation_context_reaches_the_registered_class(self, monkeypatch):
+        monkeypatch.setitem(registered_functions, "context_aware", ContextAwareFunction)
+        Functions.model_validate(
+            [{"name": "f", "type": "context_aware", "x": "a", "factor": 1.0}],
+            context={"origin": "test"},
+        )
+        assert ContextAwareFunction.last_context == {"origin": "test"}

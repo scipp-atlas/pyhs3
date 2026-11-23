@@ -11,6 +11,7 @@ from pydantic import (
     Field,
     PrivateAttr,
     RootModel,
+    ValidationInfo,
     ValidatorFunctionWrapHandler,
     WrapValidator,
 )
@@ -38,9 +39,16 @@ def dispatch_on_type(
     An unknown ``type`` raises a ``union_tag_invalid`` error carrying ``tag``
     and ``expected_tags``, the same error a pydantic discriminated union raises,
     so :func:`~pyhs3.exceptions.custom_error_msg` can reword it.
+
+    The selected class is validated with the caller's validation ``context``.
+    Pydantic does not tell validators whether the caller asked for
+    ``strict=True``, so the selected class validates in its own configured
+    mode.
     """
 
-    def _validator(value: Any, handler: ValidatorFunctionWrapHandler) -> Any:
+    def _validator(
+        value: Any, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
+    ) -> Any:
         if isinstance(value, base):
             return value
         if isinstance(value, Mapping):
@@ -53,7 +61,7 @@ def dispatch_on_type(
                     "Input tag '{tag}' found using 'type' does not match any of the expected tags: {expected_tags}",
                     {"tag": tag, "expected_tags": ", ".join(map(repr, registry))},
                 )
-            return cls.model_validate(value)
+            return cls.model_validate(value, context=info.context)
         return handler(value)
 
     return WrapValidator(_validator)

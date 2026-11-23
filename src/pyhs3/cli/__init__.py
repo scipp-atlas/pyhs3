@@ -13,6 +13,7 @@ from __future__ import annotations
 import typer
 
 from pyhs3.cli import graph, infer, plot, spec
+from pyhs3.logging import setup
 
 app = typer.Typer(
     name="pyhs3",
@@ -21,6 +22,15 @@ app = typer.Typer(
     add_completion=False,
     rich_markup_mode="markdown",
 )
+
+
+@app.callback()
+def main() -> None:
+    """Command-line tools for HS3 workspaces: validate, inspect, and evaluate."""
+    # The command-line tool is an application, so it shows pyhs3's log
+    # records on the console; importing pyhs3 as a library does not.
+    setup()
+
 
 app.command()(graph.graph)
 app.command()(spec.validate)

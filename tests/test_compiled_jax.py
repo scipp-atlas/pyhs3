@@ -156,8 +156,6 @@ from test_compiled import _workspace
 
 jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 compiler_log = logging.getLogger("jax._src.compiler")
-# Importing pyhs3 disables loggers that existed before it, such as JAX's.
-compiler_log.disabled = False
 compiler_log.setLevel(logging.DEBUG)
 compiler_log.propagate = False
 compiler_log.addHandler(logging.StreamHandler())

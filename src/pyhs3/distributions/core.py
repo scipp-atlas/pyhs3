@@ -512,7 +512,7 @@ class BatchableDistribution(Distribution, ABC):
         for member in members:
             signature = tuple(
                 (key, name if context[name].ndim != 0 else None)
-                for key, name in member._parameters.items()
+                for key, name in member._parameters.items()  # pylint: disable=protected-access
             )
             groups.setdefault(signature, []).append(member)
         outputs: dict[str, TensorVar] = {}
@@ -536,9 +536,9 @@ class BatchableDistribution(Distribution, ABC):
     ) -> dict[str, TensorVar]:
         """Batch members whose fields name the same non-scalar inputs (see :meth:`batch_log_expressions`)."""
         first = members[0]
-        keys = list(first._parameters)
+        keys = list(first._parameters)  # pylint: disable=protected-access
         reason = None
-        if any(list(m._parameters) != keys for m in members):
+        if any(list(m._parameters) != keys for m in members):  # pylint: disable=protected-access
             reason = "the members' fields differ"
         elif any("[" in key for key in keys):
             reason = "it has list-valued fields"
@@ -546,7 +546,7 @@ class BatchableDistribution(Distribution, ABC):
         shared_ndim = 0
         if reason is None:
             for key in keys:
-                names = [m._parameters[key] for m in members]
+                names = [m._parameters[key] for m in members]  # pylint: disable=protected-access
                 if len(set(names)) == 1:
                     tensor = context[names[0]]
                     if tensor.ndim == 1 or (

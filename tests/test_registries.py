@@ -142,3 +142,11 @@ class TestInstances:
             ValidationError, match="Unknown distribution type 'flat_dist'"
         ):
             Distributions([{"name": "flat", "type": "flat_dist", "x": "x"}])
+
+    def test_a_non_string_type_is_unknown(self):
+        with pytest.raises(ValidationError, match="Unknown distribution type '3'"):
+            Distributions([{"name": "g", "type": 3, "x": "x"}])
+
+    def test_a_non_mapping_is_rejected(self):
+        with pytest.raises(ValidationError, match="Distribution"):
+            Distributions(["g"])

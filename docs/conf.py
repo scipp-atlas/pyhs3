@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import importlib.metadata
 import pathlib
-from typing import Any
+from typing import Any, TypeAliasType
 
+from docutils import nodes
 from intersphinx_registry import get_intersphinx_mapping
+from pydantic import BaseModel, RootModel
+from sphinx.application import Sphinx
+from sphinx.environment import BuildEnvironment
+from sphinx.ext import intersphinx
 
 project = "pyhs3"
 copyright = "2025, Giordon Stark"
@@ -38,6 +43,14 @@ issues_github_path = "scipp-atlas/pyhs3"
 
 # Generate the API documentation when building
 autosummary_generate = True
+
+# Members that pyhs3's models only inherit from pydantic (model_validate,
+# model_json_schema, the deprecated parse_obj, ...). The class template leaves
+# them out: pydantic documents them, and their docstrings reference pydantic
+# internals that do not resolve here.
+autosummary_context = {
+    "pydantic_members": sorted(set(dir(BaseModel)) | set(dir(RootModel))),
+}
 numpydoc_show_class_members = False
 
 # Add any paths that contain templates here, relative to this directory.
@@ -84,8 +97,12 @@ intersphinx_mapping = get_intersphinx_mapping(
         "python",
         "matplotlib",
         "numpy",
+        "pydantic",
+        "sympy",
     }
 )
+
+intersphinx_mapping["pytensor"] = ("https://pytensor.readthedocs.io/en/latest/", None)
 
 # Add HS3 specification documentation
 intersphinx_mapping["hs3"] = (
@@ -98,9 +115,87 @@ intersphinx_mapping["hist"] = ("http://hist.readthedocs.io/en/latest/", None)
 nitpick_ignore = [
     ("py:class", "_io.StringIO"),
     ("py:class", "_io.BytesIO"),
+    # The type variable of RootModel.root, which pydantic does not document.
+    ("py:class", "pydantic.root_model.RootModelRootType"),
 ]
 
+nitpick_ignore_regex = [
+    # numpy.typing.ArrayLike expands into these private, undocumented helpers.
+    ("py:class", r"numpy\._typing\..*"),
+    # Sphinx renders a pydantic field's type with its Annotated metadata
+    # (discriminator tags, validator functions) and then tries to link the
+    # whole string, or the private helpers named inside it; none of these is
+    # a documented object.
+    ("py:(class|obj)", r"(list\[~)?typing\.Annotated\[.*"),
+    ("py:class", r"pyhs3\.axes\._binned_axis_discriminator"),
+    ("py:class", r"pyhs3\.exceptions\.custom_error_msg\.<locals>\._validator"),
+]
+
+# Render a docstring's "Attributes:" section as fields of the class, so that
+# the template's autoattribute entries are the only descriptions of each field.
+napoleon_use_ivar = True
+
 always_document_param_types = True
+
+
+def _format_type_alias(annotation: Any, _config: Any) -> str | None:
+    """Render a PEP 695 ``type`` alias by its name, linked to its definition.
+
+    Left to sphinx-autodoc-typehints, an alias such as ``TensorVar`` renders
+    as the name of its class, ``TypeAliasType``, which links nowhere.
+    """
+    if isinstance(annotation, TypeAliasType):
+        return f":py:obj:`~{annotation.__module__}.{annotation.__name__}`"
+    return None
+
+
+typehints_formatter = _format_type_alias
+
+# Sphinx cannot pickle the function above into its environment cache, so it
+# rereads the whole project on each build; that is the only cost.
+suppress_warnings = ["config.cache"]
+
+# Annotations resolve to where a class is defined, but these projects document
+# it under the public path it is re-exported from (and NDArray as data, not a
+# class): target name -> (documented name, documented object type or None).
+_documented_targets = {
+    "pytensor.tensor.variable.TensorVariable": ("pytensor.tensor.TensorVariable", None),
+    "pytensor.tensor.type.TensorType": ("pytensor.tensor.TensorType", None),
+    "numpy.float64": ("numpy.double", None),
+    "np.float64": ("numpy.double", None),
+    "npt.NDArray": ("numpy.typing.NDArray", "data"),
+    "Mode": ("pytensor.compile.mode.Mode", None),
+    "pyhs3.transpile.jaxify": ("pyhs3.jaxify", None),
+}
+
+
+def _resolve_documented_target(
+    app: Sphinx,
+    env: BuildEnvironment,
+    node: nodes.Element,
+    contnode: nodes.TextElement,
+) -> nodes.reference | None:
+    documented = _documented_targets.get(node.get("reftarget", ""))
+    if documented is None:
+        return None
+    node["reftarget"], reftype = documented
+    if reftype is not None:
+        node["reftype"] = reftype
+    resolved = env.get_domain("py").resolve_xref(
+        env,
+        node["refdoc"],
+        app.builder,
+        node["reftype"],
+        node["reftarget"],
+        node,
+        contnode,
+    )
+    return resolved or intersphinx.missing_reference(app, env, node, contnode)
+
+
+def setup(app: Sphinx) -> None:
+    app.connect("missing-reference", _resolve_documented_target)
+
 
 # Napoleon configuration for custom sections
 napoleon_custom_sections = [

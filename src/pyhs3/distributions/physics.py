@@ -186,7 +186,7 @@ class CrystalBallDist(Distribution):
             -\frac{1}{2} t^2, & \text{otherwise}
             \end{cases}
 
-        via :func:`_crystalball_log_tail` for the tail branch. Evaluating
+        via ``_crystalball_log_tail`` for the tail branch. Evaluating
         this directly (rather than ``pt.log(self.likelihood(...))``) avoids
         computing the power-law tail :math:`A(B-t)^{-n}` and re-logging it,
         which underflows to 0.0 (and then to ``-inf``) once the tail decays
@@ -342,7 +342,7 @@ class AsymmetricCrystalBallDist(Distribution):
             \log A_R - n_R \log(B_R + t_R), & \text{otherwise}
             \end{cases}
 
-        via :func:`_crystalball_log_tail` for both tail branches (shared with
+        via ``_crystalball_log_tail`` for both tail branches (shared with
         :class:`CrystalBallDist`, which uses the same power-law tail form on
         its single tail). Evaluating this directly (rather than
         ``pt.log(self.likelihood(...))``) avoids computing each region's
@@ -600,7 +600,7 @@ class ArgusDist(Distribution):
         ``pt.log`` call, so the in-range branch's gradient stays finite when
         PyTensor differentiates it at points where that branch is not
         selected (bracket_term <= 0) -- the same guard idiom as
-        :class:`CrystalBallDist`'s tail guard (:func:`_crystalball_log_tail`).
+        :class:`CrystalBallDist`'s tail guard (``_crystalball_log_tail``).
         Without the clamp, the in-range branch's un-selected-branch gradient
         would multiply an infinite/NaN local derivative of ``pt.log`` at a
         non-positive argument by the switch's zero mask (``0 * NaN = NaN``).

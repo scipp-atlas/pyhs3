@@ -244,7 +244,7 @@ class Model:
         """Default parameter values from the workspace parameter set.
 
         Returns all parameters, including those marked ``const=True`` (which
-        are baked as :func:`pytensor.tensor.constant` in the symbolic graph
+        are baked as ``pytensor.tensor.constant`` in the symbolic graph
         and are therefore not free inputs to a jaxified expression).
 
         Use :attr:`free_params` when passing parameters to a jaxified callable

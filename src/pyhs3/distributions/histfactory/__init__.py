@@ -255,7 +255,7 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         ``data`` is ``None`` by design (per-bin errors come from sample data
         instead), so ``modifier.make_constraint()`` would raise. The
         corresponding constraint is channel-level, not modifier-level — callers
-        get it from :meth:`_make_barlow_beeston_lite_constraint` instead.
+        get it from ``_make_barlow_beeston_lite_constraint`` instead.
         """
         for sample in self.samples:
             for modifier in sample.modifiers:
@@ -348,7 +348,7 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
 
         Returns ``None`` when this channel has no staterror modifier, or
         when every bin was excluded. Shared by
-        :meth:`_make_barlow_beeston_lite_constraint` (product of per-bin
+        ``_make_barlow_beeston_lite_constraint`` (product of per-bin
         probabilities) and :meth:`_make_barlow_beeston_lite_log_constraint`
         (sum of per-bin log-probabilities) so the parametrization is defined
         exactly once.
@@ -428,7 +428,7 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     def _make_barlow_beeston_lite_log_constraint(
         self, context: Context
     ) -> TensorVar | None:
-        """Log-space counterpart of :meth:`_make_barlow_beeston_lite_constraint`.
+        """Log-space counterpart of ``_make_barlow_beeston_lite_constraint``.
 
         Sum of per-bin Gauss/Poisson log-probabilities instead of their
         product, so the constraint stays finite where the probability-space
@@ -673,7 +673,7 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         followed by the original binning axes.
 
         Returns:
-            hist.Hist: Histogram with shape (n_samples, *binning_shape) where:
+            hist.Hist: Histogram with shape ``(n_samples, *binning_shape)`` where:
                 - Axis 0: Categorical axis "process" with sample names
                 - Remaining axes: Original binning axes from self.axes
                 - Values: Sample contents (with errors as variances)

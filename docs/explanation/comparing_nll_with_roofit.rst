@@ -56,7 +56,7 @@ For an extended unbinned distribution with :math:`N` events and expected yield
 :math:`\mathrm{Poisson}(N \mid \nu)`, which contains :math:`-\ln N!` in the
 log-likelihood. pyhs3 omits that term, as RooFit does. An extended mixture
 contributes :math:`\sum_j \ln \sum_i c_i f_i(x_j) - \nu` (see
-:meth:`pyhs3.distributions.composite.MixtureDist.log_prob_terms`), so the
+:meth:`pyhs3.distributions.MixtureDist.log_prob_terms`), so the
 pyhs3 NLL is smaller than the specification's literal form by
 :math:`\ln N!` per extended unbinned dataset. This constant is the same one
 RooFit omits, so it does not add to the RooFit offset above.

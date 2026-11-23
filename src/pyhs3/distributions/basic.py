@@ -40,7 +40,7 @@ class GaussianDist(Distribution):
         x (str): Input variable name.
 
     HS3 Reference:
-        :ref:`hs3:hs3.gaussian-normal-distribution`
+        :ref:`hs3:hs3.gaussiannormal-distribution`
     """
 
     type: Literal["gaussian_dist"] = "gaussian_dist"
@@ -115,7 +115,7 @@ class UniformDist(Distribution):
 
     where :math:`(l_i, u_i)` are the domain bounds of axis :math:`x_i`.
 
-    Delegates to :mod:`pytensor_distributions.uniform`, which already returns the
+    Delegates to ``pytensor_distributions.uniform``, which already returns the
     self-normalized :math:`1/(u_i - l_i)` on the support, so the distribution
     opts out of pyhs3's own normalization (``_normalizable = False``) to avoid
     dividing by the domain measure a second time. Because normalization is opted
@@ -189,7 +189,7 @@ class UniformDist(Distribution):
         """
         Builds a symbolic expression for the uniform PDF.
 
-        Delegates to :mod:`pytensor_distributions.uniform`, returning the product
+        Delegates to ``pytensor_distributions.uniform``, returning the product
         over axes of :math:`1/(u_i - l_i)` on the support. The bounds are derived
         from the observable domain, so ``x`` itself does not appear in the density.
 
@@ -319,7 +319,7 @@ class ExponentialDist(Distribution):
     Exponential probability distribution.
 
     Implements the exponential probability density function. The raw density,
-    delegated to :mod:`pytensor_distributions.exponential`, is rate-normalized
+    delegated to ``pytensor_distributions.exponential``, is rate-normalized
     and supported on :math:`x \ge 0`:
 
     .. math::

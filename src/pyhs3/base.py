@@ -183,9 +183,10 @@ class Evaluable(NamedModel, ABC):
             param_key: The parameter field name to process (e.g., "mean", "sigma").
 
         Returns:
-            Tuple containing:
-                - processed_name: Either the original string value or a generated constant name
-                - numeric_value: The numeric value if input was numeric, None otherwise
+            ``(processed_name, numeric_value)``. ``processed_name`` is either
+            the original string value or a generated constant name;
+            ``numeric_value`` is the numeric value if the input was numeric,
+            ``None`` otherwise.
 
         Example:
             >>> from typing import Literal
@@ -226,9 +227,10 @@ class Evaluable(NamedModel, ABC):
             param_key: The parameter field name to process (e.g., "factors", "coefficients").
 
         Returns:
-            Tuple containing:
-                - processed_names: List of parameter names (original strings or generated constant names)
-                - numeric_values: List of numeric values (None for string entries)
+            ``(processed_names, numeric_values)``. ``processed_names`` lists the
+            parameter names (original strings or generated constant names);
+            ``numeric_values`` lists the numeric values (``None`` for string
+            entries).
 
         Example:
             >>> from typing import Literal

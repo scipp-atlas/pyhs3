@@ -532,7 +532,7 @@ class InterpolationFunction(BatchableFunction):
 
         Returns:
             Contributions of shape ``(K, *batch)`` with ``K = len(indices)``;
-            row ``k`` is :meth:`_flexible_interp_single` for ``indices[k]``.
+            row ``k`` is ``_flexible_interp_single`` for ``indices[k]``.
         """
         columns = [
             [context[names[i]] for i in indices]
@@ -575,7 +575,7 @@ class InterpolationFunction(BatchableFunction):
           own expression with factor 1.
         - Entries are sorted by interpolation code, so each code's
           contributions are one contiguous slice, evaluated once with
-          :meth:`_flexible_interp_single`, and the slices are concatenated.
+          ``_flexible_interp_single``, and the slices are concatenated.
         - Contributions are padded into ``(F, E_max)`` with a sentinel (factor
           1 for multiplicative, term 0 for additive members) and reduced over
           the entry axis.
@@ -821,6 +821,7 @@ class ProcessNormalizationFunction(Function):
         result = nominalValue * exp(symShift + asymShift) * otherFactors
 
         where:
+
         - symShift = sum(logKappa[i] * theta[i]) for symmetric variations
         - asymShift = sum(_asym_interpolation(theta[i], kappa_sum[i], kappa_diff[i]))
           for asymmetric variations with kappa_sum = logKappaHi + logKappaLo

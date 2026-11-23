@@ -58,10 +58,10 @@ def analyze_sympy_expr(sympy_expr: sp.Expr) -> dict[str, Any]:
         sympy_expr: The SymPy expression to analyze.
 
     Returns:
-        Dictionary containing analysis results with keys:
-        - 'expression': The original expression
-        - 'independent_vars': Set of independent variables (symbols)
-        - 'dependent_vars': Set of dependent variables (functions)
+        The analysis, keyed by ``'expression'`` (the original expression),
+        ``'independent_vars'`` (the set of independent variables, as symbols)
+        and ``'dependent_vars'`` (the set of dependent variables, as
+        functions).
     """
     # Independent variables (symbols in the expression)
     independent_vars = sympy_expr.free_symbols

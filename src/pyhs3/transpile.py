@@ -1,7 +1,7 @@
 """
 JAX transpilation helpers for pyhs3.
 
-Provides :func:`jaxify` and :class:`JaxifiedGraph` for converting any PyTensor
+Provides :func:`~pyhs3.jaxify` and :class:`JaxifiedGraph` for converting any PyTensor
 expression into a callable JAX function suitable for use with JAX-based
 optimizers (e.g. ``optimistix``).
 
@@ -11,7 +11,7 @@ Requires the ``jax`` optional extra::
 
 which pulls in ``pytensor[jax]`` and, transitively, JAX itself.
 
-The callable :func:`jaxify` returns is not jitted. Wrap it in ``jax.jit`` for
+The callable :func:`~pyhs3.jaxify` returns is not jitted. Wrap it in ``jax.jit`` for
 any repeated evaluation; see :class:`JaxifiedGraph`.
 """
 
@@ -37,7 +37,7 @@ from pyhs3.typing.aliases import TensorVar
 class JaxifiedGraph:
     """A JAX-callable wrapper around a compiled PyTensor expression.
 
-    Produced by :func:`jaxify`. Supports keyword-argument calls (the primary
+    Produced by :func:`~pyhs3.jaxify`. Supports keyword-argument calls (the primary
     interface for dict-pytree-based optimizers like optimistix or everwillow)
     and positional calls via :meth:`call_positional`.
 
@@ -100,7 +100,7 @@ class JaxifiedGraph:
     def call_positional(self, *args: object) -> object:
         """Call with positional arguments — pure passthrough to :attr:`fn`.
 
-        Like :meth:`__call__`, this is not jitted; wrap it in ``jax.jit`` for
+        Like calling the graph, this is not jitted; wrap it in ``jax.jit`` for
         repeated use.
 
         Parameters

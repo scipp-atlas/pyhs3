@@ -16,7 +16,7 @@ from pyhs3.compiled import default_nll_mode
 from pyhs3.distributions import Distributions
 from pyhs3.functions import Functions, InterpolationFunction, ProductFunction
 from pyhs3.functions.core import BatchableFunction
-from pyhs3.networks import build_dependency_graph, plan_function_families
+from pyhs3.networks import build_dependency_graph, plan_families
 from pyhs3.parameter_points import ParameterSet
 
 _NOMINALS = [10.0, 3.0, 0.5, 7.0]
@@ -380,14 +380,14 @@ def _planning_inputs():
 class TestPlanFunctionFamilies:
     def test_one_family_per_type_and_channel(self):
         graph, functions = _planning_inputs()
-        families = plan_function_families(graph, functions, ["g0", "g1"])
+        families = plan_families(graph, functions, ["g0", "g1"])
         members = sorted(sorted(f.members) for f in families)
         assert members == [["f0", "f1"], ["f2", "f3"]]
         assert all(f.kind is InterpolationFunction for f in families)
 
     def test_members_depend_only_on_their_family(self):
         graph, functions = _planning_inputs()
-        families = plan_function_families(graph, functions, ["g0", "g1"])
+        families = plan_families(graph, functions, ["g0", "g1"])
         for family in families:
             assert graph[family.name]["type"] == "family"
             for member in family.members:
@@ -400,7 +400,7 @@ class TestPlanFunctionFamilies:
         """f4 reads f0's output, so batching it with f0 would form a cycle."""
         graph, functions = _planning_inputs()
         with caplog.at_level(logging.DEBUG, logger="pyhs3.networks"):
-            families = plan_function_families(graph, functions, ["g0", "g1"])
+            families = plan_families(graph, functions, ["g0", "g1"])
         assert all("f4" not in f.members for f in families)
         assert "f4" in caplog.text
         graph.topological_sort()  # still acyclic
@@ -429,7 +429,7 @@ class TestPlanFunctionFamilies:
         graph, _, _ = build_dependency_graph(
             ParameterSet(name="p", parameters=[]), functions, distributions
         )
-        assert plan_function_families(graph, functions, ["g0"]) == []
+        assert plan_families(graph, functions, ["g0"]) == []
         assert graph.predecessors("f0") != []
 
 
@@ -551,7 +551,7 @@ class TestPlanFamiliesOfSeveralTypes:
             ParameterSet(name="p", parameters=[]), functions, distributions
         )
         with caplog.at_level(logging.DEBUG, logger="pyhs3.networks"):
-            families = plan_function_families(graph, functions, ["g"])
+            families = plan_families(graph, functions, ["g"])
 
         graph.topological_sort()  # raises on a cycle
         members = {m for f in families for m in f.members}

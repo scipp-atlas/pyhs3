@@ -8,18 +8,22 @@ standard and CMS-specific distribution implementations.
 from __future__ import annotations
 
 import json
+import logging
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar, Self, cast
 
 import pytensor.tensor as pt
 from pydantic import PrivateAttr
+from pytensor.tensor.shape import specify_shape
 
 from pyhs3.base import Evaluable
 from pyhs3.context import Context
 from pyhs3.normalization import gauss_legendre_integral, substitute_variable
 from pyhs3.typing.aliases import TensorVar
+
+log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pyhs3.distributions import Distributions
@@ -441,3 +445,161 @@ class Distribution(Evaluable, ABC):
             LogProbTerms: per-event, per-channel, and constraint contributions.
         """
         return LogProbTerms(per_event=[log_expressions[self.name]])
+
+
+class BatchableDistribution(Distribution, ABC):
+    """
+    A distribution type whose instances can be evaluated together, as one family.
+
+    The distribution counterpart of
+    :class:`~pyhs3.functions.BatchableFunction`: :class:`~pyhs3.Model` groups
+    the instances of a batchable type that feed the same root distribution into
+    one family node and builds all of them with a single call to
+    :meth:`batch_log_expressions`.
+
+    Inheriting this class asserts that the type's ``log_likelihood``,
+    ``likelihood`` and ``normalization_expression`` are elementwise in every
+    parameter: evaluated with each parameter replaced by a stack of the
+    members' values along a new leading axis, they return the members' results
+    stacked along that axis.  The default :meth:`batch_log_expressions` relies
+    on that and needs no code in the subclass.
+
+    No built-in distribution inherits this class: on large workspaces,
+    batching them made the cold C compile slower (stacked parameter math needs
+    C modules of its own) for gains only on the JAX backend.  See
+    ``docs/explanation/batched_families.rst`` before opting a type in.
+    """
+
+    @classmethod
+    def batch_log_expressions(
+        cls, members: Sequence[Self], context: Context
+    ) -> dict[str, TensorVar]:
+        """
+        Build every member's log-space expression with one evaluation of the class's math.
+
+        Fields that name the same input for every member (typically the
+        observable) are kept as they are.  Every other field is replaced by a
+        stack of the members' scalar inputs placed on the parameter-batch
+        axis: an observable enters as an ``(N, 1)`` view whose last axis is
+        that batch axis (length 1 for scalar parameters), so the stack has
+        shape ``(1, K)`` for ``K`` members and the log density comes out
+        ``(N, K)``.  Normalization works unchanged, since Gauss-Legendre
+        quadrature also sums over axis 0.  Members without shared tensors (a
+        constraint on a parameter) stack to ``(K,)``.  One
+        :meth:`log_expression` of a member whose fields name those stacks,
+        normalization included, is then split along the last axis into one
+        expression per member with the member's own shape: ``(N, 1)``, or a
+        scalar.
+
+        Members are first split by the non-scalar inputs their fields name
+        (for example, shapes on one observable and constraints on parameters
+        are batched separately), and each such group is batched on its own;
+        a group of one member is simply that member's
+        :meth:`log_expression`.  If a group's fields are list-valued or a
+        shared input is not ``(N, 1)``-like (its last axis already batches
+        parameters), each of its members is built with its own
+        :meth:`log_expression` and the reason is logged at debug level.
+
+        Args:
+            members: Instances of this class with the same observables.
+            context: Built tensors by name.
+
+        Returns:
+            dict[str, TensorVar]: Log-space expression per member name, equal
+            to that member's ``log_expression(context)`` up to rounding.
+        """
+        groups: dict[tuple[tuple[str, str | None], ...], list[Self]] = {}
+        for member in members:
+            signature = tuple(
+                (key, name if context[name].ndim != 0 else None)
+                for key, name in member._parameters.items()
+            )
+            groups.setdefault(signature, []).append(member)
+        outputs: dict[str, TensorVar] = {}
+        for group in groups.values():
+            if len(group) > 1:
+                outputs.update(cls._batch_log_expressions_of_one_shape(group, context))
+                continue
+            if len(members) > 1:
+                log.debug(
+                    "%s '%s' is built on its own, not batched: no other member "
+                    "uses the same non-scalar inputs",
+                    cls.__name__,
+                    group[0].name,
+                )
+            outputs[group[0].name] = group[0].log_expression(context)
+        return outputs
+
+    @classmethod
+    def _batch_log_expressions_of_one_shape(
+        cls, members: Sequence[Self], context: Context
+    ) -> dict[str, TensorVar]:
+        """Batch members whose fields name the same non-scalar inputs (see :meth:`batch_log_expressions`)."""
+        first = members[0]
+        keys = list(first._parameters)
+        reason = None
+        if any(list(m._parameters) != keys for m in members):
+            reason = "the members' fields differ"
+        elif any("[" in key for key in keys):
+            reason = "it has list-valued fields"
+        differing: dict[str, list[str]] = {}
+        shared_ndim = 0
+        if reason is None:
+            for key in keys:
+                names = [m._parameters[key] for m in members]
+                if len(set(names)) == 1:
+                    tensor = context[names[0]]
+                    if tensor.ndim == 1 or (
+                        tensor.ndim > 1 and not tensor.type.broadcastable[-1]
+                    ):
+                        reason = f"its shared '{key}' input has no length-1 batch axis"
+                        break
+                    shared_ndim = max(shared_ndim, tensor.ndim)
+                elif any(context[name].ndim != 0 for name in names):
+                    reason = f"its '{key}' input is not a scalar for every member"
+                    break
+                else:
+                    differing[key] = names
+        if reason is not None:
+            for member in members:
+                log.debug(
+                    "%s '%s' is built on its own, not batched: %s",
+                    cls.__name__,
+                    member.name,
+                    reason,
+                )
+            return {m.name: m.log_expression(context) for m in members}
+        if not differing:
+            # Every field names the same inputs: the members are one expression.
+            shared = first.log_expression(context)
+            return {m.name: shared for m in members}
+
+        batched_context = context.copy()
+        fields = first.model_dump()
+        for key, names in differing.items():
+            placeholder = f"__family__{first.name}__{key}"
+            stacked = pt.stack([context[name] for name in names])  # (K,)
+            # (1, ..., 1, K): the members ride on the shared inputs' last
+            # (parameter-batch) axis; no extra axis when nothing is shared.
+            stacked = stacked.dimshuffle(*(["x"] * max(shared_ndim - 1, 0)), 0)
+            batched_context.add_parameter(placeholder, cast(TensorVar, stacked))
+            fields[key] = placeholder
+        fields["name"] = f"__family__{first.name}"
+        batched = type(first).model_validate(fields).log_expression(batched_context)
+        k = len(members)
+        last = batched.ndim - 1
+        pieces = (
+            pt.split(batched, [1] * k, n_splits=k, axis=last)  # type: ignore[no-untyped-call]
+            if k > 1
+            else [batched]
+        )
+        outputs = {}
+        for member, piece in zip(members, pieces, strict=True):
+            # Restore the member's own shape: (N, 1) keeps its length-1 batch
+            # axis; a scalar member drops it.
+            fixed = specify_shape(piece, (None,) * last + (1,))
+            outputs[member.name] = cast(
+                TensorVar,
+                fixed.dimshuffle(tuple(range(last))) if shared_ndim == 0 else fixed,
+            )
+        return outputs

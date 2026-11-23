@@ -23,7 +23,7 @@ from pyhs3.distributions import (
     mathematical,
     physics,
 )
-from pyhs3.distributions.core import Distribution, LogProbTerms
+from pyhs3.distributions.core import BatchableDistribution, Distribution, LogProbTerms
 from pyhs3.exceptions import custom_error_msg
 
 # Export distribution classes for backwards compatibility
@@ -67,6 +67,7 @@ FastVerticalInterpHistPdf2D2Dist = cms.FastVerticalInterpHistPdf2D2Dist
 __all__ = [
     "ArgusDist",
     "AsymmetricCrystalBallDist",
+    "BatchableDistribution",
     "BernsteinPolyDist",
     "CrystalBallDist",
     "Distribution",

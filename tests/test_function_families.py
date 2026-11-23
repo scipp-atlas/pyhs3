@@ -238,6 +238,72 @@ class TestBatchedInterpolationFallback:
         for got, want in zip(result, expected, strict=True):
             np.testing.assert_allclose(got, want, rtol=1e-12)
 
+    def test_every_member_on_the_per_function_path(self, caplog):
+        members = [
+            _interp("f0", [0, 5, 0], "nom_0", ["alpha_a", "alpha_b", "alpha_c"]),
+            _interp("f1", [5, 0, 5], "nom_1", ["alpha_a", "alpha_b", "alpha_c"]),
+        ]
+        setup = _Setup(members, [])
+        with caplog.at_level(logging.DEBUG, logger="pyhs3.functions.standard"):
+            batched = _batched(setup)
+        assert "f0" in caplog.text
+        assert "f1" in caplog.text
+        np.testing.assert_allclose(
+            setup.evaluate(batched), setup.evaluate(_per_function(setup)), rtol=1e-12
+        )
+
+    @pytest.mark.parametrize("which", ["nominal", "variation"])
+    def test_non_scalar_inputs_use_the_per_function_path(self, which, caplog):
+        """A (3,) nominal or variation cannot sit in the (F,) or (F, E) tables."""
+        members = [
+            _interp("f0", [5], "nom_0", ["alpha_a"]),
+            _interp("f1", [5], "nom_1", ["alpha_b"]),
+        ]
+        setup = _Setup(members, [])
+        name = "nom_0" if which == "nominal" else "f0_hi_0"
+        vector = pt.dvector(name)
+        setup.inputs.append(vector)
+        setup.context[name] = vector
+        setup.values[name] = np.array([9.0, 10.0, 11.0])
+        with caplog.at_level(logging.DEBUG, logger="pyhs3.functions.standard"):
+            batched = _batched(setup)
+        assert "'f0' is built on its own" in caplog.text
+        result = setup.evaluate(batched)
+        expected = setup.evaluate(_per_function(setup))
+        for got, want in zip(result, expected, strict=True):
+            np.testing.assert_allclose(got, want, rtol=1e-12)
+
+    def test_product_entry_with_a_vector_factor_uses_the_per_function_path(
+        self, caplog
+    ):
+        """``p0 = alpha_v * beta`` with alpha_v of shape (3,) is not a scalar entry."""
+        product = ProductFunction(name="p0", factors=["alpha_v", "beta"])
+        members = [
+            _interp("f0", [5], "nom_0", ["p0"]),
+            _interp("f1", [5], "nom_1", ["alpha_b"]),
+        ]
+        setup = _Setup(members, [])
+        setup.inputs = [v for v in setup.inputs if v.name != "p0"]
+        del setup.values["p0"]
+        alpha_v, beta = pt.dvector("alpha_v"), pt.dscalar("beta")
+        setup.inputs += [alpha_v, beta]
+        setup.context.update(alpha_v=alpha_v, beta=beta)
+        setup.values.update(alpha_v=np.array([-1.0, 0.0, 1.0]), beta=0.5)
+        setup.context["p0"] = product.expression(setup.context)
+        setup.functions["p0"] = product
+        with caplog.at_level(logging.DEBUG, logger="pyhs3.functions.standard"):
+            batched = _batched(setup)
+        assert "'f0' is built on its own" in caplog.text
+        result = setup.evaluate(batched)
+        expected = setup.evaluate(_per_function(setup))
+        for got, want in zip(result, expected, strict=True):
+            np.testing.assert_allclose(got, want, rtol=1e-12)
+
+    def test_members_without_entries_give_their_nominals(self):
+        members = [_interp("f0", [], "nom_0", []), _interp("f1", [], "nom_1", [])]
+        setup = _Setup(members, [])
+        np.testing.assert_allclose(setup.evaluate(_batched(setup)), _NOMINALS[:2])
+
 
 class TestBatchedInterpolationGraph:
     @staticmethod
@@ -338,6 +404,13 @@ class TestPlanFunctionFamilies:
         assert all("f4" not in f.members for f in families)
         assert "f4" in caplog.text
         graph.topological_sort()  # still acyclic
+
+    def test_functions_feeding_no_listed_root_are_left_alone(self):
+        """f2 and f3 feed only g1, which is not a root here."""
+        graph, functions = _planning_inputs()
+        families = plan_function_families(graph, functions, ["g0"])
+        assert [sorted(f.members) for f in families] == [["f0", "f1"]]
+        assert graph.predecessors("f2") != []
 
     def test_single_instance_is_not_a_family(self):
         """A channel with one batchable function gains nothing from a family."""

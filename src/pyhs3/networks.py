@@ -7,8 +7,11 @@ between parameters, functions, and distributions in HS3 models.
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections import defaultdict
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from typing import Any, TypeVar, cast
 
 import rustworkx as rx
@@ -16,10 +19,13 @@ import rustworkx as rx
 from pyhs3.base import Evaluable
 from pyhs3.distributions.core import Distribution
 from pyhs3.exceptions import DuplicateEntityError
+from pyhs3.functions.core import BatchableFunction
 from pyhs3.typing.aliases import EntityType, TensorVar
 
 # Import after defining the ABCs to avoid circular imports
 T = TypeVar("T")
+
+log = logging.getLogger(__name__)
 
 
 class HasInternalNodes(ABC):
@@ -199,6 +205,33 @@ class NamedDiGraph:
             closure.add(node_idx)
             closure.update(rx.ancestors(self.graph, node_idx))
         return closure
+
+    def predecessors(self, name: str) -> list[str]:
+        """Names of the nodes with an edge into ``name`` (its direct dependencies)."""
+        return [
+            self.graph[idx]["name"]
+            for idx in self.graph.predecessor_indices(self.get_node_index(name))
+        ]
+
+    def ancestors(self, name: str) -> set[str]:
+        """Names of every node ``name`` depends on, directly or transitively."""
+        return {
+            self.graph[idx]["name"]
+            for idx in rx.ancestors(self.graph, self.get_node_index(name))
+        }
+
+    def descendants(self, name: str) -> set[str]:
+        """Names of every node that depends on ``name``, directly or transitively."""
+        return {
+            self.graph[idx]["name"]
+            for idx in rx.descendants(self.graph, self.get_node_index(name))
+        }
+
+    def remove_named_edge(self, from_name: str, to_name: str) -> None:
+        """Remove the edge from ``from_name`` to ``to_name``."""
+        self.graph.remove_edge(
+            self.get_node_index(from_name), self.get_node_index(to_name)
+        )
 
     def __contains__(self, name: str) -> bool:
         """Check if a named node exists."""
@@ -401,3 +434,94 @@ def build_dependency_graph(
             graph.add_named_edge(param_name, entity.name, None)
 
     return graph, constants_map, modifiers_map
+
+
+@dataclass(frozen=True)
+class FunctionFamily:
+    """Batchable functions of one type built together, as one dependency-graph node.
+
+    Attributes:
+        name: Name of the family's node in the dependency graph.
+        kind: The batchable function class of every member.
+        members: Member function names, in build order.
+    """
+
+    name: str
+    kind: type[BatchableFunction]
+    members: tuple[str, ...]
+
+
+def plan_function_families(
+    graph: NamedDiGraph, functions: Iterable[Any], roots: Sequence[str]
+) -> list[FunctionFamily]:
+    """Group batchable functions into families and rewire ``graph`` around them.
+
+    Functions of a :class:`~pyhs3.functions.BatchableFunction` type are
+    grouped by type and by the first of ``roots`` (typically the likelihood's
+    distributions, in order) that depends on them, so each family serves one
+    channel and a single distribution's graph only evaluates its own
+    channel's functions.  For each group of two or more, a ``"family"`` node
+    is added whose inputs are the union of its members' inputs, and each
+    member is rewired to depend on the family node alone; building the
+    family node builds every member (see
+    :meth:`~pyhs3.functions.BatchableFunction.batch_expressions`).
+
+    A function that depends on another function of its group stays out of the
+    family (the family would depend on itself) and is logged at debug level;
+    functions no root depends on are left alone.  Each group is checked
+    against the graph as already rewired by the families planned before it:
+    that is what keeps families of different types from forming a cycle
+    through each other (one type's family feeding the other's members and
+    back), so the ancestry must not be computed once up front.
+
+    Args:
+        graph: Dependency graph from :func:`build_dependency_graph`; modified
+            in place.
+        functions: The model's functions.
+        roots: Names of the root distributions, in order of precedence.
+
+    Returns:
+        list[FunctionFamily]: The families added to ``graph``.
+    """
+    root_names = [name for name in roots if name in graph]
+    groups: dict[tuple[type[BatchableFunction], str], list[str]] = defaultdict(list)
+    for function in functions:
+        if not isinstance(function, BatchableFunction) or function.name not in graph:
+            continue
+        consumers = graph.descendants(function.name)
+        root = next((name for name in root_names if name in consumers), None)
+        if root is not None:
+            groups[(type(function), root)].append(function.name)
+
+    families = []
+    for (kind, root), names in groups.items():
+        group = set(names)
+        members = []
+        for name in names:
+            needs = graph.ancestors(name) & group
+            if needs:
+                log.debug(
+                    "%s '%s' is built on its own, not in the family for '%s': "
+                    "it depends on %s",
+                    kind.__name__,
+                    name,
+                    root,
+                    sorted(needs),
+                )
+            else:
+                members.append(name)
+        if len(members) < 2:
+            continue
+        family = FunctionFamily(
+            name=f"family:{kind.__name__}:{root}", kind=kind, members=tuple(members)
+        )
+        graph.add_named_node(family.name, {"type": "family", "name": family.name})
+        inputs = dict.fromkeys(dep for m in members for dep in graph.predecessors(m))
+        for dep in inputs:
+            graph.add_named_edge(dep, family.name)
+        for member in members:
+            for dep in graph.predecessors(member):
+                graph.remove_named_edge(dep, member)
+            graph.add_named_edge(family.name, member)
+        families.append(family)
+    return families

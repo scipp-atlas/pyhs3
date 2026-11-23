@@ -443,6 +443,105 @@ Without an analytical expression, pyhs3 uses 64-point Gauss-Legendre quadrature 
 
 For complete details, see :doc:`/normalization`.
 
+Batching Many Instances of a Function
+-------------------------------------
+
+A workspace can hold hundreds of instances of one function type, such as one
+:class:`~pyhs3.functions.InterpolationFunction` per sample and systematic. A
+function type that inherits :class:`~pyhs3.functions.BatchableFunction` lets
+the model build all instances that feed one likelihood channel with a single
+vectorised expression, which pyhs3 calls a *family*, so that compile time does
+not grow with their number. :doc:`explanation/batched_families` explains the
+design.
+
+Besides ``_expression``, a batchable type implements the classmethod
+:meth:`~pyhs3.functions.BatchableFunction.batch_expressions`. It receives:
+
+- ``members``: the instances of exactly this class in one family, in a fixed
+  order;
+- ``context``: a built tensor for every name the members' parameter fields
+  reference;
+- ``functions``: the model's function definitions (``Function`` objects, not
+  tensors) by name, for a member whose inputs are themselves functions and
+  whose structure you want to inspect.
+
+It returns a dict with one entry per member name, each an expression with the
+same shape as that member's own ``expression(context)``. Here each member is
+a scalar:
+
+.. doctest:: batchable
+
+    >>> from typing import Literal
+    >>> import numpy as np
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> from pyhs3.functions import BatchableFunction
+    >>> class ScaledFunction(BatchableFunction):
+    ...     type: Literal["scaled"] = "scaled"
+    ...     x: str
+    ...     factor: float
+    ...     def _expression(self, context):
+    ...         return context[self.x] * self.factor
+    ...     @classmethod
+    ...     def batch_expressions(cls, members, context, functions):
+    ...         # Stack the inputs into one (F,) vector, scale by a constant (F,)
+    ...         # table, and split back into one scalar per member.
+    ...         x = pt.stack([context[m.x] for m in members])
+    ...         scaled = x * np.array([m.factor for m in members])
+    ...         pieces = pt.split(scaled, [1] * len(members), n_splits=len(members))
+    ...         return {m.name: p.reshape(()) for m, p in zip(members, pieces)}
+    ...
+    >>> members = [
+    ...     ScaledFunction(name="a", x="u", factor=2.0),
+    ...     ScaledFunction(name="b", x="v", factor=3.0),
+    ... ]
+    >>> u, v = pt.dscalar("u"), pt.dscalar("v")
+    >>> context = {"u": u, "v": v}
+    >>> outputs = ScaledFunction.batch_expressions(members, context, {})
+    >>> f = pytensor.function([u, v], [outputs["a"], outputs["b"]], mode="FAST_COMPILE")
+    >>> [float(y) for y in f(1.5, 4.0)]
+    [3.0, 12.0]
+
+Nothing checks at run time that the batched outputs equal each member's own
+expression, so compare them yourself, as here and in your tests:
+
+.. doctest:: batchable
+
+    >>> g = pytensor.function(
+    ...     [u, v], [m.expression(context) for m in members], mode="FAST_COMPILE"
+    ... )
+    >>> [float(y) for y in g(1.5, 4.0)]
+    [3.0, 12.0]
+
+The contract and the graph rules that keep a family fast:
+
+- **Equal results:** each returned expression has the value of the member's
+  own ``expression(context)``. For a member you cannot batch (for example one
+  with a non-scalar input), return its own ``expression(context)`` and log the
+  reason at debug level.
+- **Every member:** return an entry for every member; the model raises a
+  ``RuntimeError`` naming any member that is missing.
+- **Fixed graph size:** build a fixed number of operations however many members
+  there are. Build per-member constant tables as one numpy array from Python
+  values, rather than stacking many scalar constant tensors.
+- **One Split for the outputs:** read the per-member outputs with a single
+  ``pt.split``, not by indexing ``result[i]`` per member; see
+  :doc:`explanation/batched_families` for why.
+
+The model finds batchable types by inheritance, wherever their instances
+appear among a model's functions, and needs no other registration. It groups
+the instances of each class that feed one root distribution into one family;
+a group needs at least two members, and an instance that depends on another
+member of its group is built on its own. To see which instances were built on
+their own instead of in a family, and why, enable debug logging for pyhs3:
+
+.. code-block:: python
+
+    import logging
+
+    logging.basicConfig()
+    logging.getLogger("pyhs3").setLevel(logging.DEBUG)
+
 Best Practices
 --------------
 

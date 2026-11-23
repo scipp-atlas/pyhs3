@@ -285,13 +285,24 @@ Graph Nodes
 Graph Construction
 ~~~~~~~~~~~~~~~~~~
 
-Located in ``src/pyhs3/networks.py``:
+Located in ``src/pyhs3/networks.py`` (steps 1 to 3) and
+``Model._build_dependency_graph`` in ``src/pyhs3/model.py`` (steps 3 to 6):
 
 1. Parse all components (distributions, functions, parameters)
 2. Build dependency graph with rustworkx
-3. Topologically sort to determine evaluation order
-4. Convert to PyTensor ops maintaining dependencies
-5. Compile for efficient evaluation
+3. Plan function families: instances of a
+   :class:`~pyhs3.functions.BatchableFunction` type that feed the same root
+   distribution become one ``"family"`` node, and each member is rewired to
+   depend on it (``plan_function_families``; see
+   :doc:`explanation/batched_families`). Each group's exclusion check runs on
+   the graph as already rewired by earlier families, which is what keeps
+   families of different types out of a cycle, so do not compute the ancestry
+   once before rewiring
+4. Topologically sort to determine evaluation order, keeping only the nodes the
+   likelihood needs when the model has one
+5. Convert to PyTensor ops maintaining dependencies; a family node builds all
+   its members with one ``batch_expressions`` call
+6. Compile for efficient evaluation
 
 Context Management
 ~~~~~~~~~~~~~~~~~~
@@ -422,9 +433,13 @@ Example skeleton:
 Adding New Functions
 ~~~~~~~~~~~~~~~~~~~~
 
-1. Create class inheriting from ``Function``
-2. Implement ``_to_pytensor`` method
-3. Add to ``Functions.model_validate`` discriminator
+1. Create class inheriting from ``Function``, or from ``BatchableFunction`` if
+   many instances can be evaluated together (see :doc:`defining_components`)
+2. Implement the ``_expression`` method (and ``batch_expressions`` for a
+   batchable type)
+3. Add the class to the ``FunctionType`` union in
+   ``src/pyhs3/functions/__init__.py`` and to its module's ``functions``
+   registry
 4. Write unit tests
 5. Update documentation
 

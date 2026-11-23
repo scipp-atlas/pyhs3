@@ -14,11 +14,12 @@ from pydantic import Field
 
 from pyhs3.collections import NamedCollection
 from pyhs3.exceptions import custom_error_msg
-from pyhs3.functions import standard
+from pyhs3.functions import core, standard
 from pyhs3.functions.core import Function
 
 log = logging.getLogger(__name__)
 
+BatchableFunction = core.BatchableFunction
 SumFunction = standard.SumFunction
 ProductFunction = standard.ProductFunction
 GenericFunction = standard.GenericFunction

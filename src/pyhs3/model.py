@@ -969,16 +969,25 @@ class Model:
                     # its own expression.  A family is not itself a value, so
                     # it is not added to the context.
                     family = families[node_name]
-                    family_outputs.update(
-                        family.kind.batch_expressions(
-                            [
-                                cast(BatchableFunction, functions_by_name[name])
-                                for name in family.members
-                            ],
-                            context,
-                            functions_by_name,
-                        )
+                    outputs = family.kind.batch_expressions(
+                        [
+                            cast(BatchableFunction, functions_by_name[name])
+                            for name in family.members
+                        ],
+                        context,
+                        functions_by_name,
                     )
+                    missing = [name for name in family.members if name not in outputs]
+                    if missing:
+                        msg = (
+                            f"{family.kind.__name__}.batch_expressions returned no "
+                            f"expression for {missing}; it must return one per member."
+                        )
+                        raise RuntimeError(msg)
+                    for name in family.members:
+                        # Named like Evaluable.expression names its result.
+                        outputs[name].name = name
+                        family_outputs[name] = outputs[name]
                     progress_bar.advance(task)
                     continue
                 elif node_type == "function":

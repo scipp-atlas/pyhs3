@@ -11,6 +11,7 @@ from pytensor.tensor.basic import Split
 
 import pyhs3
 from pyhs3 import model as model_module
+from pyhs3.functions import InterpolationFunction
 
 
 def _workspace() -> pyhs3.Workspace:
@@ -197,3 +198,20 @@ class TestModelBuildsFamilies:
         value = _model().logpdf("g0", **point)
         request.getfixturevalue("unbatched")
         np.testing.assert_allclose(value, _model().logpdf("g0", **point), rtol=1e-12)
+
+
+class TestFamilyContract:
+    def test_family_outputs_are_named_after_their_member(self):
+        """Like Evaluable.expression, a batched member's tensor carries its name."""
+        model = _model()
+        assert model.functions["g0_interp0"].name == "g0_interp0"
+
+    def test_a_member_missing_from_batch_expressions_raises(self, monkeypatch):
+        """batch_expressions must return every member; a gap is a contract error."""
+        monkeypatch.setattr(
+            InterpolationFunction,
+            "batch_expressions",
+            classmethod(lambda *_args: {}),
+        )
+        with pytest.raises(RuntimeError, match="returned no expression for"):
+            _model()

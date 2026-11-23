@@ -456,7 +456,7 @@ def plan_function_families(
 ) -> list[FunctionFamily]:
     """Group batchable functions into families and rewire ``graph`` around them.
 
-    Functions of a :class:`~pyhs3.functions.core.BatchableFunction` type are
+    Functions of a :class:`~pyhs3.functions.BatchableFunction` type are
     grouped by type and by the first of ``roots`` (typically the likelihood's
     distributions, in order) that depends on them, so each family serves one
     channel and a single distribution's graph only evaluates its own
@@ -464,11 +464,15 @@ def plan_function_families(
     is added whose inputs are the union of its members' inputs, and each
     member is rewired to depend on the family node alone; building the
     family node builds every member (see
-    :meth:`~pyhs3.functions.core.BatchableFunction.batch_expressions`).
+    :meth:`~pyhs3.functions.BatchableFunction.batch_expressions`).
 
     A function that depends on another function of its group stays out of the
     family (the family would depend on itself) and is logged at debug level;
-    functions no root depends on are left alone.
+    functions no root depends on are left alone.  Each group is checked
+    against the graph as already rewired by the families planned before it:
+    that is what keeps families of different types from forming a cycle
+    through each other (one type's family feeding the other's members and
+    back), so the ancestry must not be computed once up front.
 
     Args:
         graph: Dependency graph from :func:`build_dependency_graph`; modified

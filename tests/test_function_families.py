@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 import numpy as np
 import pytensor
@@ -390,3 +391,95 @@ class TestFamiliesUnderTheDefaultNLLMode:
         np.testing.assert_allclose(
             evaluate(default_nll_mode()), evaluate("FAST_COMPILE"), rtol=1e-10
         )
+
+
+class TestBatchedInterpolationEdgeCases:
+    def test_additive_member_with_contribution_minus_one_has_finite_gradient(self):
+        """An additive term of exactly -1 must not leak a 0/0 from the product branch."""
+        members = [
+            # Code 0 with nominal 10 and high 9: at alpha = 1 the term is exactly -1.
+            _interp("f0", [0], "nom_0", ["alpha_a"]),
+            _interp("f1", [5], "nom_1", ["alpha_b"]),
+        ]
+        setup = _Setup(members, [])
+        setup.context["nom_0"] = pt.constant(10.0, name="nom_0")
+        setup.context["f0_hi_0"] = pt.constant(9.0, name="f0_hi_0")
+        setup.values["alpha_a"] = 1.0
+        free = [v for v in setup.inputs if v.name in ("alpha_a", "alpha_b")]
+
+        def gradient(outputs):
+            return pt.grad(pt.sum(pt.stack(outputs)), free)
+
+        batched = setup.evaluate(gradient(_batched(setup)))
+        assert np.all(np.isfinite(batched))
+        np.testing.assert_allclose(
+            batched, setup.evaluate(gradient(_per_function(setup))), rtol=1e-12
+        )
+
+    def test_mixed_but_not_interleaved_kinds_use_the_per_function_path(self, caplog):
+        members = [
+            _interp("f0", [0, 0, 5], "nom_0", ["alpha_a", "alpha_b", "alpha_c"]),
+            _interp("f1", [5], "nom_1", ["alpha_a"]),
+        ]
+        setup = _Setup(members, [])
+        with caplog.at_level(logging.DEBUG, logger="pyhs3.functions.standard"):
+            batched = _batched(setup)
+        assert "f0" in caplog.text
+        np.testing.assert_allclose(
+            setup.evaluate(batched), setup.evaluate(_per_function(setup)), rtol=1e-12
+        )
+
+
+class _Scaled(BatchableFunction):
+    """A second batchable type for planner tests: ``x * factor``."""
+
+    type: Literal["scaled"] = "scaled"
+    x: str
+    factor: float
+
+    def _expression(self, context):
+        return context[self.x] * self.factor
+
+    @classmethod
+    def batch_expressions(cls, members, context, _functions):
+        return {m.name: m.expression(context) for m in members}
+
+
+class TestPlanFamiliesOfSeveralTypes:
+    def test_families_of_two_types_never_form_a_cycle(self, caplog):
+        """b1 (scaled) feeds a1 (interp) while a2 (interp) feeds b2 (scaled).
+
+        Checked against the original graph neither group has an internal
+        dependency, yet the two families together would form the cycle
+        family(interp) -> a2 -> family(scaled) -> b1 -> family(interp).  The
+        planner checks each group against the graph as already rewired by
+        earlier families, so one member stays out instead.
+        """
+        functions = [
+            _Scaled(name="b1", x="alpha_a", factor=2.0),
+            _Scaled(name="b2", x="a2", factor=3.0),
+            _Scaled(name="b3", x="alpha_b", factor=4.0),
+            _interp("a1", [5], "nom_1", ["b1"]),
+            _interp("a2", [5], "nom_2", ["alpha_c"]),
+            ProductFunction(name="mean", factors=["a1", "b2", "b3"]),
+        ]
+        distributions = Distributions(
+            [
+                {
+                    "name": "g",
+                    "type": "gaussian_dist",
+                    "x": "x0",
+                    "mean": "mean",
+                    "sigma": 1.0,
+                }
+            ]
+        )
+        graph, _, _ = build_dependency_graph(
+            ParameterSet(name="p", parameters=[]), functions, distributions
+        )
+        with caplog.at_level(logging.DEBUG, logger="pyhs3.networks"):
+            families = plan_function_families(graph, functions, ["g"])
+
+        graph.topological_sort()  # raises on a cycle
+        members = {m for f in families for m in f.members}
+        assert not {"a1", "a2", "b1", "b2"} <= members

@@ -582,8 +582,8 @@ class InterpolationFunction(BatchableFunction):
           single ``Split``, so the gradient is one ``Join`` rather than a sum
           of ``F`` scattered ``IncSubtensor`` updates.
 
-        Members whose inputs are not all scalars, or whose entries interleave
-        additive and multiplicative codes (which do not commute), are built
+        Members whose inputs are not all scalars, or whose entries mix
+        additive (0, 2, 3, 4) and multiplicative (1, 5, 6) codes, are built
         with their own :meth:`expression` and logged at debug level.
 
         Args:
@@ -618,7 +618,7 @@ class InterpolationFunction(BatchableFunction):
         """This member's inputs for a batched evaluation, or why it cannot batch."""
         runs = self._entry_runs()
         if len(runs) > 1:
-            return "its entries interleave additive and multiplicative codes"
+            return "its entries mix additive and multiplicative codes"
         nominal = context[self.nom]
         if nominal.ndim != 0:
             return f"its nominal '{self.nom}' is not a scalar"
@@ -751,14 +751,21 @@ def _batched_interpolation(rows: Sequence[_InterpolationRow]) -> dict[str, Tenso
             table[r, position[r]] = e
             position[r] += 1
         additive = np.array([row.additive for row in rows])
+        # Each reduction reads only its own kind's rows; rows of the other kind
+        # read the sentinel alone, so e.g. an additive term of -1 never becomes
+        # a zero factor in the product.
+        multiplicative_table = np.where(additive[:, None], len(flat), table)
+        additive_table = np.where(additive[:, None], table, len(flat))
         results = []
         if not additive.all():
-            factors = pt.concatenate([1.0 + contributions, pt.ones(1)])[table]  # type: ignore[no-untyped-call]
+            factors = pt.concatenate([1.0 + contributions, pt.ones(1)])[  # type: ignore[no-untyped-call]
+                multiplicative_table
+            ]
             results.append(
                 nominal * pt.prod(factors, axis=1, no_zeros_in_input=True)  # type: ignore[no-untyped-call]
             )
         if additive.any():
-            terms = pt.concatenate([contributions, pt.zeros(1)])[table]  # type: ignore[no-untyped-call]
+            terms = pt.concatenate([contributions, pt.zeros(1)])[additive_table]  # type: ignore[no-untyped-call]
             results.append(nominal + pt.sum(terms, axis=1))  # type: ignore[no-untyped-call]
         result = (
             results[0]

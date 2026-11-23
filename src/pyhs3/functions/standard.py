@@ -702,6 +702,22 @@ def _as_vector(tensors: Sequence[TensorVar]) -> npt.NDArray[np.float64] | Tensor
     return cast(TensorVar, pt.stack(list(tensors)))
 
 
+def _entry_table(
+    row_of: npt.NDArray[np.int64], members: npt.NDArray[np.int64], sentinel: int
+) -> npt.NDArray[np.int64]:
+    """``(len(members), E_max)`` positions of each member's entries on the entry axis.
+
+    Row ``i`` lists the entry positions of member ``members[i]`` (``row_of``
+    gives each entry's member), padded with ``sentinel``; ``E_max`` is the
+    largest entry count among ``members`` (at least 1).
+    """
+    rows = [np.flatnonzero(row_of == member) for member in members]
+    table = np.full((len(members), max(1, *(len(r) for r in rows))), sentinel)
+    for i, positions in enumerate(rows):
+        table[i, : len(positions)] = positions
+    return table
+
+
 def _batched_interpolation(rows: Sequence[_InterpolationRow]) -> dict[str, TensorVar]:
     """The vectorised evaluation described in :meth:`InterpolationFunction.batch_expressions`."""
     n_rows = len(rows)
@@ -742,39 +758,39 @@ def _batched_interpolation(rows: Sequence[_InterpolationRow]) -> dict[str, Tenso
                 )
             )
         contributions = cast(TensorVar, pt.concatenate(blocks))  # type: ignore[no-untyped-call]  # (E,)
-        # (F, E_max) positions into the entry axis; E (one past the end) is the
-        # sentinel slot appended below.
-        counts = np.bincount(row_of, minlength=n_rows)
-        table = np.full((n_rows, counts.max()), len(flat), dtype=np.int64)
-        position = np.zeros(n_rows, dtype=np.int64)
-        for e, r in enumerate(row_of):
-            table[r, position[r]] = e
-            position[r] += 1
         additive = np.array([row.additive for row in rows])
-        # Each reduction reads only its own kind's rows; rows of the other kind
-        # read the sentinel alone, so e.g. an additive term of -1 never becomes
-        # a zero factor in the product.
-        multiplicative_table = np.where(additive[:, None], len(flat), table)
-        additive_table = np.where(additive[:, None], table, len(flat))
-        results = []
-        if not additive.all():
-            factors = pt.concatenate([1.0 + contributions, pt.ones(1)])[  # type: ignore[no-untyped-call]
-                multiplicative_table
-            ]
-            results.append(
-                nominal * pt.prod(factors, axis=1, no_zeros_in_input=True)  # type: ignore[no-untyped-call]
-            )
-        if additive.any():
-            terms = pt.concatenate([contributions, pt.zeros(1)])[additive_table]  # type: ignore[no-untyped-call]
-            results.append(nominal + pt.sum(terms, axis=1))  # type: ignore[no-untyped-call]
+        results: list[TensorVar] = []
+        order: list[int] = []
+        # One reduction per kind over only that kind's members, so neither ever
+        # reads the other kind's entries (an additive term of -1 is never a
+        # zero factor of a product).  The results come out in kind order and
+        # are matched back to their members at the split below.
+        for is_additive in (False, True):
+            members = np.flatnonzero(additive == is_additive)
+            if members.size == 0:
+                continue
+            # (F_kind, E_max_kind) positions on the entry axis; len(flat), one
+            # past the end, is the sentinel slot appended to the entry axis.
+            table = _entry_table(row_of, members, sentinel=len(flat))
+            if is_additive:
+                terms = pt.concatenate([contributions, pt.zeros(1)])[table]  # type: ignore[no-untyped-call]
+                results.append(nominal[members] + pt.sum(terms, axis=1))  # type: ignore[no-untyped-call]
+            else:
+                factors = pt.concatenate([1.0 + contributions, pt.ones(1)])[table]  # type: ignore[no-untyped-call]
+                results.append(
+                    nominal[members] * pt.prod(factors, axis=1, no_zeros_in_input=True)  # type: ignore[no-untyped-call]
+                )
+            order.extend(members.tolist())
         result = (
             results[0]
             if len(results) == 1
-            else pt.switch(additive, results[1], results[0])
+            else cast(TensorVar, pt.concatenate(results))  # type: ignore[no-untyped-call]
         )
     else:
         result = pt.as_tensor_variable(nominal)
-    positive = np.array([row.positive_definite for row in rows])
+        order = list(range(n_rows))
+    ordered = [rows[i] for i in order]  # rows in the order of result
+    positive = np.array([row.positive_definite for row in ordered])
     if positive.any():
         result = pt.switch(positive, pt.maximum(result, 0.0), result)
     # One Split, not F Subtensors: the gradient of Split is one Join.
@@ -788,7 +804,7 @@ def _batched_interpolation(rows: Sequence[_InterpolationRow]) -> dict[str, Tenso
             TensorVar,
             specify_shape(piece, (1,)).dimshuffle(()),
         )
-        for row, piece in zip(rows, pieces, strict=True)
+        for row, piece in zip(ordered, pieces, strict=True)
     }
 
 

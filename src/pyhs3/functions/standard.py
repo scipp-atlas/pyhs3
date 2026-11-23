@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """
 HS3 Functions implementation.
 
@@ -556,7 +557,7 @@ class InterpolationFunction(BatchableFunction):
         )
 
     @classmethod
-    def batch_expressions(
+    def batch_expressions(  # pylint: disable=redefined-outer-name
         cls,
         members: Sequence[InterpolationFunction],
         context: Context,
@@ -598,7 +599,7 @@ class InterpolationFunction(BatchableFunction):
         outputs: dict[str, TensorVar] = {}
         rows: list[_InterpolationRow] = []
         for member in members:
-            row = member._batch_row(context, functions)
+            row = member._batch_row(context, functions)  # pylint: disable=protected-access
             if isinstance(row, str):
                 log.debug(
                     "Interpolation function '%s' is built on its own, not batched: %s",
@@ -612,7 +613,7 @@ class InterpolationFunction(BatchableFunction):
             outputs.update(_batched_interpolation(rows))
         return outputs
 
-    def _batch_row(
+    def _batch_row(  # pylint: disable=redefined-outer-name
         self, context: Context, functions: Mapping[str, Function]
     ) -> _InterpolationRow | str:
         """This member's inputs for a batched evaluation, or why it cannot batch."""
@@ -664,7 +665,7 @@ class _InterpolationRow:
     entries: list[_InterpolationEntry]
 
 
-def _entry_source(
+def _entry_source(  # pylint: disable=redefined-outer-name
     var: str, context: Context, functions: Mapping[str, Function]
 ) -> tuple[TensorVar, float] | None:
     """``(tensor, factor)`` with entry parameter ``tensor * factor``; None if not scalar.
@@ -748,7 +749,7 @@ def _batched_interpolation(rows: Sequence[_InterpolationRow]) -> dict[str, Tenso
         for code in dict.fromkeys(codes.tolist()):
             sl = slice(*np.flatnonzero(codes == code)[[0, -1]] + [0, 1])
             blocks.append(
-                InterpolationFunction._flexible_interp_single(
+                InterpolationFunction._flexible_interp_single(  # pylint: disable=protected-access
                     interp_code=code,
                     low_val=pt.as_tensor_variable(lows[sl]),
                     high_val=pt.as_tensor_variable(highs[sl]),

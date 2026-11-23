@@ -535,12 +535,13 @@ class BatchableDistribution(Distribution, ABC):
         cls, members: Sequence[Self], context: Context
     ) -> dict[str, TensorVar]:
         """Batch members whose fields name the same non-scalar inputs (see :meth:`batch_log_expressions`)."""
+        # batch_log_expressions groups members by their fields and the names of
+        # their non-scalar inputs, so every member has the same keys, and a
+        # field whose input names differ between members is scalar for each.
         first = members[0]
         keys = list(first._parameters)  # pylint: disable=protected-access
         reason = None
-        if any(list(m._parameters) != keys for m in members):  # pylint: disable=protected-access
-            reason = "the members' fields differ"
-        elif any("[" in key for key in keys):
+        if any("[" in key for key in keys):
             reason = "it has list-valued fields"
         differing: dict[str, list[str]] = {}
         shared_ndim = 0
@@ -555,9 +556,6 @@ class BatchableDistribution(Distribution, ABC):
                         reason = f"its shared '{key}' input has no length-1 batch axis"
                         break
                     shared_ndim = max(shared_ndim, tensor.ndim)
-                elif any(context[name].ndim != 0 for name in names):
-                    reason = f"its '{key}' input is not a scalar for every member"
-                    break
                 else:
                     differing[key] = names
         if reason is not None:

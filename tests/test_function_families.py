@@ -408,7 +408,7 @@ class TestPlanFunctionFamilies:
     def test_functions_feeding_no_listed_root_are_left_alone(self):
         """f2 and f3 feed only g1, which is not a root here."""
         graph, functions = _planning_inputs()
-        families = plan_function_families(graph, functions, ["g0"])
+        families = plan_families(graph, functions, ["g0"])
         assert [sorted(f.members) for f in families] == [["f0", "f1"]]
         assert graph.predecessors("f2") != []
 

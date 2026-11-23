@@ -12,7 +12,12 @@ from pytensor.graph.traversal import io_toposort
 from pytensor.tensor.basic import Split
 
 from pyhs3.context import Context
-from pyhs3.distributions import AsymmetricCrystalBallDist, Distributions, GaussianDist
+from pyhs3.distributions import (
+    AsymmetricCrystalBallDist,
+    Distributions,
+    GaussianDist,
+    PolynomialDist,
+)
 from pyhs3.distributions.core import BatchableDistribution
 from pyhs3.functions import Functions
 from pyhs3.networks import build_dependency_graph, plan_families
@@ -32,6 +37,10 @@ class BatchableCrystalBall(AsymmetricCrystalBallDist, BatchableDistribution):
 
 class BatchableGaussian(GaussianDist, BatchableDistribution):
     """GaussianDist opted into batching, for tests (see BatchableCrystalBall)."""
+
+
+class BatchablePolynomial(PolynomialDist, BatchableDistribution):
+    """PolynomialDist opted into batching, for tests: it has a list-valued field."""
 
 
 def _observable_context(names=("x",), bounds=(105.0, 160.0)):
@@ -245,6 +254,63 @@ class TestBatchedDistributionFallback:
         np.testing.assert_allclose(a, c, rtol=1e-12)
         np.testing.assert_allclose(b, d, rtol=1e-12)
 
+    def test_a_single_member_is_built_on_its_own(self, caplog):
+        context, leaves = _observable_context()
+        members = [_crystal_ball("cb0")]
+        _add_crystal_ball_parameters(context, members, np.random.default_rng(5))
+        with caplog.at_level(logging.DEBUG, logger="pyhs3.distributions.core"):
+            batched = _batched(members, context)
+        assert "built on its own" not in caplog.text
+        fn = pytensor.function(
+            [leaves["x"]],
+            [*batched, *_per_member(members, context)],
+            mode="FAST_COMPILE",
+        )
+        a, b = fn(_EVENTS)
+        np.testing.assert_allclose(a, b, rtol=1e-12)
+
+    def test_list_valued_fields_use_the_per_member_path(self, caplog):
+        context, leaves = _observable_context()
+        members = [
+            BatchablePolynomial(name=f"poly{k}", x="x", coefficients=[f"a{k}", f"b{k}"])
+            for k in range(2)
+        ]
+        for k in range(2):
+            context.add_parameter(f"a{k}", pt.constant(1.0 + k))
+            context.add_parameter(f"b{k}", pt.constant(0.01 * (k + 1)))
+        with caplog.at_level(logging.DEBUG, logger="pyhs3.distributions.core"):
+            batched = _batched(members, context)
+        assert "list-valued fields" in caplog.text
+        fn = pytensor.function(
+            [leaves["x"]],
+            [*batched, *_per_member(members, context)],
+            mode="FAST_COMPILE",
+        )
+        a, b, c, d = fn(_EVENTS)
+        np.testing.assert_allclose([a, b], [c, d], rtol=1e-12)
+
+    def test_shared_input_without_a_batch_axis_uses_the_per_member_path(self, caplog):
+        """A shared mean of shape (M,) has no length-1 axis to stack members on."""
+        context, leaves = _observable_context()
+        members = [
+            BatchableGaussian(name=f"g{k}", x="x", mean="mu", sigma=f"s{k}")
+            for k in range(2)
+        ]
+        mu = pt.dvector("mu")
+        context.add_parameter("mu", mu)
+        for k in range(2):
+            context.add_parameter(f"s{k}", pt.constant(2.0 + k))
+        with caplog.at_level(logging.DEBUG, logger="pyhs3.distributions.core"):
+            batched = _batched(members, context)
+        assert "has no length-1 batch axis" in caplog.text
+        fn = pytensor.function(
+            [leaves["x"], mu],
+            [*batched, *_per_member(members, context)],
+            mode="FAST_COMPILE",
+        )
+        a, b, c, d = fn(_EVENTS, np.full(_EVENTS.shape, 125.0))
+        np.testing.assert_allclose([a, b], [c, d], rtol=1e-12)
+
 
 class TestPlanDistributionFamilies:
     def test_distributions_feeding_one_root_form_a_family(self):
@@ -270,6 +336,22 @@ class TestPlanDistributionFamilies:
         assert [sorted(f.members) for f in families] == [["g0", "g1"]]
         assert families[0].kind is BatchableGaussian
         assert graph.predecessors("g0") == [families[0].name]
+
+    def test_distributions_outside_the_graph_or_any_root_are_left_alone(self):
+        distributions = Distributions(
+            [
+                BatchableGaussian(name="g0", x="x", mean="mu0", sigma=1.0),
+                BatchableGaussian(name="g1", x="x", mean="mu1", sigma=2.0),
+            ]
+        )
+        functions = Functions([])
+        graph, _, _ = build_dependency_graph(
+            ParameterSet(name="p", parameters=[]), functions, distributions
+        )
+        outside = BatchableGaussian(name="elsewhere", x="x", mean="mu2", sigma=1.0)
+
+        assert plan_families(graph, [*distributions, outside], ["no_such_root"]) == []
+        assert "elsewhere" not in graph
 
 
 class TestBatchedDistributionSubBatches:

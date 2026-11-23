@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import numpy as np
 import pytensor
 import pytensor.tensor as pt
@@ -20,11 +22,13 @@ class BatchableGaussian(GaussianDist, BatchableDistribution):
     """
 
 
-def _workspace() -> pyhs3.Workspace:
+def _workspace(duplicates: tuple[tuple[str, str], ...] = ()) -> pyhs3.Workspace:
     """Two channels, each an extended mixture of two Gaussians, plus constraints.
 
     The Gaussians in a channel share their observable; the three Gaussian
-    constraints on alpha_a/b/c are product factors of both channels.
+    constraints on alpha_a/b/c are product factors of both channels.  Each
+    ``(channel, s)`` in ``duplicates`` adds ``constr_{s}_{channel}``, identical
+    to ``constr_{s}`` but for its name, as another factor of that channel.
     """
     parameters = [{"name": n, "value": 0.0} for n in ("alpha_a", "alpha_b", "alpha_c")]
     parameters += [
@@ -54,12 +58,22 @@ def _workspace() -> pyhs3.Workspace:
             {
                 "name": f"{ch}_model",
                 "type": "product_dist",
-                "factors": [f"{ch}_mix", "constr_a", "constr_b", "constr_c"],
+                "factors": [
+                    f"{ch}_mix",
+                    "constr_a",
+                    "constr_b",
+                    "constr_c",
+                    *(f"constr_{s}_{c}" for c, s in duplicates if c == ch),
+                ],
             },
         ]
     distributions += [
         BatchableGaussian(name=f"constr_{s}", x=f"alpha_{s}", mean=0.0, sigma=1.0)
         for s in ("a", "b", "c")
+    ]
+    distributions += [
+        BatchableGaussian(name=f"constr_{s}_{ch}", x=f"alpha_{s}", mean=0.0, sigma=1.0)
+        for ch, s in duplicates
     ]
     data = [
         {
@@ -104,8 +118,8 @@ def unbatched(monkeypatch):
     monkeypatch.setattr(model_module, "plan_families", lambda *_a, **_k: [])
 
 
-def _model():
-    ws = _workspace()
+def _model(duplicates: tuple[tuple[str, str], ...] = ()):
+    ws = _workspace(duplicates)
     return ws.model(ws.analyses["A"], progress=False)
 
 
@@ -159,3 +173,93 @@ class TestModelBuildsDistributionFamilies:
         model = _model()
         assert model.distributions["g0_sig"].name == "g0_sig"
         assert model.log_distributions["constr_b"].name == "constr_b"
+
+
+class TestStructuralSharingInFamilies:
+    """Members identical but for their name reuse one expression, as without families."""
+
+    @pytest.mark.parametrize(
+        "duplicates",
+        [
+            pytest.param((("g0", "a"),), id="within-one-family"),
+            pytest.param((("g1", "a"),), id="across-families"),
+        ],
+    )
+    def test_log_prob_and_gradient_match_the_per_member_build(
+        self, duplicates, request
+    ):
+        model = _model(duplicates)
+        ((channel, s),) = duplicates
+        assert (
+            model.log_distributions[f"constr_{s}_{channel}"]
+            is model.log_distributions[f"constr_{s}"]
+        )
+        value, grad = _value_and_grad(model)
+        request.getfixturevalue("unbatched")
+        ref_value, ref_grad = _value_and_grad(_model(duplicates))
+
+        assert value == pytest.approx(ref_value, rel=1e-12)
+        for name, g in ref_grad.items():
+            assert grad[name] == pytest.approx(g, rel=1e-10, abs=1e-12)
+
+
+class UnsharedBatchableGaussian(BatchableGaussian):
+    """A batchable type that opts out of structural sharing."""
+
+    share_identical_expressions: ClassVar[bool] = False
+
+
+def _twin_products(cls: type[BatchableGaussian]) -> pyhs3.Workspace:
+    """prod_A and prod_B multiply constraints identical but for their names.
+
+    Without a likelihood every distribution is a root, so each product's two
+    constraints form a family of their own.
+    """
+    distributions: list = []
+    for p in ("A", "B"):
+        distributions += [
+            cls(name=f"c{p}_{s}", x=f"alpha_{s}", mean=0.0, sigma=1.0)
+            for s in ("a", "b")
+        ]
+        distributions.append(
+            {
+                "name": f"prod_{p}",
+                "type": "product_dist",
+                "factors": [f"c{p}_a", f"c{p}_b"],
+            }
+        )
+    return pyhs3.Workspace(
+        metadata={"hs3_version": "0.2"},
+        parameter_points=[
+            {
+                "name": "init",
+                "parameters": [
+                    {"name": "alpha_a", "value": 0.6},
+                    {"name": "alpha_b", "value": -1.3},
+                ],
+            }
+        ],
+        distributions=distributions,
+    )
+
+
+class TestFamiliesWithoutRowsOfTheirOwn:
+    @pytest.mark.parametrize(
+        ("cls", "shared"),
+        [
+            pytest.param(BatchableGaussian, True, id="shared"),
+            pytest.param(UnsharedBatchableGaussian, False, id="opted-out"),
+        ],
+    )
+    def test_twin_families_match_the_per_member_build(self, cls, shared, request):
+        model = _twin_products(cls).model(0, progress=False)
+        assert (
+            model.log_distributions["cB_a"] is model.log_distributions["cA_a"]
+        ) == shared
+        point = {"alpha_a": np.array(0.6), "alpha_b": np.array(-1.3)}
+        value = model.logpdf("prod_B", **point)
+        request.getfixturevalue("unbatched")
+        reference = (
+            _twin_products(cls).model(0, progress=False).logpdf("prod_B", **point)
+        )
+        np.testing.assert_allclose(value, reference, rtol=1e-12)

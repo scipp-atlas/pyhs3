@@ -1,17 +1,20 @@
 .. diataxis: explanation
 .. status: implemented
 
-Building many functions of one type as a family
-===============================================
+Building many functions or distributions of one type as a family
+================================================================
 
-Large workspaces repeat the same kind of function many times. A combined
+Large workspaces repeat the same kind of component many times. A combined
 measurement over many channels can hold hundreds of
 :class:`~pyhs3.functions.InterpolationFunction` instances, one per sample and
-systematic, each with its own nominal value, variations, and nuisance
-parameters. This page explains how pyhs3 builds such functions as one
-vectorised computation per likelihood channel, and why. :class:`~pyhs3.Model`
-does this for every batchable function type without any option to set or turn
-off, and the likelihood it builds has the same value to rounding.
+systematic, several crystal-ball signal shapes per channel, and a Gaussian
+constraint per nuisance parameter. This page explains how pyhs3 builds such
+components as one vectorised computation per likelihood channel, and why.
+:class:`~pyhs3.Model` does this for every batchable function and distribution
+type without any option to set or turn off, and the likelihood it builds has
+the same value to rounding. Among pyhs3's own types, interpolation functions
+are batchable; no built-in distribution is, for the reasons given in `Why no
+built-in distribution opts in`_.
 
 Why one subgraph per function is slow
 -------------------------------------
@@ -35,17 +38,19 @@ Families in the dependency graph
 The dependency graph already records every function's type and inputs before
 anything is built, so pyhs3 groups functions there rather than rediscovering
 the structure from the built graph. After building the dependency graph,
-``pyhs3.networks.plan_function_families`` groups the instances of each
-:class:`~pyhs3.functions.BatchableFunction` type by the first *root*
+``pyhs3.networks.plan_families`` groups the instances of each
+:class:`~pyhs3.functions.BatchableFunction` and
+:class:`~pyhs3.distributions.BatchableDistribution` type by the first *root*
 distribution that depends on them: the likelihood's distributions and
 auxiliary distributions, in order, or every distribution when the model has no
 likelihood. Instances are grouped by their exact class, and each group of two
 or more becomes one *family* node: its inputs are the union of its members'
 inputs, and every member is rewired to depend on the family alone. When the
 model's walk reaches the family node, one call to
-:meth:`~pyhs3.functions.BatchableFunction.batch_expressions` builds all
-members, and each member node takes its own expression from the result, named
-after the member.
+:meth:`~pyhs3.functions.BatchableFunction.batch_expressions` (for functions)
+or :meth:`~pyhs3.distributions.BatchableDistribution.batch_log_expressions`
+(for distributions) builds all members, and each member node takes its own
+expression from the result, named after the member.
 
 pyhf follows the same pattern for modifiers. Each modifier type pairs a builder,
 which collects the data of every instance into arrays, with a combined applier
@@ -122,3 +127,64 @@ model build, the compile, and each evaluation, on both the C and the JAX
 backend, while the likelihood and its gradient agree with the per-function
 build to rounding. Scoping families per channel instead of sharing one family
 across the whole model costs little extra compile time.
+
+How distribution families evaluate
+----------------------------------
+
+A distribution family reuses each distribution's own formulas instead of a
+batched reimplementation. Inheriting
+:class:`~pyhs3.distributions.BatchableDistribution` asserts that a type's
+likelihood, log-likelihood and analytic normalization are elementwise in their
+parameters. The family replaces every parameter that differs between members
+by a stack of the members' values and evaluates one member's
+``log_expression`` on those stacks.
+
+The stack goes onto the parameter-batch axis that pyhs3's shapes already
+carry. An observable enters a distribution as an ``(N, 1)`` view, whose last
+axis batches parameter points and has length 1 for scalar parameters. With the
+members stacked to shape ``(1, K)`` there, the log density comes out
+``(N, K)``, and splitting along that axis gives each member its own ``(N, 1)``
+result. Normalization needs no special handling: an analytic antiderivative is
+elementwise anyway, and Gauss-Legendre quadrature substitutes its nodes for the
+observable and sums over axis 0, which the member axis leaves alone. A stack
+along a new leading axis would collide with that quadrature axis instead. For
+constraints on parameters, which have no observable, the stack is simply
+``(K,)``.
+
+Within a family, members are batched together only when their fields name
+the same non-scalar inputs: a type used both as a shape on an observable and as
+a constraint on a parameter forms one batch of shapes and one of constraints.
+A member that no other member matches, for example one with a batched
+(``kind=pt.vector``) parameter, is built on its own and logged at debug level.
+Two distributions that are identical in every field but their name still share
+one expression, as without families; only the distinct ones become rows of a
+batch.
+
+Because a member's log density is one row of its batch's computation,
+:meth:`~pyhs3.Model.pdf` of that member takes the inputs of every member
+batched with it, and :meth:`~pyhs3.Model.pars` lists them.
+
+Why no built-in distribution opts in
+------------------------------------
+
+The distribution formulas in pyhs3 are elementwise, so built-in types could
+opt in, but on large workspaces batching them traded one backend against the
+other rather than helping both, while the likelihood and its gradient stayed
+the same to rounding.
+
+Batching crystal-ball shapes makes the JAX compile faster, because XLA's work
+grows with the size of the graph, but makes the cold C compile slower. The C
+backend compiles one module per distinct operation and input type. As scalars,
+a crystal ball's parameter-only expressions (its tail constants and
+normalization terms) reuse modules that the rest of the graph already
+compiles; stacked into a ``(1, K)`` vector they need a new set of their own,
+roughly one fixed cost per distribution type and family size. Interpolation
+families do not have this cost, because without them every function's stack
+of entries already had its own length; batching removed that variety.
+Gaussian constraints are a handful of cheap scalar operations each, so
+stacking and splitting them costs more evaluation time on C than it saves,
+with no gain on JAX.
+
+A distribution type of your own can still opt in (see
+:doc:`/defining_components`); measure the cold compile and the evaluation
+time on both backends for your workspaces before you do.

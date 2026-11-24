@@ -33,6 +33,7 @@ from pyhs3.distributions.basic import GaussianDist
 from pyhs3.distributions.composite import MixtureDist, ProductDist
 from pyhs3.distributions.histfactory import HistFactoryDistChannel
 from pyhs3.domains import ProductDomain
+from pyhs3.exceptions import WorkspaceValidationError
 from pyhs3.functions import Functions
 from pyhs3.likelihoods import Likelihood
 from pyhs3.model import Model
@@ -190,6 +191,17 @@ def test_likelihood_model_retains_aux_distribution_branch():
     ws = Workspace(
         **{
             **_WS_DICT,
+            # gauss2 is auxiliary (no paired data), so y_obs is a parameter, not
+            # an observable, and HS3 section 2.7 needs it in a referenced domain.
+            "domains": [
+                {
+                    **_WS_DICT["domains"][0],
+                    "axes": [
+                        *_WS_DICT["domains"][0]["axes"],
+                        {"name": "y_obs", "min": -10.0, "max": 10.0},
+                    ],
+                }
+            ],
             "likelihoods": [
                 {
                     "name": "L",
@@ -257,6 +269,141 @@ def test_model_from_analysis_unknown_init_raises():
     )
     with pytest.raises(ValueError, match="nonexistent_params"):
         ws_bad.model(ws_bad.analyses["A"], progress=False)
+
+
+# ---------------------------------------------------------------------------
+# HS3 section 2.7: every likelihood parameter must be in a referenced domain
+# or const in the referenced parameter point
+# ---------------------------------------------------------------------------
+
+
+def _ws_with_unlisted_width(analysis: dict, parameter_points: list[dict]) -> Workspace:
+    """_WS_DICT with gauss1's sigma as a parameter 'width' that no domain lists."""
+    distributions = [
+        {**_WS_DICT["distributions"][0], "sigma": "width"},
+        _WS_DICT["distributions"][1],
+    ]
+    return Workspace(
+        **{
+            **_WS_DICT,
+            "distributions": distributions,
+            "analyses": [
+                {"name": "A", "likelihood": "L", "domains": ["main"], **analysis}
+            ],
+            "parameter_points": parameter_points,
+        }
+    )
+
+
+_FREE_WIDTH = {
+    "name": "free_width",
+    "parameters": [{"name": "mean", "value": 2.0}, {"name": "width", "value": 1.0}],
+}
+_FIXED_WIDTH = {
+    "name": "fixed_width",
+    "parameters": [
+        {"name": "mean", "value": 2.0},
+        {"name": "width", "value": 1.0, "const": True},
+    ],
+}
+
+
+def test_model_from_analysis_unlisted_parameter_without_init_raises():
+    """A likelihood parameter outside the domains, with no referenced parameter point, is invalid."""
+    ws = _ws_with_unlisted_width({}, [_FIXED_WIDTH])
+    with pytest.raises(
+        WorkspaceValidationError, match=r"Analysis 'A' violates HS3 section 2\.7"
+    ) as excinfo:
+        ws.model(ws.analyses["A"], progress=False)
+    assert "width" in str(excinfo.value)
+    assert "no init" in str(excinfo.value)
+
+
+def test_model_from_analysis_unlisted_parameter_not_const_in_init_raises():
+    """Listing the parameter in the init point is not enough: it must be const there."""
+    ws = _ws_with_unlisted_width({"init": "free_width"}, [_FREE_WIDTH])
+    with pytest.raises(WorkspaceValidationError, match="width"):
+        ws.model(ws.analyses["A"], progress=False)
+
+
+def test_model_from_analysis_unlisted_parameter_const_in_init():
+    """A parameter that is const in the init point is valid and is not a free graph input."""
+    ws = _ws_with_unlisted_width({"init": "fixed_width"}, [_FIXED_WIDTH])
+    model = ws.model(ws.analyses["A"], progress=False)
+    inputs = {v.name for v in explicit_graph_inputs([model.log_prob]) if v.name}
+    assert "width" not in inputs
+    assert "mean" in inputs
+
+
+def test_model_from_analysis_parameter_set_override_counts_as_referenced():
+    """An explicit parameter_set replaces init as the referenced parameter point."""
+    ws = _ws_with_unlisted_width({}, [_FREE_WIDTH, _FIXED_WIDTH])
+    model = ws.model(ws.analyses["A"], parameter_set="fixed_width", progress=False)
+    inputs = {v.name for v in explicit_graph_inputs([model.log_prob]) if v.name}
+    assert "width" not in inputs
+
+
+def test_model_from_analysis_unlisted_parameter_error_suggests_parameter_set():
+    """The error names the parameter points in which every offending parameter is const."""
+    ws = _ws_with_unlisted_width({}, [_FREE_WIDTH, _FIXED_WIDTH])
+    with pytest.raises(WorkspaceValidationError) as excinfo:
+        ws.model(ws.analyses["A"], progress=False)
+    message = str(excinfo.value)
+    assert "parameter_set='fixed_width'" in message
+    assert "free_width" not in message
+
+
+def test_model_from_analysis_suggestion_must_hold_every_unlisted_parameter_const():
+    """A suggested parameter set replaces init, so it must make every unlisted parameter const.
+
+    'width' is const in init but 'shift' is not; 'only_shift' marks only shift const and
+    would free width again, so only 'both' is a valid suggestion.
+    """
+    distributions = [
+        {**_WS_DICT["distributions"][0], "sigma": "width"},
+        {**_WS_DICT["distributions"][1], "sigma": "shift"},
+    ]
+    point = {"name": "mean", "value": 2.0}
+    ws = Workspace(
+        **{
+            **_WS_DICT,
+            "distributions": distributions,
+            "analyses": [
+                {"name": "A", "likelihood": "L", "domains": ["main"], "init": "init"}
+            ],
+            "parameter_points": [
+                {
+                    "name": "init",
+                    "parameters": [
+                        point,
+                        {"name": "width", "value": 1.0, "const": True},
+                        {"name": "shift", "value": 2.0},
+                    ],
+                },
+                {
+                    "name": "only_shift",
+                    "parameters": [
+                        point,
+                        {"name": "width", "value": 1.0},
+                        {"name": "shift", "value": 2.0, "const": True},
+                    ],
+                },
+                {
+                    "name": "both",
+                    "parameters": [
+                        point,
+                        {"name": "width", "value": 1.0, "const": True},
+                        {"name": "shift", "value": 2.0, "const": True},
+                    ],
+                },
+            ],
+        }
+    )
+    with pytest.raises(WorkspaceValidationError) as excinfo:
+        ws.model(ws.analyses["A"], progress=False)
+    assert excinfo.value.parameters == ["shift"]
+    assert excinfo.value.const_parameter_sets == ["both"]
+    assert "only_shift" not in str(excinfo.value)
 
 
 def test_model_from_analysis_multi_domain_merges():
@@ -1311,6 +1458,15 @@ def test_log_prob_product_extended_mixture_with_constraint():
         ],
         "likelihoods": [
             {"name": "L", "distributions": ["channel1"], "data": ["data1"]}
+        ],
+        "domains": [
+            {
+                **_WS_EXTENDED_MIXTURE["domains"][0],
+                "axes": [
+                    *_WS_EXTENDED_MIXTURE["domains"][0]["axes"],
+                    {"name": "alpha", "min": -5.0, "max": 5.0},
+                ],
+            }
         ],
         "parameter_points": [
             {

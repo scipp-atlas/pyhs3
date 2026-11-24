@@ -13,7 +13,7 @@ from typing import Annotated
 import typer
 
 from pyhs3.cli._shared import load_workspace
-from pyhs3.cli.infer import _select_target
+from pyhs3.cli.infer import _build_model, _check_parameter_set, _select_target
 
 
 def graph(
@@ -34,6 +34,13 @@ def graph(
         typer.Option(
             "--analysis",
             help="Name of the analysis (or likelihood) to build the model from. Defaults to the sole one.",
+        ),
+    ] = None,
+    parameter_set: Annotated[
+        str | None,
+        typer.Option(
+            "--parameter-set",
+            help="Parameter set whose values and const flags to use, instead of the analysis init.",
         ),
     ] = None,
     fmt: Annotated[
@@ -70,7 +77,8 @@ def graph(
     r"""Render a distribution's computation graph to an image file.
 
     Builds the model the same way ``nll`` does (``--analysis`` selects which
-    analysis or likelihood to build from) and delegates to
+    analysis or likelihood to build from, ``--parameter-set`` replaces the
+    analysis ``init``) and delegates to
     ``Model.visualize_graph``. Prints the path of the
     rendered file to stdout. Requires the ``graph`` optional dependency
     (``pip install 'pyhs3[graph]'``, which installs ``pydot``) **and** the
@@ -82,7 +90,8 @@ def graph(
     """
     ws = load_workspace(workspace)
     target = _select_target(ws, analysis)
-    model = ws.model(target, progress=False)
+    _check_parameter_set(ws, parameter_set)
+    model = _build_model(ws, target, parameter_set)
 
     try:
         outpath = model.visualize_graph(

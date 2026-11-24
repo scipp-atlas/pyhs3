@@ -17,7 +17,9 @@ from rich.console import Console
 
 from pyhs3.analyses import Analysis
 from pyhs3.cli._shared import load_workspace, parse_param
+from pyhs3.exceptions import UnlistedParameterError
 from pyhs3.likelihoods import Likelihood
+from pyhs3.model import Model
 from pyhs3.workspace import Workspace
 
 _err_console = Console(stderr=True)
@@ -58,8 +60,42 @@ def _select_target(ws: Workspace, name: str | None) -> Analysis | Likelihood:
     raise typer.BadParameter(msg)
 
 
+def _check_parameter_set(ws: Workspace, name: str | None) -> None:
+    """Reject a ``--parameter-set`` name that the workspace does not define."""
+    if name is None:
+        return
+    available = [pset.name for pset in ws.parameter_points or []]
+    if name not in available:
+        listed = ", ".join(available) if available else "none"
+        msg = f"no parameter set named {name!r} in the workspace (available: {listed})"
+        raise typer.BadParameter(msg)
+
+
+def _build_model(
+    ws: Workspace, target: Analysis | Likelihood, parameter_set: str | None
+) -> Model:
+    """Build the model for *target*, turning an HS3 section 2.7 violation into a CLI error.
+
+    The library error suggests ``ws.model(..., parameter_set=...)``; from the
+    command line the same fix is ``--parameter-set``, so that is appended.
+    """
+    try:
+        return ws.model(target, parameter_set=parameter_set, progress=False)
+    except UnlistedParameterError as exc:
+        msg = str(exc)
+        if exc.const_parameter_sets:
+            options = " or ".join(
+                f"--parameter-set {name}" for name in exc.const_parameter_sets
+            )
+            msg += f" From the command line: {options}."
+        raise typer.BadParameter(msg) from exc
+
+
 def _compute_nll(
-    ws: Workspace, target: Analysis | Likelihood, overrides: dict[str, float]
+    ws: Workspace,
+    target: Analysis | Likelihood,
+    overrides: dict[str, float],
+    parameter_set: str | None = None,
 ) -> float:
     """Compile the joint log-prob and evaluate ``NLL = -2 * log_prob``.
 
@@ -70,7 +106,7 @@ def _compute_nll(
     the model was built from, and always wins over an override of the same
     name: ``--param`` overrides a free parameter, never the observed data.
     """
-    model = ws.model(target, progress=False)
+    model = _build_model(ws, target, parameter_set)
     log_prob = model.log_prob
     data = model.data
 
@@ -153,6 +189,13 @@ def nll(
             help="Name of the analysis (or likelihood) to evaluate. Defaults to the sole one.",
         ),
     ] = None,
+    parameter_set: Annotated[
+        str | None,
+        typer.Option(
+            "--parameter-set",
+            help="Parameter set whose values and const flags to use, instead of the analysis init.",
+        ),
+    ] = None,
 ) -> None:
     """Compute the negative log-likelihood at a point in parameter space.
 
@@ -178,6 +221,13 @@ def nll(
     directly. With neither given, the workspace's sole analysis is used, or,
     absent any analyses, its sole likelihood; having more than one of either
     without ``--analysis`` is a fatal error.
+
+    ``--parameter-set`` builds the model with the named parameter set in place
+    of the analysis ``init``: its values seed the free parameters and its
+    ``const`` flags hold parameters constant. HS3 requires every likelihood
+    parameter of an analysis to be in one of its domains or const in that set;
+    ROOT exports, which give their analyses no ``init``, usually need this
+    option, and the error for a violating analysis names the sets that work.
     """
     overrides: dict[str, float] = {}
     if params_file is not None:
@@ -192,5 +242,6 @@ def nll(
 
     ws = load_workspace(workspace)
     target = _select_target(ws, analysis)
-    value = _compute_nll(ws, target, overrides)
+    _check_parameter_set(ws, parameter_set)
+    value = _compute_nll(ws, target, overrides, parameter_set)
     typer.echo(f"{value!r}")

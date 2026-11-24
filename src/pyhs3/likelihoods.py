@@ -14,7 +14,7 @@ import numpy.typing as npt
 from pydantic import Field, model_validator
 
 from pyhs3.collections import NamedCollection, NamedModel
-from pyhs3.data import Data, Datum
+from pyhs3.data import BinnedData, Data, Datum
 
 if TYPE_CHECKING:
     from pyhs3.workspace import Workspace
@@ -119,6 +119,27 @@ class Likelihood(NamedModel):
             for ax_idx, axis in enumerate(datum.axes):
                 result[axis.name] = entries_arr[:, ax_idx]
         return result
+
+    def distribution_names(self) -> list[str]:
+        """Names of the distributions this likelihood evaluates, auxiliary ones included."""
+        return [
+            dist if isinstance(dist, str) else dist.name
+            for dist in [*self.distributions, *(self.aux_distributions or [])]
+        ]
+
+    def binned_observed_inputs(self) -> dict[str, BinnedData]:
+        """Binned data keyed by the ``{distribution}_observed`` input it supplies.
+
+        A distribution paired with :class:`~pyhs3.data.BinnedData` (a HistFactory
+        channel, for example) reads its observed bin counts from the input named
+        ``{distribution}_observed``. These inputs are data, not parameters.
+        """
+        # zip() joins str and Distribution to object for mypy; narrow on the class.
+        return {
+            f"{dist.name if isinstance(dist, Distribution) else str(dist)}_observed": datum
+            for dist, datum in zip(self.distributions, self.data, strict=True)
+            if isinstance(datum, BinnedData)
+        }
 
     @model_validator(mode="after")
     def validate_distributions_data_pairing(self) -> Likelihood:

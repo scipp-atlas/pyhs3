@@ -239,7 +239,7 @@ Test interactions between components:
                    )
                ],
            )
-           model = ws.model()
+           model = ws.model(0)
            assert len(model.parameters) == 3
 
 End-to-End Tests
@@ -266,7 +266,7 @@ Test with real data and complete workflows:
                workspace_data = json.load(f)
 
            ws = pyhs3.Workspace(**workspace_data)
-           model = ws.model()
+           model = ws.model(0)
 
            # Validate against expected results
            assert model is not None
@@ -412,7 +412,7 @@ Use pytest fixtures for common test setup:
 
    def test_with_fixture(simple_workspace):
        """Test using the fixture."""
-       model = simple_workspace.model()
+       model = simple_workspace.model(0)
        assert model is not None
 
 Parametrized Tests

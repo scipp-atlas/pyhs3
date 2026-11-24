@@ -39,5 +39,6 @@
 {% if attributes %}
 {% for item in attributes if item not in pydantic_members or item not in inherited_members %}
 .. autoattribute:: {{ objname }}.{{ item }}
+   :no-value:
 {%- endfor %}
 {% endif %}

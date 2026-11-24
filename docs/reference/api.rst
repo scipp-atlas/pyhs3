@@ -299,4 +299,5 @@ Typing
    :toctree: _generated/
    :nosignatures:
 
+    EntityType
     TensorVar

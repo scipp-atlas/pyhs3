@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self, cast
 
@@ -232,13 +232,49 @@ class Distribution(Evaluable, ABC):
             True if the observable's leaf is an ancestor of any of the fields.
         """
         leaf = context.parameters[observable_name]
-        return leaf in ancestors([context[self._parameters[f]] for f in fields])
+        return bool(
+            self._upstream_among(context, [self._parameters[f] for f in fields], {leaf})
+        )
+
+    @staticmethod
+    def _upstream_among(
+        context: Context,
+        names: Iterable[str],
+        candidates: set[TensorVar],
+    ) -> set[TensorVar]:
+        """
+        The ``candidates`` found in the graphs of ``names``, the named variables included.
+
+        Filtering while walking avoids materializing every ancestor of a large
+        graph just to test a few variables for membership.
+
+        Args:
+            context: Mapping of names to pytensor variables.
+            names: Names of the context entries whose graphs to walk.
+            candidates: Variables to look for.
+
+        Returns:
+            The subset of ``candidates`` that is a named variable or one of its ancestors.
+        """
+        return cast(
+            set[TensorVar],
+            {
+                variable
+                for variable in ancestors([context[name] for name in names])
+                if variable in candidates
+            },
+        )
 
     def _matching_observables(
         self, context: Context
     ) -> list[tuple[str, TensorVar, TensorVar]]:
         """
-        Observable bounds from context that this distribution's parameters reference.
+        Observable bounds from context that this distribution depends on.
+
+        An observable matches when it is one of the distribution's parameters or
+        when its leaf is an ancestor of a parameter's tensor, so an observable
+        that reaches the density only through a function still counts. The
+        ancestors are collected once for all observables.
 
         Shared by _apply_normalization() and log_expression() so both agree on
         whether any normalization applies without duplicating the matching logic.
@@ -249,11 +285,22 @@ class Distribution(Evaluable, ABC):
         Returns:
             List of (name, lower, upper) for each observable this distribution depends on.
         """
-        return [
-            (name, lower, upper)
-            for name, (lower, upper) in context.observables.items()
+        leaves = context.parameters
+        direct = [
+            (name, bounds)
+            for name, bounds in context.observables.items()
             if name in self.parameters
         ]
+        # Observables of data this graph never builds have no leaf.
+        indirect = {
+            leaves[name]: (name, bounds)
+            for name, bounds in context.observables.items()
+            if name not in self.parameters and name in leaves
+        }
+        if indirect:
+            found = self._upstream_among(context, self.parameters, set(indirect))
+            direct += [indirect[leaf] for leaf in found]
+        return [(name, lower, upper) for name, (lower, upper) in direct]
 
     def _normalization_integral_for(
         self,
@@ -294,7 +341,11 @@ class Distribution(Evaluable, ABC):
             msg = (
                 f"Multi-dimensional normalization is not yet supported "
                 f"(observables: {obs_names}). "
-                f"See https://github.com/scipp-atlas/pyhs3/issues/214"
+                f"See https://github.com/scipp-atlas/pyhs3/issues/214. "
+                f"A distribution that depends on an observable only through "
+                f"a function is also affected: whether it is normalized over "
+                f"that observable (joint) or conditioned on it is undecided, "
+                f"see https://github.com/scipp-atlas/pyhs3/issues/396"
             )
             raise NotImplementedError(msg)
 

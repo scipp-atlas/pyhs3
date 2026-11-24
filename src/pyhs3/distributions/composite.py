@@ -150,6 +150,9 @@ class MixtureDist(Distribution):
     # unnormalized_expression() and expected_yield() so that model.log_prob
     # shares the same subgraphs instead of building duplicates the compiler
     # then has to merge (a measurable compile-time cost on large workspaces).
+    # Components are already-normalized densities; re-normalizing over the
+    # observables they depend on would add a redundant integral.
+    _normalizable: bool = PrivateAttr(default=False)
     _cached_unnorm_expr: TensorVar | None = PrivateAttr(default=None)
     _cached_nu_expr: TensorVar | None = PrivateAttr(default=None)
 
@@ -531,6 +534,8 @@ class ProductDist(Distribution):
 
     type: Literal["product_dist"] = "product_dist"
     factors: list[str]
+    # Factors are already-normalized densities, each over its own observables.
+    _normalizable: bool = PrivateAttr(default=False)
 
     def likelihood(self, context: Context) -> TensorVar:
         """

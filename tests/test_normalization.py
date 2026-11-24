@@ -781,6 +781,31 @@ class TestGaussianAnalyticNormalization:
         inputs = [lower, upper, mu, sigma]
         return function(inputs, scalar), function(inputs, pt.grad(scalar, [mu, sigma]))
 
+    @pytest.mark.parametrize("dependent", ["mean", "sigma"])
+    def test_parameter_depending_on_the_observable_defers_to_quadrature(
+        self, dependent
+    ):
+        """The CDF difference is only the integral when mean and sigma are constant in x.
+
+        A mean or sigma built from the observable (shape (N, 1), like its view)
+        varies with the integration variable, so both analytic entry points
+        return None and the base class integrates by quadrature instead.
+        """
+        lower, upper = pt.dscalar("lower"), pt.dscalar("upper")
+        x = pt.dvector("x")
+        view = x[:, None]
+        mean = 1.0 + 0.1 * view if dependent == "mean" else pt.dscalar("mu")
+        sigma = 1.0 + 0.05 * view**2 if dependent == "sigma" else pt.dscalar("s")
+        context = Context(
+            parameters={"x": x, "mu": mean, "s": sigma},
+            observables={"x": (lower, upper)},
+            views={"x": view},
+        )
+        dist = GaussianDist(name="g", x="x", mean="mu", sigma="s")
+
+        assert dist.normalization_expression(context, "x") is None
+        assert dist._normalization_integral(context, "x", lower, upper) is None
+
     def test_normalization_expression_is_provided(self):
         """The antiderivative exists for x and defers to quadrature otherwise."""
         context, _ = _observable_context({"mu": pt.dscalar("mu"), "s": pt.dscalar("s")})

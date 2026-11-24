@@ -9,6 +9,7 @@ import numpy.typing as npt
 import pytensor.tensor as pt
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     PrivateAttr,
     RootModel,
@@ -76,6 +77,11 @@ class StatErrorData(ModifierData):
 # base modifier
 class Modifier(BaseModel, HasDependencies, ABC):
     """Base class for modifier effects (multiplicative or additive)."""
+
+    # A key the modifier does not define is an error. Ignoring it would change
+    # the likelihood silently, e.g. a constraint given under a key pyhs3 does
+    # not read would leave the default constraint in place.
+    model_config = ConfigDict(extra="forbid")
 
     name: str
     type: str

@@ -11,6 +11,7 @@ import math
 import numpy as np
 import pytensor.tensor as pt
 import pytest
+from pydantic import ValidationError
 from scipy.stats import norm as scipy_norm
 
 from pyhs3.context import Context
@@ -20,6 +21,7 @@ from pyhs3.distributions.histfactory.modifiers import (
     HistoSysData,
     HistoSysDataContents,
     HistoSysModifier,
+    Modifiers,
     NormFactorModifier,
     NormSysData,
     NormSysModifier,
@@ -953,3 +955,60 @@ class TestVectorizedBinConstraints:
         calls["count"] = 0
         modifier.log_constraint(context, sample_data)
         assert calls["count"] == 1
+
+
+#: One valid modifier of each type, as it appears in an HS3 v0.2 document.
+VALID_MODIFIERS = {
+    "normfactor": {"name": "mu", "type": "normfactor", "parameter": "mu"},
+    "normsys": {
+        "name": "lumi",
+        "type": "normsys",
+        "parameter": "alpha_lumi",
+        "data": {"hi": 1.1, "lo": 0.9},
+        "constraint": "Gauss",
+    },
+    "histosys": {
+        "name": "shape",
+        "type": "histosys",
+        "parameter": "alpha_shape",
+        "data": {"hi": {"contents": [11.0]}, "lo": {"contents": [9.0]}},
+        "constraint": "Gauss",
+    },
+    "shapefactor": {"name": "sf", "type": "shapefactor", "parameters": ["gamma_sf_0"]},
+    "shapesys": {
+        "name": "ss",
+        "type": "shapesys",
+        "parameters": ["gamma_ss_0"],
+        "data": {"vals": [0.5]},
+        "constraint": "Poisson",
+    },
+    "staterror": {
+        "name": "staterror",
+        "type": "staterror",
+        "parameters": ["gamma_stat_0"],
+        "constraint": "Poisson",
+    },
+}
+
+
+class TestUnknownModifierKeys:
+    """A key a modifier does not define is an error, not silently ignored.
+
+    Ignoring one changes the likelihood without warning: for example ROOT's
+    ``constraint_type`` on a ``staterror`` would leave pyhs3's default
+    constraint in place.
+    """
+
+    @pytest.mark.parametrize("modifier_type", sorted(VALID_MODIFIERS))
+    def test_valid_modifier_loads(self, modifier_type):
+        (modifier,) = Modifiers.model_validate([VALID_MODIFIERS[modifier_type]])
+        assert modifier.type == modifier_type
+
+    @pytest.mark.parametrize("modifier_type", sorted(VALID_MODIFIERS))
+    @pytest.mark.parametrize(
+        "key", ["constraint_type", "constraint_name", "unexpected"]
+    )
+    def test_unknown_key_is_rejected(self, modifier_type, key):
+        modifier = {**VALID_MODIFIERS[modifier_type], key: "Poisson"}
+        with pytest.raises(ValidationError, match=key):
+            Modifiers.model_validate([modifier])

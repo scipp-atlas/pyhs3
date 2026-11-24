@@ -16,6 +16,7 @@ from pydantic import (
 from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode, get_mode
 from pytensor.graph.traversal import io_toposort
+from scipy.stats import gennorm
 
 from pyhs3.axes import RegularAxis
 from pyhs3.context import Context
@@ -578,6 +579,43 @@ class TestNormalizationStaticShapes:
 
         assert integral is not None
         assert all(size == 1 for size in integral.type.shape)
+
+    def test_batched_parameter_integral_has_static_unit_event_axis(self):
+        """A parameter batch of M gives a (1, M) integral and an (N, M) density.
+
+        Shapes: ``mu`` is (M,), the observable view is (N, 1), so the density is
+        (N, M).  The integral substitutes a (1,) bound for x, so it is (1, M)
+        with a statically length-1 event axis that broadcasts against N.
+        """
+        n_events, n_batch = 5, 3
+        mu = pt.dvector("mu")
+        params = {"mu": mu, "alpha": pt.dscalar("alpha"), "beta": pt.dscalar("beta")}
+        context, x = _observable_context(params)
+        lower, upper = context.observables["x"]
+        dist = GenNormalDist(name="d", x="x", mean="mu", alpha="alpha", beta="beta")
+
+        integral = dist._normalization_integral(context, "x", lower, upper)
+        density = dist.expression(context)
+
+        assert integral is not None
+        assert integral.type.shape == (1, None)
+        events = np.linspace(-1.0, 1.0, n_events)
+        mus = np.array([0.1, 0.2, 0.3])
+        alpha, beta = 1.2, 1.7
+        inputs = [x, mu, params["alpha"], params["beta"]]
+        integral_val = function(inputs[1:], integral)(mus, alpha, beta)
+        density_val = function(inputs, density)(events, mus, alpha, beta)
+
+        assert integral_val.shape == (1, n_batch)
+        assert density_val.shape == (n_events, n_batch)
+        expected_norm = gennorm.cdf(5.0, beta, loc=mus, scale=alpha) - gennorm.cdf(
+            -5.0, beta, loc=mus, scale=alpha
+        )
+        np.testing.assert_allclose(integral_val[0], expected_norm, rtol=1e-10)
+        expected_density = (
+            gennorm.pdf(events[:, None], beta, loc=mus, scale=alpha) / expected_norm
+        )
+        np.testing.assert_allclose(density_val, expected_density, rtol=1e-10)
 
     @pytest.mark.parametrize(("dist", "values"), _ANALYTIC)
     def test_analytic_integral_shares_observable_independent_nodes(self, dist, values):

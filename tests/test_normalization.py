@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pytensor.tensor as pt
+import pytensor_distributions.normal as Normal
 import pytest
 from pydantic import (
     ConfigDict,
@@ -16,6 +17,7 @@ from pydantic import (
 from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode, get_mode
 from pytensor.graph.traversal import io_toposort
+from scipy import stats
 
 from pyhs3.axes import RegularAxis
 from pyhs3.context import Context
@@ -624,13 +626,13 @@ class TestNormalizationStaticShapes:
 
     def test_quadrature_log_expression_evaluates_without_fusion(self):
         """The Gauss-Legendre fallback also runs without elemwise fusion."""
-        params = {"mu": pt.dscalar("mu"), "sigma": pt.dscalar("sigma")}
+        params = {"c": pt.dscalar("c")}
         context, x = _observable_context(params)
-        dist = GaussianDist(name="g", x="x", mean="mu", sigma="sigma")
+        dist = ExponentialDist(name="e", x="x", c="c")
 
         log_pdf = dist.log_expression(context)
         unfused = function([x, *params.values()], log_pdf, mode=_no_fusion_mode())(
-            np.linspace(-4.0, 4.0, 7), 0.5, 1.3
+            np.linspace(0.5, 4.0, 7), 0.5
         )
 
         assert unfused.shape == (7, 1)
@@ -717,3 +719,124 @@ class TestSubstituteVariable:
         expr = pt.exp(s)
 
         assert substitute_variable(expr, x, pt.as_tensor_variable([3.0])) is expr
+
+
+class TestGaussianAnalyticNormalization:
+    """GaussianDist normalizes with the exact CDF difference, not quadrature."""
+
+    @staticmethod
+    def _integral_functions():
+        """Compile (lower, upper, mu, sigma) -> normalization integral and its gradients."""
+        lower, upper = pt.dscalar("lower"), pt.dscalar("upper")
+        mu, sigma = pt.dscalar("mu"), pt.dscalar("sigma")
+        x = pt.dvector("x")
+        context = Context(
+            parameters={"x": x, "mu": mu, "sigma": sigma},
+            observables={"x": (lower, upper)},
+            views={"x": x[:, None]},
+        )
+        dist = GaussianDist(name="g", x="x", mean="mu", sigma="sigma")
+        integral = dist._normalization_integral(context, "x", lower, upper)
+        assert integral is not None
+        # shape (1, 1) for scalar parameters: one bound pair, one parameter point
+        scalar = integral[0, 0]
+        inputs = [lower, upper, mu, sigma]
+        return function(inputs, scalar), function(inputs, pt.grad(scalar, [mu, sigma]))
+
+    def test_normalization_expression_is_provided(self):
+        """The antiderivative exists for x and defers to quadrature otherwise."""
+        context, _ = _observable_context({"mu": pt.dscalar("mu"), "s": pt.dscalar("s")})
+        dist = GaussianDist(name="g", x="x", mean="mu", sigma="s")
+
+        assert dist.normalization_expression(context, "x") is not None
+        assert dist.normalization_expression(context, "mu") is None
+
+    @pytest.mark.parametrize(
+        ("lower", "upper", "mu", "sigma"),
+        [
+            pytest.param(-5.0, 5.0, 0.0, 1.0, id="symmetric"),
+            pytest.param(-1.0, 4.0, 0.3, 1.7, id="asymmetric"),
+            pytest.param(100.0, 160.0, 125.0, 2.5, id="wide-window"),
+            pytest.param(30.0, 31.0, 0.0, 1.0, id="right-far-tail"),
+            pytest.param(-31.0, -30.0, 0.0, 1.0, id="left-far-tail"),
+            pytest.param(8.0, 9.5, 1.0, 0.5, id="right-far-tail-scaled"),
+        ],
+    )
+    def test_integral_matches_scipy_cdf(self, lower, upper, mu, sigma):
+        """F(upper) - F(lower) equals the scipy CDF difference to 1e-10 relative."""
+        value, _ = self._integral_functions()
+        z_lo, z_hi = (lower - mu) / sigma, (upper - mu) / sigma
+        # sf on the right tail, cdf on the left: each stays accurate where the
+        # naive cdf(b) - cdf(a) cancels catastrophically
+        expected = (
+            stats.norm.sf(z_lo) - stats.norm.sf(z_hi)
+            if z_lo + z_hi > 0
+            else stats.norm.cdf(z_hi) - stats.norm.cdf(z_lo)
+        )
+
+        np.testing.assert_allclose(
+            value(lower, upper, mu, sigma), expected, rtol=1e-10, atol=0
+        )
+
+    @pytest.mark.parametrize(
+        ("lower", "upper", "mu", "sigma"),
+        [(-5.0, 5.0, 0.0, 1.0), (-1.0, 4.0, 0.3, 1.7), (3.0, 9.0, 1.0, 2.0)],
+    )
+    def test_integral_matches_quadrature(self, lower, upper, mu, sigma):
+        """The analytic integral agrees with the Gauss-Legendre fallback to 1e-10."""
+        x = pt.dvector("x")
+        mu_t, sigma_t = pt.dscalar("mu"), pt.dscalar("sigma")
+        quadrature = gauss_legendre_integral(
+            Normal.pdf(x, mu_t, sigma_t), x, pt.constant(lower), pt.constant(upper)
+        )
+        value, _ = self._integral_functions()
+
+        np.testing.assert_allclose(
+            value(lower, upper, mu, sigma),
+            function([mu_t, sigma_t], quadrature)(mu, sigma).item(),
+            rtol=1e-10,
+        )
+
+    @pytest.mark.parametrize(
+        ("lower", "upper", "mu", "sigma"),
+        [
+            (-5.0, 5.0, 0.3, 1.2),
+            (-1.0, 4.0, 0.3, 1.7),
+            (3.0, 9.0, 1.0, 2.0),
+            (-9.0, -3.0, 1.0, 2.0),
+        ],
+    )
+    def test_gradient_matches_finite_differences(self, lower, upper, mu, sigma):
+        """d(integral)/d(mu, sigma) agrees with central differences to rtol 1e-6."""
+        value, grads = self._integral_functions()
+        h = 1e-6
+        d_mu = (
+            value(lower, upper, mu + h, sigma) - value(lower, upper, mu - h, sigma)
+        ) / (2 * h)
+        d_sigma = (
+            value(lower, upper, mu, sigma + h) - value(lower, upper, mu, sigma - h)
+        ) / (2 * h)
+
+        got_mu, got_sigma = grads(lower, upper, mu, sigma)
+        np.testing.assert_allclose(got_mu, d_mu, rtol=1e-6)
+        np.testing.assert_allclose(got_sigma, d_sigma, rtol=1e-6)
+
+    def test_far_tail_density_matches_truncated_normal(self):
+        """A window 30 sigma out normalizes: the integral is tiny but nonzero."""
+        params = {"mu": pt.dscalar("mu"), "sigma": pt.dscalar("sigma")}
+        x = pt.dvector("x")
+        context = Context(
+            parameters={"x": x, **params},
+            observables={"x": (pt.constant(30.0), pt.constant(31.0))},
+            views={"x": x[:, None]},
+        )
+        dist = GaussianDist(name="g", x="x", mean="mu", sigma="sigma")
+        events = np.linspace(30.0, 31.0, 2001)
+
+        pdf = function([x, *params.values()], dist._expression(context))(
+            events, 0.0, 1.0
+        )
+
+        assert np.all(np.isfinite(pdf))
+        expected = stats.norm.pdf(events) / (stats.norm.sf(30.0) - stats.norm.sf(31.0))
+        np.testing.assert_allclose(pdf[:, 0], expected, rtol=1e-10)

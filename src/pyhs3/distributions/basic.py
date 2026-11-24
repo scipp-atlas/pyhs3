@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """
 Basic HS3 Distribution implementations.
 

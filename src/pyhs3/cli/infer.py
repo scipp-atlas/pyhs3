@@ -103,8 +103,10 @@ def _compute_nll(
     """Compile the joint log-prob and evaluate ``NLL = -2 * log_prob``.
 
     Parameter values are layered, later layers winning: the workspace's own
-    ``parameter_points`` (a convenience base so an analysis without an ``init``
-    set is still evaluable), then the model's free (non-const) parameter values,
+    ``parameter_points`` (a convenience base for targets that select no
+    parameter set, such as a likelihood or distribution name; an analysis must
+    give every free parameter a value in its ``init`` or via ``--parameter-set``),
+    then the model's free (non-const) parameter values,
     then the caller's *overrides*. Observable data is taken from the likelihood
     the model was built from, and always wins over an override of the same
     name: ``--param`` overrides a free parameter, never the observed data.
@@ -121,8 +123,9 @@ def _compute_nll(
     }
 
     # Base layer: every value declared in the workspace's parameter_points.
-    # A model built from an analysis with no `init` has empty free_params, so
-    # this base makes it evaluable from the workspace's nominal values. When
+    # A model built from a likelihood or distribution name may have no
+    # parameter set, so this base makes it evaluable from the workspace's
+    # nominal values (an analysis must set every free parameter). When
     # multiple sets declare the same name, the last one seen wins; the model's
     # own set (applied next) takes precedence for names it defines.
     params: dict[str, float] = {}

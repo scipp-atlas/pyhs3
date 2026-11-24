@@ -68,6 +68,7 @@ docs = [
   "sphinxcontrib-bibtex",
   "sphinxcontrib-doxylink",
   "sphinxcontrib-typer",
+  "sphinxcontrib-pydantic>=0.4.0",
   "matplotlib",
   "hist[plot] > 2.7.0", # keep synced with dependencies
 ]

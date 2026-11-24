@@ -30,7 +30,6 @@ from pyhs3.context import Context
 from pyhs3.data import BinnedData
 from pyhs3.distributions import Distribution, Distributions, HistFactoryDistChannel
 from pyhs3.distributions.core import BatchableDistribution
-from pyhs3.domains import Domain
 from pyhs3.functions import Functions
 from pyhs3.functions.core import BatchableFunction, Function
 from pyhs3.graph_viz import (
@@ -40,9 +39,8 @@ from pyhs3.graph_viz import (
     render_graph,
 )
 from pyhs3.networks import Family, build_dependency_graph, plan_families
-from pyhs3.parameter_points import ParameterSet
+from pyhs3.parameter_context import ParameterContext
 from pyhs3.tensorutils import (
-    create_bounded_tensor,
     ensure_array,
     merge_duplicate_nodes,
 )
@@ -119,9 +117,8 @@ class Model:
     def __init__(
         self,
         *,
-        parameterset: ParameterSet,
+        context: ParameterContext,
         distributions: Distributions,
-        domain: Domain,
         functions: Functions,
         progress: bool = True,
         mode: str = _DEFAULT_MODE,
@@ -132,9 +129,14 @@ class Model:
         Represents a probabilistic model composed of parameters, domains, distributions, and functions.
 
         Args:
-            parameterset (ParameterSet): The parameter set used in the model.
+            context (ParameterContext): The parameter context: starting
+                values, ``const`` parameters (baked into the graph as
+                constants), domain bounds and parameters of interest.  Use
+                :meth:`pyhs3.Workspace.parameter_context` to derive it from an
+                analysis.  The bounds are not applied in the graph; they are
+                passed to the minimizer through
+                :attr:`pyhs3.compiled.CompiledNLL.bounds`.
             distributions (Distributions): Set of distributions to include.
-            domain (Domain): Domain constraints for parameters.
             functions (Functions): Set of functions that compute parameter values.
             progress (bool): Whether to show progress bar during dependency graph construction.
             mode (str): PyTensor compilation mode. Defaults to "CVM".
@@ -150,8 +152,7 @@ class Model:
             observables (dict[str, tuple[float, float]] | None): Dictionary mapping observable names to (lower, upper) bounds.
 
         Attributes:
-            domain (Domain): The original domain with constraints for parameters.
-            parameterset (ParameterSet): The original parameter set with parameter values.
+            context (ParameterContext): The parameter context the model was built from.
             distributions (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic distribution expressions.
             parameters (dict[str, pytensor.tensor.variable.TensorVariable]): Symbolic parameter variables.
             functions (dict[str, pytensor.tensor.variable.TensorVariable]): Computed function values.
@@ -162,8 +163,7 @@ class Model:
             mode (str): PyTensor compilation mode.
             _compiled_functions (dict[str, Callable[..., npt.NDArray[np.float64]]]): Cache of compiled PyTensor functions.
         """
-        self.parameterset = parameterset
-        self.domain = domain
+        self.context = context
         self._observables = {
             name: (pt.constant(lower), pt.constant(upper))
             for name, (lower, upper) in (observables or {}).items()
@@ -247,7 +247,7 @@ class Model:
 
     @property
     def nominal_params(self) -> dict[str, float]:
-        """Default parameter values from the workspace parameter set.
+        """Default parameter values from the parameter context.
 
         Returns all parameters, including those marked ``const=True`` (which
         are baked as ``pytensor.tensor.constant`` in the symbolic graph
@@ -256,14 +256,11 @@ class Model:
         Use :attr:`free_params` when passing parameters to a jaxified callable
         to avoid supplying spurious keyword arguments.
         """
-        result: dict[str, float] = {}
-        for pp in self.parameterset:
-            result[pp.name] = float(pp.value)
-        return result
+        return self.context.values
 
     @property
     def free_params(self) -> dict[str, float]:
-        """Non-constant parameter values from the workspace parameter set.
+        """Non-constant parameter values from the parameter context.
 
         Like :attr:`nominal_params` but excludes parameters whose
         ``ParameterPoint.const`` flag is ``True`` and observables (whose values
@@ -274,11 +271,12 @@ class Model:
             jg = pyhs3.jaxify(model.log_prob)
             jg(**model.data, **model.free_params)
         """
-        result: dict[str, float] = {}
-        for pp in self.parameterset:
-            if not pp.const and pp.name not in self._observables:
-                result[pp.name] = float(pp.value)
-        return result
+        const = self.context.const
+        return {
+            name: value
+            for name, value in self.context.values.items()
+            if name not in const and name not in self._observables
+        }
 
     def compile_nll(
         self,
@@ -367,7 +365,7 @@ class Model:
             mode = self.mode
         log_prob = self.log_prob
         data = self.data
-        start = {**self.nominal_params, **self.free_params}
+        start = self.context.values
         free: list[TensorVar] = []
         baked: dict[TensorVar, npt.NDArray[np.float64]] = {}
         names: list[str] = []
@@ -396,7 +394,8 @@ class Model:
                 "parameter_set= to Workspace.model."
             )
             raise ValueError(msg)
-        bounds = [self.domain.get(name, (None, None)) for name in names]
+        domain_bounds = self.context.bounds
+        bounds = [domain_bounds.get(name, (None, None)) for name in names]
         return compile_nll(
             log_prob,
             free,
@@ -613,20 +612,21 @@ class Model:
         return pt.constant(np.asarray(datum.contents, dtype=np.float64), name=node_name)
 
     def _build_parameter_node(self, node_name: str, context: Context) -> TensorVar:
-        """Build a parameter node: baked constant (const=True) or bounded free variable."""
+        """Build a parameter node: baked constant (const=True) or free variable.
+
+        Domain bounds are not applied to a free variable; they reach the
+        minimizer through :attr:`pyhs3.compiled.CompiledNLL.bounds`.
+        """
         baked = self._try_bake_hfdc_observed(node_name)
         if baked is not None:
             return baked
 
-        param_point = self.parameterset.get(node_name) if self.parameterset else None
-        domain_bounds = (
-            self.domain.get(node_name, (None, None)) if self.domain else (None, None)
-        )
+        param_point = self.context.parameter_set.get(node_name)
         if param_point and param_point.const:
             # Bake as a compile-time constant so it is invisible to
             # explicit_graph_inputs and JAX transpilation.
             val = np.float64(param_point.value)
-            lower, upper = domain_bounds
+            lower, upper = self.context.domain.get(node_name, (None, None))
             if (lower is not None and val < lower) or (
                 upper is not None and val > upper
             ):
@@ -660,7 +660,7 @@ class Model:
         else:
             param_kind = default_kind
 
-        tensor = create_bounded_tensor(node_name, domain_bounds, param_kind)
+        tensor = param_kind(node_name)
 
         # For vector parameters, cache the ExpandDims view used internally for
         # broadcasting, but return the leaf so model.parameters[name] is 1-D:
@@ -890,7 +890,7 @@ class Model:
         in topological order.
         """
         graph, constants_map, modifiers_map = build_dependency_graph(
-            self.parameterset, functions, distributions
+            self.context.parameter_set, functions, distributions
         )
 
         likelihood_roots: list[str] = []

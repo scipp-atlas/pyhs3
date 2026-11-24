@@ -13,6 +13,7 @@ from pytensor.compile.mode import get_mode
 from pytensor.graph.traversal import explicit_graph_inputs
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.tensor.basic import TensorConstant
+from scipy.stats import norm
 
 import pyhs3 as hs3
 from pyhs3.distributions import Distributions
@@ -20,6 +21,7 @@ from pyhs3.distributions.mathematical import GenericDist
 from pyhs3.domains import ProductDomain
 from pyhs3.exceptions import MissingInitialValueError
 from pyhs3.functions import Functions
+from pyhs3.parameter_context import ParameterContext
 from pyhs3.parameter_points import ParameterPoint, ParameterSet
 
 
@@ -499,9 +501,8 @@ class TestModelGraphVisualizationOptions:
         functions = Functions([])
 
         return hs3.Model(
-            parameterset=parameterset,
+            context=ParameterContext(parameter_set=parameterset, domain=domain),
             distributions=distributions,
-            domain=domain,
             functions=functions,
             progress=False,
             observables={"x": (0.0, 10.0)},
@@ -1583,30 +1584,30 @@ class TestWorkspaceModelDispatch:
         )
         analysis = ws.analyses["sig_analysis"]
         model = ws.model(analysis, parameter_set=custom, progress=False)
-        assert model.parameterset.name == "custom"
-        assert model.parameterset.get("mu").value == pytest.approx(99.0)
+        assert model.context.name == "custom"
+        assert model.context.values["mu"] == pytest.approx(99.0)
 
     def test_analysis_parameterset_string_lookup(self, ws):
         """parameter_set='alt' looks up the named set in workspace.parameter_points."""
         analysis = ws.analyses["sig_analysis"]
         model = ws.model(analysis, parameter_set="alt", progress=False)
-        assert model.parameterset.name == "alt"
-        assert model.parameterset.get("mu").value == pytest.approx(1.0)
+        assert model.context.name == "alt"
+        assert model.context.values["mu"] == pytest.approx(1.0)
 
     def test_analysis_parameterset_int_lookup(self, ws):
         """parameter_set=1 looks up by index in workspace.parameter_points."""
         analysis = ws.analyses["sig_analysis"]
         model = ws.model(analysis, parameter_set=1, progress=False)
         # index 1 → 'alt' → mu=1.0
-        assert model.parameterset.name == "alt"
-        assert model.parameterset.get("mu").value == pytest.approx(1.0)
+        assert model.context.name == "alt"
+        assert model.context.values["mu"] == pytest.approx(1.0)
 
     def test_analysis_parameterset_from_init(self, ws):
         """No parameter_set override → analysis.init ('nominal') is used."""
         analysis = ws.analyses["sig_analysis"]
         model = ws.model(analysis, progress=False)
-        assert model.parameterset.name == "nominal"
-        assert model.parameterset.get("mu").value == pytest.approx(0.0)
+        assert model.context.name == "nominal"
+        assert model.context.values["mu"] == pytest.approx(0.0)
 
     def test_analysis_no_init_no_override_uses_empty_default(self):
         """Analysis without init + no parameter_set override → empty ParameterSet, so free parameters lack values."""
@@ -1699,7 +1700,7 @@ class TestWorkspaceModelDispatch:
         model = ws.model("sig_analysis", progress=False)
         # Analysis overload uses analysis.init → 'nominal'
         assert model is not None
-        assert model.parameterset.name == "nominal"
+        assert model.context.name == "nominal"
 
     def test_str_dispatches_to_likelihood(self, ws):
         """workspace.model('sig_likelihood') resolves to the Likelihood overload."""
@@ -1731,14 +1732,14 @@ class TestWorkspaceModelDispatch:
             ],
         )
         model = ws.model("first_domain", parameter_set=custom, progress=False)
-        assert model.parameterset.name == "custom"
-        assert model.parameterset.get("mu").value == pytest.approx(77.0)
+        assert model.context.name == "custom"
+        assert model.context.values["mu"] == pytest.approx(77.0)
 
     def test_str_legacy_parameterset_string_lookup(self, ws):
         """parameter_set='alt' looks up the named set in workspace.parameter_points on str-legacy path."""
         model = ws.model("first_domain", parameter_set="alt", progress=False)
-        assert model.parameterset.name == "alt"
-        assert model.parameterset.get("mu").value == pytest.approx(1.0)
+        assert model.context.name == "alt"
+        assert model.context.values["mu"] == pytest.approx(1.0)
 
     # ------------------------------------------------------------------ #
     # Likelihood target — parameter_set branches                          #
@@ -1755,15 +1756,15 @@ class TestWorkspaceModelDispatch:
         )
         lh = ws.likelihoods["sig_likelihood"]
         model = ws.model(lh, parameter_set=custom, progress=False)
-        assert model.parameterset.name == "custom"
-        assert model.parameterset.get("mu").value == pytest.approx(42.0)
+        assert model.context.name == "custom"
+        assert model.context.values["mu"] == pytest.approx(42.0)
 
     def test_likelihood_parameterset_string_lookup(self, ws):
         """parameter_set='alt' looks up the named set in workspace.parameter_points on Likelihood path."""
         lh = ws.likelihoods["sig_likelihood"]
         model = ws.model(lh, parameter_set="alt", progress=False)
-        assert model.parameterset.name == "alt"
-        assert model.parameterset.get("mu").value == pytest.approx(1.0)
+        assert model.context.name == "alt"
+        assert model.context.values["mu"] == pytest.approx(1.0)
 
     # ------------------------------------------------------------------ #
     # parameterset fallback — ValueError when not resolvable             #
@@ -1977,3 +1978,126 @@ class TestGraphSummaryCompilationStatus:
             model = simple_workspace.model(0, mode=mode)
             summary = model.graph_summary("gauss")
             assert "Compiled: No" in summary, f"Expected 'Compiled: No' for mode={mode}"
+
+
+class TestModelParameterContext:
+    """A Model is built from a ParameterContext; domain bounds are not clipped in the graph."""
+
+    @pytest.fixture
+    def context(self):
+        return ParameterContext(
+            parameter_set=ParameterSet(
+                name="init",
+                parameters=[
+                    ParameterPoint(name="mu", value=1.0),
+                    ParameterPoint(name="sigma", value=1.5),
+                ],
+            ),
+            domain=ProductDomain(
+                name="d",
+                axes=[
+                    {"name": "mu", "min": 0.0, "max": 5.0},
+                    {"name": "sigma", "min": 0.1, "max": 3.0},
+                ],
+            ),
+        )
+
+    @pytest.fixture
+    def model(self, context):
+        return hs3.Model(
+            context=context,
+            distributions=Distributions(
+                [
+                    {
+                        "name": "g",
+                        "type": "gaussian_dist",
+                        "x": "x",
+                        "mean": "mu",
+                        "sigma": "sigma",
+                    }
+                ]
+            ),
+            functions=Functions([]),
+            progress=False,
+        )
+
+    def test_context_attribute(self, model, context):
+        assert model.context is context
+
+    def test_nominal_and_free_params_read_context(self, model):
+        assert model.nominal_params == {"mu": 1.0, "sigma": 1.5}
+        assert model.free_params == {"mu": 1.0, "sigma": 1.5}
+
+    def test_no_clip_in_graph(self, model):
+        """Bounded free parameters are plain graph inputs, not clipped views."""
+        assert model.parameters["mu"].owner is None
+        assert model.parameters["sigma"].owner is None
+
+    def test_value_outside_bounds_is_not_clipped(self, model):
+        """mu=-1 is below the domain's lower bound 0 and is evaluated as given."""
+        result = model.logpdf(
+            "g", x=np.array(0.5), mu=np.array(-1.0), sigma=np.array(1.5)
+        )
+        npt.assert_allclose(result, norm.logpdf(0.5, loc=-1.0, scale=1.5))
+
+    def test_compile_nll_bounds_from_context(self):
+        ws = hs3.Workspace(
+            metadata={"hs3_version": "0.2"},
+            distributions=[
+                {
+                    "name": "g",
+                    "type": "gaussian_dist",
+                    "x": "x",
+                    "mean": "mu",
+                    "sigma": "sigma",
+                }
+            ],
+            parameter_points=[
+                {
+                    "name": "init",
+                    "parameters": [
+                        {"name": "mu", "value": 1.0},
+                        {"name": "sigma", "value": 1.5},
+                    ],
+                }
+            ],
+            domains=[
+                {
+                    "name": "d",
+                    "type": "product_domain",
+                    "axes": [
+                        {"name": "mu", "min": 0.0, "max": 5.0},
+                        {"name": "sigma", "min": 0.1, "max": 3.0},
+                    ],
+                }
+            ],
+            data=[
+                {
+                    "name": "obs",
+                    "type": "unbinned",
+                    "axes": [{"name": "x", "min": -5.0, "max": 5.0}],
+                    "entries": [[0.5], [1.0], [2.5]],
+                }
+            ],
+            likelihoods=[{"name": "L", "distributions": ["g"], "data": ["obs"]}],
+            analyses=[
+                {"name": "A", "likelihood": "L", "domains": ["d"], "init": "init"}
+            ],
+        )
+        model = ws.model("A", progress=False)
+        nll = model.compile_nll()
+        bounds = dict(zip(nll.parameter_names, nll.bounds, strict=True))
+        assert bounds == {"mu": (0.0, 5.0), "sigma": (0.1, 3.0)}
+
+        # Outside the bounds the NLL and its gradient are those of the
+        # unclipped likelihood, -sum(log N(x | mu, sigma)), here at mu=-1.
+        # The data are normalized over the observable's axis [-5, 5].
+        x = np.array([0.5, 1.0, 2.5])  # shape (3,)
+        mu, sigma = -1.0, 1.5
+        point = nll.to_vector({"mu": mu, "sigma": sigma})
+        value, grad = nll.value_and_grad(point)
+        norm_const = norm.cdf(5.0, mu, sigma) - norm.cdf(-5.0, mu, sigma)
+        expected = -(norm.logpdf(x, mu, sigma) - np.log(norm_const)).sum()
+        assert value == pytest.approx(expected)
+        assert np.all(np.isfinite(grad))
+        assert grad[nll.parameter_names.index("mu")] != 0.0

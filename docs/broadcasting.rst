@@ -98,9 +98,9 @@ You can inspect the model to understand its parameter structure:
     >>> print(f"x parameter type: {type(model.parameters['x'])}")
     x parameter type: <class 'pytensor.tensor.variable.TensorVariable'>
     >>> # Check parameter set configuration
-    >>> print(f"Parameter set: {model.parameterset}")  # doctest: +ELLIPSIS
+    >>> print(f"Parameter set: {model.context.parameter_set}")  # doctest: +ELLIPSIS
     Parameter set: ...
-    >>> print(f"x parameter config: {model.parameterset['x']}")
+    >>> print(f"x parameter config: {model.context.parameter_set['x']}")
     x parameter config: name='x'
 
 Behavior Difference: Scalar vs Vector Parameters

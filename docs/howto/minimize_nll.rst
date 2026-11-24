@@ -73,7 +73,8 @@ Every method of the result takes or returns a 1-D array with one entry per
 free parameter, ordered as ``nll.parameter_names``. ``nll.initial`` is the
 starting point from the analysis' parameter set and ``nll.bounds`` holds each
 parameter's ``(lower, upper)`` domain bounds (``None`` where unbounded), in the
-same order:
+same order. The compiled function does not apply these bounds, so pass them to
+your minimizer:
 
 .. doctest:: minimize-nll
 

@@ -837,9 +837,8 @@ class Workspace(BaseModel):
             target, parameter_set=parameter_set, domain=domain
         )
         return Model(
-            parameterset=context.parameter_set,
+            context=context,
             distributions=self.distributions or Distributions(),
-            domain=context.domain,
             functions=self.functions or Functions(),
             progress=progress,
             mode=mode,
@@ -861,9 +860,8 @@ class Workspace(BaseModel):
         context = self.parameter_context(target, parameter_set=parameter_set)
 
         return Model(
-            parameterset=context.parameter_set,
+            context=context,
             distributions=self.distributions or Distributions(),
-            domain=context.domain,
             functions=self.functions or Functions(),
             progress=progress,
             mode=mode,
@@ -885,9 +883,8 @@ class Workspace(BaseModel):
             target, parameter_set=parameter_set, domain=domain
         )
         return Model(
-            parameterset=context.parameter_set,
+            context=context,
             distributions=self.distributions or Distributions(),
-            domain=context.domain,
             functions=self.functions or Functions(),
             progress=progress,
             mode=mode,
@@ -933,9 +930,8 @@ class Workspace(BaseModel):
             target, parameter_set=parameter_set, domain=domain
         )
         return Model(
-            parameterset=context.parameter_set,
+            context=context,
             distributions=self.distributions or Distributions(),
-            domain=context.domain,
             functions=self.functions or Functions(),
             progress=progress,
             mode=mode,

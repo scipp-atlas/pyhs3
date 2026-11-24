@@ -48,7 +48,7 @@ Let's see how normalization affects a Gaussian distribution over a finite domain
 
    >>> from pyhs3 import Model
    >>> from pyhs3.distributions.basic import GaussianDist
-   >>> from pyhs3.domains import ProductDomain
+   >>> from pyhs3.parameter_context import ParameterContext
    >>> from pyhs3.parameter_points import ParameterSet, ParameterPoint
    >>> from pyhs3.distributions import Distributions
    >>> from pyhs3.functions import Functions
@@ -64,15 +64,16 @@ Let's see how normalization affects a Gaussian distribution over a finite domain
    >>>
    >>> # Model WITH observables - normalized
    >>> model_norm = Model(
-   ...     parameterset=ParameterSet(
-   ...         name="default",
-   ...         parameters=[
-   ...             ParameterPoint(name="mu", value=130.0),
-   ...             ParameterPoint(name="sigma", value=10.0),
-   ...         ],
+   ...     context=ParameterContext(
+   ...         parameter_set=ParameterSet(
+   ...             name="default",
+   ...             parameters=[
+   ...                 ParameterPoint(name="mu", value=130.0),
+   ...                 ParameterPoint(name="sigma", value=10.0),
+   ...             ],
+   ...         ),
    ...     ),
    ...     distributions=Distributions([gaussian]),
-   ...     domain=ProductDomain(name="default"),
    ...     functions=Functions([]),
    ...     observables={"x": (100.0, 160.0)},  # Finite domain
    ...     progress=False,
@@ -82,16 +83,17 @@ Let's see how normalization affects a Gaussian distribution over a finite domain
    >>> with warnings.catch_warnings(record=True) as w:
    ...     warnings.simplefilter("always")
    ...     model_unnorm = Model(
-   ...         parameterset=ParameterSet(
-   ...             name="default",
-   ...             parameters=[
-   ...                 ParameterPoint(name="x", value=100.0, kind=pt.vector),
-   ...                 ParameterPoint(name="mu", value=130.0),
-   ...                 ParameterPoint(name="sigma", value=10.0),
-   ...             ],
+   ...         context=ParameterContext(
+   ...             parameter_set=ParameterSet(
+   ...                 name="default",
+   ...                 parameters=[
+   ...                     ParameterPoint(name="x", value=100.0, kind=pt.vector),
+   ...                     ParameterPoint(name="mu", value=130.0),
+   ...                     ParameterPoint(name="sigma", value=10.0),
+   ...                 ],
+   ...             ),
    ...         ),
    ...         distributions=Distributions([gaussian]),
-   ...         domain=ProductDomain(name="default"),
    ...         functions=Functions([]),
    ...         observables=None,  # No observables
    ...         progress=False,

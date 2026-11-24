@@ -87,13 +87,13 @@ distribution, no functions.
 Evaluate the negative log-likelihood
 -------------------------------------
 
-Read the parameter values straight off the model's parameter set, and pass
+Read the parameter values straight off the model's parameter context, and pass
 them to ``logpdf`` as NumPy arrays:
 
 .. doctest:: getting-started
 
    >>> import numpy as np
-   >>> parameters = {par.name: np.array(par.value) for par in model.parameterset}
+   >>> parameters = {name: np.array(value) for name, value in model.context.values.items()}
    >>> nll = -2 * model.logpdf("gauss", **parameters)
    >>> print(f"nll: {nll:.8f}")
    nll: 1.83787707

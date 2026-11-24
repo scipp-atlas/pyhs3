@@ -37,6 +37,7 @@ from pyhs3.exceptions import MissingInitialValueError, WorkspaceValidationError
 from pyhs3.functions import Functions
 from pyhs3.likelihoods import Likelihood
 from pyhs3.model import Model
+from pyhs3.parameter_context import ParameterContext
 from pyhs3.parameter_points import ParameterSet
 
 # ---------------------------------------------------------------------------
@@ -158,7 +159,7 @@ def test_model_from_likelihood_prefers_named_default_domain():
 
     model = ws.model(ws.likelihoods["L"], progress=False)
 
-    assert model.domain.name == "default_domain"
+    assert model.context.domain.name == "default_domain"
 
 
 def test_model_legacy_int_still_works():
@@ -514,8 +515,8 @@ def test_model_from_analysis_multi_domain_merges():
         }
     )
     model = ws_multi.model(ws_multi.analyses["A"], progress=False)
-    assert "mean" in model.domain
-    assert "sigma_nuis" in model.domain
+    assert "mean" in model.context.bounds
+    assert "sigma_nuis" in model.context.bounds
 
 
 # ---------------------------------------------------------------------------
@@ -1127,9 +1128,11 @@ def test_log_prob_string_datum_skipped_returns_constant_zero():
     """Likelihood with unresolved string datum refs skips all pairs → constant 0.0."""
     likelihood = Likelihood(name="L", distributions=["gauss1"], data=["data1"])
     model = Model(
-        parameterset=ParameterSet(name="default", parameters=[]),
+        context=ParameterContext(
+            parameter_set=ParameterSet(name="default", parameters=[]),
+            domain=ProductDomain(name="default", axes=[]),
+        ),
         distributions=Distributions([]),
-        domain=ProductDomain(name="default", axes=[]),
         functions=Functions([]),
         progress=False,
         mode="FAST_COMPILE",

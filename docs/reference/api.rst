@@ -271,6 +271,7 @@ Exceptions
    ExpressionParseError
    ExpressionEvaluationError
    WorkspaceValidationError
+   UnlistedParameterError
    DuplicateEntityError
    custom_error_msg
 

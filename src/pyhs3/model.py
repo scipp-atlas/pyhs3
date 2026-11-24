@@ -1018,6 +1018,11 @@ class Model:
                         else family_built
                     )
                     self.distributions[node_name] = built
+                    # Composite distributions built later read their
+                    # components in log space via context.log_density().
+                    context.add_log_density(
+                        node_name, self.log_distributions[node_name]
+                    )
 
                 # Make the freshly built node available to later nodes (any
                 # broadcasting view was propagated above for parameter nodes).

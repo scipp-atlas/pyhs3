@@ -8,6 +8,9 @@ and lists of parameter names for accessing PyTensor variables.
 from __future__ import annotations
 
 from collections.abc import ItemsView, KeysView, Mapping, ValuesView
+from typing import cast
+
+import pytensor.tensor as pt
 
 from pyhs3.typing.aliases import TensorVar
 
@@ -48,6 +51,9 @@ class Context:
         self._auxiliaries = dict(auxiliaries) if auxiliaries else {}
         self._observables = dict(observables) if observables else {}
         self._views = dict(views) if views else {}
+        # Log-space tensors of built distributions, keyed like the
+        # probability-space values; see add_log_density()/log_density().
+        self._log_densities: dict[str, TensorVar] = {}
 
         # Validate no key duplication between parameters and auxiliaries
         parameter_keys = set(self._parameters.keys())
@@ -126,6 +132,43 @@ class Context:
         """
         self._views[key] = view
 
+    def add_log_density(self, key: str, log_value: TensorVar) -> None:
+        """Register the log-space tensor of the distribution ``key`` in place.
+
+        The model builder records each built distribution's log-space
+        expression here alongside its probability-space value
+        (``context[key]``, which is ``pt.exp`` of it), so that composite
+        distributions can combine their components in log space via
+        :meth:`log_density`.
+
+        Args:
+            key: Distribution name.
+            log_value: Log-space tensor of that distribution, with the same
+                shape as ``context[key]``.
+        """
+        self._log_densities[key] = log_value
+
+    def log_density(self, key: str) -> TensorVar:
+        """Log-space tensor of the distribution ``key``.
+
+        Returns the tensor registered with :meth:`add_log_density`.  A name
+        without one (e.g. a context assembled by hand rather than by the
+        model builder) gives ``pt.log(context[key])``, which is the same
+        value wherever ``context[key]`` does not underflow to 0.0.
+
+        Args:
+            key: Distribution name.
+
+        Returns:
+            TensorVar: The log-space tensor.
+
+        Raises:
+            KeyError: If ``key`` is neither registered nor in the context.
+        """
+        if key in self._log_densities:
+            return self._log_densities[key]
+        return cast(TensorVar, pt.log(self[key]))
+
     @property
     def parameters(self) -> dict[str, TensorVar]:
         """Get read-only view of parameters."""
@@ -161,9 +204,12 @@ class Context:
 
     def copy(self) -> Context:
         """Create a copy of this context."""
-        return Context(
+        copied = Context(
             parameters=self._parameters.copy(),
             auxiliaries=self._auxiliaries.copy(),
             observables=self._observables.copy(),
             views=self._views.copy(),
         )
+        for key, log_value in self._log_densities.items():
+            copied.add_log_density(key, log_value)
+        return copied

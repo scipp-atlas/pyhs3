@@ -20,7 +20,11 @@ from pyhs3.distributions.histfactory.modifiers import (
     ParametersModifier,
 )
 from pyhs3.domains import Domain, Domains, DomainType, ProductDomain
-from pyhs3.exceptions import UnlistedParameterError, WorkspaceValidationError
+from pyhs3.exceptions import (
+    MissingInitialValueError,
+    UnlistedParameterError,
+    WorkspaceValidationError,
+)
 from pyhs3.functions import Functions
 from pyhs3.likelihoods import Likelihood, Likelihoods
 from pyhs3.metadata import Metadata
@@ -456,6 +460,59 @@ class Workspace(BaseModel):
             for axis in datum.axes or []
         }
 
+    def _likelihood_parameters(
+        self, likelihood: Likelihood, parameterset: ParameterSet
+    ) -> set[str]:
+        """Names of the parameter nodes in the dependency closure of *likelihood*.
+
+        The walk covers the structural dependency graph only, so it needs no
+        expression to be built.
+        """
+        graph, _, _ = build_dependency_graph(
+            parameterset,
+            self.functions or Functions(),
+            self.distributions or Distributions(),
+        )
+        roots = [name for name in likelihood.distribution_names() if name in graph]
+        return {
+            graph[idx]["name"]
+            for idx in graph.ancestor_closure(roots)
+            if graph[idx]["type"] == "parameter"
+        }
+
+    def _check_initial_values(
+        self,
+        analysis: Analysis,
+        likelihood: Likelihood,
+        parameterset: ParameterSet,
+    ) -> None:
+        """Require a starting value for every free parameter of an analysis.
+
+        A free parameter is a likelihood parameter that is neither ``const`` in
+        the referenced parameter point (``parameterset``) nor an observable or
+        observed-data input of a binned channel.
+
+        Raises:
+            MissingInitialValueError: naming the free parameters that
+                ``parameterset`` does not set.
+        """
+        free = (
+            self._likelihood_parameters(likelihood, parameterset)
+            - set(self._extract_observables(likelihood))
+            - set(likelihood.binned_observed_inputs())
+            - {point.name for point in parameterset if point.const}
+        )
+        missing = sorted(free - {point.name for point in parameterset})
+        if not missing:
+            return
+        msg = (
+            f"Analysis '{analysis.name}' has {len(missing)} free parameter(s) with no "
+            f"starting value in the parameter point '{parameterset.name}': "
+            f"{', '.join(missing)}. Every free parameter needs a value in the "
+            f"analysis init, or in the parameter point passed as parameter_set=."
+        )
+        raise MissingInitialValueError(msg, missing)
+
     def _check_analysis_parameters(
         self,
         analysis: Analysis,
@@ -477,17 +534,7 @@ class Workspace(BaseModel):
                 parameter points in which every parameter outside the domains
                 and data is ``const``.
         """
-        graph, _, _ = build_dependency_graph(
-            parameterset,
-            self.functions or Functions(),
-            self.distributions or Distributions(),
-        )
-        roots = [name for name in likelihood.distribution_names() if name in graph]
-        parameters = {
-            graph[idx]["name"]
-            for idx in graph.ancestor_closure(roots)
-            if graph[idx]["type"] == "parameter"
-        }
+        parameters = self._likelihood_parameters(likelihood, parameterset)
         # Parameters the domains and data do not account for: each must be const
         # in the referenced parameter point.
         unlisted = (
@@ -694,6 +741,7 @@ class Workspace(BaseModel):
         self._check_analysis_parameters(
             target, likelihood_obj, analysis_domain, parameterset
         )
+        self._check_initial_values(target, likelihood_obj, parameterset)
 
         return Model(
             parameterset=parameterset,

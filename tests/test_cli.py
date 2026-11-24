@@ -406,14 +406,14 @@ def test_nll_bad_param_format(good_workspace):
     assert result.exit_code != 0
 
 
-def test_nll_no_init_uses_parameter_points(tmp_path):
-    """An analysis without an `init` set falls back to workspace parameter_points."""
+def test_nll_no_init_uses_parameter_set_option(tmp_path):
+    """An analysis without an `init` set takes its starting values from --parameter-set."""
     spec = json.loads(json.dumps(_WS_DICT))
     del spec["analyses"][0]["init"]  # analysis no longer names a parameter set
     path = tmp_path / "no_init.json"
     path.write_text(json.dumps(spec), encoding="utf-8")
 
-    result = runner.invoke(app, ["nll", str(path)])
+    result = runner.invoke(app, ["nll", str(path), "--parameter-set", "params"])
     assert result.exit_code == 0, result.output
     value = float(result.output.strip().splitlines()[-1])
     # parameter_points declares mean=2.0, so the NLL matches the mean=2.0 case.
@@ -759,7 +759,8 @@ def test_nll_missing_free_parameter_value(tmp_path):
     path.write_text(json.dumps(spec), encoding="utf-8")
     result = runner.invoke(app, ["nll", str(path)])
     assert result.exit_code != 0
-    assert "mean" in result.output
+    assert "mean" in _plain(result.output)
+    assert "--parameter-set" in _plain(result.output)
 
 
 # ---------------------------------------------------------------------------

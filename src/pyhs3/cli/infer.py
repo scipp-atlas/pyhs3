@@ -17,7 +17,7 @@ from rich.console import Console
 
 from pyhs3.analyses import Analysis
 from pyhs3.cli._shared import load_workspace, parse_param
-from pyhs3.exceptions import UnlistedParameterError
+from pyhs3.exceptions import MissingInitialValueError, UnlistedParameterError
 from pyhs3.likelihoods import Likelihood
 from pyhs3.model import Model
 from pyhs3.workspace import Workspace
@@ -74,7 +74,7 @@ def _check_parameter_set(ws: Workspace, name: str | None) -> None:
 def _build_model(
     ws: Workspace, target: Analysis | Likelihood, parameter_set: str | None
 ) -> Model:
-    """Build the model for *target*, turning an HS3 section 2.7 violation into a CLI error.
+    """Build the model for *target*, turning an HS3 section 2.7 or missing-start violation into a CLI error.
 
     The library error suggests ``ws.model(..., parameter_set=...)``; from the
     command line the same fix is ``--parameter-set``, so that is appended.
@@ -88,6 +88,9 @@ def _build_model(
                 f"--parameter-set {name}" for name in exc.const_parameter_sets
             )
             msg += f" From the command line: {options}."
+        raise typer.BadParameter(msg) from exc
+    except MissingInitialValueError as exc:
+        msg = f"{exc} From the command line: --parameter-set NAME."
         raise typer.BadParameter(msg) from exc
 
 

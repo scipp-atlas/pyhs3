@@ -273,6 +273,7 @@ Exceptions
    ExpressionEvaluationError
    WorkspaceValidationError
    UnlistedParameterError
+   MissingInitialValueError
    DuplicateEntityError
    custom_error_msg
 

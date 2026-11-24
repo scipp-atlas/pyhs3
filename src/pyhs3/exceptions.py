@@ -92,6 +92,30 @@ class UnlistedParameterError(WorkspaceValidationError):
         self.const_parameter_sets = const_parameter_sets
 
 
+class MissingInitialValueError(WorkspaceValidationError):
+    """
+    Raised when a free parameter of an analysis has no starting value.
+
+    Every free (non-``const``) parameter of an analysis's likelihood needs a
+    value in the referenced parameter point (the analysis ``init``, or the
+    caller's override). HS3 does not define a starting value for a parameter
+    that only its domain lists.
+
+    Attributes:
+        parameters: The free parameter names with no starting value, sorted.
+    """
+
+    def __init__(self, message: str, parameters: list[str]) -> None:
+        """Store the message and the names a caller needs to fix the analysis.
+
+        Args:
+            message: Human-readable description of the violation.
+            parameters: The free parameter names with no starting value, sorted.
+        """
+        super().__init__(message)
+        self.parameters = parameters
+
+
 class DuplicateEntityError(HS3Exception):
     """
     Raised when two distinct entities share a single name in the dependency graph.

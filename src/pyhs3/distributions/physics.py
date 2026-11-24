@@ -127,11 +127,11 @@ class CrystalBallDist(Distribution):
     """
 
     type: Literal["crystalball_dist"] = "crystalball_dist"
-    alpha: str
+    alpha: str | float
     m: str
-    m0: str
-    n: str
-    sigma: str
+    m0: str | float
+    n: str | float
+    sigma: str | float
 
     def likelihood(self, context: Context) -> TensorVar:
         """
@@ -144,11 +144,11 @@ class CrystalBallDist(Distribution):
         # the sigma/alpha divisors and the power-law exponent n against <= 0
         # inputs. m and m0 are positions and stay unclipped. Element-wise; keeps
         # each input's shape.
-        alpha = _clip_shape(context[self.alpha])
+        alpha = _clip_shape(context[self._parameters["alpha"]])
         m = context[self.m]
-        m0 = context[self.m0]
-        n = _clip_shape(context[self.n])
-        sigma = _clip_shape(context[self.sigma])
+        m0 = context[self._parameters["m0"]]
+        n = _clip_shape(context[self._parameters["n"]])
+        sigma = _clip_shape(context[self._parameters["sigma"]])
 
         # Calculate A and B per ROOT formula
         # Note: alpha, n, sigma are assumed to be positive
@@ -204,11 +204,11 @@ class CrystalBallDist(Distribution):
         # the sigma/alpha divisors and the power-law exponent n against <= 0
         # inputs. m and m0 are positions and stay unclipped. Element-wise; keeps
         # each input's shape.
-        alpha = _clip_shape(context[self.alpha])
+        alpha = _clip_shape(context[self._parameters["alpha"]])
         m = context[self.m]
-        m0 = context[self.m0]
-        n = _clip_shape(context[self.n])
-        sigma = _clip_shape(context[self.sigma])
+        m0 = context[self._parameters["m0"]]
+        n = _clip_shape(context[self._parameters["n"]])
+        sigma = _clip_shape(context[self._parameters["sigma"]])
 
         B = (n / alpha) - alpha
         t = (m - m0) / sigma
@@ -266,14 +266,14 @@ class AsymmetricCrystalBallDist(Distribution):
     """
 
     type: Literal["crystalball_doublesided_dist"] = "crystalball_doublesided_dist"
-    alpha_L: str
-    alpha_R: str
+    alpha_L: str | float
+    alpha_R: str | float
     m: str
-    m0: str
-    n_L: str
-    n_R: str
-    sigma_R: str
-    sigma_L: str
+    m0: str | float
+    n_L: str | float
+    n_R: str | float
+    sigma_R: str | float
+    sigma_L: str | float
 
     def likelihood(self, context: Context) -> TensorVar:
         """
@@ -286,14 +286,14 @@ class AsymmetricCrystalBallDist(Distribution):
         # the sigma/alpha divisors and the power-law exponents n against <= 0
         # inputs on either side. m and m0 are positions and stay unclipped.
         # Element-wise; keeps each input's shape.
-        alpha_L = _clip_shape(context[self.alpha_L])
-        alpha_R = _clip_shape(context[self.alpha_R])
+        alpha_L = _clip_shape(context[self._parameters["alpha_L"]])
+        alpha_R = _clip_shape(context[self._parameters["alpha_R"]])
         m = context[self.m]
-        m0 = context[self.m0]
-        n_L = _clip_shape(context[self.n_L])
-        n_R = _clip_shape(context[self.n_R])
-        sigma_L = _clip_shape(context[self.sigma_L])
-        sigma_R = _clip_shape(context[self.sigma_R])
+        m0 = context[self._parameters["m0"]]
+        n_L = _clip_shape(context[self._parameters["n_L"]])
+        n_R = _clip_shape(context[self._parameters["n_R"]])
+        sigma_L = _clip_shape(context[self._parameters["sigma_L"]])
+        sigma_R = _clip_shape(context[self._parameters["sigma_R"]])
 
         # Calculate A_i and B_i per ROOT formula
         # Note: alpha, n, sigma are assumed to be positive
@@ -360,14 +360,14 @@ class AsymmetricCrystalBallDist(Distribution):
         # the sigma/alpha divisors and the power-law exponents n against <= 0
         # inputs on either side. m and m0 are positions and stay unclipped.
         # Element-wise; keeps each input's shape.
-        alpha_L = _clip_shape(context[self.alpha_L])
-        alpha_R = _clip_shape(context[self.alpha_R])
+        alpha_L = _clip_shape(context[self._parameters["alpha_L"]])
+        alpha_R = _clip_shape(context[self._parameters["alpha_R"]])
         m = context[self.m]
-        m0 = context[self.m0]
-        n_L = _clip_shape(context[self.n_L])
-        n_R = _clip_shape(context[self.n_R])
-        sigma_L = _clip_shape(context[self.sigma_L])
-        sigma_R = _clip_shape(context[self.sigma_R])
+        m0 = context[self._parameters["m0"]]
+        n_L = _clip_shape(context[self._parameters["n_L"]])
+        n_R = _clip_shape(context[self._parameters["n_R"]])
+        sigma_L = _clip_shape(context[self._parameters["sigma_L"]])
+        sigma_R = _clip_shape(context[self._parameters["sigma_R"]])
 
         B_L = (n_L / alpha_L) - alpha_L
         B_R = (n_R / alpha_R) - alpha_R
@@ -419,14 +419,14 @@ class AsymmetricCrystalBallDist(Distribution):
         # the sigma/alpha divisors and the power-law exponents n against <= 0
         # inputs on either side. m and m0 are positions and stay unclipped.
         # Element-wise; keeps each input's shape.
-        alpha_L = _clip_shape(context[self.alpha_L])
-        alpha_R = _clip_shape(context[self.alpha_R])
+        alpha_L = _clip_shape(context[self._parameters["alpha_L"]])
+        alpha_R = _clip_shape(context[self._parameters["alpha_R"]])
         m = context[self.m]
-        m0 = context[self.m0]
-        n_L = _clip_shape(context[self.n_L])
-        n_R = _clip_shape(context[self.n_R])
-        sigma_L = _clip_shape(context[self.sigma_L])
-        sigma_R = _clip_shape(context[self.sigma_R])
+        m0 = context[self._parameters["m0"]]
+        n_L = _clip_shape(context[self._parameters["n_L"]])
+        n_R = _clip_shape(context[self._parameters["n_R"]])
+        sigma_L = _clip_shape(context[self._parameters["sigma_L"]])
+        sigma_R = _clip_shape(context[self._parameters["sigma_R"]])
 
         # Same A_i and B_i as likelihood(); alpha, n, sigma assumed positive.
         A_L = (n_L / alpha_L) ** n_L * pt.exp(-(alpha_L**2) / 2)

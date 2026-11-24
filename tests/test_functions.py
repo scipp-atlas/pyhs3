@@ -207,6 +207,14 @@ class TestSumFunction:
         assert func.summands == ["a", "b", "c"]
         assert func.parameters == {"a", "b", "c"}
 
+    def test_sum_function_numeric_and_named_summands(self):
+        """Test SumFunction accepts numbers and names mixed in summands."""
+        func = SumFunction(name="test_sum", summands=["a", 2.5, "b", 1])
+        assert len(func.parameters) == 4
+        context = {"a": pt.constant(3.0), "b": pt.constant(4.0), **func.constants}
+        f = function([], func.expression(context))
+        assert np.isclose(f(), 10.5)
+
     def test_sum_function_expression_empty_summands(self):
         """Test SumFunction with empty summands returns 0.0."""
         func = SumFunction(name="test_sum", summands=[])

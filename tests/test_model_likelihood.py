@@ -4,8 +4,11 @@ Tests for ws.model(analysis) / ws.model(likelihood) — joint log-prob interface
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytensor
+import pytensor.tensor as pt
 import pytest
 from pydantic import ValidationError
 from scipy.special import logsumexp
@@ -18,12 +21,17 @@ try:
 except ImportError:
     _HAS_JAX = False
 
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.basic import MergeOptimizer
 from pytensor.graph.traversal import explicit_graph_inputs
 from pytensor.tensor import TensorConstant
 
 from pyhs3 import Workspace, jaxify
 from pyhs3.data import PointData
 from pyhs3.distributions import Distributions
+from pyhs3.distributions.basic import GaussianDist
+from pyhs3.distributions.composite import MixtureDist, ProductDist
+from pyhs3.distributions.histfactory import HistFactoryDistChannel
 from pyhs3.domains import ProductDomain
 from pyhs3.exceptions import WorkspaceValidationError
 from pyhs3.functions import Functions
@@ -1567,3 +1575,273 @@ def test_log_prob_extended_mixture_far_tails_stays_finite():
     nu = 30.0 + 20.0
     expected = logsumexp([np.log(30.0) + log_sig, np.log(20.0) + log_bkg]) - nu
     assert val == pytest.approx(expected, rel=1e-9)
+
+
+def test_log_prob_has_no_structurally_duplicate_nodes():
+    """Subexpressions shared by different distributions appear once in log_prob.
+
+    The two summands differ (sigma 1 and 2), so they are not shared as HS3
+    objects, but both build ``x_obs - mean`` and broadcast the same inputs.
+    log_prob must hand PyTensor a graph in which its merge rewrite has
+    nothing left to merge, and the value must be unchanged.
+    """
+    spec = json.loads(json.dumps(_WS_EXTENDED_MIXTURE))
+    spec["distributions"][1] = {
+        "name": "bkg",
+        "type": "gaussian_dist",
+        "x": "x_obs",
+        "mean": "mean",
+        "sigma": 2.0,
+    }
+    ws = Workspace(**spec)
+    model = ws.model(ws.analyses["A"], progress=False)
+    log_prob = model.log_prob
+
+    inputs = list(explicit_graph_inputs([log_prob]))
+    fgraph = FunctionGraph(inputs, [log_prob], clone=True)
+    before = len(fgraph.apply_nodes)
+    MergeOptimizer().rewrite(fgraph)
+    assert len(fgraph.apply_nodes) == before
+
+    events = [1.0, 2.0, 3.0, 4.0, 5.0]
+    expected = (
+        sum(
+            np.log(
+                30.0 * np.exp(_truncnorm_logpdf(x, 2.0, 1.0, -10.0, 10.0))
+                + 20.0 * np.exp(_truncnorm_logpdf(x, 2.0, 2.0, -10.0, 10.0))
+            )
+            for x in events
+        )
+        - 50.0
+    )
+    value = pytensor.function(
+        [v for v in inputs if v.name is not None], log_prob, on_unused_input="ignore"
+    )(
+        **{
+            name: val
+            for name, val in {**model.free_params, **model.data}.items()
+            if name in {v.name for v in inputs}
+        }
+    )
+    # The Gaussians are normalised by 64-point Gauss-Legendre quadrature on
+    # [-10, 10], accurate to ~1e-10 relative here.
+    np.testing.assert_allclose(value, expected, rtol=1e-8)
+
+
+def _two_summand_mixture(bkg: dict) -> Workspace:
+    spec = json.loads(json.dumps(_WS_EXTENDED_MIXTURE))
+    spec["distributions"][1] = {"name": "bkg", "type": "gaussian_dist", **bkg}
+    return Workspace(**spec)
+
+
+def test_identical_distributions_share_one_expression():
+    """Distributions equal in every field but ``name`` are built once.
+
+    ``sig`` and ``bkg`` reference the same observable, mean and width, so the
+    second is an alias of the first and reuses its tensors.
+    """
+    ws = _two_summand_mixture({"x": "x_obs", "mean": "mean", "sigma": 1.0})
+    model = ws.model(ws.analyses["A"], progress=False)
+
+    assert model.log_distributions["bkg"] is model.log_distributions["sig"]
+    assert model.distributions["bkg"] is model.distributions["sig"]
+
+
+@pytest.mark.parametrize(
+    "bkg",
+    [
+        {"x": "x_obs", "mean": "mean", "sigma": 2.0},  # different constant
+        {"x": "x_obs", "mean": 0.0, "sigma": 1.0},  # constant instead of parameter
+    ],
+    ids=["different_sigma", "different_mean_reference"],
+)
+def test_distributions_differing_in_a_field_are_built_separately(bkg):
+    """Any differing field (value or reference) means a separate expression."""
+    ws = _two_summand_mixture(bkg)
+    model = ws.model(ws.analyses["A"], progress=False)
+
+    assert model.log_distributions["bkg"] is not model.log_distributions["sig"]
+
+
+@pytest.mark.parametrize(
+    ("cls", "shares"),
+    [
+        (MixtureDist, False),
+        (HistFactoryDistChannel, False),
+        (GaussianDist, True),
+        (ProductDist, True),
+    ],
+)
+def test_distribution_classes_declare_whether_identical_objects_share(cls, shares):
+    """Classes that keep per-object build state opt out of sharing.
+
+    MixtureDist caches its coefficient and yield nodes on the object for
+    log_prob_terms, and HistFactoryDistChannel resolves its observed data by
+    its own name, so an alias would miss that state.
+    """
+    assert cls.share_identical_expressions is shares
+
+
+def _extended_mixture_model(c_sig: float, c_bkg: float):
+    spec = json.loads(json.dumps(_WS_EXTENDED_MIXTURE))
+    for parameter in spec["parameter_points"][0]["parameters"]:
+        if parameter["name"] == "c_sig":
+            parameter["value"] = c_sig
+        if parameter["name"] == "c_bkg":
+            parameter["value"] = c_bkg
+    spec["domains"][0]["axes"][2]["min"] = -100.0
+    ws = Workspace(**spec)
+    model = ws.model(ws.analyses["A"], progress=False)
+    inputs = {v.name: v for v in explicit_graph_inputs([model.log_prob]) if v.name}
+    fn = pytensor.function(list(inputs.values()), model.log_prob)
+    return model, inputs, fn
+
+
+def test_log_prob_extended_mixture_negative_coefficient_positive_density():
+    """A negative coefficient with a positive total density gives the linear-sum value.
+
+    HS3 defines the mixture as sum_i c_i f_i without restricting the sign of
+    c_i (https://github.com/scipp-atlas/pyhs3/issues/348); ROOT's RooAddPdf
+    accepts it too.
+    """
+    model, _, fn = _extended_mixture_model(c_sig=30.0, c_bkg=-0.2)
+    events = [1.0, 2.0, 3.0, 4.0, 5.0]
+    expected = _extended_mixture_logprob(events, mean=2.0, c_sig=30.0, c_bkg=-0.2)
+    assert np.isfinite(expected)
+
+    value = float(fn(**model.data, **model.nominal_params).item())
+
+    assert value == pytest.approx(expected, rel=1e-10)
+
+
+def test_log_prob_extended_mixture_negative_density_is_nan():
+    """Where sum_i c_i f_i(x) < 0 for an event the log-likelihood is NaN."""
+    model, _, fn = _extended_mixture_model(c_sig=1.0, c_bkg=-5.0)
+
+    value = float(fn(**model.data, **model.nominal_params).item())
+
+    assert np.isnan(value)
+
+
+def test_log_prob_extended_mixture_negative_coefficient_gradient():
+    """The gradient with respect to a negative coefficient matches finite differences."""
+    model, inputs, _ = _extended_mixture_model(c_sig=30.0, c_bkg=-0.2)
+    grad_fn = pytensor.function(
+        list(inputs.values()), pytensor.grad(model.log_prob.sum(), inputs["c_bkg"])
+    )
+    events = [1.0, 2.0, 3.0, 4.0, 5.0]
+    step = 1e-6
+    expected = (
+        _extended_mixture_logprob(events, mean=2.0, c_sig=30.0, c_bkg=-0.2 + step)
+        - _extended_mixture_logprob(events, mean=2.0, c_sig=30.0, c_bkg=-0.2 - step)
+    ) / (2 * step)
+
+    value = float(grad_fn(**model.data, **model.nominal_params))
+
+    assert value == pytest.approx(expected, rel=1e-6)
+
+
+def test_log_prob_extended_mixture_zero_coefficient_gradient_is_finite():
+    """The gradient at a coefficient of exactly zero is finite and correct.
+
+    d/dc_b [sum_j log(c_s f_s(x_j) + c_b f_b(x_j)) - (c_s + c_b)]
+        = sum_j f_b(x_j) / (c_s f_s(x_j) + c_b f_b(x_j)) - 1,
+    which is finite at c_b = 0 (e.g. a spurious-signal yield whose nuisance
+    parameter starts at zero).  Writing the term with log|c_b| would give
+    1/c_b * 0 = NaN there.
+    """
+    model, inputs, _ = _extended_mixture_model(c_sig=30.0, c_bkg=0.0)
+    grad_fn = pytensor.function(
+        list(inputs.values()), pytensor.grad(model.log_prob.sum(), inputs["c_bkg"])
+    )
+    events = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    f_sig = np.exp([_truncnorm_logpdf(x, 2.0, 1.0, -10.0, 10.0) for x in events])
+    f_bkg = np.exp([_truncnorm_logpdf(x, 0.0, 2.0, -10.0, 10.0) for x in events])
+    expected = float(np.sum(f_bkg / (30.0 * f_sig)) - 1.0)
+
+    value = float(grad_fn(**model.data, **model.nominal_params))
+
+    assert np.isfinite(value)
+    assert value == pytest.approx(expected, rel=1e-8)
+
+
+def test_log_prob_extended_mixture_batched_and_scalar_coefficients():
+    """A (M,) coefficient batch next to a scalar coefficient gives M values.
+
+    The coefficients are stacked with a common shape among themselves, so a
+    profile scan over one yield (vector) alongside a fixed scalar yield must
+    evaluate every scan point exactly as the unbatched model does.
+    """
+    ws = Workspace(**json.loads(json.dumps(_WS_EXTENDED_MIXTURE)))
+    ws.parameter_points["params"]["c_sig"].kind = pt.vector
+    with pytest.warns(UserWarning, match="kind override vector"):
+        model = ws.model(ws.analyses["A"], progress=False)
+    inputs = {v.name: v for v in explicit_graph_inputs([model.log_prob]) if v.name}
+    fn = pytensor.function(list(inputs.values()), model.log_prob)
+    scan = np.array([10.0, 30.0, 55.0])
+    events = [1.0, 2.0, 3.0, 4.0, 5.0]
+
+    values = fn(**{**model.data, **model.nominal_params, "c_sig": scan})
+
+    assert values.shape == (3,)
+    expected = [
+        _extended_mixture_logprob(events, mean=2.0, c_sig=c, c_bkg=20.0) for c in scan
+    ]
+    # Gaussians are normalised by 64-point Gauss-Legendre quadrature on
+    # [-10, 10], accurate to ~1e-10 relative against the exact reference.
+    np.testing.assert_allclose(values, expected, rtol=1e-8)
+
+
+class TestLogProbBatchedShape:
+    """log_prob is (M,) for M parameter points, whichever term a batched parameter enters.
+
+    Batched non-observable parameters reach distributions as (1, M) views;
+    every likelihood term must still combine into a 1-D (M,) result
+    (https://github.com/scipp-atlas/pyhs3/issues/358).
+    """
+
+    @staticmethod
+    def _evaluate(spec: dict, values: dict[str, object]) -> np.ndarray:
+        ws = Workspace(**json.loads(json.dumps(spec)))
+        model = ws.model(ws.analyses["A"], progress=False)
+        inputs = [v for v in explicit_graph_inputs([model.log_prob]) if v.name]
+        fn = pytensor.function(inputs, model.log_prob)
+        return fn(**{**model.data, **model.nominal_params, **values})
+
+    @pytest.mark.parametrize(
+        ("spec", "name", "scan"),
+        [
+            pytest.param(_WS_DICT, "mean", [-0.5, 0.3, 1.2], id="shape"),
+            pytest.param(_WS_EXTENDED_MIXTURE, "c_sig", [10.0, 30.0, 55.0], id="yield"),
+            pytest.param(
+                _WS_PRODUCT_CONSTRAINT,
+                "alpha",
+                [-1.0, 0.5, 2.0],
+                id="product_constraint",
+            ),
+            pytest.param(_WS_AUX, "alpha", [-1.0, 0.5, 2.0], id="aux_constraint"),
+        ],
+    )
+    def test_batched_parameter_gives_one_value_per_point(self, spec, name, scan):
+        ws = Workspace(**json.loads(json.dumps(spec)))
+        point = next(iter(ws.parameter_points))
+        point[name].kind = pt.vector
+        with pytest.warns(UserWarning, match="kind override vector"):
+            model = ws.model(ws.analyses["A"], progress=False)
+        inputs = [v for v in explicit_graph_inputs([model.log_prob]) if v.name]
+        fn = pytensor.function(inputs, model.log_prob)
+
+        values = fn(**{**model.data, **model.nominal_params, name: np.array(scan)})
+
+        assert model.log_prob.type.ndim == 1
+        assert values.shape == (len(scan),)
+        expected = [self._evaluate(spec, {name: np.float64(v)}).item() for v in scan]
+        np.testing.assert_allclose(values, expected, rtol=1e-12)
+
+    @pytest.mark.parametrize(
+        "spec",
+        [_WS_DICT, _WS_EXTENDED_MIXTURE, _WS_PRODUCT_CONSTRAINT, _WS_AUX],
+        ids=["shape", "yield", "product_constraint", "aux_constraint"],
+    )
+    def test_scalar_parameters_give_shape_one(self, spec):
+        assert self._evaluate(spec, {}).shape == (1,)

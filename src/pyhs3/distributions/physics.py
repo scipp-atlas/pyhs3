@@ -2,13 +2,13 @@
 Physics-specific distribution implementations.
 
 Provides classes for handling probability distributions commonly used
-in high-energy physics analysis, including Crystal Ball distributions
-and ARGUS background models.
+in high-energy physics analysis, including Crystal Ball distributions,
+ARGUS background models, and the relativistic Breit-Wigner resonance shape.
 
-``CrystalBallDist``, ``AsymmetricCrystalBallDist``, and ``ArgusDist`` are
-hand-rolled symbolic PyTensor expressions and stay that way:
-``pytensor_distributions`` provides no equivalent for any of them, so they
-cannot be delegated the way the basic distributions are.
+``CrystalBallDist``, ``AsymmetricCrystalBallDist``, ``ArgusDist``, and
+``RelativisticBreitWignerDist`` are hand-rolled symbolic PyTensor expressions
+and stay that way: ``pytensor_distributions`` provides no equivalent for any of
+them, so they cannot be delegated the way the basic distributions are.
 """
 
 from __future__ import annotations
@@ -17,7 +17,9 @@ from typing import Literal, cast
 
 import numpy as np
 import pytensor.tensor as pt
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from pyhs3.base import balanced_sum
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
 from pyhs3.typing.aliases import TensorVar
@@ -184,7 +186,7 @@ class CrystalBallDist(Distribution):
             -\frac{1}{2} t^2, & \text{otherwise}
             \end{cases}
 
-        via :func:`_crystalball_log_tail` for the tail branch. Evaluating
+        via ``_crystalball_log_tail`` for the tail branch. Evaluating
         this directly (rather than ``pt.log(self.likelihood(...))``) avoids
         computing the power-law tail :math:`A(B-t)^{-n}` and re-logging it,
         which underflows to 0.0 (and then to ``-inf``) once the tail decays
@@ -340,7 +342,7 @@ class AsymmetricCrystalBallDist(Distribution):
             \log A_R - n_R \log(B_R + t_R), & \text{otherwise}
             \end{cases}
 
-        via :func:`_crystalball_log_tail` for both tail branches (shared with
+        via ``_crystalball_log_tail`` for both tail branches (shared with
         :class:`CrystalBallDist`, which uses the same power-law tail form on
         its single tail). Evaluating this directly (rather than
         ``pt.log(self.likelihood(...))``) avoids computing each region's
@@ -598,7 +600,7 @@ class ArgusDist(Distribution):
         ``pt.log`` call, so the in-range branch's gradient stays finite when
         PyTensor differentiates it at points where that branch is not
         selected (bracket_term <= 0) -- the same guard idiom as
-        :class:`CrystalBallDist`'s tail guard (:func:`_crystalball_log_tail`).
+        :class:`CrystalBallDist`'s tail guard (``_crystalball_log_tail``).
         Without the clamp, the in-range branch's un-selected-branch gradient
         would multiply an infinite/NaN local derivative of ``pt.log`` at a
         non-positive argument by the switch's zero mask (``0 * NaN = NaN``).
@@ -624,11 +626,269 @@ class ArgusDist(Distribution):
         return cast(TensorVar, pt.switch(bracket_term > 0, log_valid, -np.inf))
 
 
+def _barrier_factor_squared(w: TensorVar, ell: int) -> TensorVar:
+    r"""
+    Blatt-Weisskopf factor :math:`n_l^2 = w^l h_l^2` as a function of :math:`w = z^2`.
+
+    HS3 defines :math:`h_l^2(z) = 1 / (P_l(z) P_l(-z))` with
+    :math:`P_0 = 1`, :math:`P_1 = 1 - iz` and
+    :math:`P_{l+1} = (2l+1) P_l - z^2 P_{l-1}`. The product
+    :math:`P_l(z) P_l(-z)` is even in :math:`z` with real coefficients, so it is
+    a real polynomial in :math:`w`. Its coefficients are computed here (``ell``
+    is a plain integer fixed when the graph is built) and evaluated in real
+    arithmetic, which stays valid for :math:`w < 0`, i.e. an imaginary breakup
+    momentum below threshold.
+
+    Args:
+        w: :math:`(qR)^2`, real, of any broadcastable shape.
+        ell: Orbital angular momentum :math:`l \geq 0`.
+
+    Returns:
+        Symbolic :math:`n_l^2`, with the shape of ``w``.
+    """
+    # Coefficients of P_l(z), lowest power of z first (complex).
+    p_prev = np.array([1.0 + 0j])
+    p_curr = np.array([1.0 + 0j, -1.0j])
+    for k in range(1, ell):
+        # P_{k+1} = (2k+1) P_k - z^2 P_{k-1}, padded to a common length
+        z2_p_prev = np.concatenate([[0j, 0j], p_prev])
+        scaled = np.concatenate(
+            [(2 * k + 1) * p_curr, np.zeros(len(z2_p_prev) - len(p_curr))]
+        )
+        p_prev, p_curr = p_curr, scaled - z2_p_prev
+    poly = p_prev if ell == 0 else p_curr
+    # P_l(-z) flips the sign of the odd powers of z.
+    flipped = poly * (-1.0) ** np.arange(len(poly))
+    # P_l(z) P_l(-z) is even in z: keep the even powers, i.e. powers of w = z^2.
+    denominator_coeffs = np.convolve(poly, flipped)[::2].real
+
+    denominator = pt.constant(denominator_coeffs[-1])
+    for coeff in denominator_coeffs[-2::-1]:  # Horner's scheme
+        denominator = denominator * w + coeff
+    return cast(TensorVar, w**ell / denominator)
+
+
+class RelativisticBreitWignerChannel(BaseModel):
+    r"""
+    One two-body decay channel of a :class:`RelativisticBreitWignerDist`.
+
+    Field names follow HS3. The angular momentum is stored as ``ell`` and
+    serialized as ``l``, avoiding an ambiguous single-letter attribute name.
+
+    Parameters:
+        name (str | None): Name of the final state (optional).
+        Gamma (str | float): Non-negative width coefficient
+            :math:`\Gamma_{\text{BW},i}`, in mass units.
+        m1 (str | float): Mass of the first daughter (default 0).
+        m2 (str | float): Mass of the second daughter (default 0).
+        ell (int): Orbital angular momentum :math:`l_i \geq 0` (``l`` in HS3,
+            default 0).
+        R (str | float): Radius parameter :math:`R_i`, in inverse mass units
+            (default 3, i.e. 3 GeV\ :sup:`-1`).
+    """
+
+    model_config = ConfigDict(serialize_by_alias=True, populate_by_name=True)
+
+    name: str | None = None
+    Gamma: str | float | int
+    m1: str | float | int = 0.0
+    m2: str | float | int = 0.0
+    ell: int = Field(default=0, ge=0, alias="l")
+    R: str | float | int = 3.0
+
+
+class RelativisticBreitWignerDist(Distribution):
+    r"""
+    Relativistic Breit-Wigner distribution for a resonance in a two-body mass spectrum.
+
+    Implements the HS3 line shape for the invariant mass :math:`m` of the
+    observed two-particle system, with the resonance coupled to a list of
+    two-body channels (the first is the observed final state). For
+    :math:`m > m_{1,1} + m_{2,1}`:
+
+    .. math::
+
+        f(m) \propto \frac{m\,\Gamma_1(m)}
+        {\left| m_\text{BW}^2 - m^2 - i\,m_\text{BW}\,\Gamma(m) \right|^2},
+        \qquad \Gamma(m) = \sum_i \Gamma_i(m)
+
+    and :math:`f(m) = 0` below the observed channel's threshold. Each channel
+    contributes
+
+    .. math::
+
+        \Gamma_i(m) = \Gamma_{\text{BW},i}\; n_{l_i}^2(m)\; \rho_i(m), \quad
+        \rho_i = \frac{2 q_i}{m}, \quad
+        n_{l}^2 = z^{2l} h_l^2(z), \quad z = q_i R_i,
+
+    with breakup momentum
+
+    .. math::
+
+        q_i(m) = \frac{\sqrt{\left(m^2 - (m_{1i}+m_{2i})^2\right)
+        \left(m^2 - (m_{1i}-m_{2i})^2\right)}}{2m}
+
+    and Blatt-Weisskopf factors :math:`h_l^2(z) = 1/(P_l(z)P_l(-z))`,
+    :math:`P_0 = 1`, :math:`P_1 = 1 - iz`,
+    :math:`P_{l+1} = (2l+1)P_l - z^2 P_{l-1}` (for example
+    :math:`h_1^2 = 1/(1+z^2)`).
+
+    Channels that are closed at :math:`m` still enter the denominator: their
+    breakup momentum is continued analytically to :math:`q = +i\sqrt{-q^2}`
+    between :math:`|m_{1}-m_{2}|` and :math:`m_{1}+m_{2}`, and :math:`q` is
+    negative real below :math:`|m_{1}-m_{2}|`. This implementation evaluates
+    the complex width in real arithmetic: open channels contribute to
+    :math:`\mathrm{Re}\,\Gamma` and continued channels to
+    :math:`\mathrm{Im}\,\Gamma`, so the denominator is
+    :math:`(m_\text{BW}^2 - m^2 + m_\text{BW}\,\mathrm{Im}\,\Gamma)^2 +
+    (m_\text{BW}\,\mathrm{Re}\,\Gamma)^2`.
+
+    The density is normalized over the observable's domain by the standard
+    automatic normalization (64-point Gauss-Legendre quadrature, see
+    :doc:`/normalization`). The line shape has a square-root onset at the
+    observed channel's threshold, which the quadrature resolves poorly if the
+    threshold lies inside the domain; start the domain at or above the
+    threshold.
+
+    Parameters:
+        mass (str): Name of the observable mass variable :math:`m`.
+        resonance (str | float): Nominal mass :math:`m_\text{BW}` (strictly
+            positive; not in general the pole mass).
+        channels (list[RelativisticBreitWignerChannel]): Non-empty list of
+            channels, observed channel first. The first channel's ``Gamma``
+            must be strictly positive.
+
+    Note:
+        Following HS3, ``Gamma`` is a width coefficient, not the partial width
+        at the nominal mass: no division by the phase space at
+        :math:`m_\text{BW}` is made, unlike the nominal-partial-width
+        convention of Eq. (50.35) in the PDG review. The density carries the
+        factor :math:`m` (the Jacobian from :math:`m^2` to :math:`m`) and no
+        mass-dependent production factors, so it differs from ROOT's
+        ``RooBreitWigner`` (a constant-width, non-relativistic Cauchy shape)
+        and from ROOT's ``RooRelBreitWigner``, which uses its own
+        parametrization of the running width and barrier factors.
+
+    HS3 Reference:
+        :external+hs3:ref:`relativistic_breit_wigner_dist <hs3.relativistic-breit-wigner-distribution>`
+    """
+
+    type: Literal["relativistic_breit_wigner_dist"] = "relativistic_breit_wigner_dist"
+    mass: str | float | int
+    resonance: str | float | int
+    channels: list[RelativisticBreitWignerChannel] = Field(
+        min_length=1, json_schema_extra={"preprocess": False}
+    )
+
+    @model_validator(mode="after")
+    def _register_channel_parameters(self) -> RelativisticBreitWignerDist:
+        """Register channel fields as parameters, mirroring the flat-field processing."""
+        for index, channel in enumerate(self.channels):
+            for field_name in ("Gamma", "m1", "m2", "R"):
+                key = f"channels[{index}].{field_name}"
+                value = getattr(channel, field_name)
+                if isinstance(value, str):
+                    self._parameters[key] = value
+                    continue
+                constant_name = f"constant_{self.name}_{key}"
+                self._parameters[key] = constant_name
+                self._constants_values[constant_name] = value
+        return self
+
+    def _channel_widths(
+        self, context: Context, index: int, m: TensorVar
+    ) -> tuple[TensorVar, TensorVar]:
+        r"""
+        Real and imaginary parts of :math:`\Gamma_i(m)` for one channel.
+
+        Channel parameters are scalars and ``m`` has any shape, so both
+        returned tensors have the shape of ``m``.
+
+        With :math:`q^2 = (m^2 - s_+^2)(m^2 - s_-^2) / (4m^2)`, :math:`q^2 > 0`
+        gives a real :math:`q` (negative below :math:`|m_1 - m_2|`) and
+        :math:`q^2 < 0` gives :math:`q = i\sqrt{-q^2}`. The Blatt-Weisskopf
+        factor is real in both cases (it depends on :math:`q^2` only), so
+        :math:`\Gamma_i` is real for :math:`q^2 > 0` and purely imaginary for
+        :math:`q^2 < 0`.
+
+        Args:
+            context: Mapping of names to pytensor variables.
+            index: Channel position in ``channels``.
+            m: Invariant mass.
+
+        Returns:
+            ``(Re Gamma_i, Im Gamma_i)``.
+        """
+        gamma, m1, m2, radius = (
+            context[self._parameters[f"channels[{index}].{name}"]]
+            for name in ("Gamma", "m1", "m2", "R")
+        )
+        above_threshold = m**2 - (m1 + m2) ** 2
+        above_pseudothreshold = m**2 - (m1 - m2) ** 2
+        q_squared = above_threshold * above_pseudothreshold / (4.0 * m**2)
+
+        # |q| = sqrt(|q^2|), with the argument of sqrt guarded so its gradient
+        # stays finite at q^2 == 0 (the switch's zero mask would otherwise
+        # multiply an infinite local derivative).
+        abs_q2 = pt.abs(q_squared)
+        safe_abs_q2 = pt.switch(abs_q2 > 0, abs_q2, 1.0)
+        abs_q = pt.switch(abs_q2 > 0, pt.sqrt(safe_abs_q2), 0.0)
+
+        barrier = _barrier_factor_squared(
+            q_squared * radius**2, self.channels[index].ell
+        )
+        magnitude = gamma * barrier * 2.0 * abs_q / m
+        # q is negative real only below |m1 - m2|, where both factors are negative
+        sign = pt.switch(above_threshold > 0, 1.0, -1.0)
+        real = pt.switch(q_squared > 0, sign * magnitude, 0.0)
+        imag = pt.switch(q_squared < 0, magnitude, 0.0)
+        return cast(TensorVar, real), cast(TensorVar, imag)
+
+    def likelihood(self, context: Context) -> TensorVar:
+        """
+        Builds a symbolic expression for the unnormalized relativistic Breit-Wigner density.
+
+        The density is zero at and below the observed channel's threshold.
+        Normalization over the observable's domain is applied by
+        :meth:`pyhs3.distributions.Distribution.expression`.
+
+        Args:
+            context (dict): Mapping of names to pytensor variables.
+
+        Returns:
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of the
+            unnormalized density, with the shape of the mass variable.
+        """
+        m = context[self._parameters["mass"]]
+        m_bw = context[self._parameters["resonance"]]
+
+        widths = [
+            self._channel_widths(context, index, m)
+            for index in range(len(self.channels))
+        ]
+        total_real = balanced_sum([real for real, _ in widths], pt.constant(0.0))
+        total_imag = balanced_sum([imag for _, imag in widths], pt.constant(0.0))
+
+        # |m_BW^2 - m^2 - i m_BW (Re + i Im)|^2, in real arithmetic
+        denominator = (m_bw**2 - m**2 + m_bw * total_imag) ** 2 + (
+            m_bw * total_real
+        ) ** 2
+
+        observed_real, _ = widths[0]
+        m1 = context[self._parameters["channels[0].m1"]]
+        m2 = context[self._parameters["channels[0].m2"]]
+        numerator = pt.switch(m > m1 + m2, m * observed_real, 0.0)
+
+        return cast(TensorVar, numerator / denominator)
+
+
 # Export list of physics distribution classes
 __all__ = [
     "ArgusDist",
     "AsymmetricCrystalBallDist",
     "CrystalBallDist",
+    "RelativisticBreitWignerChannel",
+    "RelativisticBreitWignerDist",
     "distributions",
 ]
 
@@ -637,4 +897,5 @@ distributions: dict[str, type[Distribution]] = {
     "crystalball_dist": CrystalBallDist,
     "crystalball_doublesided_dist": AsymmetricCrystalBallDist,
     "argus_dist": ArgusDist,
+    "relativistic_breit_wigner_dist": RelativisticBreitWignerDist,
 }

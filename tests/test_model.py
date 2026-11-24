@@ -9,7 +9,9 @@ import numpy as np
 import numpy.testing as npt
 import pytensor.tensor as pt
 import pytest
+from pytensor.compile.mode import get_mode
 from pytensor.graph.traversal import explicit_graph_inputs
+from pytensor.link.numba.linker import NumbaLinker
 from pytensor.tensor.basic import TensorConstant
 
 import pyhs3 as hs3
@@ -167,6 +169,88 @@ class TestModelModes:
         assert abs(result_fast_run - result_fast_compile) < 1e-10
 
 
+class TestDefaultCompileMode:
+    """The default mode compiles with the C virtual machine, not Numba.
+
+    With PyTensor's default ``config.linker="auto"``, ``"FAST_RUN"``
+    resolves to its Numba linker, which does not finish compiling large
+    workspaces
+    (https://github.com/scipp-atlas/pyhs3/issues/367).
+    """
+
+    def test_model_default_mode(self, simple_workspace):
+        model = simple_workspace.model(0)
+        assert model.mode == "CVM"
+        assert not isinstance(get_mode(model.mode).linker, NumbaLinker)
+
+    def test_model_default_mode_evaluates(self, simple_workspace):
+        model = simple_workspace.model(0)
+        value = model.pdf(
+            "gauss", x=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0)
+        )
+        assert np.all(np.isfinite(value))
+
+
+class TestInputShapeValidation:
+    """pdf/logpdf reject arrays whose ndim differs from the compiled input.
+
+    The compiled functions skip PyTensor's input checks (trust_input), and the
+    C backend would otherwise read only the first element of an array passed
+    for a scalar parameter.
+    """
+
+    @pytest.mark.parametrize("method", ["pdf", "logpdf"])
+    def test_vector_for_a_scalar_parameter_raises(self, simple_workspace, method):
+        model = simple_workspace.model(0)
+        with pytest.raises(ValueError, match=r"'x'.*0-dimensional.*\(3,\)"):
+            getattr(model, method)(
+                "gauss",
+                x=np.array([0.0, 1.0, 2.0]),
+                mu=np.array(0.0),
+                sigma=np.array(1.0),
+            )
+
+    @pytest.mark.parametrize("method", ["pdf_unsafe", "logpdf_unsafe"])
+    def test_unsafe_variants_skip_the_check(self, simple_workspace, method):
+        """The _unsafe variants skip the check; the C backend reads the first element."""
+        model = simple_workspace.model(0)
+        safe = getattr(model, method.removesuffix("_unsafe"))
+        expected = safe("gauss", x=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0))
+
+        value = getattr(model, method)("gauss", x=[0.0, 1.0, 2.0], mu=0.0, sigma=1.0)
+
+        assert value == pytest.approx(expected, rel=1e-12)
+
+    def test_scalar_for_a_vector_parameter_raises(self, simple_workspace):
+        simple_workspace.parameter_points[0]["x"].kind = pt.vector
+        with pytest.warns(UserWarning, match="kind override vector"):
+            model = simple_workspace.model(0)
+        with pytest.raises(ValueError, match=r"'x'.*1-dimensional.*\(\)"):
+            model.pdf("gauss", x=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0))
+
+    @pytest.mark.parametrize(
+        "x",
+        [
+            pytest.param(0.0, id="float"),
+            pytest.param([0.0], id="list"),
+            pytest.param(np.array(0), id="int_array"),
+            pytest.param(np.array(0.0, dtype=np.float32), id="float32_array"),
+        ],
+    )
+    @pytest.mark.parametrize("method", ["pdf", "logpdf"])
+    def test_non_float64_array_raises_type_error(self, simple_workspace, method, x):
+        model = simple_workspace.model(0)
+        with pytest.raises(TypeError, match=r"Parameter 'x' of 'gauss'.*float64"):
+            getattr(model, method)("gauss", x=x, mu=np.array(0.0), sigma=np.array(1.0))
+
+    def test_matching_shapes_evaluate(self, simple_workspace):
+        model = simple_workspace.model(0)
+        value = model.pdf(
+            "gauss", x=np.array(0.0), mu=np.array(0.0), sigma=np.array(1.0)
+        )
+        assert value == pytest.approx(1.0 / np.sqrt(2.0 * np.pi), rel=1e-6)
+
+
 class TestModelRepr:
     """Test Model.__repr__ method."""
 
@@ -180,7 +264,7 @@ class TestModelRepr:
         assert repr_str.endswith(")")
 
         # Should contain mode information
-        assert "mode: FAST_RUN" in repr_str
+        assert "mode: CVM" in repr_str
 
         # Should contain parameter, distribution, and function counts
         assert "parameters:" in repr_str

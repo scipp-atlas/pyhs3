@@ -50,8 +50,12 @@ python = "<3.15,>=3.14"
 platforms = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64"]
 
 [feature.jax.dependencies]
-jax = "*"
-jaxlib = "*"
+# >=0.10: loading CPU executables from the persistent compilation cache
+# crashes on 0.9 (macOS)
+jax = ">=0.10"
+jaxlib = ">=0.10"
+# serialization of jax.export modules (compile_nll(backend="jax", cache=...))
+python-flatbuffers = "*"
 
 [feature.plot.dependencies]
 matplotlib-base = "*"
@@ -60,6 +64,7 @@ mplhep = "*"
 [feature.test.dependencies]
 pytest = ">=9"
 pytest-cov = ">=3"
+pytest-xdist = ">=3"
 pyhf = ">=0.7.6"
 scikit-hep-testdata = ">=0.6.2"
 pydot = "*"
@@ -83,13 +88,14 @@ root_base = ">=6.32.10,<7"
 #root_base = ">=6.32.10,<7"
 
 [feature.test.tasks]
-test = { cmd = "pytest -m 'not slow and not pydot'", description = "Run quick tests (skip slow and pydot)" }
-test-cov = { cmd = "pytest -m 'not slow and not pydot' --cov=pyhs3 --cov-report=term --cov-report=html", description = "Run quick tests with coverage" }
+test = { cmd = "pytest -n auto -m 'not slow and not pydot'", description = "Run quick tests in parallel (skip slow and pydot)" }
+test-serial = { cmd = "pytest -m 'not slow and not pydot'", description = "Run quick tests in a single process (skip slow and pydot)" }
+test-cov = { cmd = "pytest -n auto -m 'not slow and not pydot' --cov=pyhs3 --cov-report=term --cov-report=html", description = "Run quick tests with coverage" }
 test-docstrings = { cmd = "pytest --doctest-modules src/pyhs3", description = "Run doctests in source modules" }
 test-docs = { cmd = "pytest README.rst docs", description = "Run doctests in docs and README.rst" }
 test-slow = { cmd = "pytest --runslow", description = "Run tests including slow tests" }
 test-pydot = { cmd = "pytest --runpydot", description = "Run tests including pydot tests" }
-test-all = { cmd = "pytest --runslow --runpydot --cov=pyhs3", description = "Run all tests with coverage (slow + pydot)" }
+test-all = { cmd = "pytest -n auto --runslow --runpydot --cov=pyhs3", description = "Run all tests with coverage (slow + pydot)" }
 
 [feature.docs.dependencies]
 sphinx = ">=7.0"
@@ -110,6 +116,8 @@ lychee = ">=0.22.0,<0.23"
 [feature.docs.pypi-dependencies]
 # sphinxcontrib-typer has no conda-forge feedstock yet, so it stays on PyPI.
 sphinxcontrib-typer = "*"
+# sphinxcontrib-pydantic is not on conda-forge.
+sphinxcontrib-pydantic = ">=0.4.0"
 
 [feature.docs.tasks]
 docs-fetch-root-tag = { cmd = "python docs/_scripts/fetch_root_tag.py", description = "Download ROOT Doxygen tag file" }

@@ -87,7 +87,7 @@ You can inspect the model to understand its parameter structure:
 
     >>> print(model)  # doctest: +ELLIPSIS
     Model(
-        mode: FAST_RUN
+        mode: CVM
         parameters: 3 (...)
         distributions: 1 (model)
         functions: 0 ()
@@ -106,16 +106,32 @@ You can inspect the model to understand its parameter structure:
 Behavior Difference: Scalar vs Vector Parameters
 ------------------------------------------------
 
-When you pass vector values to a scalar parameter model, it will loudly complain... so be careful:
+In the scalar ``model``, every parameter is a 0-dimensional input. Below,
+``x`` has shape ``(3,)`` while ``mu`` and ``sigma`` each have shape ``()``.
+The scalar model does not broadcast over ``x``: its compiled function takes
+exactly one value of ``x``. For this dimensionality mismatch,
+:meth:`~pyhs3.Model.pdf` and :meth:`~pyhs3.Model.logpdf` raise a
+``ValueError`` naming the parameter:
 
-.. code-block:: pycon
+.. doctest::
 
-    >>> # Scalar model with vector input - only uses first element
-    >>> parameters = {"x": [0.0, 1.0, 2.0], "mu": 0.0, "sigma": 1.0}
-    >>> result = model.pdf_unsafe("model", **parameters)  # doctest: +IGNORE_EXCEPTION_DETAIL
+    >>> import numpy as np
+    >>> result = model.pdf(
+    ...     "model", x=np.array([0.0, 1.0, 2.0]), mu=np.array(0.0), sigma=np.array(1.0)
+    ... )
     Traceback (most recent call last):
     ...
-    numba.core.errors.TypingError: Failed in nopython mode pipeline ...
+    ValueError: Parameter 'x' of 'model' expects a 0-dimensional array, got shape (3,).
+
+:meth:`~pyhs3.Model.pdf_unsafe` and :meth:`~pyhs3.Model.logpdf_unsafe` skip
+this check, so the same call through them returns the density at the first
+element only:
+
+.. doctest::
+
+    >>> parameters = {"x": [0.0, 1.0, 2.0], "mu": 0.0, "sigma": 1.0}
+    >>> print(f"{model.pdf_unsafe('model', **parameters):.8f}")
+    0.39894228
 
     >>> # Compare with vector model - shape (1, N): override vectors sit on axis 1
     >>> result_vector = new_model.pdf_unsafe("model", **parameters)

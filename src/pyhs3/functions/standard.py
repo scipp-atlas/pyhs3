@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """
 HS3 Functions implementation.
 
@@ -8,14 +9,20 @@ generic functions with mathematical expressions, and interpolation functions.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from enum import IntEnum
 from typing import Annotated, Literal, cast
 
+import numpy as np
+import numpy.typing as npt
 import pytensor.tensor as pt
 from pydantic import (
     ConfigDict,
     Field,
 )
+from pytensor.tensor.shape import specify_shape
+from pytensor.tensor.variable import TensorConstant
 
 from pyhs3.base import balanced_sum
 from pyhs3.context import Context
@@ -28,12 +35,20 @@ from pyhs3.distributions.histfactory.interpolations import (
 )
 from pyhs3.distributions.histogram import HistogramData
 from pyhs3.exceptions import custom_error_msg
-from pyhs3.functions.core import Function
+from pyhs3.functions.core import BatchableFunction, Function
 from pyhs3.generic_parse import GenericExpressionMixin
 from pyhs3.tensorutils import is_scalar_multiplicative_identity
 from pyhs3.typing.aliases import TensorVar
 
 log = logging.getLogger(__name__)
+
+
+def _pad_to_ndim(var: TensorVar, ndim: int) -> TensorVar:
+    """Prepend broadcastable axes to ``var`` until it has ``ndim`` dimensions."""
+    if var.ndim == ndim:
+        return var
+    pattern = ("x",) * (ndim - var.ndim) + tuple(range(var.ndim))
+    return cast(TensorVar, var.dimshuffle(pattern))  # type: ignore[no-untyped-call]
 
 
 def _asym_interpolation(
@@ -225,7 +240,7 @@ class InterpolationCode(IntEnum):
     POL_LIN_MUL = 6
 
 
-class InterpolationFunction(Function):
+class InterpolationFunction(BatchableFunction):
     r"""
     Piecewise interpolation function implementation.
 
@@ -276,8 +291,8 @@ class InterpolationFunction(Function):
     positiveDefinite: bool = Field(..., repr=False)
     vars: list[str] = Field(..., repr=False)
 
+    @staticmethod
     def _flexible_interp_single(
-        self,
         interp_code: int,
         low_val: TensorVar,
         high_val: TensorVar,
@@ -413,11 +428,72 @@ class InterpolationFunction(Function):
         nominal = context[self.nom]
         result = nominal
 
-        # Reuse dtype-matched scalar identities across multiplicative terms.
-        ones_by_dtype: dict[str, TensorVar] = {}
+        for additive, run in self._entry_runs():
+            by_code: dict[int, list[int]] = {}
+            for i in run:
+                by_code.setdefault(self.interpolationCodes[i], []).append(i)
+            terms = [
+                (
+                    len(indices),
+                    self._stacked_contribution(code, indices, nominal, context),
+                )
+                for code, indices in by_code.items()
+            ]
+            if additive:
+                # Each term has shape (K_code, *batch); summing over the entry
+                # axis gives shape (*batch).
+                result = balanced_sum(
+                    [result, *(pt.sum(term, axis=0) for _, term in terms)],  # type: ignore[no-untyped-call]
+                    result,
+                )
+            else:
+                one = pt.constant(1.0, dtype=terms[0][1].dtype)
+                # Product over the entry axis of each (K_code, *batch) factor
+                # tensor, giving shape (*batch).  no_zeros_in_input=True makes
+                # the gradient the elementwise prod / factor instead of going
+                # through ProdWithoutZeros (no JAX dispatch, no second
+                # derivative).  Splitting the factors into one row per entry
+                # would avoid that too, but autodiff then scatters every row's
+                # gradient back with an IncSubtensor, which with thousands of
+                # entries makes the gradient graph very slow to compile.  A
+                # factor of exactly zero (a multiplicative yield of zero) gives
+                # a non-finite gradient.
+                # One n-ary Mul per run: the nominal (or running total) times
+                # every code group's product.  The Python loop only builds a
+                # fixed graph over the few code groups; each pt.prod reduces
+                # all of its group's entries in one vectorised op.
+                result = pt.mul(
+                    result,
+                    *(
+                        pt.prod(one + term, axis=0, no_zeros_in_input=True)  # type: ignore[no-untyped-call]
+                        for _, term in terms
+                    ),
+                )
 
-        # Apply interpolation for each nuisance parameter
-        for i, var_name in enumerate(self.vars):
+        # Apply positive definite constraint if requested
+        if self.positiveDefinite:
+            result = pt.maximum(result, 0.0)
+
+        return result
+
+    def _entry_runs(self) -> list[tuple[bool, list[int]]]:
+        """Group entry indices into consecutive runs of the same kind.
+
+        Entries are applied in order (additive codes add to the running total,
+        multiplicative codes scale it), so interleaved additive and
+        multiplicative entries do not commute.  Within a consecutive run of the
+        same kind they do, so each run is evaluated with one vectorised
+        expression per interpolation code instead of one expression per entry.
+        This keeps the graph size independent of the number of entries.
+
+        Entries whose index exceeds the ``high``/``low``/``interpolationCodes``
+        lists are skipped with a warning.
+
+        Returns:
+            ``(additive, indices)`` pairs in entry order.
+        """
+        runs: list[tuple[bool, list[int]]] = []
+        for i in range(len(self.vars)):
             if (
                 i >= len(self.high)
                 or i >= len(self.low)
@@ -429,37 +505,308 @@ class InterpolationFunction(Function):
                     self.name,
                 )
                 continue
+            additive = self.interpolationCodes[i] in (0, 2, 3, 4)
+            if runs and runs[-1][0] == additive:
+                runs[-1][1].append(i)
+            else:
+                runs.append((additive, [i]))
+        return runs
 
-            param_val = context[var_name]
-            low_val = context[self.low[i]]
-            high_val = context[self.high[i]]
-            interp_code = self.interpolationCodes[i]
+    def _stacked_contribution(
+        self,
+        code: int,
+        indices: list[int],
+        nominal: TensorVar,
+        context: Context,
+    ) -> TensorVar:
+        """Evaluate the contributions of several same-code entries at once.
 
-            # Calculate interpolated contribution
-            contribution = self._flexible_interp_single(
-                interp_code=interp_code,
-                low_val=low_val,
-                high_val=high_val,
-                boundary=1.0,
-                nominal=nominal,
-                param_val=param_val,
+        Stacks the entries' parameters and variations along a new leading axis
+        and evaluates the elementwise interpolation formula once.
+
+        Args:
+            code: Interpolation code shared by all ``indices``.
+            indices: Entry positions in ``vars``/``high``/``low``.
+            nominal: Nominal value, shape ``(*batch)`` or scalar.
+            context: Mapping of names to PyTensor variables.
+
+        Returns:
+            Contributions of shape ``(K, *batch)`` with ``K = len(indices)``;
+            row ``k`` is ``_flexible_interp_single`` for ``indices[k]``.
+        """
+        columns = [
+            [context[names[i]] for i in indices]
+            for names in (self.vars, self.low, self.high)
+        ]
+        # Entries may mix scalars and batched (M,) vectors; give them a common
+        # shape before stacking so the leading axis indexes entries only.
+        ndim = max(nominal.ndim, *(var.ndim for column in columns for var in column))
+        padded = [[_pad_to_ndim(var, ndim) for var in column] for column in columns]
+        flat = [var for column in padded for var in column]
+        if len({var.type for var in flat}) > 1:
+            flat = [cast(TensorVar, var) for var in pt.broadcast_arrays(*flat)]
+        k = len(indices)
+        params, lows, highs = (pt.stack(flat[j * k : (j + 1) * k]) for j in range(3))
+        return self._flexible_interp_single(
+            interp_code=code,
+            low_val=lows,
+            high_val=highs,
+            boundary=1.0,
+            nominal=_pad_to_ndim(nominal, ndim),
+            param_val=params,
+        )
+
+    @classmethod
+    def batch_expressions(  # pylint: disable=redefined-outer-name
+        cls,
+        members: Sequence[InterpolationFunction],
+        context: Context,
+        functions: Mapping[str, Function],
+    ) -> dict[str, TensorVar]:
+        """
+        Evaluate many interpolation functions as one vectorised computation.
+
+        Every entry of every member becomes one element of a flat entry axis
+        of length ``E``, and the members one row of a ``(F, E_max)`` table:
+
+        - Each entry's parameter is gathered from one stacked vector: a free
+          parameter times a constant (a ``ProductFunction`` of one free
+          parameter and constants, or a parameter itself), or else the entry's
+          own expression with factor 1.
+        - Entries are sorted by interpolation code, so each code's
+          contributions are one contiguous slice, evaluated once with
+          ``_flexible_interp_single``, and the slices are concatenated.
+        - Contributions are padded into ``(F, E_max)`` with a sentinel (factor
+          1 for multiplicative, term 0 for additive members) and reduced over
+          the entry axis.
+        - The ``(F,)`` result is split into one scalar per member with a
+          single ``Split``, so the gradient is one ``Join`` rather than a sum
+          of ``F`` scattered ``IncSubtensor`` updates.
+
+        Members whose inputs are not all scalars, or whose entries mix
+        additive (0, 2, 3, 4) and multiplicative (1, 5, 6) codes, are built
+        with their own :meth:`expression` and logged at debug level.
+
+        Args:
+            members: Interpolation functions to evaluate.
+            context: Built tensors by name.
+            functions: Every function of the model by name, to recognise
+                ``ProductFunction`` entries.
+
+        Returns:
+            dict[str, TensorVar]: Scalar expression per member name.
+        """
+        outputs: dict[str, TensorVar] = {}
+        rows: list[_InterpolationRow] = []
+        for member in members:
+            row = member._batch_row(context, functions)  # pylint: disable=protected-access
+            if isinstance(row, str):
+                log.debug(
+                    "Interpolation function '%s' is built on its own, not batched: %s",
+                    member.name,
+                    row,
+                )
+                outputs[member.name] = member.expression(context)
+            else:
+                rows.append(row)
+        if rows:
+            outputs.update(_batched_interpolation(rows))
+        return outputs
+
+    def _batch_row(  # pylint: disable=redefined-outer-name
+        self, context: Context, functions: Mapping[str, Function]
+    ) -> _InterpolationRow | str:
+        """This member's inputs for a batched evaluation, or why it cannot batch."""
+        runs = self._entry_runs()
+        if len(runs) > 1:
+            return "its entries mix additive and multiplicative codes"
+        nominal = context[self.nom]
+        if nominal.ndim != 0:
+            return f"its nominal '{self.nom}' is not a scalar"
+        entries: list[_InterpolationEntry] = []
+        for i in runs[0][1] if runs else []:
+            low, high = context[self.low[i]], context[self.high[i]]
+            if low.ndim != 0 or high.ndim != 0:
+                return f"the variations of entry {i} are not scalars"
+            source = _entry_source(self.vars[i], context, functions)
+            if source is None:
+                return f"entry '{self.vars[i]}' is not a scalar"
+            entries.append(
+                _InterpolationEntry(self.interpolationCodes[i], low, high, *source)
             )
+        return _InterpolationRow(
+            name=self.name,
+            nominal=nominal,
+            additive=bool(runs) and runs[0][0],
+            positive_definite=self.positiveDefinite,
+            entries=entries,
+        )
 
-            # Add contribution based on interpolation mode
-            if interp_code in [0, 2, 3, 4]:  # Additive modes
-                result = result + contribution
-            else:  # Multiplicative modes (1, 5, 6)
-                one = ones_by_dtype.get(contribution.dtype)
-                if one is None:
-                    one = pt.constant(1.0, dtype=contribution.dtype)
-                    ones_by_dtype[contribution.dtype] = one
-                result = result * (one + contribution)
 
-        # Apply positive definite constraint if requested
-        if self.positiveDefinite:
-            result = pt.maximum(result, 0.0)
+@dataclass(frozen=True)
+class _InterpolationEntry:
+    """One entry: its code, variations, and parameter ``tensor * factor``."""
 
-        return result
+    code: int
+    low: TensorVar
+    high: TensorVar
+    tensor: TensorVar
+    factor: float
+
+
+@dataclass(frozen=True)
+class _InterpolationRow:
+    """One member's inputs to :func:`_batched_interpolation`."""
+
+    name: str
+    nominal: TensorVar
+    additive: bool
+    positive_definite: bool
+    entries: list[_InterpolationEntry]
+
+
+def _entry_source(  # pylint: disable=redefined-outer-name
+    var: str, context: Context, functions: Mapping[str, Function]
+) -> tuple[TensorVar, float] | None:
+    """``(tensor, factor)`` with entry parameter ``tensor * factor``; None if not scalar.
+
+    A ``ProductFunction`` of exactly one non-constant factor and constant
+    factors gives that factor and the product of the constants, so that many
+    entries share one gathered tensor.  Any other scalar entry is its own
+    tensor with factor 1.
+    """
+    product = functions.get(var)
+    if isinstance(product, ProductFunction):
+        factors = product.get_parameter_list(context, "factors")
+        if all(f.ndim == 0 for f in factors):
+            free = [f for f in factors if not isinstance(f, TensorConstant)]
+            if len(free) == 1:
+                constants = [
+                    float(f.data) for f in factors if isinstance(f, TensorConstant)
+                ]
+                return free[0], float(np.prod(constants))
+    tensor = context[var]
+    return (tensor, 1.0) if tensor.ndim == 0 else None
+
+
+def _as_vector(tensors: Sequence[TensorVar]) -> npt.NDArray[np.float64] | TensorVar:
+    """``(len(tensors),)`` values: a numpy table if every input is a constant, else stacked.
+
+    Tables keep the per-entry bookkeeping (indexing, slicing) in numpy, out of
+    the graph.
+    """
+    if all(isinstance(t, TensorConstant) for t in tensors):
+        return np.array(
+            [float(t.data) for t in tensors if isinstance(t, TensorConstant)],
+            dtype=np.float64,
+        )
+    return cast(TensorVar, pt.stack(list(tensors)))
+
+
+def _entry_table(
+    row_of: npt.NDArray[np.int64], members: npt.NDArray[np.int64], sentinel: int
+) -> npt.NDArray[np.int64]:
+    """``(len(members), E_max)`` positions of each member's entries on the entry axis.
+
+    Row ``i`` lists the entry positions of member ``members[i]`` (``row_of``
+    gives each entry's member), padded with ``sentinel``; ``E_max`` is the
+    largest entry count among ``members`` (at least 1).
+    """
+    rows = [np.flatnonzero(row_of == member) for member in members]
+    table = np.full((len(members), max(1, *(len(r) for r in rows))), sentinel)
+    for i, positions in enumerate(rows):
+        table[i, : len(positions)] = positions
+    return table
+
+
+def _batched_interpolation(rows: Sequence[_InterpolationRow]) -> dict[str, TensorVar]:
+    """The vectorised evaluation described in :meth:`InterpolationFunction.batch_expressions`."""
+    n_rows = len(rows)
+    nominal = _as_vector([row.nominal for row in rows])  # (F,)
+    flat = sorted(
+        ((r, entry) for r, row in enumerate(rows) for entry in row.entries),
+        key=lambda item: item[1].code,
+    )
+    if flat:
+        row_of = np.array([r for r, _ in flat])  # (E,) member of each entry
+        codes = np.array([entry.code for _, entry in flat])
+        # One gather: unique entry tensors stacked once, indexed per entry.
+        slots: dict[int, int] = {}
+        stacked: list[TensorVar] = []
+        index = np.empty(len(flat), dtype=np.int64)
+        for e, (_, entry) in enumerate(flat):
+            key = id(entry.tensor)
+            if key not in slots:
+                slots[key] = len(stacked)
+                stacked.append(entry.tensor)
+            index[e] = slots[key]
+        factor = np.array([entry.factor for _, entry in flat])
+        params = cast(TensorVar, pt.stack(stacked)[index] * factor)  # (E,)
+        lows = _as_vector([entry.low for _, entry in flat])  # (E,)
+        highs = _as_vector([entry.high for _, entry in flat])  # (E,)
+        entry_nominal = nominal[row_of]  # (E,)
+        blocks = []
+        for code in dict.fromkeys(codes.tolist()):
+            sl = slice(*np.flatnonzero(codes == code)[[0, -1]] + [0, 1])
+            blocks.append(
+                InterpolationFunction._flexible_interp_single(  # pylint: disable=protected-access
+                    interp_code=code,
+                    low_val=pt.as_tensor_variable(lows[sl]),
+                    high_val=pt.as_tensor_variable(highs[sl]),
+                    boundary=1.0,
+                    nominal=pt.as_tensor_variable(entry_nominal[sl]),
+                    param_val=params[sl],
+                )
+            )
+        contributions = cast(TensorVar, pt.concatenate(blocks))  # type: ignore[no-untyped-call]  # (E,)
+        additive = np.array([row.additive for row in rows])
+        results: list[TensorVar] = []
+        order: list[int] = []
+        # One reduction per kind over only that kind's members, so neither ever
+        # reads the other kind's entries (an additive term of -1 is never a
+        # zero factor of a product).  The results come out in kind order and
+        # are matched back to their members at the split below.
+        for is_additive in (False, True):
+            members = np.flatnonzero(additive == is_additive)
+            if members.size == 0:
+                continue
+            # (F_kind, E_max_kind) positions on the entry axis; len(flat), one
+            # past the end, is the sentinel slot appended to the entry axis.
+            table = _entry_table(row_of, members, sentinel=len(flat))
+            if is_additive:
+                terms = pt.concatenate([contributions, pt.zeros(1)])[table]  # type: ignore[no-untyped-call]
+                results.append(nominal[members] + pt.sum(terms, axis=1))  # type: ignore[no-untyped-call]
+            else:
+                factors = pt.concatenate([1.0 + contributions, pt.ones(1)])[table]  # type: ignore[no-untyped-call]
+                results.append(
+                    nominal[members] * pt.prod(factors, axis=1, no_zeros_in_input=True)  # type: ignore[no-untyped-call]
+                )
+            order.extend(members.tolist())
+        result = (
+            results[0]
+            if len(results) == 1
+            else cast(TensorVar, pt.concatenate(results))  # type: ignore[no-untyped-call]
+        )
+    else:
+        result = pt.as_tensor_variable(nominal)
+        order = list(range(n_rows))
+    ordered = [rows[i] for i in order]  # rows in the order of result
+    positive = np.array([row.positive_definite for row in ordered])
+    if positive.any():
+        result = pt.switch(positive, pt.maximum(result, 0.0), result)
+    # One Split, not F Subtensors: the gradient of Split is one Join.
+    pieces = (
+        pt.split(result, [1] * n_rows, n_splits=n_rows)  # type: ignore[no-untyped-call]
+        if n_rows > 1
+        else [result]
+    )
+    return {
+        row.name: cast(
+            TensorVar,
+            specify_shape(piece, (1,)).dimshuffle(()),
+        )
+        for row, piece in zip(ordered, pieces, strict=True)
+    }
 
 
 class ProcessNormalizationFunction(Function):
@@ -474,6 +821,7 @@ class ProcessNormalizationFunction(Function):
         result = nominalValue * exp(symShift + asymShift) * otherFactors
 
         where:
+
         - symShift = sum(logKappa[i] * theta[i]) for symmetric variations
         - asymShift = sum(_asym_interpolation(theta[i], kappa_sum[i], kappa_diff[i]))
           for asymmetric variations with kappa_sum = logKappaHi + logKappaLo

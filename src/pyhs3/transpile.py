@@ -1,7 +1,7 @@
 """
 JAX transpilation helpers for pyhs3.
 
-Provides :func:`jaxify` and :class:`JaxifiedGraph` for converting any PyTensor
+Provides :func:`~pyhs3.jaxify` and :class:`JaxifiedGraph` for converting any PyTensor
 expression into a callable JAX function suitable for use with JAX-based
 optimizers (e.g. ``optimistix``).
 
@@ -10,6 +10,9 @@ Requires the ``jax`` optional extra::
     pip install pyhs3[jax]
 
 which pulls in ``pytensor[jax]`` and, transitively, JAX itself.
+
+The callable :func:`~pyhs3.jaxify` returns is not jitted. Wrap it in ``jax.jit`` for
+any repeated evaluation; see :class:`JaxifiedGraph`.
 """
 
 from __future__ import annotations
@@ -34,9 +37,20 @@ from pyhs3.typing.aliases import TensorVar
 class JaxifiedGraph:
     """A JAX-callable wrapper around a compiled PyTensor expression.
 
-    Produced by :func:`jaxify`. Supports keyword-argument calls (the primary
+    Produced by :func:`~pyhs3.jaxify`. Supports keyword-argument calls (the primary
     interface for dict-pytree-based optimizers like optimistix or everwillow)
     and positional calls via :meth:`call_positional`.
+
+    Calling a ``JaxifiedGraph`` does not jit it: JAX runs the graph eagerly,
+    one operation at a time, which on a large likelihood is orders of
+    magnitude slower than the same call wrapped in ``jax.jit``.  Wrap it for
+    any repeated evaluation::
+
+        jg = jaxify(model.log_prob)
+        nll = jax.jit(lambda params: -jg(**params)[0])
+
+    For a likelihood evaluated repeatedly without JAX,
+    :meth:`pyhs3.Model.compile_nll` compiles it for you.
 
     Attributes:
         inputs: Tuple of PyTensor input variables, in evaluation order.
@@ -50,6 +64,9 @@ class JaxifiedGraph:
 
     def __call__(self, **kwargs: object) -> object:
         """Call by keyword argument — pure passthrough to :attr:`fn`.
+
+        This call is not jitted; wrap it in ``jax.jit`` for repeated use (see
+        :class:`JaxifiedGraph`).
 
         ``jax_funcify`` generates a function whose parameter names match the
         original PyTensor variable names, so kwargs are forwarded directly.
@@ -83,6 +100,9 @@ class JaxifiedGraph:
     def call_positional(self, *args: object) -> object:
         """Call with positional arguments — pure passthrough to :attr:`fn`.
 
+        Like calling the graph, this is not jitted; wrap it in ``jax.jit`` for
+        repeated use.
+
         Parameters
         ----------
         *args:
@@ -101,6 +121,14 @@ def jaxify(
     inputs: Sequence[TensorVar] | None = None,
 ) -> JaxifiedGraph:
     """Convert a PyTensor expression into a JAX-callable :class:`JaxifiedGraph`.
+
+    The returned callable is not jitted: calling it runs JAX eagerly, one
+    operation at a time, which on a large likelihood is orders of magnitude
+    slower than the same call wrapped in ``jax.jit``. Jit it for repeated
+    calls::
+
+        jg = jaxify(model.log_prob)
+        nll = jax.jit(lambda params: -jg(**params)[0])
 
     Parameters
     ----------

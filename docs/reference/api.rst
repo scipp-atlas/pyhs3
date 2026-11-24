@@ -17,6 +17,8 @@ Top-Level
    Model
    jaxify
    JaxifiedGraph
+   metadata.Metadata
+   metadata.PackageInfo
 
 Modules
 -------
@@ -25,6 +27,7 @@ Modules
    :toctree: _generated/
    :nosignatures:
 
+   compiled
    distributions
    functions
    axes
@@ -36,18 +39,36 @@ Modules
    generic_parse
    exceptions
    normalization
+   tensorutils
    transpile
 
 Base Classes
 ------------
 
-.. currentmodule:: pyhs3.base
+.. currentmodule:: pyhs3
 
 .. autosummary::
    :toctree: _generated/
    :nosignatures:
 
-   Evaluable
+   base.Evaluable
+   collections.NamedModel
+   collections.NamedCollection
+   context.Context
+
+Compiled Likelihoods
+--------------------
+
+.. currentmodule:: pyhs3.compiled
+
+.. autosummary::
+   :toctree: _generated/
+   :nosignatures:
+
+   compile_nll
+   default_nll_mode
+   CompiledNLL
+   BatchedCompiledNLL
 
 Functions
 ---------
@@ -60,6 +81,7 @@ Functions
 
    Functions
    Function
+   BatchableFunction
    ProductFunction
    SumFunction
    GenericFunction
@@ -77,6 +99,7 @@ Distributions
 
    Distributions
    Distribution
+   BatchableDistribution
    LogProbTerms
    GaussianDist
    UniformDist
@@ -87,12 +110,15 @@ Distributions
    MixtureDist
    ProductDist
    HistogramDist
+   histogram.HistogramData
    GenericDist
    PolynomialDist
    BernsteinPolyDist
    CrystalBallDist
    AsymmetricCrystalBallDist
    ArgusDist
+   RelativisticBreitWignerDist
+   physics.RelativisticBreitWignerChannel
    HistFactoryDistChannel
    FastVerticalInterpHistPdf2Dist
    GGZZBackgroundDist
@@ -206,6 +232,7 @@ Parsing
    parse_expression
    sympy_to_pytensor
    analyze_sympy_expr
+   GenericExpressionMixin
 
 Likelihoods
 -----------
@@ -244,6 +271,8 @@ Exceptions
    ExpressionParseError
    ExpressionEvaluationError
    WorkspaceValidationError
+   DuplicateEntityError
+   custom_error_msg
 
 Utilities
 ---------
@@ -255,14 +284,20 @@ Utilities
    :nosignatures:
 
     normalization.gauss_legendre_integral
+    normalization.substitute_variable
+    tensorutils.create_bounded_tensor
+    tensorutils.ensure_array
+    tensorutils.is_scalar_multiplicative_identity
+    tensorutils.merge_duplicate_nodes
 
 Typing
 ------
 
-.. currentmodule:: pyhs3.typing
+.. currentmodule:: pyhs3.typing.aliases
 
 .. autosummary::
    :toctree: _generated/
    :nosignatures:
 
+    EntityType
     TensorVar

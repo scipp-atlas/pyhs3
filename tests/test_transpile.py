@@ -10,10 +10,13 @@ from __future__ import annotations
 import math
 import sys
 
+import numpy as np
+import pytensor
 import pytensor.tensor as pt
 import pytest
 from scipy.stats import norm
 
+from pyhs3.functions import InterpolationFunction
 from pyhs3.transpile import JaxifiedGraph, jaxify
 
 jax = pytest.importorskip("jax")
@@ -187,3 +190,44 @@ class TestJaxifiedGraphCall:
         free = {"mu": jnp.float64(0.0), "sigma": jnp.float64(1.0)}
         result = nll(free)
         assert jnp.isfinite(result)
+
+
+# ---------------------------------------------------------------------------
+# Gradients of vectorised interpolation
+# ---------------------------------------------------------------------------
+
+
+class TestJaxifyInterpolationGradient:
+    def test_multiplicative_interpolation_gradient_matches_pytensor(self):
+        """The gradient of a multiplicative InterpolationFunction transpiles to JAX.
+
+        The product over entries must not lower to an op without a JAX
+        implementation (such as ProdWithoutZeros); values must match the
+        PyTensor gradient.
+        """
+        n_entries = 4
+        func = InterpolationFunction(
+            name="interp",
+            high=[f"hi_{i}" for i in range(n_entries)],
+            low=[f"lo_{i}" for i in range(n_entries)],
+            nom="nom",
+            interpolationCodes=[5, 1, 5, 1],
+            positiveDefinite=False,
+            vars=[f"theta_{i}" for i in range(n_entries)],
+        )
+        thetas = [pt.dscalar(f"theta_{i}") for i in range(n_entries)]
+        context = {"nom": pt.constant(10.0)}
+        for i, theta in enumerate(thetas):
+            context[f"hi_{i}"] = pt.constant(10.0 * (1.1 + 0.05 * i))
+            context[f"lo_{i}"] = pt.constant(10.0 * (0.9 - 0.05 * i))
+            context[f"theta_{i}"] = theta
+        result = func.expression(context)
+        grads = pt.grad(result, thetas)
+        values = {f"theta_{i}": v for i, v in enumerate([0.3, -1.4, 0.8, 1.7])}
+
+        jax_grads = jaxify(pt.stack(grads))(
+            **{k: jnp.float64(v) for k, v in values.items()}
+        )[0]
+        pt_grads = pytensor.function(thetas, grads)(*values.values())
+
+        np.testing.assert_allclose(np.asarray(jax_grads), pt_grads, rtol=1e-10)

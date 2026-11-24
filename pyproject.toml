@@ -68,11 +68,14 @@ docs = [
   "sphinxcontrib-bibtex",
   "sphinxcontrib-doxylink",
   "sphinxcontrib-typer",
+  "sphinxcontrib-pydantic>=0.4.0",
   "matplotlib",
   "hist[plot] > 2.7.0", # keep synced with dependencies
 ]
 jax = [
   "pytensor[jax]",  # transitively pulls jax + jaxlib
+  "jax >= 0.10",  # persistent compilation cache crashes on 0.9 (macOS)
+  "flatbuffers",  # serialization of jax.export modules (compile_nll cache)
 ]
 graph = [
   "pydot", # also requires the system `dot` executable (Graphviz); not installable via pip

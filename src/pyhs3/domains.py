@@ -39,7 +39,7 @@ class Domain(NamedModel):
 
     @property
     def axis_names(self) -> list[str]:
-        """List of axis names in this domain. Note: may not be implemented for all domain types."""
+        """List of axis names in this domain; not every domain type implements it."""
         raise NotImplementedError
 
     def __len__(self) -> int:

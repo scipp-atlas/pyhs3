@@ -1,7 +1,18 @@
+"""
+Logging for pyhs3.
+
+pyhs3 is a library, so importing it configures no logging at all: the root
+logger, every other library's logger, and the ``pyhs3`` logger itself are left
+as the application configured them.  The ``pyhs3`` logger deliberately gets no
+handler, not even a :class:`logging.NullHandler`, so that without any
+configuration Python's last-resort handler still prints pyhs3's warnings and
+errors to ``stderr``.  :func:`setup` gives the ``pyhs3`` logger a rich console
+handler instead; the ``pyhs3`` command-line tool calls it.
+"""
+
 from __future__ import annotations
 
 import logging
-import logging.config
 from logging import LogRecord
 from pathlib import Path
 
@@ -28,50 +39,28 @@ def rich_handler_factory() -> RichHandler:
     )
 
 
-LOGGING_CONFIG = {
-    "version": 1,
-    "disable_existing_loggers": True,
-    "filters": {
-        "appfilter": {
-            "()": AppFilter,
-        }
-    },
-    "formatters": {
-        "standard": {"format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s"},
-        "pretty": {"format": "[[yellow]%(filenameStem)s[/]] %(message)s"},
-    },
-    "handlers": {
-        "default": {
-            "formatter": "standard",
-            "class": "logging.StreamHandler",
-            "stream": "ext://sys.stderr",  # Default is stderr
-        },
-        "rich": {
-            "()": rich_handler_factory,
-            "formatter": "pretty",
-            "filters": ["appfilter"],
-        },
-    },
-    "loggers": {
-        "": {
-            "handlers": ["default", "rich"],
-            "level": "WARNING",
-            "propagate": False,
-        },
-        "pyhs3": {
-            "handlers": [],
-            "level": "INFO",
-            "propagate": True,
-        },
-    },
-}
-
-
-def setup() -> None:
+def setup(level: int | str = logging.INFO) -> None:
     """
-    Initialize logging based on the configuration dictionary in this file.
+    Send pyhs3's log records to a rich console handler.
+
+    Configures only the ``pyhs3`` logger: it sets its level and gives it one
+    :class:`~rich.logging.RichHandler`.  The root logger and other loggers are
+    left untouched, and records still propagate, so handlers the application
+    attaches to the root logger (or pytest's ``caplog``) see them too.
+    Calling it again updates the level without adding a second handler.
+
+    Args:
+        level: Level of the ``pyhs3`` logger.
     """
-    logging.config.dictConfig(LOGGING_CONFIG)
+    logger = logging.getLogger("pyhs3")
+    logger.setLevel(level)
+    if not any(isinstance(handler, RichHandler) for handler in logger.handlers):
+        handler = rich_handler_factory()
+        handler.setFormatter(
+            logging.Formatter("[[yellow]%(filenameStem)s[/]] %(message)s")
+        )
+        handler.addFilter(AppFilter())
+        logger.addHandler(handler)
 
 
 __all__ = ("setup",)

@@ -6,6 +6,7 @@
    howto/load_workspace
    howto/evaluate_model
    howto/fit_model
+   howto/minimize_nll
    howto/debug_model
    howto/check_a_workspace_from_the_cli
    howto/evaluate_and_visualize_from_the_cli
@@ -13,6 +14,8 @@
    reference/cli
    explanation/building_a_model
    explanation/comparing_nll_with_roofit
+   explanation/duplicate_subexpressions
+   explanation/batched_families
    broadcasting
    defining_components
    normalization

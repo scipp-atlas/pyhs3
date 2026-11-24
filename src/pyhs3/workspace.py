@@ -598,7 +598,7 @@ class Workspace(BaseModel):
         domain: int | str | Domain | None = None,
         parameter_set: int | str | ParameterSet | None = None,
         progress: bool = True,
-        mode: str = "FAST_RUN",
+        mode: str = "CVM",
     ) -> Model:
         """
         Constructs a :class:`~pyhs3.model.Model` rooted at ``target``.
@@ -630,7 +630,8 @@ class Workspace(BaseModel):
             domain: Override domain (legacy and Likelihood paths only).
             parameter_set: Override parameter set (legacy and Likelihood paths only).
             progress: Whether to show a progress bar during graph construction.
-            mode: PyTensor compilation mode (default ``"FAST_RUN"``).
+            mode: PyTensor compilation mode (default ``"CVM"``; see
+                :class:`~pyhs3.Model`).
 
         Returns:
             :class:`~pyhs3.model.Model`: The constructed model.
@@ -656,7 +657,7 @@ class Workspace(BaseModel):
         *,
         parameter_set: int | str | ParameterSet | None = None,
         progress: bool = True,
-        mode: str = "FAST_RUN",
+        mode: str = "CVM",
     ) -> Model:
         # _resolve_foreign_keys guarantees both are resolved objects by construction.
         likelihood_obj = cast(Likelihood, target.likelihood)
@@ -713,7 +714,7 @@ class Workspace(BaseModel):
         domain: int | str | Domain | None = None,
         parameter_set: int | str | ParameterSet | None = None,
         progress: bool = True,
-        mode: str = "FAST_RUN",
+        mode: str = "CVM",
     ) -> Model:
         selected_domain = self._select_domain(domain)
         parameterset = self._select_parameterset(parameter_set)
@@ -736,7 +737,7 @@ class Workspace(BaseModel):
         domain: int | str | Domain | None = None,
         parameter_set: int | str | ParameterSet | None = None,
         progress: bool = True,
-        mode: str = "FAST_RUN",
+        mode: str = "CVM",
     ) -> Model:
         # Search analyses first, then likelihoods; fall back to legacy domain indexing.
         if self.analyses:

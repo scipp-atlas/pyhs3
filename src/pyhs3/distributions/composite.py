@@ -8,7 +8,7 @@ multiple other distributions, including mixtures and products of distributions.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import pytensor.tensor as pt
 from pydantic import (
@@ -19,7 +19,6 @@ from pydantic import (
     field_validator,
     model_serializer,
 )
-from pytensor.graph.traversal import explicit_graph_inputs
 
 from pyhs3.base import balanced_sum
 from pyhs3.context import Context
@@ -30,7 +29,9 @@ if TYPE_CHECKING:
     from pyhs3.distributions import Distributions
 
 
-def _stable_logsumexp(x: TensorVar, axis: int) -> TensorVar:
+def _stable_logsumexp(
+    x: TensorVar, axis: int, weights: TensorVar | None = None
+) -> TensorVar:
     """Numerically stable log-sum-exp, built explicitly instead of via ``pt.logsumexp``.
 
     ``pt.logsumexp`` lowers to the literal ``log(sum(exp(x)))`` graph; the
@@ -45,9 +46,25 @@ def _stable_logsumexp(x: TensorVar, axis: int) -> TensorVar:
     https://github.com/pymc-devs/pytensor/issues/2288 for the tracked
     upstream request for a stable-by-construction ``logsumexp``.
 
+    With ``weights``, the reduction is log(sum(weights * exp(x))): each term
+    enters the sum multiplied by the corresponding entry of ``weights``, which
+    may be negative or zero.  This is how :class:`MixtureDist` evaluates
+    log(sum_i c_i f_i) with ``x = log f`` and ``weights = c``.  The max shift
+    uses ``x`` only, so every exp(x - m) stays <= 1 and the result is stable
+    in the same regimes, while the weights enter linearly: the derivative
+    with respect to a weight is exp(x - m) / sum, finite even where the
+    weight is exactly zero (unlike writing the term as log|w| + x, whose
+    derivative 1/w is infinite there).  A negative total gives NaN (log of a
+    negative number), surfacing a density that is negative somewhere; a total
+    of exactly zero gives -inf.  When positive and negative terms nearly
+    cancel, the relative precision of the total is limited by that
+    cancellation, as it is for the probability-space sum.
+
     Args:
         x: Tensor to reduce.
         axis: Axis to reduce over.
+        weights: Optional tensor broadcastable to ``x`` holding each term's
+            weight.  ``None`` means every weight is one.
 
     Returns:
         log(sum(exp(x), axis=axis)), stable against underflow (large
@@ -65,8 +82,11 @@ def _stable_logsumexp(x: TensorVar, axis: int) -> TensorVar:
     """
     m = pt.max(x, axis=axis, keepdims=True)  # type: ignore[no-untyped-call]
     safe_m = pt.switch(pt.isinf(m), 0.0, m)
+    shifted = pt.exp(x - safe_m)
+    if weights is not None:
+        shifted = weights * shifted
     result = safe_m + pt.log(
-        pt.sum(pt.exp(x - safe_m), axis=axis, keepdims=True)  # type: ignore[no-untyped-call]
+        pt.sum(shifted, axis=axis, keepdims=True)  # type: ignore[no-untyped-call]
     )
     return cast(TensorVar, pt.squeeze(result, axis=axis))  # type: ignore[no-untyped-call]
 
@@ -140,12 +160,18 @@ class MixtureDist(Distribution):
     # than re-resolving them from a context it is not given.
     _cached_coeffs: list[TensorVar] | None = PrivateAttr(default=None)
 
+    # The caches above are set by this object's own likelihood() call and read
+    # by its log_prob_terms(); an alias sharing another mixture's expression
+    # would never set them.
+    share_identical_expressions: ClassVar[bool] = False
+
     @model_serializer(mode="wrap")
     def serialize_model(self, handler: Callable[[Any], Any]) -> Any:
         """Do not serialize ref_coef_norm if it is unspecified (None)."""
         data = handler(self)
         if self.ref_coef_norm is None:
-            del data["ref_coef_norm"]
+            # exclude_none / exclude may already have dropped the key.
+            data.pop("ref_coef_norm", None)
         return data
 
     @field_validator("ref_coef_norm", mode="before")
@@ -405,7 +431,7 @@ class MixtureDist(Distribution):
         log(Σᵢcᵢfᵢ(xⱼ)) is evaluated as logsumexp(log cᵢ + log fᵢ(xⱼ)) using
         each summand's own log-space expression (``log_expressions``) rather
         than ``pt.log`` of the probability-space sum
-        (:attr:`_cached_unnorm_expr`).  fᵢ(xⱼ) can underflow to 0.0 in
+        (``_cached_unnorm_expr``).  fᵢ(xⱼ) can underflow to 0.0 in
         float64 for xⱼ far in a component's tail, which would make every
         cᵢfᵢ(xⱼ) — and hence their sum — exactly 0.0 and ``pt.log`` of it
         ``-inf``, even though log fᵢ(xⱼ) itself is finite.  Building the sum
@@ -413,16 +439,22 @@ class MixtureDist(Distribution):
         terms are stacked on a new leading axis (shape ``(n_summands, N, M)``
         for ``N`` events and parameter-batch size ``M``, matching the
         per-event shape documented on :class:`LogProbTerms`) and reduced with
-        :func:`_stable_logsumexp` over that axis, giving the ``(N, M)``
-        per-event term.  :func:`_stable_logsumexp` is used instead of
+        ``_stable_logsumexp`` over that axis, giving the ``(N, M)``
+        per-event term.  ``_stable_logsumexp`` is used instead of
         ``pt.logsumexp`` because the latter's stability is an emergent
         property of a graph rewrite that only runs under ``FAST_RUN`` (see
-        :func:`_stable_logsumexp`'s docstring and
-        https://github.com/scipp-atlas/pyhs3/issues/277).  This assumes cᵢ ≥ 0, matching the probabilistic meaning of a mixture
-        weight; :class:`MixtureDist` does not validate coefficient sign, so a
-        negative cᵢ produces NaN here (``pt.log`` of a negative number) just
-        as ``pt.log(Σᵢcᵢfᵢ)`` would if the probability-space sum itself were
-        negative.
+        ``_stable_logsumexp``'s docstring and
+        https://github.com/scipp-atlas/pyhs3/issues/277).
+
+        Coefficients may be negative: HS3 defines the mixture as Σᵢcᵢfᵢ
+        without restricting the sign of cᵢ (and c_n = 1 - Σcᵢ can be negative
+        by construction), and RooFit's RooAddPdf accepts it.  The terms are
+        therefore log fᵢ(xⱼ), reduced with the cᵢ as linear weights, so the
+        result equals log(Σᵢcᵢfᵢ(xⱼ)) whenever that sum is positive and is NaN
+        where it is negative (see
+        https://github.com/scipp-atlas/pyhs3/issues/348).  Keeping cᵢ linear
+        also keeps the gradient with respect to cᵢ finite at cᵢ = 0, the
+        usual starting point of e.g. a spurious-signal yield.
 
         The data-only -log(N!) constant is omitted and N_eff = Σwⱼ is used
         for weighted data; both are RooFit conventions adopted because HS3
@@ -447,11 +479,27 @@ class MixtureDist(Distribution):
             )
             raise RuntimeError(msg)
 
-        log_terms = [
-            pt.log(coeff) + log_expressions[summand]
-            for coeff, summand in zip(self._cached_coeffs, self.summands, strict=True)
+        log_terms = [log_expressions[summand] for summand in self.summands]
+        # Each log f_i has the per-event shape (N, M); each coefficient is a
+        # scalar or a (M,) batch.  Pad the coefficients with leading
+        # broadcastable axes to the terms' rank, (1, 1) or (1, M), and give
+        # them a common shape among themselves only, so that their stack
+        # (n_summands, 1, 1 or M) broadcasts against the stacked terms
+        # (n_summands, N, M).  Broadcasting each coefficient to its term's
+        # full shape would need that term's symbolic shape, which is slow to
+        # build for large expressions.
+        ndim = max(term.ndim for term in log_terms)
+        coeffs = [
+            coeff.dimshuffle(("x",) * (ndim - coeff.ndim) + tuple(range(coeff.ndim)))  # type: ignore[no-untyped-call]
+            if coeff.ndim < ndim
+            else coeff
+            for coeff in self._cached_coeffs
         ]
-        per_event_term = _stable_logsumexp(pt.stack(log_terms, axis=0), axis=0)
+        if len({coeff.type for coeff in coeffs}) > 1:
+            coeffs = list(pt.broadcast_arrays(*coeffs))
+        per_event_term = _stable_logsumexp(
+            pt.stack(log_terms, axis=0), axis=0, weights=pt.stack(coeffs, axis=0)
+        )
 
         return LogProbTerms(
             per_event=[per_event_term],
@@ -509,14 +557,17 @@ class ProductDist(Distribution):
         """
         Split factors into per-event shape terms and per-channel constraints.
 
-        Factors that depend on an observable (detected by a pt.vector free
-        input — observable arrays are built as pt.vector, NP scalars as
-        pt.scalar) delegate to their own log_prob_terms, so e.g. an extended
-        mixture inside a product contributes its yield term correctly.
+        Factors that depend on an observable delegate to their own
+        log_prob_terms, so e.g. an extended mixture inside a product
+        contributes its yield term correctly.  Such a factor carries the
+        event axis: observables enter as ``(N, 1)`` views, so its expression
+        has a leading axis that is not length-1.  Batched parameters enter as
+        ``(1, M)`` views, so a factor of parameters alone is a scalar or has
+        a length-1 leading axis.
 
-        Factors that depend only on scalar nuisance parameters are constraint
-        PDFs and are returned as named constraints for the model to add once
-        globally.  This prevents the N-fold overcounting that occurs when
+        Factors that depend only on nuisance parameters (scalar or batched)
+        are constraint PDFs and are returned as named constraints for the
+        model to add once globally.  This prevents the N-fold overcounting that occurs when
         naively summing log(shape x Π_j constr_j) over N events, which
         multiplies each constr_j term by N rather than counting it once.
 
@@ -530,11 +581,9 @@ class ProductDist(Distribution):
         terms = LogProbTerms()
         for factor_name in self.factors:
             factor_expr = expressions[factor_name]
-            free_inputs = [
-                v for v in explicit_graph_inputs([factor_expr]) if v.name is not None
-            ]
-            # Observable-dependent factors have at least one vector (rank-1) input.
-            is_shape = any(v.type.ndim >= 1 for v in free_inputs)
+            # Observable-dependent factors carry the event axis (axis 0); a
+            # batched parameter's (1, M) view only adds a length-1 axis 0.
+            is_shape = factor_expr.ndim >= 1 and not factor_expr.type.broadcastable[0]
 
             if is_shape:
                 factor_terms = distributions[factor_name].log_prob_terms(

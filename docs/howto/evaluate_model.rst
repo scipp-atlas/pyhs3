@@ -191,6 +191,17 @@ extra (``pip install pyhs3[jax]``):
     >>> print(f"-2 log L = {float(nll_value[0]):.4f}")  # doctest: +ELLIPSIS
     -2 log L = ...
 
+.. warning::
+
+    The object ``pyhs3.jaxify`` returns is not jitted. Calling it directly
+    runs JAX eagerly, one operation at a time, which on a large likelihood is
+    orders of magnitude slower than the same call wrapped in ``jax.jit``.
+    Wrap it for any repeated evaluation, such as a fit or a
+    scan, for example ``nll = jax.jit(lambda params: nll_graph(**fit_model.data, **params)[0])``.
+    The single call above is fine without ``jax.jit``, since jitting would add
+    compile time and save nothing. :meth:`~pyhs3.Model.compile_nll` compiles
+    and bakes in the data for you; see :doc:`/howto/minimize_nll`.
+
 ``fit_model.free_params`` gives every non-constant parameter's starting value
 from the workspace, and ``fit_model.data`` gives the observed arrays each
 distribution needs, so the two dicts together are exactly what a jaxified
@@ -203,3 +214,89 @@ callable one needs. See :doc:`/howto/fit_model` for minimizing
 ``nll_graph`` over ``free_params`` with optimistix. See
 :doc:`/explanation/comparing_nll_with_roofit` if the absolute value differs
 from RooFit's.
+
+Call a compiled likelihood with low overhead
+---------------------------------------------
+
+To evaluate the full likelihood repeatedly, for example in a fit, use
+:meth:`~pyhs3.Model.compile_nll` (see :doc:`/howto/minimize_nll`). It compiles
+the negative log-likelihood and its gradient as a function of one parameter
+vector, with the data and constant parameters baked in, and handles the input
+order and dtypes described below for you. The rest of this section is for
+compiling individual expressions yourself.
+
+``model.pdf`` and ``model.logpdf`` take keyword arguments, so each call
+reorders them into the compiled function's positional order before
+evaluating. In a loop that evaluates a small model many times, you avoid
+that cost by compiling the expression once and calling it with positional
+arrays yourself. On a small model, where the evaluation itself is cheap, the
+per-call overhead of keyword dicts and Python floats can dominate; calling the
+compiled function with positional ``numpy`` arrays and ``trust_input=True``
+removes most of it (see `issue #115
+<https://github.com/scipp-atlas/pyhs3/issues/115>`_). Time your own model
+before relying on it.
+
+pyhs3 compiles its functions with ``trust_input=True``. PyTensor then skips
+input validation, so every input must already be a ``numpy`` array whose dtype
+equals the input variable's ``.dtype`` and whose shape matches the parameter: a
+0-d array for a scalar parameter, a 1-d array for a vector one. pyhs3 creates
+its inputs with ``pt.scalar`` and ``pt.vector``, so the dtype is PyTensor's
+``config.floatX``, which is ``float64`` by default. Build each argument with
+``np.asarray(value, dtype=var.dtype)``. A Python ``float``, a mismatched dtype,
+or a wrong shape is not rejected with a clear error. It fails inside the
+compiled code or returns wrong values.
+
+Inputs are positional, and the order is not the order of the workspace. For a
+single distribution, :meth:`~pyhs3.Model.pars` returns the names in the order
+the compiled function expects:
+
+.. doctest:: evaluate-model
+
+    >>> model.pars("gauss")
+    ['sigma', 'mu', 'x']
+
+Compile the log-density with the same inputs and call it with one array per
+name, in that order. Each array here has shape ``()`` and the dtype of its
+input variable:
+
+.. doctest:: evaluate-model
+
+    >>> from pytensor import function
+    >>> from pytensor.graph.traversal import explicit_graph_inputs
+    >>> log_density = model.log_distributions["gauss"]
+    >>> inputs = [v for v in explicit_graph_inputs([log_density]) if v.name is not None]
+    >>> [v.name for v in inputs] == model.pars("gauss")
+    True
+    >>> fast_logpdf = function(inputs, log_density, trust_input=True)
+    >>> values = {"x": 0.0, "mu": 0.0, "sigma": 1.0}
+    >>> args = [np.asarray(values[v.name], dtype=v.dtype) for v in inputs]
+    >>> fast_logpdf(*args)  # doctest: +ELLIPSIS
+    array(-0.918938...)
+
+Build the ordered ``args`` list once, outside the loop, so the loop body is a single positional call.
+
+For the joint likelihood, the input order is the order
+``explicit_graph_inputs`` yields for ``model.log_prob``. Compile ``log_prob``
+with exactly that list. ``fit_model.data`` and ``fit_model.free_params`` supply
+the values. ``fit_model.data`` already holds arrays of shape ``(n_entries,)``;
+``free_params`` holds Python floats, so each becomes a 0-d array. Casting every
+value to its input variable's dtype covers both:
+
+.. doctest:: fit-example
+
+    >>> from pytensor import function
+    >>> from pytensor.graph.traversal import explicit_graph_inputs
+    >>> nll_inputs = [
+    ...     v for v in explicit_graph_inputs([fit_model.log_prob]) if v.name is not None
+    ... ]
+    >>> sorted(v.name for v in nll_inputs)
+    ['mu', 'sigma', 'x']
+    >>> fast_log_prob = function(nll_inputs, fit_model.log_prob, trust_input=True)
+    >>> point = {**fit_model.data, **fit_model.free_params}
+    >>> nll_args = [np.asarray(point[v.name], dtype=v.dtype) for v in nll_inputs]
+    >>> fast_log_prob(*nll_args).shape
+    (1,)
+
+See :doc:`/howto/fit_model` for passing a jaxified ``log_prob`` to a
+minimizer, and :meth:`~pyhs3.Model.pars` and :attr:`~pyhs3.Model.log_prob` for
+the ordering guarantees.

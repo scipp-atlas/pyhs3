@@ -135,10 +135,10 @@ class TestJaxifiedGraphCall:
         assert jnp.isfinite(val[0])
 
     def test_call_raises_on_extra_kwarg(self):
-        """Extra kwargs beyond the graph inputs raise TypeError (Python's own error)."""
+        """Extra kwargs beyond the graph inputs raise TypeError ."""
         _, _, _, pdf_expr = _gaussian_pytensor_expr()
         jg = jaxify(pdf_expr)
-        with pytest.raises(TypeError, match="unexpected keyword argument"):
+        with pytest.raises(TypeError, match="unexpected"):
             jg(
                 x=jnp.float64(0.0),
                 mu=jnp.float64(0.0),
@@ -147,7 +147,7 @@ class TestJaxifiedGraphCall:
             )
 
     def test_call_raises_on_missing_kwarg(self):
-        """Missing kwargs raise TypeError (Python's own error for missing args)."""
+        """Missing kwargs raise TypeError ."""
         _, _, _, pdf_expr = _gaussian_pytensor_expr()
         jg = jaxify(pdf_expr)
         with pytest.raises(TypeError, match="missing"):
@@ -162,6 +162,14 @@ class TestJaxifiedGraphCall:
         args[sigma_idx] = jnp.float64(1.0)
         val = jg.call_positional(*args)
         assert jnp.isfinite(val[0])
+
+    def test_call_by_kwargs_with_consecutive_underscores(self):
+        """Names PyTensor sanitizes in generated source still bind by keyword."""
+        a = pt.scalar("alpha__beta")
+        b = pt.scalar("gamma")
+        jg = jaxify(a - 2 * b, inputs=[a, b])
+        val = jg(alpha__beta=jnp.float64(5.0), gamma=jnp.float64(1.0))
+        assert float(val[0]) == pytest.approx(3.0)
 
     def test_jaxify_importerror_when_jax_dispatch_missing(self, monkeypatch):
         """jaxify() raises ImportError with a helpful message when pytensor[jax] absent."""

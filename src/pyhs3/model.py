@@ -896,10 +896,6 @@ class Model:
         family_outputs: dict[str, TensorVar] = {}
 
         sorted_nodes = graph.topological_sort()
-        for node_idx in sorted_nodes:
-            if graph[node_idx]["type"] != "family":
-                self._entity_types[graph[node_idx]["name"]] = graph[node_idx]["type"]
-
         # A likelihood-rooted model only needs the distributions that
         # participate in that likelihood and their transitive dependencies.
         # The complete structural graph is still built first so dependency
@@ -913,6 +909,10 @@ class Model:
             resolved_roots = [name for name in likelihood_roots if name in graph]
             active_nodes = graph.ancestor_closure(resolved_roots)
             sorted_nodes = [idx for idx in sorted_nodes if idx in active_nodes]
+
+        for node_idx in sorted_nodes:
+            if graph[node_idx]["type"] != "family":
+                self._entity_types[graph[node_idx]["name"]] = graph[node_idx]["type"]
 
         with Progress(
             SpinnerColumn(),

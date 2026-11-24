@@ -148,6 +148,19 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     _cached_expected_rates: TensorVar | None = PrivateAttr(default=None)
     _cached_bin_log_probs: TensorVar | None = PrivateAttr(default=None)
 
+    def _clear_expression_cache(self) -> None:
+        """Release graph-building references retained by the channel cache.
+
+        Direct ``likelihood``/``log_likelihood`` callers still benefit from
+        the per-context cache. A :class:`Model` captures the resulting graph,
+        however, so keeping the shared workspace channel pointed at that
+        model's global ``Context`` would retain the entire graph for as long
+        as the workspace lives.
+        """
+        self._cached_context = None
+        self._cached_expected_rates = None
+        self._cached_bin_log_probs = None
+
     # Each channel resolves its observed data by its own name
     # (``<channel>_observed``) and keeps the per-instance caches above, so two
     # channels never share one built expression.

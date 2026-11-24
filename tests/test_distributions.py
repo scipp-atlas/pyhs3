@@ -19,7 +19,7 @@ from pydantic import ValidationError
 from pytensor import function
 from scipy import integrate
 from scipy.special import logsumexp
-from scipy.stats import gennorm, laplace, norm
+from scipy.stats import gennorm, landau, laplace, norm
 
 from pyhs3 import Workspace
 from pyhs3.context import Context
@@ -3024,6 +3024,134 @@ class TestBernsteinPolyDist:
         assert result_val >= 0.0
 
 
+# Relative tolerance against scipy.stats.landau, set by the rational
+# approximation of the Landau density (Koelbig and Schorr, CERNLIB G110).
+LANDAU_RTOL = 1e-6
+
+
+def _scipy_landau(mean, sigma):
+    """scipy.stats.landau equivalent to LandauDist(mean, sigma).
+
+    scipy's standard Landau (c = 1) has its variable rescaled by 2/pi and
+    shifted by ln(pi/2) relative to the CERNLIB/ROOT convention, so
+    ``loc = mean + sigma ln(pi/2)`` and ``scale = sigma pi/2``.
+    """
+    return landau(loc=mean + sigma * math.log(math.pi / 2), scale=sigma * math.pi / 2)
+
+
+def _landau_functions():
+    """Compile LandauDist pdf/log-pdf for vector x and scalar mean, sigma."""
+    x, mean, sigma = pt.vector("x"), pt.scalar("mean"), pt.scalar("sigma")
+    dist = LandauDist(name="landau", x="x", mean="mean", sigma="sigma")
+    context = Context({"x": x, "mean": mean, "sigma": sigma})
+    pdf = dist.likelihood(context)
+    log_pdf = dist.log_likelihood(context)
+    return x, mean, sigma, pdf, log_pdf
+
+
+class TestLandauDistAccuracy:
+    """LandauDist matches scipy.stats.landau(loc=mean, scale=sigma)."""
+
+    @pytest.mark.parametrize(
+        ("mean", "sigma"), [(0.0, 1.0), (125.0, 10.0), (-3.0, 0.2)]
+    )
+    def test_pdf_and_log_pdf_match_scipy(self, mean, sigma):
+        """pdf and log-pdf agree with scipy for v = (x-mean)/sigma in [-5, 100]."""
+        x, m, s, pdf, log_pdf = _landau_functions()
+        f = function([x, m, s], [pdf, log_pdf])
+        v = np.linspace(-5.0, 100.0, 4001)  # shape (4001,)
+        pdf_val, log_pdf_val = f(mean + sigma * v, mean, sigma)
+        ref = _scipy_landau(mean, sigma)
+        x_val = mean + sigma * v
+        np.testing.assert_allclose(pdf_val, ref.pdf(x_val), rtol=LANDAU_RTOL)
+        np.testing.assert_allclose(log_pdf_val, ref.logpdf(x_val), rtol=LANDAU_RTOL)
+
+    def test_far_right_tail_matches_scipy(self):
+        """The 1/v^2 tail matches scipy's log-pdf out to v = 1e6."""
+        x, m, s, _, log_pdf = _landau_functions()
+        f = function([x, m, s], log_pdf)
+        v = np.array([300.0, 1.0e3, 1.0e4, 1.0e6])  # shape (4,)
+        np.testing.assert_allclose(
+            f(v, 0.0, 1.0), _scipy_landau(0.0, 1.0).logpdf(v), rtol=LANDAU_RTOL
+        )
+
+    @pytest.mark.parametrize("v", [-8.0, -15.0, -30.0])
+    def test_far_left_tail_matches_asymptote(self, v):
+        """scipy's logpdf is -inf for v < -9, so compare with the leading
+        asymptote log(phi) = -log(sqrt(2 pi)) - exp(-(v+1)) - (v+1)/2."""
+        x, m, s, _, log_pdf = _landau_functions()
+        f = function([x, m, s], log_pdf)
+        asymptote = -0.5 * math.log(2 * math.pi) - math.exp(-(v + 1)) - (v + 1) / 2
+        np.testing.assert_allclose(f(np.array([v]), 0.0, 1.0), [asymptote], rtol=1e-5)
+
+    def test_mode_is_shifted_from_mean(self):
+        """mean is the location (scipy loc), not the most probable value."""
+        x, m, s, pdf, _ = _landau_functions()
+        f = function([x, m, s], pdf)
+        grid = np.linspace(-1.0, 1.0, 200001)
+        mode = grid[np.argmax(f(grid, 0.0, 1.0))]
+        assert mode == pytest.approx(-0.22278, abs=1e-4)
+
+    def test_integrates_to_one(self):
+        """The density integrates to the scipy CDF difference over a wide range."""
+        x, m, s, pdf, _ = _landau_functions()
+        f = function([x, m, s], pdf)
+        lo, hi = -30.0, 1.0e4
+        total, _ = integrate.quad(
+            lambda t: f(np.array([t]), 0.0, 1.0)[0],
+            lo,
+            hi,
+            points=[-5.5, -1, 1, 5, 12, 50, 300],
+            limit=500,
+        )
+        ref = _scipy_landau(0.0, 1.0)
+        expected = ref.cdf(hi) - ref.cdf(lo)
+        assert total == pytest.approx(expected, rel=1e-6)
+        assert total == pytest.approx(1.0, abs=2e-4)  # remaining 1/hi tail
+
+    @pytest.mark.parametrize("target", ["likelihood", "log_likelihood"])
+    def test_gradients_match_finite_differences(self, target):
+        """d/dmean and d/dsigma agree with central finite differences in every region."""
+        x, m, s, pdf, log_pdf = _landau_functions()
+        out = pdf if target == "likelihood" else log_pdf
+        value = out.sum()
+        f = function([x, m, s], value)
+        g = function([x, m, s], pt.grad(value, [m, s]))
+        xs = np.array([-8.0, -3.0, -0.5, 0.5, 3.0, 8.0, 30.0, 100.0, 500.0])
+        mean, sigma, h = 0.3, 1.7, 1e-6
+        d_mean, d_sigma = g(xs, mean, sigma)
+        fd_mean = (f(xs, mean + h, sigma) - f(xs, mean - h, sigma)) / (2 * h)
+        fd_sigma = (f(xs, mean, sigma + h) - f(xs, mean, sigma - h)) / (2 * h)
+        assert np.isfinite([d_mean, d_sigma]).all()
+        np.testing.assert_allclose(d_mean, fd_mean, rtol=1e-4, atol=1e-9)
+        np.testing.assert_allclose(d_sigma, fd_sigma, rtol=1e-4, atol=1e-9)
+
+    def test_log_likelihood_finite_where_likelihood_underflows(self):
+        """Far left tail: likelihood underflows to 0 but log_likelihood is finite."""
+        x, m, s, pdf, log_pdf = _landau_functions()
+        f = function([x, m, s], [pdf, log_pdf])
+        pdf_val, log_val = f(np.array([-60.0]), 0.0, 1.0)  # shape (1,)
+        assert pdf_val[0] == 0.0
+        assert np.isfinite(log_val[0])
+
+    def test_observable_view_broadcasts_against_parameter_batch(self):
+        """(N, 1) x against (1, B) parameters gives an (N, B) density."""
+        dist = LandauDist(name="landau", x="x", mean="mean", sigma="sigma")
+        xv = pt.tensor("x", shape=(None, 1))
+        mu = pt.tensor("mean", shape=(1, None))
+        sg = pt.tensor("sigma", shape=(1, None))
+        ctx = Context({"x": xv, "mean": mu, "sigma": sg})
+        f = function([xv, mu, sg], [dist.likelihood(ctx), dist.log_likelihood(ctx)])
+        xs = np.linspace(-1.0, 10.0, 7)[:, None]  # (7, 1)
+        means = np.array([[0.0, 1.0, 2.0]])  # (1, 3)
+        sigmas = np.array([[1.0, 2.0, 0.5]])  # (1, 3)
+        pdf_val, log_val = f(xs, means, sigmas)
+        assert pdf_val.shape == (7, 3)
+        ref = _scipy_landau(means, sigmas).pdf(xs)
+        np.testing.assert_allclose(pdf_val, ref, rtol=LANDAU_RTOL)
+        np.testing.assert_allclose(log_val, np.log(ref), rtol=LANDAU_RTOL)
+
+
 class TestLandauDist:
     """Test LandauDist implementation."""
 
@@ -3063,8 +3191,8 @@ class TestLandauDist:
         assert np.isfinite(result_val)
         assert result_val > 0.0
 
-        expected = 0.0491938
-        np.testing.assert_allclose(result_val, expected, rtol=1e-6)
+        expected = _scipy_landau(3.0, 1.0).pdf(5.0)
+        np.testing.assert_allclose(result_val, expected, rtol=LANDAU_RTOL)
 
     def test_landau_symmetry_properties(self):
         """Test LandauDist asymmetric properties."""
@@ -3101,10 +3229,8 @@ class TestLandauDist:
         assert np.isfinite(val_above)
         assert val_above > 0.0
 
-        # Test that the distribution can handle different input values
-        # (The simplified Landau implementation may not show true asymmetry)
-        assert val_below > 0.0
-        assert val_above > 0.0
+        # The mode sits at mean - 0.22278 sigma, so x = mean - sigma is closer to it
+        assert val_below > val_above
 
     def test_landau_scaling_with_sigma(self):
         """Test LandauDist scaling behavior with sigma parameter."""

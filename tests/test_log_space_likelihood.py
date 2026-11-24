@@ -684,10 +684,10 @@ class TestUniformLogLikelihood:
 class TestLandauLogLikelihood:
     """LandauDist.log_likelihood is the analytic log form of likelihood().
 
-    The raw density is a product of two exponentials divided by a constant
-    normalization, so its log is a plain sum -- no product/sum term can
-    partially cancel another, unlike e.g. a piecewise density built from a
-    difference of two comparable-magnitude terms.
+    The density is piecewise: a rational function times an exponential factor
+    on the left, rational functions in the middle, and rational functions of
+    1/v on the right. The log is taken per region so that the left tail, where
+    the density underflows, stays finite.
     """
 
     @pytest.mark.parametrize(
@@ -708,9 +708,9 @@ class TestLandauLogLikelihood:
         np.testing.assert_allclose(log_val, np.log(prob_val), rtol=1e-10)
 
     def test_finite_deep_in_tail_while_likelihood_underflows(self):
-        """z = (x-mean)/sigma = 100 deep in the tail: likelihood underflows, log_likelihood stays finite."""
+        """z = (x-mean)/sigma = -100 deep in the left tail: likelihood underflows, log_likelihood stays finite."""
         dist = LandauDist(name="landau", x="x", mean="mean", sigma="sigma")
-        context = Context({"x": _c(100.0), "mean": _c(0.0), "sigma": _c(1.0)})
+        context = Context({"x": _c(-100.0), "mean": _c(0.0), "sigma": _c(1.0)})
         prob_val = float(pytensor.function([], dist.likelihood(context))())
         log_val = float(pytensor.function([], dist.log_likelihood(context))())
 

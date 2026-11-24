@@ -586,31 +586,182 @@ class LogNormalDist(Distribution):
         )
 
 
+# Coefficients of the rational approximation to the Landau density by
+# K.S. Koelbig and B. Schorr, CPC 31 (1984) 97 (CERNLIB
+# G110 DENLAN), as used by ROOT's ``landau_pdf`` in
+# ``math/mathcore/src/PdfFuncMathCore.cxx``. Each ``_LANDAU_P*`` / ``_LANDAU_Q*``
+# pair holds numerator / denominator polynomial coefficients in increasing power.
+_LANDAU_P1 = (
+    0.4259894875,
+    -0.1249762550,
+    0.03984243700,
+    -0.006298287635,
+    0.001511162253,
+)
+_LANDAU_Q1 = (1.0, -0.3388260629, 0.09594393323, -0.01608042283, 0.003778942063)
+_LANDAU_P2 = (
+    0.1788541609,
+    0.1173957403,
+    0.01488850518,
+    -0.001394989411,
+    0.0001283617211,
+)
+_LANDAU_Q2 = (1.0, 0.7428795082, 0.3153932961, 0.06694219548, 0.008790609714)
+_LANDAU_P3 = (
+    0.1788544503,
+    0.09359161662,
+    0.006325387654,
+    0.00006611667319,
+    -0.000002031049101,
+)
+_LANDAU_Q3 = (1.0, 0.6097809921, 0.2560616665, 0.04746722384, 0.006957301675)
+_LANDAU_P4 = (0.9874054407, 118.6723273, 849.2794360, -743.7792444, 427.0262186)
+_LANDAU_Q4 = (1.0, 106.8615961, 337.6496214, 2016.712389, 1597.063511)
+_LANDAU_P5 = (1.003675074, 167.5702434, 4789.711289, 21217.86767, -22324.94910)
+_LANDAU_Q5 = (1.0, 156.9424537, 3745.310488, 9834.698876, 66924.28357)
+_LANDAU_P6 = (1.000827619, 664.9143136, 62972.92665, 475554.6998, -5743609.109)
+_LANDAU_Q6 = (1.0, 651.4101098, 56974.73333, 165917.4725, -2815759.939)
+_LANDAU_A1 = (0.04166666667, -0.01996527778, 0.02709538966)
+_LANDAU_A2 = (-1.845568670, -4.284640743)
+_LANDAU_INV_SQRT_2PI = 0.3989422803  # 1/sqrt(2*pi), truncated as in ROOT
+
+
+def _horner(coefficients: tuple[float, ...], t: TensorVar) -> TensorVar:
+    """Evaluate ``sum_k coefficients[k] * t**k`` by Horner's rule."""
+    result = pt.as_tensor_variable(coefficients[-1]) + 0.0 * t
+    for c in reversed(coefficients[:-1]):
+        result = result * t + c
+    return cast(TensorVar, result)
+
+
+def _log_rational(
+    p: tuple[float, ...], q: tuple[float, ...], t: TensorVar
+) -> TensorVar:
+    """Log of the rational function ``P(t) / Q(t)`` of the given coefficients."""
+    return cast(TensorVar, pt.log(_horner(p, t)) - pt.log(_horner(q, t)))
+
+
+def _landau_log_density(v: TensorVar) -> TensorVar:
+    r"""
+    Log of the standard (location 0, scale 1) Landau density at ``v``.
+
+    Piecewise approximation of Koelbig and Schorr, selected by ``v``. Every
+    region is evaluated on an argument clipped into that region (the
+    "double-where" pattern), so the unselected branches of ``pt.switch`` never
+    produce inf or NaN that would poison gradients. ``v`` may have any shape;
+    the result has the same shape.
+    """
+    # v < -5.5: exp(-1/u) / sqrt(u) * (1 + a1 polynomial in u), u = exp(v + 1).
+    v_left = pt.minimum(v, -5.5)
+    u_left = pt.exp(v_left + 1.0)
+    log_left = (
+        math.log(_LANDAU_INV_SQRT_2PI)
+        - 1.0 / u_left
+        - 0.5 * (v_left + 1.0)
+        + pt.log(_horner(_LANDAU_A1, u_left) * u_left + 1.0)
+    )
+
+    # -5.5 <= v < -1: exp(-u) sqrt(u) P1(v) / Q1(v), u = exp(-v - 1).
+    v_a = pt.clip(v, -5.5, -1.0)
+    log_a = (
+        -pt.exp(-v_a - 1.0)
+        + 0.5 * (-v_a - 1.0)
+        + _log_rational(_LANDAU_P1, _LANDAU_Q1, v_a)
+    )
+
+    # -1 <= v < 1 and 1 <= v < 5: rational functions of v.
+    v_b = pt.clip(v, -1.0, 1.0)
+    log_b = _log_rational(_LANDAU_P2, _LANDAU_Q2, v_b)
+    v_c = pt.clip(v, 1.0, 5.0)
+    log_c = _log_rational(_LANDAU_P3, _LANDAU_Q3, v_c)
+
+    # v >= 5: u**2 * P(u) / Q(u) with u = 1/v, split at 12, 50, 300.
+    def log_inverse_branch(
+        p: tuple[float, ...], q: tuple[float, ...], lower: float, upper: float
+    ) -> TensorVar:
+        u = 1.0 / pt.clip(v, lower, upper)
+        return cast(TensorVar, 2.0 * pt.log(u) + _log_rational(p, q, u))
+
+    log_d = log_inverse_branch(_LANDAU_P4, _LANDAU_Q4, 5.0, 12.0)
+    log_e = log_inverse_branch(_LANDAU_P5, _LANDAU_Q5, 12.0, 50.0)
+    log_f = log_inverse_branch(_LANDAU_P6, _LANDAU_Q6, 50.0, 300.0)
+
+    # v >= 300: u**2 * (1 + a2 polynomial in u), u = 1 / (v - v log(v) / (v + 1)).
+    v_tail = pt.maximum(v, 300.0)
+    u_tail = 1.0 / (v_tail - v_tail * pt.log(v_tail) / (v_tail + 1.0))
+    log_tail = 2.0 * pt.log(u_tail) + pt.log(
+        1.0 + (_LANDAU_A2[0] + _LANDAU_A2[1] * u_tail) * u_tail
+    )
+
+    return cast(
+        TensorVar,
+        pt.switch(
+            v < -5.5,
+            log_left,
+            pt.switch(
+                v < -1.0,
+                log_a,
+                pt.switch(
+                    v < 1.0,
+                    log_b,
+                    pt.switch(
+                        v < 5.0,
+                        log_c,
+                        pt.switch(
+                            v < 12.0,
+                            log_d,
+                            pt.switch(
+                                v < 50.0,
+                                log_e,
+                                pt.switch(v < 300.0, log_f, log_tail),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
 class LandauDist(Distribution):
     r"""
     Landau probability distribution.
 
     Implements the Landau probability density function as defined in ROOT's
-    RooLandau. Used primarily in high-energy physics for modeling energy
-    loss distributions.
-
-    Approximation using modified Gaussian with asymmetric tails:
+    :root:`RooLandau`, used in high-energy physics to model energy loss. The
+    density is
 
     .. math::
 
-        f(x; \mu, \sigma) = \frac{1}{\sigma} \exp\left(-\frac{1}{2}z^2 - \frac{1}{10}(z-1)^2\right)
+        f(x; \mu, \sigma) = \frac{1}{\sigma}\,\phi(v), \qquad
+        v = \frac{x-\mu}{\sigma},
 
-    where $z = \frac{x-\mu}{\sigma}$ for $z > 1$.
+    where :math:`\phi(v) = \frac{1}{2\pi i}\int_{c-i\infty}^{c+i\infty}
+    \exp(s\ln s + vs)\,ds` is the standard Landau density. :math:`\phi` is
+    evaluated with the piecewise rational approximation of Koelbig and Schorr
+    (CPC 31 (1984) 97; CERNLIB G110 ``DENLAN``), the same
+    one ROOT's ``TMath::Landau`` uses (``landau_pdf`` in
+    ``math/mathcore/src/PdfFuncMathCore.cxx``). The approximation uses
+    different expressions on ``v < -5.5``, ``[-5.5, -1)``, ``[-1, 1)``,
+    ``[1, 5)``, ``[5, 12)``, ``[12, 50)``, ``[50, 300)`` and ``v >= 300``.
+
+    Parameter mapping: ``mean`` is the location parameter of the distribution,
+    not its mean (the Landau distribution has no finite mean) and not its most
+    probable value. The mode lies at :math:`\mu - 0.22278\,\sigma`. The pyhs3
+    parameters map onto ROOT's ``RooLandau(x, mean, sigma)`` and
+    ``TMath::Landau(x, mean, sigma)`` unchanged. ``scipy.stats.landau`` uses a
+    different standardization (its variable is rescaled by :math:`2/\pi` and
+    shifted by :math:`\ln(\pi/2)`), so the mapping is
+    ``loc = mean + sigma * log(pi / 2)`` and ``scale = sigma * pi / 2``.
 
     Parameters:
         x (str): Input variable name.
         mean (str): Location parameter.
-        sigma (str): Scale parameter.
+        sigma (str): Scale parameter, must be positive.
 
     Note:
-        The Landau distribution is asymmetric with a long tail towards larger values.
-        This implementation uses an approximation since the exact Landau function
-        is not available in PyTensor.
+        Array shapes follow the inputs: ``x`` of shape ``(N,)`` or an ``(N, 1)``
+        observable view broadcast against parameter batches in the usual way.
 
     HS3 Reference:
         Note: Landau distribution is not explicitly defined in the current HS3 specification.
@@ -628,92 +779,43 @@ class LandauDist(Distribution):
         """
         Builds a symbolic expression for the Landau PDF.
 
+        Evaluated as the exponential of :meth:`log_likelihood`, which underflows
+        to 0.0 deep in the left tail.
+
         Args:
             context (dict): Mapping of names to pytensor variables.
 
         Returns:
             pytensor.tensor.variable.TensorVariable: Symbolic representation of Landau PDF.
-
-        Note:
-            This implementation uses a Gaussian approximation. In practice,
-            ROOT uses more sophisticated approximations or numerical methods.
         """
-        x = context[self._parameters["x"]]
-        mean = context[self._parameters["mean"]]
-        sigma = context[self._parameters["sigma"]]
-
-        # Normalized variable
-        z = (x - mean) / sigma
-
-        # Landau approximation using a modified Gaussian with asymmetric tails
-        # This is a simplified approximation - ROOT uses more sophisticated methods
-        gaussian_core = pt.exp(-0.5 * z**2)
-        asymmetric_factor = pt.exp(-0.1 * pt.maximum(0.0, z - 1) ** 2)
-        gaussian_term_integral = pt.sqrt(math.pi / 2) * (1 + pt.erf(1 / pt.sqrt(2.0)))
-        asymmetric_factor_integral = (
-            pt.exp(-1 / 12)
-            * (pt.sqrt(5 * math.pi / 3) / 2)
-            * pt.erfc((5 / 6) * pt.sqrt(3 / 5))
-        )
-        normalization = gaussian_term_integral + asymmetric_factor_integral
-
-        return cast(
-            TensorVar,
-            (1.0 / normalization) * (1.0 / sigma) * gaussian_core * asymmetric_factor,
-        )
+        return cast(TensorVar, pt.exp(self.log_likelihood(context)))
 
     def log_likelihood(self, context: Context) -> TensorVar:
         r"""
-        Builds a symbolic expression for the Landau approximation log-PDF.
+        Builds a symbolic expression for the Landau log-PDF.
 
-        Analytic log form of :meth:`likelihood`. The raw density there is a
-        product of two exponentials and a constant normalization factor
-        (``gaussian_core * asymmetric_factor / (sigma * normalization)``), so
-        its log is a plain sum -- no product term can partially cancel another:
+        Analytic log of the piecewise approximation described in the class
+        docstring, taken region by region. In the left tail the log density
+        is :math:`-e^{-(v+1)} + \dots`, which stays finite long after the
+        density itself underflows.
 
         .. math::
 
-            \log f(x; \mu, \sigma) = -\log\sigma - \frac{1}{2}z^2
-            - \frac{1}{10}\max(0, z-1)^2 - \log(\mathcal{N}),
-            \quad z = \frac{x-\mu}{\sigma}
-
-        where :math:`\mathcal{N}` is the same constant (parameter-independent)
-        normalization computed in :meth:`likelihood`. Evaluating this directly
-        avoids computing the two exponentials and re-logging their product,
-        which underflows to 0.0 (and then to ``-inf``) for large :math:`|z|`.
+            \log f(x; \mu, \sigma) = \log\phi(v) - \log\sigma,
+            \quad v = \frac{x-\mu}{\sigma}
 
         Args:
             context (dict): Mapping of names to pytensor variables.
 
         Returns:
-            pytensor.tensor.variable.TensorVariable: Symbolic representation of the Landau
-            approximation log-PDF.
+            pytensor.tensor.variable.TensorVariable: Symbolic representation of the
+            Landau log-PDF.
         """
         x = context[self._parameters["x"]]
         mean = context[self._parameters["mean"]]
         sigma = context[self._parameters["sigma"]]
 
-        # Normalized variable
-        z = (x - mean) / sigma
-
-        # Log of the same Gaussian-core / asymmetric-tail approximation used in likelihood()
-        gaussian_log_term = -0.5 * z**2
-        asymmetric_log_term = -0.1 * pt.maximum(0.0, z - 1) ** 2
-        gaussian_term_integral = pt.sqrt(math.pi / 2) * (1 + pt.erf(1 / pt.sqrt(2.0)))
-        asymmetric_factor_integral = (
-            pt.exp(-1 / 12)
-            * (pt.sqrt(5 * math.pi / 3) / 2)
-            * pt.erfc((5 / 6) * pt.sqrt(3 / 5))
-        )
-        normalization = gaussian_term_integral + asymmetric_factor_integral
-
-        return cast(
-            TensorVar,
-            -pt.log(sigma)
-            - pt.log(normalization)
-            + gaussian_log_term
-            + asymmetric_log_term,
-        )
+        return cast(TensorVar, _landau_log_density((x - mean) / sigma) - pt.log(sigma))
 
 
 class GenNormalDist(Distribution):

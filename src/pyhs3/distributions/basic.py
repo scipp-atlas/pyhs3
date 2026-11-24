@@ -18,7 +18,6 @@ import pytensor_distributions.normal as Normal
 import pytensor_distributions.poisson as Poisson
 import pytensor_distributions.uniform as Uniform
 from pydantic import PrivateAttr
-from pytensor.graph.traversal import ancestors
 
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
@@ -101,17 +100,6 @@ class GaussianDist(Distribution):
             ),
         )
 
-    def _shape_depends_on(self, context: Context, observable_name: str) -> bool:
-        """Whether ``mean`` or ``sigma`` is built from the observable being integrated.
-
-        The Gaussian CDF difference is the integral over ``x`` only when the mean
-        and width are constant in ``x``; otherwise the analytic entry points
-        return None and the base class integrates by quadrature.
-        """
-        leaf = context.parameters[observable_name]
-        shape = [context[self._parameters["mean"]], context[self._parameters["sigma"]]]
-        return leaf in ancestors(shape)
-
     def normalization_expression(
         self, context: Context, observable_name: str
     ) -> TensorVar | None:
@@ -142,8 +130,8 @@ class GaussianDist(Distribution):
         Returns:
             Symbolic antiderivative expression, or None for numerical fallback.
         """
-        if observable_name != self._parameters["x"] or self._shape_depends_on(
-            context, observable_name
+        if observable_name != self._parameters["x"] or self._depends_on_observable(
+            context, observable_name, ("mean", "sigma")
         ):
             return None
 
@@ -189,8 +177,8 @@ class GaussianDist(Distribution):
         Returns:
             Symbolic integral expression, or None for numerical fallback.
         """
-        if obs_name != self._parameters["x"] or self._shape_depends_on(
-            context, obs_name
+        if obs_name != self._parameters["x"] or self._depends_on_observable(
+            context, obs_name, ("mean", "sigma")
         ):
             return None
 
@@ -857,7 +845,8 @@ class GenNormalDist(Distribution):
 
         Returns None (deferring to quadrature) when the matching observable is
         not this distribution's ``x``, since the antiderivative is only defined
-        with respect to ``x``.
+        with respect to ``x``, and when ``mean``, ``alpha`` or ``beta`` depends on
+        that observable, since the CDF difference then is not the integral.
 
         Args:
             context: Mapping of names to pytensor variables.
@@ -866,7 +855,9 @@ class GenNormalDist(Distribution):
         Returns:
             Symbolic antiderivative expression, or None for numerical fallback.
         """
-        if observable_name != self._parameters["x"]:
+        if observable_name != self._parameters["x"] or self._depends_on_observable(
+            context, observable_name, ("mean", "alpha", "beta")
+        ):
             return None
 
         x = context[self._parameters["x"]]

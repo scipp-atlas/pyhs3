@@ -903,3 +903,51 @@ class TestGaussianAnalyticNormalization:
         assert np.all(np.isfinite(pdf))
         expected = stats.norm.pdf(events) / (stats.norm.sf(30.0) - stats.norm.sf(31.0))
         np.testing.assert_allclose(pdf[:, 0], expected, rtol=1e-10)
+
+
+class TestGenNormalDependentShape:
+    """GenNormalDist's CDF difference is the integral only for parameters constant in x."""
+
+    @pytest.mark.parametrize("dependent", ["mean", "alpha", "beta"])
+    def test_parameter_depending_on_the_observable_defers_to_quadrature(
+        self, dependent
+    ):
+        """A parameter built from the observable (shape (N, 1), like its view)
+        makes both analytic entry points return None, so the base class
+        integrates by quadrature instead."""
+        lower, upper = pt.dscalar("lower"), pt.dscalar("upper")
+        x = pt.dvector("x")
+        view = x[:, None]
+        values = {
+            "mu": 1.0 + 0.1 * view if dependent == "mean" else pt.dscalar("mu"),
+            "alpha": 1.0 + 0.05 * view**2
+            if dependent == "alpha"
+            else pt.dscalar("alpha"),
+            "beta": 2.0 + 0.1 * view**2 if dependent == "beta" else pt.dscalar("beta"),
+        }
+        context = Context(
+            parameters={"x": x, **values},
+            observables={"x": (lower, upper)},
+            views={"x": view},
+        )
+        dist = GenNormalDist(name="d", x="x", mean="mu", alpha="alpha", beta="beta")
+
+        assert dist.normalization_expression(context, "x") is None
+        assert dist._normalization_integral(context, "x", lower, upper) is None
+
+    def test_independent_parameters_keep_the_analytic_integral(self):
+        lower, upper = pt.dscalar("lower"), pt.dscalar("upper")
+        x = pt.dvector("x")
+        context = Context(
+            parameters={
+                "x": x,
+                "mu": pt.dscalar("mu"),
+                "alpha": pt.dscalar("alpha"),
+                "beta": pt.dscalar("beta"),
+            },
+            observables={"x": (lower, upper)},
+            views={"x": x[:, None]},
+        )
+        dist = GenNormalDist(name="d", x="x", mean="mu", alpha="alpha", beta="beta")
+
+        assert dist.normalization_expression(context, "x") is not None

@@ -53,6 +53,9 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# PyTensor mode a :class:`Model` uses unless built with another one.
+_DEFAULT_MODE = "CVM"
+
 
 def _drop_view_axis(term: TensorVar) -> TensorVar:
     """Return a likelihood term as a scalar or an ``(M,)`` vector.
@@ -121,7 +124,7 @@ class Model:
         domain: Domain,
         functions: Functions,
         progress: bool = True,
-        mode: str = "CVM",
+        mode: str = _DEFAULT_MODE,
         observables: dict[str, tuple[float, float]] | None = None,
         likelihood: Likelihood | None = None,
     ):
@@ -320,6 +323,11 @@ class Model:
             mode: PyTensor compile mode, replacing the default
                 ``default_nll_mode(fuse=fuse)``; e.g. ``"CVM"`` (C
                 backend only).  Cannot be combined with ``fuse=True``.
+                With ``mode=None``, the C backend uses the ``mode`` the
+                model was built with if that is not the default ``"CVM"``
+                and ``fuse`` is ``False``; otherwise it uses
+                ``default_nll_mode(fuse=fuse)``.  The JAX backend ignores
+                the model's ``mode``.
             cache: Cache the compiled function on disk and reuse it when the
                 same likelihood is compiled again with the same options,
                 pyhs3 and PyTensor versions.  ``True`` uses
@@ -353,6 +361,8 @@ class Model:
                 for ``batched=True`` without ``backend="jax"``.
             ImportError: If ``backend="jax"`` and JAX is not installed.
         """
+        if mode is None and backend == "c" and not fuse and self.mode != _DEFAULT_MODE:
+            mode = self.mode
         log_prob = self.log_prob
         data = self.data
         start = {**self.nominal_params, **self.free_params}

@@ -46,7 +46,7 @@ from pyhs3.tensorutils import (
     ensure_array,
     merge_duplicate_nodes,
 )
-from pyhs3.typing.aliases import TensorVar
+from pyhs3.typing.aliases import EntityType, TensorVar
 
 if TYPE_CHECKING:
     from pyhs3.likelihoods import Likelihood
@@ -209,6 +209,9 @@ class Model:
         # (shapesys/staterror) are emitted per-channel.
         self._hfdc_log_constraints: list[TensorVar] = []
         self._hfdc_constraint_params_seen: set[str] = set()
+        # Entity type of every user-facing name, for entity_type().  Family
+        # nodes are excluded: their names are generated, not user-defined.
+        self._entity_types: dict[str, EntityType] = {}
         # Log-space Poisson-only (no constraint sum) expression for each HFDC
         # channel: the summed per-bin Poisson log-pmf. log_prob uses this
         # instead of log(exp(...)) so the joint NLL stays finite where the
@@ -903,6 +906,9 @@ class Model:
         family_outputs: dict[str, TensorVar] = {}
 
         sorted_nodes = graph.topological_sort()
+        for node_idx in sorted_nodes:
+            if graph[node_idx]["type"] != "family":
+                self._entity_types[graph[node_idx]["name"]] = graph[node_idx]["type"]
 
         # A likelihood-rooted model only needs the distributions that
         # participate in that likelihood and their transitive dependencies.
@@ -1587,6 +1593,56 @@ class Model:
     distributions: {len(dist_names)} ({dist_display})
     functions: {len(func_names)} ({func_display})
 )"""
+
+    def entity_type(self, name: str) -> EntityType:
+        """
+        Get the kind of entity a name refers to.
+
+        Args:
+            name (str): Name of a distribution, function, parameter, constant,
+                or HistFactory modifier in the model.
+
+        Returns:
+            EntityType: One of ``"distribution"``, ``"function"``,
+            ``"parameter"``, ``"constant"``, or ``"modifier"``.
+
+        Raises:
+            ValueError: If the model has no entity with this name.
+
+        Examples:
+            >>> import pyhs3
+            >>> ws = pyhs3.Workspace(
+            ...     metadata={"hs3_version": "0.2"},
+            ...     distributions=[
+            ...         {
+            ...             "name": "gauss",
+            ...             "type": "gaussian_dist",
+            ...             "x": "x",
+            ...             "mean": "mu",
+            ...             "sigma": 1.0,
+            ...         }
+            ...     ],
+            ...     parameter_points=[
+            ...         {
+            ...             "name": "default_values",
+            ...             "parameters": [
+            ...                 {"name": "x", "value": 0.0},
+            ...                 {"name": "mu", "value": 0.0},
+            ...             ],
+            ...         }
+            ...     ],
+            ... )
+            >>> model = ws.model(0, progress=False)
+            >>> model.entity_type("gauss")
+            'distribution'
+            >>> model.entity_type("mu")
+            'parameter'
+        """
+        try:
+            return self._entity_types[name]
+        except KeyError:
+            msg = f"Entity '{name}' not found in model"
+            raise ValueError(msg) from None
 
     def graph_summary(self, name: str) -> str:
         """

@@ -56,6 +56,18 @@ If a parameter you expected is missing, it was never referenced by any
 distribution or function in the workspace — pyhs3 only discovers parameters
 that something actually depends on.
 
+To check what kind of entity a name refers to, call ``entity_type()``. It
+returns ``"distribution"``, ``"function"``, ``"parameter"``, ``"constant"``,
+or ``"modifier"``, and raises ``ValueError`` for a name the model does not
+contain:
+
+.. doctest::
+
+    >>> model.entity_type("gauss")
+    'distribution'
+    >>> model.entity_type("mu")
+    'parameter'
+
 Inspect a distribution's computation graph
 -----------------------------------------------
 

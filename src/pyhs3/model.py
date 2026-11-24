@@ -756,7 +756,13 @@ class Model:
         # Poisson term and per-modifier make_constraint() are never called
         # here: the probability-space channel expression is derived below as
         # pt.exp() of the log expression instead.
-        log_poisson = dist.log_likelihood(context)
+        try:
+            log_poisson = dist.log_likelihood(context)
+        finally:
+            # The captured TensorVar owns everything this Model needs. Do not
+            # leave the shared workspace channel retaining the Context (and
+            # therefore the complete model graph).
+            dist._clear_expression_cache()  # pylint: disable=protected-access
         self._hfdc_log_poisson[node_name] = log_poisson
 
         channel_log_constraints = self._collect_histfactory_log_constraints(

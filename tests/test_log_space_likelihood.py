@@ -1685,6 +1685,12 @@ def _evaluate_at(
     )
 
 
+@pytest.fixture(scope="module", params=["CVM", "FAST_COMPILE"])
+def composite_model(request: pytest.FixtureRequest) -> hs3.Model:
+    """The composite workspace built once per compile mode for TestLogNativeComposition."""
+    return _composite_workspace().model(0, progress=False, mode=request.param)
+
+
 class TestLogNativeComposition:
     """logpdf of MixtureDist/ProductDist is composed from component log-densities."""
 
@@ -1693,22 +1699,18 @@ class TestLogNativeComposition:
     # FAST_COMPILE skips the stabilizing rewrites that could otherwise rescue
     # a probability-space round trip (e.g. log(exp(a) * exp(b)) -> a + b), so
     # the stability must come from the graph itself.
-    @pytest.fixture(scope="class", params=["CVM", "FAST_COMPILE"])
-    def model(self, request: pytest.FixtureRequest) -> hs3.Model:
-        return _composite_workspace().model(0, progress=False, mode=request.param)
-
     @pytest.mark.parametrize("name", COMPOSITES)
     def test_logpdf_finite_where_components_underflow(
-        self, model: hs3.Model, name: str
+        self, composite_model: hs3.Model, name: str
     ) -> None:
         """Both Gaussians 40-60 sigma away underflow to 0.0, yet logpdf is finite."""
         x = np.array([40.0, 50.0, -60.0])
         # Precondition: every component's probability density underflows.
         for component in ("g1", "g2"):
-            pdf_val = _evaluate_at(model.pdf_unsafe, component, x)
+            pdf_val = _evaluate_at(composite_model.pdf_unsafe, component, x)
             assert np.all(pdf_val == 0.0)
 
-        logpdf_val = _evaluate_at(model.logpdf_unsafe, name, x)
+        logpdf_val = _evaluate_at(composite_model.logpdf_unsafe, name, x)
         assert np.all(np.isfinite(logpdf_val))
         np.testing.assert_allclose(
             logpdf_val, _composite_reference(name, x), rtol=1e-12
@@ -1716,7 +1718,7 @@ class TestLogNativeComposition:
 
     @pytest.mark.parametrize("name", COMPOSITES)
     def test_logpdf_unchanged_at_ordinary_points(
-        self, model: hs3.Model, name: str
+        self, composite_model: hs3.Model, name: str
     ) -> None:
         """Where nothing underflows, logpdf is the log of the probability-space composition."""
         x = np.array([-1.5, 0.0, 0.5, 2.0])
@@ -1729,22 +1731,24 @@ class TestLogNativeComposition:
             "mix_ref": (p["n1"] * f1 + p["n2"] * f2) / p["n1"],
             "prod": f1 * f2,
         }[name]
-        logpdf_val = _evaluate_at(model.logpdf_unsafe, name, x)
+        logpdf_val = _evaluate_at(composite_model.logpdf_unsafe, name, x)
         np.testing.assert_allclose(logpdf_val, np.log(prob), rtol=1e-12)
 
     @pytest.mark.parametrize("name", COMPOSITES)
     def test_gradient_finite_where_components_underflow(
-        self, model: hs3.Model, name: str
+        self, composite_model: hs3.Model, name: str
     ) -> None:
         """The log-density's gradient in every parameter stays finite where components underflow."""
-        log_expr = pt.sum(model.log_distributions[name])
+        log_expr = pt.sum(composite_model.log_distributions[name])
         inputs = [
             v
             for v in pytensor.graph.traversal.explicit_graph_inputs([log_expr])
             if v.name
         ]
         wrt = [v for v in inputs if v.name != "x"]
-        fn = pytensor.function(inputs, pt.grad(log_expr, wrt), mode=model.mode)
+        fn = pytensor.function(
+            inputs, pt.grad(log_expr, wrt), mode=composite_model.mode
+        )
         for x in (40.0, 50.0, -60.0):
             values = {"x": x, **_COMPOSITE_PARAMS}
             grads = fn(*(np.float64(values[v.name]) for v in inputs))

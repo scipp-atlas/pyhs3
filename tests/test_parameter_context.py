@@ -11,7 +11,7 @@ import pytest
 
 from pyhs3 import Workspace
 from pyhs3.domains import Domain, ProductDomain
-from pyhs3.exceptions import UnlistedParameterError
+from pyhs3.exceptions import MissingInitialValueError, UnlistedParameterError
 from pyhs3.parameter_context import ParameterContext
 from pyhs3.parameter_points import ParameterPoint, ParameterSet
 
@@ -180,13 +180,18 @@ class TestWorkspaceParameterContextAnalysis:
 
     def test_parameter_set_instance_override(self, ws):
         custom = ParameterSet(
-            name="custom", parameters=[ParameterPoint(name="mu", value=7.0)]
+            name="custom",
+            parameters=[
+                ParameterPoint(name="mu", value=7.0),
+                ParameterPoint(name="sigma", value=2.0),
+            ],
         )
         context = ws.parameter_context(ws.analyses["A"], parameter_set=custom)
         assert context.parameter_set is custom
-        assert context.values == {"mu": 7.0}
+        assert context.values == {"mu": 7.0, "sigma": 2.0}
 
-    def test_no_init_uses_empty_parameter_set(self):
+    def test_no_init_has_no_starting_values(self):
+        """Without an init, the free parameters have no starting values."""
         ws = Workspace(
             **{
                 **_WS_DICT,
@@ -195,9 +200,8 @@ class TestWorkspaceParameterContextAnalysis:
                 ],
             }
         )
-        context = ws.parameter_context(ws.analyses["A"])
-        assert context.name == "default"
-        assert context.values == {}
+        with pytest.raises(MissingInitialValueError, match="mu, sigma"):
+            ws.parameter_context(ws.analyses["A"])
 
     def test_domain_override_raises(self, ws):
         with pytest.raises(ValueError, match="domain override"):

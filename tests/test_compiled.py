@@ -218,6 +218,53 @@ class TestCompiledNLLFuse:
             model.compile_nll(fuse=True, mode="FAST_RUN")
 
 
+class TestCompiledNLLModelMode:
+    @pytest.fixture
+    def compile_modes(self, monkeypatch):
+        """Modes passed to PyTensor's ``function`` while compiling the NLL."""
+        modes = []
+        real_function = compiled_module.function
+
+        def recording_function(*args, **kwargs):
+            modes.append(kwargs["mode"])
+            return real_function(*args, **kwargs)
+
+        monkeypatch.setattr(compiled_module, "function", recording_function)
+        return modes
+
+    def test_model_mode_is_used(self, compile_modes):
+        ws = _workspace()
+        model = ws.model(ws.analyses["A"], progress=False, mode="FAST_COMPILE")
+
+        model.compile_nll()
+
+        assert compile_modes == ["FAST_COMPILE"]
+
+    def test_default_model_mode_keeps_the_nll_default(self, model, compile_modes):
+        model.compile_nll()
+
+        (mode,) = compile_modes
+        assert not isinstance(mode, str)
+        assert "fast_run" in mode.provided_optimizer.include
+
+    def test_explicit_mode_overrides_the_model_mode(self, compile_modes):
+        ws = _workspace()
+        model = ws.model(ws.analyses["A"], progress=False, mode="FAST_COMPILE")
+
+        model.compile_nll(mode="FAST_RUN")
+
+        assert compile_modes == ["FAST_RUN"]
+
+    def test_fuse_uses_the_fused_default_mode(self, compile_modes):
+        ws = _workspace()
+        model = ws.model(ws.analyses["A"], progress=False, mode="FAST_COMPILE")
+
+        model.compile_nll(fuse=True)
+
+        (mode,) = compile_modes
+        assert not isinstance(mode, str)
+
+
 class TestCompiledNLLErrors:
     def test_batched_free_parameter_is_rejected(self):
         ws = _workspace()

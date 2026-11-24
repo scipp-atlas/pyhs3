@@ -263,7 +263,8 @@ class Model:
         """Non-constant parameter values from the workspace parameter set.
 
         Like :attr:`nominal_params` but excludes parameters whose
-        ``ParameterPoint.const`` flag is ``True``.  These are the parameters
+        ``ParameterPoint.const`` flag is ``True`` and observables (whose values
+        come from :attr:`data`).  These are the parameters
         that remain as free symbolic inputs after model construction, making
         this dict the correct one to pass to a jaxified callable::
 
@@ -272,7 +273,7 @@ class Model:
         """
         result: dict[str, float] = {}
         for pp in self.parameterset:
-            if not pp.const:
+            if not pp.const and pp.name not in self._observables:
                 result[pp.name] = float(pp.value)
         return result
 

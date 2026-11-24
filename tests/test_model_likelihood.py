@@ -620,6 +620,33 @@ def test_model_free_params_excludes_const():
     assert model.free_params["mean"] == pytest.approx(2.0)
 
 
+def test_model_free_params_excludes_observables():
+    """An observable with an initial value is not a free parameter and stays an (N,) vector."""
+    ws = Workspace(
+        **{
+            **_WS_DICT,
+            "parameter_points": [
+                {
+                    "name": "params",
+                    "parameters": [
+                        {"name": "mean", "value": 2.0},
+                        {"name": "x_obs", "value": 0.0},
+                    ],
+                }
+            ],
+        }
+    )
+    model = ws.model(ws.analyses["A"])
+
+    assert "x_obs" in model.nominal_params
+    assert "x_obs" not in model.free_params
+    assert "y_obs" not in model.free_params
+    assert model.free_params == {"mean": pytest.approx(2.0)}
+    # (N,) vector: one entry per event in the data
+    assert model.parameters["x_obs"].ndim == 1
+    assert model.data["x_obs"].shape == (5,)
+
+
 def test_model_data_raises_without_likelihood():
     ws = _ws()
     model = ws.model(0)  # legacy, no likelihood

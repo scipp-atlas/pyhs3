@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import cast
 
 from pytensor.compile import mode as _ptmode
@@ -61,16 +61,25 @@ class JaxifiedGraph:
     inputs: tuple[TensorVar, ...]
     input_names: tuple[str, ...]
     fn: Callable[..., tuple]  # type: ignore[type-arg]
+    _expected_names: frozenset[str] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        # Built once so that validating the keywords of a call is a set
+        # comparison, not a rebuild of the expected names.
+        object.__setattr__(self, "_expected_names", frozenset(self.input_names))
 
     def __call__(self, **kwargs: object) -> object:
-        """Call by keyword argument — pure passthrough to :attr:`fn`.
+        """Call by original PyTensor input name.
 
         This call is not jitted; wrap it in ``jax.jit`` for repeated use (see
         :class:`JaxifiedGraph`).
 
-        ``jax_funcify`` generates a function whose parameter names match the
-        original PyTensor variable names, so kwargs are forwarded directly.
-        Python itself raises ``TypeError`` for missing or unexpected names.
+        ``jax_funcify`` generates a function whose parameter names are
+        sanitized versions of the PyTensor variable names (for example,
+        consecutive underscores are collapsed), so forwarding kwargs by name
+        fails for some valid names. The kwargs are instead reordered into the
+        declared positional order of :attr:`input_names`. A ``TypeError``
+        lists any missing or unexpected names.
 
         The typical usage pattern with optimistix or everwillow is to jaxify
         the log-space graph directly (e.g. ``model.log_prob``) rather than
@@ -95,7 +104,16 @@ class JaxifiedGraph:
         -------
         Whatever :attr:`fn` returns (typically a 1-tuple of JAX arrays).
         """
-        return self.fn(**kwargs)
+        received = kwargs.keys()
+        if received != self._expected_names:
+            details = []
+            if missing := sorted(self._expected_names - received):
+                details.append(f"missing {missing}")
+            if unexpected := sorted(received - self._expected_names):
+                details.append(f"unexpected {unexpected}")
+            msg = "Invalid JAX graph inputs: " + ", ".join(details)
+            raise TypeError(msg)
+        return self.fn(*(kwargs[name] for name in self.input_names))
 
     def call_positional(self, *args: object) -> object:
         """Call with positional arguments — pure passthrough to :attr:`fn`.

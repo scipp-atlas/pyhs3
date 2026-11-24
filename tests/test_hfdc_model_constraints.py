@@ -11,7 +11,9 @@ nuisance parameter across all HFDC channels.
 
 from __future__ import annotations
 
+import gc
 import math
+import weakref
 
 import numpy as np
 import pytensor
@@ -1588,3 +1590,32 @@ class TestConstraintValidator:
             channels=[sr, cr], params=[{"name": "lumi", "value": 0.0}]
         )
         assert ws is not None
+
+
+class TestHFDCModelGraphRelease:
+    """A ``Model`` build must not leave its graph reachable from the workspace.
+
+    ``Workspace.model()`` hands the workspace's own ``HistFactoryDistChannel``
+    instances to each ``Model``.  If a channel keeps its per-context cache
+    after the build, it keeps the model's ``Context`` (and with it every
+    tensor of the model graph) alive for as long as the workspace lives, even
+    after the ``Model`` itself is discarded.
+    """
+
+    def test_discarded_model_graph_is_released(self):
+        ws = _single_channel_normsys_workspace()
+        likelihood = next(iter(ws.likelihoods))
+        model = ws.model(likelihood, progress=False)
+        channel = next(
+            dist
+            for dist in ws.distributions
+            if isinstance(dist, HistFactoryDistChannel)
+        )
+        build_context = channel._cached_context  # pylint: disable=protected-access
+        context_ref = weakref.ref(build_context) if build_context is not None else None
+
+        del model, build_context
+        gc.collect()
+
+        assert context_ref is None or context_ref() is None
+        assert channel._cached_context is None  # pylint: disable=protected-access

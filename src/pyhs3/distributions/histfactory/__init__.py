@@ -19,7 +19,6 @@ from pyhs3.axes import BinnedAxes
 from pyhs3.context import Context
 
 # Import existing distributions for constraint terms
-from pyhs3.distributions.basic import GaussianDist, PoissonDist
 from pyhs3.distributions.core import Distribution
 from pyhs3.distributions.histfactory.data import SampleData
 from pyhs3.distributions.histfactory.modifiers import (
@@ -27,6 +26,7 @@ from pyhs3.distributions.histfactory.modifiers import (
     Modifier,
     ParameterModifier,
     StatErrorModifier,
+    gamma_constraint,
 )
 from pyhs3.distributions.histfactory.samples import Sample, Samples
 from pyhs3.networks import HasDependencies, HasInternalNodes
@@ -147,6 +147,19 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     _cached_context: Context | None = PrivateAttr(default=None)
     _cached_expected_rates: TensorVar | None = PrivateAttr(default=None)
     _cached_bin_log_probs: TensorVar | None = PrivateAttr(default=None)
+
+    def _clear_expression_cache(self) -> None:
+        """Release graph-building references retained by the channel cache.
+
+        Direct ``likelihood``/``log_likelihood`` callers still benefit from
+        the per-context cache. A :class:`Model` captures the resulting graph,
+        however, so keeping the shared workspace channel pointed at that
+        model's global ``Context`` would retain the entire graph for as long
+        as the workspace lives.
+        """
+        self._cached_context = None
+        self._cached_expected_rates = None
+        self._cached_bin_log_probs = None
 
     # Each channel resolves its observed data by its own name
     # (``<channel>_observed``) and keeps the per-instance caches above, so two
@@ -320,19 +333,22 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     # Docstring below refs private methods autodoc never renders (known gap: #327).
     def _build_barlow_beeston_lite_dist(
         self, context: Context
-    ) -> tuple[GaussianDist | PoissonDist, Context] | None:
-        """Construct a single vectorized BB-lite Gauss/Poisson constraint distribution.
+    ) -> tuple[Distribution, Context] | None:
+        """Construct a single vectorized BB-lite constraint distribution.
 
         BB-lite uses shared gamma parameters across samples with a channel-level
         constraint built from combined MC statistical uncertainties. Stacks
         the per-bin gamma parameters into one length-B tensor and builds ONE
-        GaussianDist/PoissonDist over vector-valued inputs, instead of one
+        distribution over vector-valued inputs (see
+        :func:`~pyhs3.distributions.histfactory.modifiers.gamma_constraint`), instead of one
         scalar distribution per bin (mirroring
         :meth:`~pyhs3.distributions.histfactory.modifiers.ShapeSysModifier._build_bin_constraint`).
 
-        The constraint can be either Poisson or Gaussian:
+        The constraint is Gauss, Poisson or LogNormal, with relative
+        uncertainty relerr = sigma/nu per bin:
         - Poisson: Poisson(tau | gamma * tau) where tau = (nu/sigma)^2
-        - Gaussian: N(1.0 | gamma, relerr) where relerr = sigma/nu
+        - Gaussian: N(1.0 | gamma, relerr)
+        - LogNormal: LogNormal(1.0 | ln gamma, relerr)
 
         Combined uncertainties from samples:
         - total_nominal = sum(sample.data.contents)
@@ -361,7 +377,6 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
             return None
 
         gamma_params = staterror_mod.parameters
-        constraint_type = staterror_mod.constraint
 
         # Compute combined uncertainties from sample.data.errors
         total_nominal = np.zeros(total_bins)
@@ -389,28 +404,14 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         sigma = total_sigma[keep]
         gamma = pt.stack([context[param_name] for param_name in params])
 
-        name = f"constraint_bblite_{self.name}"
-        augmented_context = dict(context)
-
-        dist: GaussianDist | PoissonDist
-        if constraint_type == "Poisson":
-            # Poisson: Poisson(tau | gamma * tau) where tau = (nu/sigma)^2
-            tau = (nu / sigma) ** 2
-            scaled_name = f"{name}_scaled"
-            x_name = f"{name}_x"
-            augmented_context[x_name] = pt.constant(tau)
-            augmented_context[scaled_name] = gamma * pt.constant(tau)
-            dist = PoissonDist(name=name, x=x_name, mean=scaled_name)
-        else:  # "Gauss"
-            # Gaussian: N(1.0 | gamma, relerr) where relerr = sigma / nu
-            relerr = sigma / nu
-            mean_name = f"{name}_mean"
-            sigma_name = f"{name}_sigma"
-            augmented_context[mean_name] = gamma
-            augmented_context[sigma_name] = pt.constant(relerr)
-            dist = GaussianDist(name=name, x=1.0, mean=mean_name, sigma=sigma_name)
-
-        return dist, Context({**augmented_context, **dist.constants})
+        # Relative uncertainty per surviving bin. Shape: (B',).
+        return gamma_constraint(
+            f"constraint_bblite_{self.name}",
+            gamma,
+            sigma / nu,
+            staterror_mod.constraint,
+            context,
+        )
 
     def _make_barlow_beeston_lite_constraint(
         self, context: Context

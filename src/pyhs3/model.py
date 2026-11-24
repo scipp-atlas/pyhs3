@@ -263,7 +263,8 @@ class Model:
         """Non-constant parameter values from the workspace parameter set.
 
         Like :attr:`nominal_params` but excludes parameters whose
-        ``ParameterPoint.const`` flag is ``True``.  These are the parameters
+        ``ParameterPoint.const`` flag is ``True`` and observables (whose values
+        come from :attr:`data`).  These are the parameters
         that remain as free symbolic inputs after model construction, making
         this dict the correct one to pass to a jaxified callable::
 
@@ -272,7 +273,7 @@ class Model:
         """
         result: dict[str, float] = {}
         for pp in self.parameterset:
-            if not pp.const:
+            if not pp.const and pp.name not in self._observables:
                 result[pp.name] = float(pp.value)
         return result
 
@@ -755,7 +756,13 @@ class Model:
         # Poisson term and per-modifier make_constraint() are never called
         # here: the probability-space channel expression is derived below as
         # pt.exp() of the log expression instead.
-        log_poisson = dist.log_likelihood(context)
+        try:
+            log_poisson = dist.log_likelihood(context)
+        finally:
+            # The captured TensorVar owns everything this Model needs. Do not
+            # leave the shared workspace channel retaining the Context (and
+            # therefore the complete model graph).
+            dist._clear_expression_cache()  # pylint: disable=protected-access
         self._hfdc_log_poisson[node_name] = log_poisson
 
         channel_log_constraints = self._collect_histfactory_log_constraints(

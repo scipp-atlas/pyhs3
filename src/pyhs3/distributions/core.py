@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, ClassVar, Self, cast
 
 import pytensor.tensor as pt
 from pydantic import PrivateAttr
+from pytensor.graph.traversal import ancestors
 from pytensor.tensor.shape import specify_shape
 
 from pyhs3.base import Evaluable
@@ -211,6 +212,27 @@ class Distribution(Evaluable, ABC):
         upper_val = substitute_variable(expr, leaf, upper_t)
         lower_val = substitute_variable(expr, leaf, lower_t)
         return cast(TensorVar, upper_val - lower_val)
+
+    def _depends_on_observable(
+        self, context: Context, observable_name: str, fields: Sequence[str]
+    ) -> bool:
+        """Whether any of ``fields`` is built from the observable ``observable_name``.
+
+        An analytic antiderivative in ``x`` assumes the distribution's other
+        parameters are constant in ``x``. When one of them is computed from the
+        observable, :meth:`normalization_expression` should return None so the
+        integral falls back to quadrature.
+
+        Args:
+            context: Mapping of names to pytensor variables.
+            observable_name: Name of the observable being integrated over.
+            fields: Names of this distribution's parameter fields to check.
+
+        Returns:
+            True if the observable's leaf is an ancestor of any of the fields.
+        """
+        leaf = context.parameters[observable_name]
+        return leaf in ancestors([context[self._parameters[f]] for f in fields])
 
     def _matching_observables(
         self, context: Context

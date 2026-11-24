@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from typing import Annotated, Any, Literal, cast
 
 import numpy as np
+import numpy.typing as npt
 import pytensor.tensor as pt
 from pydantic import (
     BaseModel,
@@ -98,6 +99,58 @@ class Modifier(BaseModel, HasDependencies, ABC):
     @abstractmethod
     def expression(self, context: Context) -> TensorVar:
         """Return the modifier's contribution (additive term or multiplicative factor)."""
+
+
+def gamma_constraint(
+    name: str,
+    gamma: TensorVar,
+    sigma_rel: npt.NDArray[np.float64],
+    constraint: Literal["Gauss", "Poisson", "LogNormal"],
+    context: Context,
+) -> tuple[Distribution, Context]:
+    """Constraint distribution of per-bin parameters whose nominal value is 1.
+
+    Shared by ``shapesys``, ``staterror`` (Barlow-Beeston full) and the
+    channel-level Barlow-Beeston-lite constraint, so each HS3 v0.2 constraint
+    type is defined once. ``gamma`` and ``sigma_rel`` have shape (B,): the
+    parameter and its relative uncertainty for each constrained bin. The
+    returned distribution is elementwise, so it evaluates to (B,) per-bin terms:
+
+    - ``Gauss``: Gauss(1 | gamma, sigma_rel)
+    - ``Poisson``: Pois(tau | gamma * tau), continuous, with tau = 1 / sigma_rel**2
+      (as RooFit's HistFactory builds it)
+    - ``LogNormal``: LogNormal(1 | mu = ln gamma, sigma = sigma_rel), whose
+      median is gamma
+
+    Args:
+        name: Name of the constraint distribution; helper tensors are named after it.
+        gamma: (B,) per-bin parameters.
+        sigma_rel: (B,) relative uncertainties.
+        constraint: The HS3 v0.2 constraint type.
+        context: Built tensors by name; extended with the helper tensors.
+
+    Returns:
+        The constraint distribution and the context it evaluates in.
+    """
+    augmented_context = dict(context)
+    dist: Distribution
+    if constraint == "Poisson":
+        tau = 1.0 / sigma_rel**2
+        x_name, mean_name = f"{name}_x", f"{name}_scaled"
+        augmented_context[x_name] = pt.constant(tau)
+        augmented_context[mean_name] = gamma * pt.constant(tau)
+        dist = PoissonDist(name=name, x=x_name, mean=mean_name)
+    elif constraint == "Gauss":
+        mean_name, sigma_name = f"{name}_mean", f"{name}_sigma"
+        augmented_context[mean_name] = gamma
+        augmented_context[sigma_name] = pt.constant(sigma_rel)
+        dist = GaussianDist(name=name, x=1.0, mean=mean_name, sigma=sigma_name)
+    else:  # constraint == "LogNormal"
+        mu_name, sigma_name = f"{name}_mu", f"{name}_sigma"
+        augmented_context[mu_name] = pt.log(gamma)
+        augmented_context[sigma_name] = pt.constant(sigma_rel)
+        dist = LogNormalDist(name=name, x=1.0, mu=mu_name, sigma=sigma_name)
+    return dist, Context({**augmented_context, **dist.constants})
 
 
 class HasConstraint(ABC):
@@ -339,11 +392,16 @@ class ShapeFactorModifier(ParametersModifier):
 
 
 class ShapeSysModifier(HasConstraint, ParametersModifier):
-    """Uncorrelated shape systematic with Poisson constraints."""
+    """Uncorrelated shape systematic with per-bin constraints.
+
+    ``data.vals`` are absolute per-bin uncertainties (the pyhf convention); the
+    relative uncertainty of bin ``i`` is ``vals[i] / nominal[i]``. See
+    :func:`gamma_constraint` for the constraint term of each type.
+    """
 
     type: Literal["shapesys"] = "shapesys"
     application: Literal["multiplicative"] = Field("multiplicative", exclude=True)
-    constraint: Literal["Poisson"] = "Poisson"
+    constraint: Literal["Gauss", "Poisson", "LogNormal"] = "Poisson"
     data: ShapeSysData
 
     @property
@@ -359,37 +417,24 @@ class ShapeSysModifier(HasConstraint, ParametersModifier):
     def _build_bin_constraint(
         self, context: Context, sample_data: SampleData
     ) -> tuple[Distribution, Context]:
-        """Construct a single vectorized Poisson constraint distribution.
+        """Construct a single vectorized constraint distribution over all bins.
 
         Stacks the B per-bin nuisance parameters into one length-B tensor and
-        builds ONE :class:`PoissonDist` over vector-valued ``x``/``mean``,
-        instead of one scalar :class:`PoissonDist` per bin. ``PoissonDist``'s
-        ``likelihood``/``log_likelihood`` are elementwise pytensor expressions,
-        so a vector input produces a vector output; :meth:`make_constraint`
-        and :meth:`log_constraint` reduce the resulting (B,) vector with
-        ``pt.prod``/``pt.sum``. Shared by both so the parametrization is
-        defined exactly once.
+        builds ONE distribution over vector-valued inputs (see
+        :func:`gamma_constraint`), instead of one scalar distribution per bin;
+        :meth:`make_constraint` and :meth:`log_constraint` reduce the resulting
+        (B,) vector with ``pt.prod``/``pt.sum``. Shared by both so the
+        parametrization is defined exactly once.
         """
-        name = f"constraint_{self.name}"
-
-        # (sigma_b)^{-2} = (nominal / vals)^2, evaluated on concrete floats.
-        # Shape: (B,) -- one rate per bin, in self.parameters order.
-        rates = (
-            np.asarray(sample_data.contents, dtype=np.float64)
-            / np.asarray(self.data.vals, dtype=np.float64)
-        ) ** 2
-
+        # Shape (B,): relative uncertainty per bin, in self.parameters order.
+        sigma_rel = np.asarray(self.data.vals, dtype=np.float64) / np.asarray(
+            sample_data.contents, dtype=np.float64
+        )
         # gamma: (B,) stacked per-bin nuisance-parameter tensors.
         gamma = pt.stack([context[parameter] for parameter in self.parameters])
-        scaled_name = f"{name}_scaled"
-        x_name = f"{name}_x"
-
-        augmented_context = dict(context)
-        augmented_context[x_name] = pt.constant(rates)
-        augmented_context[scaled_name] = gamma * pt.constant(rates)
-
-        dist: Distribution = PoissonDist(name=name, x=x_name, mean=scaled_name)
-        return dist, Context({**augmented_context, **dist.constants})
+        return gamma_constraint(
+            f"constraint_{self.name}", gamma, sigma_rel, self.constraint, context
+        )
 
     def make_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
         """Create constraint term using PyTensor operations."""
@@ -397,7 +442,7 @@ class ShapeSysModifier(HasConstraint, ParametersModifier):
         return cast(TensorVar, pt.prod(dist.expression(augmented_context)))  # type: ignore[no-untyped-call]
 
     def log_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
-        """Create constraint term as the sum of per-bin Poisson log-probabilities."""
+        """Create constraint term as the sum of per-bin log-probabilities."""
         dist, augmented_context = self._build_bin_constraint(context, sample_data)
         return cast(TensorVar, pt.sum(dist.log_expression(augmented_context)))  # type: ignore[no-untyped-call]
 
@@ -408,7 +453,7 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
     type: Literal["staterror"] = "staterror"
     application: Literal["multiplicative"] = Field("multiplicative", exclude=True)
     parameters: list[str] = Field(default_factory=list)
-    constraint: Literal["Gauss", "Poisson"] = "Gauss"
+    constraint: Literal["Gauss", "Poisson", "LogNormal"] = "Gauss"
     data: StatErrorData | None = None
 
     @property
@@ -424,20 +469,21 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
     def _build_bin_constraint(
         self, context: Context, sample_data: SampleData, data: StatErrorData
     ) -> tuple[Distribution, Context] | None:
-        """Construct a single vectorized Gauss/Poisson constraint distribution.
+        """Construct a single vectorized constraint distribution over all bins.
 
         Only used in BB-full mode. In BB-lite mode, constraints are built at
         channel level. Stacks the per-bin nuisance parameters into one
-        length-B tensor and builds ONE GaussianDist/PoissonDist over
-        vector-valued inputs, instead of one scalar distribution per bin
-        (mirroring :meth:`ShapeSysModifier._build_bin_constraint`).
+        length-B tensor and builds ONE distribution over vector-valued inputs
+        (see :func:`gamma_constraint`), instead of one scalar distribution per
+        bin (mirroring :meth:`ShapeSysModifier._build_bin_constraint`).
 
         Returns ``None`` when there is nothing to constrain: either
         ``self.parameters`` is empty, or (Poisson only) every bin has
-        ``nominal_yield <= 0`` and was excluded. Gauss bins with a
-        nonpositive yield are NOT excluded -- they fall back to
-        ``sigma_value = 1.0``, matching the pre-vectorization per-bin
-        behavior exactly.
+        ``nominal_yield <= 0`` and was excluded. Gauss and LogNormal bins with
+        a nonpositive yield are NOT excluded -- they fall back to a relative
+        uncertainty of 1.0, matching the pre-vectorization per-bin Gauss
+        behavior exactly. Poisson needs tau = 1 / sigma**2, which such a bin
+        does not have.
 
         Shared by :meth:`make_constraint` (product of per-bin probabilities)
         and :meth:`log_constraint` (sum of per-bin log-probabilities) so the
@@ -452,45 +498,31 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
         if n == 0:
             return None
 
-        name = f"constraint_{self.name}"
         # Shape (B,): concrete per-bin nominal yields and uncertainties.
         nominal_yields = np.asarray(sample_data.contents[:n], dtype=np.float64)
         uncertainties = np.asarray(data.uncertainties[:n], dtype=np.float64)
-        augmented_context = dict(context)
+        positive = nominal_yields > 0
 
-        dist: Distribution
         if self.constraint == "Poisson":
             # Skip zero-yield bins: tau = (nu/sigma)^2 is undefined when nu <= 0.
-            keep = nominal_yields > 0
             parameters = [
-                p for p, k in zip(self.parameters[:n], keep, strict=True) if k
+                p for p, k in zip(self.parameters[:n], positive, strict=True) if k
             ]
             if not parameters:
                 return None
-            # tau = (nominal/uncertainty)^2 = 1/sigma_value^2. Shape: (B',).
-            sigma_value = uncertainties[keep] / nominal_yields[keep]
-            tau = 1.0 / sigma_value**2
-            gamma = pt.stack([context[parameter] for parameter in parameters])
-            scaled_name = f"{name}_scaled"
-            x_name = f"{name}_x"
-            augmented_context[x_name] = pt.constant(tau)
-            augmented_context[scaled_name] = gamma * pt.constant(tau)
-            dist = PoissonDist(name=name, x=x_name, mean=scaled_name)
-        else:  # "Gauss"
-            # sigma_value is the relative uncertainty = uncertainty / nominal_yield,
-            # falling back to 1.0 for nonpositive yields (bin kept, not skipped).
-            # Shape: (B,).
-            sigma_value = np.ones_like(nominal_yields)
-            positive = nominal_yields > 0
-            sigma_value[positive] = uncertainties[positive] / nominal_yields[positive]
-            gamma = pt.stack([context[parameter] for parameter in self.parameters[:n]])
-            mean_name = f"{name}_mean"
-            sigma_name = f"{name}_sigma"
-            augmented_context[mean_name] = gamma
-            augmented_context[sigma_name] = pt.constant(sigma_value)
-            dist = GaussianDist(name=name, x=1.0, mean=mean_name, sigma=sigma_name)
+            # Shape (B',): relative uncertainty of the surviving bins.
+            sigma_rel = uncertainties[positive] / nominal_yields[positive]
+        else:  # "Gauss" or "LogNormal"
+            # Relative uncertainty = uncertainty / nominal_yield, falling back
+            # to 1.0 for nonpositive yields (bin kept, not skipped). Shape: (B,).
+            parameters = self.parameters[:n]
+            sigma_rel = np.ones_like(nominal_yields)
+            sigma_rel[positive] = uncertainties[positive] / nominal_yields[positive]
 
-        return dist, Context({**augmented_context, **dist.constants})
+        gamma = pt.stack([context[parameter] for parameter in parameters])
+        return gamma_constraint(
+            f"constraint_{self.name}", gamma, sigma_rel, self.constraint, context
+        )
 
     def make_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
         """Create constraint term using PyTensor operations.

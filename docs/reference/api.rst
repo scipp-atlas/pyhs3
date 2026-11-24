@@ -154,6 +154,7 @@ HistFactory
    modifiers.ShapeSysData
    modifiers.StatErrorData
    modifiers.Modifiers
+   modifiers.gamma_constraint
 
 Axes
 ----

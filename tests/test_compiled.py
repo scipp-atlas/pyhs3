@@ -378,3 +378,63 @@ class TestCompiledNLLFit:
         # the sample mean and the (biased) sample standard deviation.
         assert fitted["mu"] == pytest.approx(np.mean(_EVENTS), abs=1e-4)
         assert fitted["sigma"] == pytest.approx(np.std(_EVENTS), abs=1e-4)
+
+
+def _poi_model(pois: list[str], **const: bool):
+    """The _workspace model with the analysis listing ``pois`` as parameters of interest."""
+    ws = _workspace()
+    ws.analyses["A"].parameters_of_interest = pois
+    for name, flag in const.items():
+        ws.parameter_points["init"][name].const = flag
+    return ws.model(ws.analyses["A"], progress=False)
+
+
+class TestCompiledNLLParametersOfInterest:
+    def test_names_and_indices_from_the_analysis(self):
+        nll = _poi_model(["sigma", "mu"]).compile_nll()
+
+        assert nll.parameters_of_interest == ("sigma", "mu")
+        assert tuple(nll.parameter_names[i] for i in nll.poi_indices) == (
+            "sigma",
+            "mu",
+        )
+
+    def test_no_parameters_of_interest(self, model):
+        nll = model.compile_nll()
+
+        assert nll.parameters_of_interest == ()
+        assert nll.poi_indices == ()
+
+    def test_const_parameter_of_interest_is_not_free(self):
+        """A POI held const is baked into the function, so it has no index."""
+        nll = _poi_model(["mu"], mu=True).compile_nll()
+
+        assert nll.parameter_names == ("sigma",)
+        assert nll.parameters_of_interest == ()
+        assert nll.poi_indices == ()
+
+    def test_kept_when_loaded_from_cache(self, tmp_path):
+        _poi_model(["mu"]).compile_nll(cache=tmp_path)
+        nll = _poi_model(["mu"]).compile_nll(cache=tmp_path)
+
+        assert nll.from_cache
+        assert nll.parameters_of_interest == ("mu",)
+        assert nll.parameter_names[nll.poi_indices[0]] == "mu"
+
+    def test_compile_nll_function_argument(self, model):
+        log_prob = model.log_prob
+        mu, sigma, x_obs = sorted(
+            (v for v in explicit_graph_inputs([log_prob]) if v.name),
+            key=lambda v: v.name,
+        )
+        nll = compiled_module.compile_nll(
+            log_prob,
+            [sigma, mu],
+            {x_obs: np.asarray(_EVENTS)},
+            [2.0, 1.0],
+            [(None, None), (None, None)],
+            parameters_of_interest=["mu", "lumi"],
+        )
+
+        assert nll.parameters_of_interest == ("mu",)
+        assert nll.poi_indices == (1,)

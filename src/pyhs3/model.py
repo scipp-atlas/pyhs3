@@ -296,8 +296,10 @@ class Model:
         :attr:`~pyhs3.compiled.CompiledNLL.parameter_names`).  The observed
         data and every ``const`` parameter are baked into the compiled
         function, so each call passes only the free parameters.  The result
-        also carries the starting point (:attr:`free_params`) and the domain
-        bounds of each parameter, ready for SciPy or iminuit.
+        also carries the starting point (:attr:`free_params`), the domain
+        bounds of each parameter, ready for SciPy or iminuit, and the
+        positions of the analysis parameters of interest
+        (:attr:`~pyhs3.compiled.CompiledNLL.poi_indices`).
 
         This is the recommended way to evaluate a likelihood repeatedly; see
         :doc:`/howto/fit_model`.
@@ -408,6 +410,7 @@ class Model:
             mode=mode,
             cache=cache,
             batched=batched,
+            parameters_of_interest=self.context.parameters_of_interest,
         )
 
     @cached_property

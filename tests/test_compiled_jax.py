@@ -298,3 +298,16 @@ class TestJaxBatched:
             backend="jax", batched=True, cache=tmp_path
         )
         assert len([p for p in tmp_path.iterdir() if p.is_file()]) == 2
+
+
+class TestJaxParametersOfInterest:
+    @pytest.mark.parametrize("batched", [False, True])
+    def test_names_and_indices_from_the_analysis(self, batched):
+        ws = _workspace()
+        ws.analyses["A"].parameters_of_interest = ["mu"]
+        model = ws.model(ws.analyses["A"], progress=False)
+
+        nll = model.compile_nll(backend="jax", batched=batched)
+
+        assert nll.parameters_of_interest == ("mu",)
+        assert nll.parameter_names[nll.poi_indices[0]] == "mu"

@@ -134,8 +134,9 @@ class Likelihood(NamedModel):
         channel, for example) reads its observed bin counts from the input named
         ``{distribution}_observed``. These inputs are data, not parameters.
         """
+        # zip() joins str and Distribution to object for mypy; narrow on the class.
         return {
-            f"{dist if isinstance(dist, str) else dist.name}_observed": datum
+            f"{dist.name if isinstance(dist, Distribution) else str(dist)}_observed": datum
             for dist, datum in zip(self.distributions, self.data, strict=True)
             if isinstance(datum, BinnedData)
         }

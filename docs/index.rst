@@ -1,34 +1,44 @@
 .. toctree::
    :hidden:
    :maxdepth: 2
+   :caption: Getting started
 
    tutorial/getting_started
-   howto/load_workspace
-   howto/evaluate_model
-   howto/fit_model
-   howto/minimize_nll
-   howto/debug_model
-   howto/check_a_workspace_from_the_cli
-   howto/evaluate_and_visualize_from_the_cli
-   reference/api
-   reference/cli
-   explanation/building_a_model
-   explanation/comparing_nll_with_roofit
-   explanation/duplicate_subexpressions
-   explanation/batched_families
-   broadcasting
-   defining_components
-   normalization
-   visualization
 
 .. toctree::
    :hidden:
    :maxdepth: 2
-   :caption: Academics
+   :caption: How-to guides
 
-   acknowledgements
-   abstracts
-   talks
+   howto/load_workspace
+   howto/evaluate_model
+   broadcasting
+   visualization
+   howto/debug_model
+   howto/minimize_nll
+   howto/fit_model
+   howto/check_a_workspace_from_the_cli
+   howto/evaluate_and_visualize_from_the_cli
+   defining_components
+
+.. toctree::
+   :hidden:
+   :maxdepth: 2
+   :caption: Reference
+
+   reference/api
+   reference/cli
+
+.. toctree::
+   :hidden:
+   :maxdepth: 2
+   :caption: Explanation
+
+   explanation/building_a_model
+   normalization
+   explanation/batched_families
+   explanation/duplicate_subexpressions
+   explanation/comparing_nll_with_roofit
 
 .. toctree::
    :hidden:
@@ -40,6 +50,15 @@
    testing
    architecture
    CODE_OF_CONDUCT
+
+.. toctree::
+   :hidden:
+   :maxdepth: 2
+   :caption: Academics
+
+   acknowledgements
+   abstracts
+   talks
 
 .. raw:: html
 

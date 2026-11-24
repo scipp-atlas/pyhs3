@@ -53,6 +53,13 @@ pure-python implementation of HS3
    :target: https://github.com/scipp-atlas/pyhs3/actions/workflows/cd.yml?query=branch%3Amain
 
 
+pyhs3 implements version 0.2 of HS3, the HEP Statistics Serialization Standard
+(`HS3 v0.2 specification
+<https://github.com/hep-statistics-serialization-standard/hep-statistics-serialization-standard/releases/tag/v0.2>`_).
+You load an HS3 v0.2 JSON workspace with pyhs3 and evaluate or fit the
+statistical model it describes.
+
+
 Hello World
 -----------
 

@@ -103,10 +103,10 @@ Let's see how normalization affects a Gaussian distribution over a finite domain
    >>> expr_norm = model_norm.distributions["signal"]
    >>> expr_unnorm = model_unnorm.distributions["signal"]
    >>>
-   >>> # The normalized version includes a division by the integral (using sum for quadrature)
-   >>> "sum" in pp(expr_norm)  # summing for numerical integration
+   >>> # The normalized version divides by the integral, which the Gaussian evaluates exactly with erfc
+   >>> "Erfc" in pp(expr_norm)
    True
-   >>> "sum" in pp(expr_unnorm)  # No sum in raw PDF
+   >>> "Erfc" in pp(expr_unnorm)  # No normalization integral in the raw PDF
    False
    >>>
    >>> # Verify normalization: integral over [100, 160] = 1.0

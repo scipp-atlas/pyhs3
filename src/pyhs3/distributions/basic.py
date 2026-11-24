@@ -18,9 +18,11 @@ import pytensor_distributions.normal as Normal
 import pytensor_distributions.poisson as Poisson
 import pytensor_distributions.uniform as Uniform
 from pydantic import PrivateAttr
+from pytensor.graph.traversal import ancestors
 
 from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
+from pyhs3.normalization import substitute_variable
 from pyhs3.typing.aliases import TensorVar
 
 
@@ -98,6 +100,118 @@ class GaussianDist(Distribution):
                 context[self._parameters["sigma"]],
             ),
         )
+
+    def _shape_depends_on(self, context: Context, observable_name: str) -> bool:
+        """Whether ``mean`` or ``sigma`` is built from the observable being integrated.
+
+        The Gaussian CDF difference is the integral over ``x`` only when the mean
+        and width are constant in ``x``; otherwise the analytic entry points
+        return None and the base class integrates by quadrature.
+        """
+        leaf = context.parameters[observable_name]
+        shape = [context[self._parameters["mean"]], context[self._parameters["sigma"]]]
+        return leaf in ancestors(shape)
+
+    def normalization_expression(
+        self, context: Context, observable_name: str
+    ) -> TensorVar | None:
+        r"""
+        Analytic antiderivative of the Gaussian PDF.
+
+        The antiderivative of the fully normalized :meth:`likelihood` density is
+        the centered CDF
+
+        .. math::
+
+            F(x) = \frac{1}{2}\,\operatorname{erf}\!\left(\frac{x-\mu}{\sigma\sqrt{2}}\right)
+
+        so that :math:`F(+\infty) - F(-\infty) = 1`. Returns None (deferring to
+        quadrature) when the matching observable is not this distribution's
+        ``x``, since the antiderivative is only defined with respect to ``x``,
+        and when ``mean`` or ``sigma`` depends on that observable, since the
+        CDF difference then is not the integral.
+
+        ``_normalization_integral`` does not subtract this expression at
+        the two bounds: far from :math:`\mu` both values approach
+        :math:`\pm 1/2` and the difference loses all of its significant digits.
+
+        Args:
+            context: Mapping of names to pytensor variables.
+            observable_name: Name of the observable to integrate over.
+
+        Returns:
+            Symbolic antiderivative expression, or None for numerical fallback.
+        """
+        if observable_name != self._parameters["x"] or self._shape_depends_on(
+            context, observable_name
+        ):
+            return None
+
+        x = context[self._parameters["x"]]
+        mean = context[self._parameters["mean"]]
+        sigma = context[self._parameters["sigma"]]
+        return cast(TensorVar, 0.5 * pt.erf((x - mean) / (sigma * math.sqrt(2.0))))
+
+    def _normalization_integral(
+        self, context: Context, obs_name: str, lower: TensorVar, upper: TensorVar
+    ) -> TensorVar | None:
+        r"""
+        Exact Gaussian probability between ``lower`` and ``upper``.
+
+        Equals :math:`F(\text{upper}) - F(\text{lower})` for the antiderivative
+        of :meth:`normalization_expression`, written with ``erfc`` on the tail
+        side of the window so that no two nearly equal numbers are subtracted.
+        With :math:`z = (x-\mu)/(\sigma\sqrt{2})`, the window is mirrored about
+        :math:`\mu` so that its midpoint lies on the :math:`z > 0` side, where
+
+        .. math::
+
+            \frac{1}{2}\left[\operatorname{erfc}(z_\text{lo}) - \operatorname{erfc}(z_\text{hi})\right]
+
+        keeps its relative precision for any distance from :math:`\mu` (the
+        difference of two ``erf`` values underflows to 0 once both bounds are
+        roughly :math:`6\sigma` out on one side, which would make the
+        normalized density infinite or NaN).
+
+        The bounds are substituted into the observable's view, so the result
+        has the same static shape as the base-class integral: the view's shape
+        with every axis of length 1.
+
+        Returns None, deferring to quadrature, under the same conditions as
+        :meth:`normalization_expression`.
+
+        Args:
+            context: Mapping of names to pytensor variables.
+            obs_name: Name of the observable to integrate over.
+            lower: Lower integration bound.
+            upper: Upper integration bound.
+
+        Returns:
+            Symbolic integral expression, or None for numerical fallback.
+        """
+        if obs_name != self._parameters["x"] or self._shape_depends_on(
+            context, obs_name
+        ):
+            return None
+
+        leaf = context.parameters[obs_name]
+        view = context[self._parameters["x"]]
+        mean = context[self._parameters["mean"]]
+        sigma = context[self._parameters["sigma"]]
+        scale = sigma * math.sqrt(2.0)
+
+        # Bounds enter in the view's shape, e.g. (1, 1) for an (N, 1) view.
+        lower_t = pt.as_tensor_variable([lower], dtype=leaf.dtype)
+        upper_t = pt.as_tensor_variable([upper], dtype=leaf.dtype)
+        z_lower = (substitute_variable(view, leaf, lower_t) - mean) / scale
+        z_upper = (substitute_variable(view, leaf, upper_t) - mean) / scale
+
+        # Mirror about mu when the window's midpoint is below it, so that both
+        # arguments of erfc sit on the right tail, where erfc is accurate.
+        mirrored = (z_lower + z_upper) < 0
+        z_near = pt.switch(mirrored, -z_upper, z_lower)
+        z_far = pt.switch(mirrored, -z_lower, z_upper)
+        return cast(TensorVar, 0.5 * (pt.erfc(z_near) - pt.erfc(z_far)))
 
 
 class UniformDist(Distribution):

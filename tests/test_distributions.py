@@ -437,6 +437,77 @@ class TestCrystalBallDist:
         np.testing.assert_allclose(negative, clipped, rtol=1e-12)
 
 
+_CRYSTAL_BALL_VALUES = {"alpha": 1.5, "m0": 0.2, "n": 3.0, "sigma": 1.2}
+_ASYMMETRIC_CRYSTAL_BALL_VALUES = {
+    "alpha_L": 1.5,
+    "alpha_R": 1.1,
+    "m0": 0.2,
+    "n_L": 3.0,
+    "n_R": 4.0,
+    "sigma_L": 1.2,
+    "sigma_R": 0.9,
+}
+
+
+def _evaluate_with_named_inputs(dist, values, numeric_fields):
+    """Evaluate ``dist`` with ``m`` named and the given fields held as constants.
+
+    Fields not in ``numeric_fields`` are looked up by name in the context, so
+    the result can be compared with an all-named distribution.
+    """
+    context = Context(
+        {
+            "m": pt.constant(-0.7),
+            **{k: pt.constant(v) for k, v in values.items() if k not in numeric_fields},
+            **dist.constants,
+        }
+    )
+    return float(function([], dist.expression(context))())
+
+
+class TestNumericScalarFields:
+    """Crystal Ball fields that HS3 allows to be a value or a name."""
+
+    @pytest.mark.parametrize("field", list(_CRYSTAL_BALL_VALUES))
+    def test_crystal_ball_numeric_matches_named(self, field):
+        values = _CRYSTAL_BALL_VALUES
+        named = CrystalBallDist(name="cb", m="m", **{k: k for k in values})
+        numeric = CrystalBallDist(
+            name="cb", m="m", **{k: (values[k] if k == field else k) for k in values}
+        )
+        expected = _evaluate_with_named_inputs(named, values, set())
+        result = _evaluate_with_named_inputs(numeric, values, {field})
+        assert result == pytest.approx(expected)
+
+    def test_crystal_ball_all_numeric_matches_named(self):
+        values = _CRYSTAL_BALL_VALUES
+        named = CrystalBallDist(name="cb", m="m", **{k: k for k in values})
+        numeric = CrystalBallDist(name="cb", m="m", **values)
+        expected = _evaluate_with_named_inputs(named, values, set())
+        result = _evaluate_with_named_inputs(numeric, values, set(values))
+        assert result == pytest.approx(expected)
+        assert numeric.model_dump()["n"] == 3.0
+
+    @pytest.mark.parametrize("field", list(_ASYMMETRIC_CRYSTAL_BALL_VALUES))
+    def test_asymmetric_crystal_ball_numeric_matches_named(self, field):
+        values = _ASYMMETRIC_CRYSTAL_BALL_VALUES
+        named = AsymmetricCrystalBallDist(name="cb", m="m", **{k: k for k in values})
+        numeric = AsymmetricCrystalBallDist(
+            name="cb", m="m", **{k: (values[k] if k == field else k) for k in values}
+        )
+        expected = _evaluate_with_named_inputs(named, values, set())
+        result = _evaluate_with_named_inputs(numeric, values, {field})
+        assert result == pytest.approx(expected)
+
+    def test_asymmetric_crystal_ball_all_numeric_matches_named(self):
+        values = _ASYMMETRIC_CRYSTAL_BALL_VALUES
+        named = AsymmetricCrystalBallDist(name="cb", m="m", **{k: k for k in values})
+        numeric = AsymmetricCrystalBallDist(name="cb", m="m", **values)
+        expected = _evaluate_with_named_inputs(named, values, set())
+        result = _evaluate_with_named_inputs(numeric, values, set(values))
+        assert result == pytest.approx(expected)
+
+
 class TestAsymmetricCrystalBallDist:
     """Test AsymmetricCrystalBallDist (double-sided) implementation."""
 

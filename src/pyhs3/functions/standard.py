@@ -122,7 +122,7 @@ class SumFunction(Function):
     """
 
     type: Literal["sum"] = Field(default="sum", repr=False)
-    summands: list[str] = Field(..., repr=False)
+    summands: list[int | float | str] = Field(..., repr=False)
 
     def _expression(self, context: Context) -> TensorVar:
         """
@@ -134,7 +134,7 @@ class SumFunction(Function):
         Returns:
             TensorVar: PyTensor expression representing the sum of all summands.
         """
-        terms = [context[summand] for summand in self.summands]
+        terms = self.get_parameter_list(context, "summands")
         return balanced_sum(terms, pt.constant(0.0))
 
 

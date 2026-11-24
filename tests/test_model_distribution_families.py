@@ -92,9 +92,12 @@ def _workspace(duplicates: tuple[tuple[str, str], ...] = ()) -> pyhs3.Workspace:
             {
                 "name": "main",
                 "type": "product_domain",
+                # HS3 section 2.7: every free parameter must be in a domain.
                 "axes": [
-                    {"name": a, "min": -5.0, "max": 5.0}
-                    for a in ("alpha_a", "alpha_b", "alpha_c")
+                    {"name": p["name"], "min": -20.0, "max": 20.0}
+                    if p["name"] not in ("alpha_a", "alpha_b", "alpha_c")
+                    else {"name": p["name"], "min": -5.0, "max": 5.0}
+                    for p in parameters
                 ],
             }
         ],

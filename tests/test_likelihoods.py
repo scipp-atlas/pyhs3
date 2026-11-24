@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 from pyhs3 import Workspace
-from pyhs3.data import Data, Datum, PointData, UnbinnedData
+from pyhs3.data import BinnedData, Data, Datum, PointData, UnbinnedData
 from pyhs3.distributions import Distributions, GaussianDist
 from pyhs3.distributions.core import Distribution
 from pyhs3.exceptions import WorkspaceValidationError
@@ -92,6 +92,33 @@ class TestLikelihood:
         assert likelihood.distributions == []
         assert likelihood.data == []
         assert likelihood.aux_distributions == ["aux1"]
+
+    def test_distribution_names_include_aux_distributions(self):
+        """distribution_names lists the paired distributions, then the auxiliary ones."""
+        likelihood = Likelihood(
+            name="L",
+            distributions=["dist1", "dist2"],
+            data=["data1", "data2"],
+            aux_distributions=["aux1"],
+        )
+        assert likelihood.distribution_names() == ["dist1", "dist2", "aux1"]
+
+    def test_binned_observed_inputs_only_for_binned_data(self):
+        """Only distributions paired with BinnedData supply a '{name}_observed' input."""
+        binned = BinnedData(
+            name="SR_data",
+            axes=[{"name": "x_SR", "min": 0.0, "max": 10.0, "nbins": 2}],
+            contents=[10.0, 20.0],
+        )
+        unbinned = UnbinnedData(
+            name="CR_data",
+            entries=[[1.0]],
+            axes=[{"name": "y", "min": 0.0, "max": 5.0}],
+        )
+        likelihood = Likelihood(
+            name="L", distributions=["CR", "SR"], data=[unbinned, binned]
+        )
+        assert likelihood.binned_observed_inputs() == {"SR_observed": binned}
 
 
 class TestLikelihoods:

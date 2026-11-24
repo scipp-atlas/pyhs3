@@ -1535,7 +1535,11 @@ class TestWorkspaceModelDispatch:
                 {
                     "name": "first_domain",
                     "type": "product_domain",
-                    "axes": [{"name": "x", "min": -5.0, "max": 5.0}],
+                    "axes": [
+                        {"name": "x", "min": -5.0, "max": 5.0},
+                        {"name": "mu", "min": -10.0, "max": 10.0},
+                        {"name": "sigma", "min": 0.1, "max": 10.0},
+                    ],
                 },
                 {
                     "name": "second_domain",
@@ -1619,7 +1623,11 @@ class TestWorkspaceModelDispatch:
                 {
                     "name": "d",
                     "type": "product_domain",
-                    "axes": [{"name": "x", "min": -5.0, "max": 5.0}],
+                    "axes": [
+                        {"name": "x", "min": -5.0, "max": 5.0},
+                        {"name": "mu", "min": -10.0, "max": 10.0},
+                        {"name": "sigma", "min": 0.1, "max": 10.0},
+                    ],
                 }
             ],
             data=[{"name": "obs", "type": "point", "value": 0.0}],

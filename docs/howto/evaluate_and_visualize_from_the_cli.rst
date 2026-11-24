@@ -43,6 +43,17 @@ precedence over the file for names given both ways:
 If the workspace defines more than one analysis (or, absent any analyses,
 more than one likelihood), name which one to evaluate with ``--analysis``.
 
+HS3 requires every parameter of an analysis's likelihood to be in one of the
+analysis domains or held ``const`` in the parameter set the analysis
+references. Workspaces exported by ROOT give their analyses no parameter set,
+so ``pyhs3 nll`` stops and lists the parameters that break the rule, together
+with the parameter sets that hold all of them constant. Pass one of those with
+``--parameter-set``:
+
+.. code-block:: console
+
+   $ pyhs3 nll workspace.json --analysis simPdf_obsData --parameter-set default_values
+
 Render a distribution's computation graph
 ---------------------------------------------
 

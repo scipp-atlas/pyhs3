@@ -92,7 +92,26 @@ class UnlistedParameterError(WorkspaceValidationError):
         self.const_parameter_sets = const_parameter_sets
 
 
-class MissingInitialValueError(WorkspaceValidationError):
+class AnalysisParameterError(WorkspaceValidationError):
+    """
+    Base for errors that name parameters an analysis must fix before its model builds.
+
+    Attributes:
+        parameters: The offending parameter names, sorted.
+    """
+
+    def __init__(self, message: str, parameters: list[str]) -> None:
+        """Store the message and the names a caller needs to fix the analysis.
+
+        Args:
+            message: Human-readable description of the violation.
+            parameters: The offending parameter names, sorted.
+        """
+        super().__init__(message)
+        self.parameters = parameters
+
+
+class MissingInitialValueError(AnalysisParameterError):
     """
     Raised when a free parameter of an analysis has no starting value.
 
@@ -105,15 +124,32 @@ class MissingInitialValueError(WorkspaceValidationError):
         parameters: The free parameter names with no starting value, sorted.
     """
 
-    def __init__(self, message: str, parameters: list[str]) -> None:
-        """Store the message and the names a caller needs to fix the analysis.
 
-        Args:
-            message: Human-readable description of the violation.
-            parameters: The free parameter names with no starting value, sorted.
-        """
-        super().__init__(message)
-        self.parameters = parameters
+class UnknownParameterOfInterestError(AnalysisParameterError):
+    """
+    Raised when an analysis names a parameter of interest its likelihood does not use.
+
+    The check runs when a model is built from the analysis, not when the
+    workspace loads: a workspace can hold analyses for different signal
+    hypotheses, such as a background-only analysis whose parameter of interest
+    only a signal patch introduces.
+
+    Attributes:
+        parameters: The parameters of interest the likelihood does not use, sorted.
+    """
+
+
+class UnconstrainedParameterError(AnalysisParameterError):
+    """
+    Raised when a parameter that gets no constraint term must be ``const`` but is free.
+
+    A per-bin HistFactory parameter (``shapesys`` or ``staterror``) whose bin
+    has a positive yield but zero uncertainty gets no constraint term; pyhf and
+    ROOT fix it at its nominal value. Left free, it would float unconstrained.
+
+    Attributes:
+        parameters: The parameters that must be ``const``, sorted.
+    """
 
 
 class DuplicateEntityError(HS3Exception):

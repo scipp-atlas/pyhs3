@@ -12,6 +12,7 @@ from typing import Any, ClassVar, Literal, cast
 
 import hist
 import numpy as np
+import numpy.typing as npt
 import pytensor.tensor as pt
 from pydantic import Field, PrivateAttr, model_validator
 
@@ -330,6 +331,62 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
                     return modifier
         return None
 
+    def _barlow_beeston_lite_totals(
+        self,
+    ) -> (
+        tuple[StatErrorModifier, npt.NDArray[np.float64], npt.NDArray[np.float64]]
+        | None
+    ):
+        """The staterror modifier and the per-bin combined yield and uncertainty.
+
+        Sums over the samples carrying a staterror modifier:
+        ``total_nominal = sum(contents)`` and ``total_sigma = sqrt(sum(errors**2))``,
+        each of shape (B,). Returns ``None`` when no sample has one.
+        """
+        staterror_mod = self._find_staterror_modifier()
+        if staterror_mod is None:
+            return None
+
+        total_bins = self._get_total_bins()
+        total_nominal = np.zeros(total_bins)
+        total_variance = np.zeros(total_bins)
+        for sample in self.samples:
+            # Only include samples that have the staterror modifier
+            has_staterror = any(
+                isinstance(mod, StatErrorModifier) for mod in sample.modifiers
+            )
+            if has_staterror:
+                total_nominal += np.array(sample.data.contents)
+                total_variance += np.square(sample.data.errors)
+
+        return staterror_mod, total_nominal, np.sqrt(total_variance)
+
+    def unconstrained_parameters(self) -> list[str]:
+        """Per-bin parameters whose bin has a positive yield and zero uncertainty.
+
+        Such a bin gets no constraint term (see
+        :meth:`~pyhs3.distributions.histfactory.modifiers.HasConstraint.unconstrained_parameters`);
+        pyhf and ROOT fix its parameter at 1, so it must be ``const``.
+        """
+        parameters = [
+            name
+            for _, modifier, sample_data in self.constraint_specs()
+            for name in modifier.unconstrained_parameters(sample_data)
+        ]
+        if self.barlow_beeston_method == "lite":
+            totals = self._barlow_beeston_lite_totals()
+            if totals is not None:
+                staterror_mod, total_nominal, total_sigma = totals
+                unconstrained = (total_nominal > 0) & (total_sigma <= 0)
+                parameters += [
+                    p
+                    for p, u in zip(
+                        staterror_mod.parameters, unconstrained, strict=True
+                    )
+                    if u
+                ]
+        return parameters
+
     # Docstring below refs private methods autodoc never renders (known gap: #327).
     def _build_barlow_beeston_lite_dist(
         self, context: Context
@@ -369,29 +426,11 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         (sum of per-bin log-probabilities) so the parametrization is defined
         exactly once.
         """
-        total_bins = self._get_total_bins()
-
-        # Find staterror modifier to get gamma params and constraint type
-        staterror_mod = self._find_staterror_modifier()
-        if staterror_mod is None:
+        totals = self._barlow_beeston_lite_totals()
+        if totals is None:
             return None
-
+        staterror_mod, total_nominal, total_sigma = totals
         gamma_params = staterror_mod.parameters
-
-        # Compute combined uncertainties from sample.data.errors
-        total_nominal = np.zeros(total_bins)
-        total_variance = np.zeros(total_bins)
-
-        for sample in self.samples:
-            # Only include samples that have the staterror modifier
-            has_staterror = any(
-                isinstance(mod, StatErrorModifier) for mod in sample.modifiers
-            )
-            if has_staterror:
-                total_nominal += np.array(sample.data.contents)
-                total_variance += np.square(sample.data.errors)
-
-        total_sigma = np.sqrt(total_variance)
 
         # Skip bins with zero nominal yield or zero uncertainty: neither has a
         # relative uncertainty, and pyhf and ROOT fix that bin's parameter at 1

@@ -213,6 +213,15 @@ class Distribution(Evaluable, ABC):
         lower_val = substitute_variable(expr, leaf, lower_t)
         return cast(TensorVar, upper_val - lower_val)
 
+    def unconstrained_parameters(self) -> list[str]:
+        """Parameters this distribution scales a positive yield with but does not constrain.
+
+        Such a parameter must be ``const`` in the parameter point an analysis
+        uses, or it floats unconstrained. Only HistFactory channels have any
+        (per-bin parameters of bins with zero uncertainty).
+        """
+        return []
+
     def _depends_on_observable(
         self, context: Context, observable_name: str, fields: Sequence[str]
     ) -> bool:

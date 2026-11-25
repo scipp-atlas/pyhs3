@@ -22,6 +22,8 @@ from pyhs3.distributions.histfactory.modifiers import (
 from pyhs3.domains import Domain, Domains, DomainType, ProductDomain
 from pyhs3.exceptions import (
     MissingInitialValueError,
+    UnconstrainedParameterError,
+    UnknownParameterOfInterestError,
     UnlistedParameterError,
     WorkspaceValidationError,
 )
@@ -514,6 +516,67 @@ class Workspace(BaseModel):
         )
         raise MissingInitialValueError(msg, missing)
 
+    def _check_parameters_of_interest(
+        self,
+        analysis: Analysis,
+        likelihood: Likelihood,
+        parameterset: ParameterSet,
+    ) -> None:
+        """Require every parameter of interest to be a parameter of the likelihood.
+
+        A ``const`` parameter of interest is accepted.
+
+        Raises:
+            UnknownParameterOfInterestError: naming the parameters of interest
+                that the likelihood does not use.
+        """
+        unknown = sorted(
+            set(analysis.parameters_of_interest or ())
+            - self._likelihood_parameters(likelihood, parameterset)
+        )
+        if not unknown:
+            return
+        msg = (
+            f"Analysis '{analysis.name}' names parameter(s) of interest that its "
+            f"likelihood '{likelihood.name}' does not use: {', '.join(unknown)}."
+        )
+        raise UnknownParameterOfInterestError(msg, unknown)
+
+    def _check_unconstrained_parameters(
+        self,
+        analysis: Analysis,
+        likelihood: Likelihood,
+        parameterset: ParameterSet,
+    ) -> None:
+        """Require ``const`` for parameters a distribution leaves unconstrained.
+
+        See :meth:`~pyhs3.distributions.core.Distribution.unconstrained_parameters`.
+
+        Raises:
+            UnconstrainedParameterError: naming those parameters that are free
+                in ``parameterset``.
+        """
+        distributions = self.distributions or Distributions()
+        const = {point.name for point in parameterset if point.const}
+        free = sorted(
+            {
+                name
+                for dist_name in likelihood.distribution_names()
+                if dist_name in distributions
+                for name in distributions[dist_name].unconstrained_parameters()
+            }
+            - const
+        )
+        if not free:
+            return
+        msg = (
+            f"Analysis '{analysis.name}': parameter(s) {', '.join(free)} get no "
+            f"constraint term (their bins have a positive yield and zero "
+            f"uncertainty), so they must be const in the parameter point "
+            f"'{parameterset.name}', as pyhf and ROOT fix them."
+        )
+        raise UnconstrainedParameterError(msg, free)
+
     def _check_analysis_parameters(
         self,
         analysis: Analysis,
@@ -682,6 +745,12 @@ class Workspace(BaseModel):
 
         Raises:
             UnlistedParameterError: If an analysis violates HS3 section 2.7.
+            MissingInitialValueError: If a free parameter of an analysis has
+                no starting value in the parameter point.
+            UnknownParameterOfInterestError: If an analysis names a parameter
+                of interest that its likelihood does not use.
+            UnconstrainedParameterError: If a parameter that gets no
+                constraint term is not ``const`` in the parameter point.
             ValueError: If an analysis references an unknown ``init``, if
                 ``domain`` is given for an analysis, or if an override is
                 requested from a workspace without parameter points or domains.
@@ -739,6 +808,8 @@ class Workspace(BaseModel):
             target, likelihood_obj, analysis_domain, parameterset
         )
         self._check_initial_values(target, likelihood_obj, parameterset)
+        self._check_parameters_of_interest(target, likelihood_obj, parameterset)
+        self._check_unconstrained_parameters(target, likelihood_obj, parameterset)
 
         return ParameterContext(
             parameter_set=parameterset,

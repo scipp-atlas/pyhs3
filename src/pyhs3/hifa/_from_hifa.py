@@ -16,7 +16,12 @@ from typing import Any, cast
 
 import numpy as np
 
-from pyhs3.hifa._defaults import _DEFAULTS, _bin_names, _ParameterDefaults
+from pyhs3.hifa._defaults import (
+    _CHANNEL_PREFIX,
+    _DEFAULTS,
+    _bin_names,
+    _ParameterDefaults,
+)
 from pyhs3.hifa._schema import (
     _Channel,
     _HiFaWorkspace,
@@ -447,7 +452,7 @@ def _emit_channel(
     axis = {"name": f"obs_x_{channel.name}", "min": 0, "max": nbins, "nbins": nbins}
     distribution = {
         "type": "histfactory_dist",
-        "name": f"model_{channel.name}",
+        "name": f"{_CHANNEL_PREFIX}{channel.name}",
         "axes": [axis],
         "samples": [
             _emit_sample(sample, channel.name, settings, layout)

@@ -4,7 +4,8 @@ Wires the individual subcommands into a single Typer application exposed as the
 ``pyhs3`` console script (see ``[project.scripts]`` in ``pyproject.toml``).
 Commands are split by concern, mirroring pyhf's CLI layout: :mod:`pyhs3.cli.spec`
 holds spec-level operations (``validate``, ``inspect``) and :mod:`pyhs3.cli.infer`
-holds inference operations (``nll``), with shared I/O helpers in
+holds inference operations (``nll``), and :mod:`pyhs3.cli.convert` holds the
+``convert`` group (``to-hs3``, ``to-pyhf``), with shared I/O helpers in
 :mod:`pyhs3.cli._shared`.
 """
 
@@ -12,7 +13,7 @@ from __future__ import annotations
 
 import typer
 
-from pyhs3.cli import graph, infer, plot, spec
+from pyhs3.cli import convert, graph, infer, plot, spec
 from pyhs3.logging import setup
 
 app = typer.Typer(
@@ -37,6 +38,7 @@ app.command()(spec.validate)
 app.command()(spec.inspect)
 app.command()(infer.nll)
 app.command()(plot.plot)
+app.add_typer(convert.app)
 
 
 __all__ = ["app"]

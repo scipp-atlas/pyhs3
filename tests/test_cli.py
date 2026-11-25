@@ -25,6 +25,7 @@ from typer.testing import CliRunner
 from pyhs3.cli import app
 from pyhs3.cli._shared import _stdin_is_tty, read_spec, stdout_is_interactive
 from pyhs3.cli.infer import _select_target
+from pyhs3.hifa import from_hifa
 from pyhs3.workspace import Workspace
 
 runner = CliRunner()
@@ -1152,3 +1153,206 @@ def test_graph_missing_dot_executable(good_workspace, monkeypatch):
     assert result.exit_code != 0
     assert "graphviz" in result.output.lower()
     assert "Traceback" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# convert
+# ---------------------------------------------------------------------------
+
+_PYHF_SPEC: dict = {
+    "channels": [
+        {
+            "name": "SR",
+            "samples": [
+                {
+                    "name": "signal",
+                    "data": [5.0, 10.0],
+                    "modifiers": [{"name": "mu", "type": "normfactor", "data": None}],
+                },
+                {
+                    "name": "background",
+                    "data": [50.0, 60.0],
+                    "modifiers": [
+                        {
+                            "name": "bkg_norm",
+                            "type": "normsys",
+                            "data": {"hi": 1.1, "lo": 0.9},
+                        }
+                    ],
+                },
+            ],
+        }
+    ],
+    "observations": [{"name": "SR", "data": [53.0, 65.0]}],
+    "measurements": [
+        {
+            "name": "meas",
+            "config": {
+                "poi": "mu",
+                "parameters": [{"name": "mu", "bounds": [[0.0, 5.0]]}],
+            },
+        }
+    ],
+    "version": "1.0.0",
+}
+
+_DEFAULT_SETTINGS = {
+    "normsys": {"interpcode": "code4"},
+    "histosys": {"interpcode": "code4p"},
+}
+
+_ROOT_FIXTURE = (
+    Path(__file__).parent
+    / "test_histfactory"
+    / "simplemodel_correlated-background_hs3.json"
+)
+
+
+@pytest.fixture
+def pyhf_workspace(tmp_path):
+    path = tmp_path / "pyhf.json"
+    path.write_text(json.dumps(_PYHF_SPEC), encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def hs3_from_pyhf(tmp_path):
+    """The HS3 workspace ``from_hifa`` makes of ``_PYHF_SPEC``, as a file."""
+    path = tmp_path / "hs3.json"
+    ws = from_hifa(_PYHF_SPEC)
+    path.write_text(json.dumps(ws.model_dump(mode="json", exclude_none=True)))
+    return path
+
+
+def test_convert_to_hs3_writes_output(pyhf_workspace, tmp_path):
+    output = tmp_path / "out.json"
+    result = runner.invoke(
+        app, ["convert", "to-hs3", str(pyhf_workspace), "-o", str(output)]
+    )
+    assert result.exit_code == 0, result.output
+    assert result.stdout == ""
+    written = Workspace(**json.loads(output.read_text()))
+    assert written.model_dump() == from_hifa(_PYHF_SPEC).model_dump()
+
+
+def test_convert_to_hs3_prints_to_stdout(pyhf_workspace):
+    result = runner.invoke(app, ["convert", "to-hs3", str(pyhf_workspace)])
+    assert result.exit_code == 0, result.output
+    written = Workspace(**json.loads(result.stdout))
+    assert written.model_dump() == from_hifa(_PYHF_SPEC).model_dump()
+
+
+def test_convert_to_hs3_from_stdin():
+    result = runner.invoke(
+        app, ["convert", "to-hs3", "-"], input=json.dumps(_PYHF_SPEC)
+    )
+    assert result.exit_code == 0, result.output
+    assert Workspace(**json.loads(result.stdout)).likelihoods[0].name == "meas"
+
+
+def test_convert_to_hs3_interpcode(pyhf_workspace):
+    result = runner.invoke(
+        app,
+        ["convert", "to-hs3", str(pyhf_workspace), "--interpcode", "normsys=code1"],
+    )
+    assert result.exit_code == 0, result.output
+    ws = Workspace(**json.loads(result.stdout))
+    normsys = ws.distributions["model_SR"].samples["background"].modifiers[0]
+    assert normsys.data.interpolation == "code1"
+
+
+@pytest.mark.parametrize(
+    ("interpcode", "message"),
+    [("code1", "TYPE=CODE"), ("normsys=code9", "code9"), ("lumi=code1", "lumi")],
+)
+def test_convert_to_hs3_bad_interpcode(pyhf_workspace, interpcode, message):
+    result = runner.invoke(
+        app,
+        ["convert", "to-hs3", str(pyhf_workspace), "--interpcode", interpcode],
+    )
+    assert result.exit_code == 2
+    assert message in result.stderr
+    assert "Traceback" not in result.output
+
+
+def test_convert_to_hs3_invalid_pyhf_workspace(tmp_path):
+    spec = json.loads(json.dumps(_PYHF_SPEC))
+    spec["observations"] = []
+    path = tmp_path / "bad.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    result = runner.invoke(app, ["convert", "to-hs3", str(path)])
+    assert result.exit_code == 2
+    assert "observations" in result.stderr
+    assert "Traceback" not in result.output
+
+
+def test_convert_to_pyhf_writes_output_and_prints_settings(hs3_from_pyhf, tmp_path):
+    output = tmp_path / "out.json"
+    result = runner.invoke(
+        app, ["convert", "to-pyhf", str(hs3_from_pyhf), "-o", str(output)]
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(output.read_text()) == _PYHF_SPEC
+    assert json.dumps(_DEFAULT_SETTINGS) in result.stderr
+
+
+def test_convert_to_pyhf_prints_to_stdout(hs3_from_pyhf):
+    result = runner.invoke(app, ["convert", "to-pyhf", str(hs3_from_pyhf)])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == _PYHF_SPEC
+
+
+def test_convert_to_pyhf_modifier_settings_file(hs3_from_pyhf, tmp_path):
+    settings = tmp_path / "settings.json"
+    result = runner.invoke(
+        app,
+        [
+            "convert",
+            "to-pyhf",
+            str(hs3_from_pyhf),
+            "--modifier-settings",
+            str(settings),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(settings.read_text()) == _DEFAULT_SETTINGS
+    assert result.stderr == ""
+
+
+def test_convert_to_pyhf_likelihood_and_poi():
+    result = runner.invoke(
+        app,
+        [
+            "convert",
+            "to-pyhf",
+            str(_ROOT_FIXTURE),
+            "--likelihood",
+            "simPdf_obsData",
+            "--poi",
+            "mu",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    spec = json.loads(result.stdout)
+    assert spec["observations"] == [{"name": "singlechannel", "data": [51.0, 48.0]}]
+    assert spec["measurements"][0]["config"]["poi"] == "mu"
+
+
+def test_convert_to_pyhf_ambiguous_likelihood():
+    result = runner.invoke(app, ["convert", "to-pyhf", str(_ROOT_FIXTURE)])
+    assert result.exit_code == 2
+    assert "choose one with likelihood=" in result.stderr
+    assert "Traceback" not in result.output
+
+
+def test_convert_to_pyhf_invalid_hs3_workspace(bad_workspace):
+    result = runner.invoke(app, ["convert", "to-pyhf", str(bad_workspace)])
+    assert result.exit_code == 2
+    assert "does_not_exist" in result.stderr
+    assert "Traceback" not in result.output
+
+
+def test_convert_without_direction_shows_help():
+    result = runner.invoke(app, ["convert"])
+    assert "to-hs3" in result.output
+    assert "to-pyhf" in result.output

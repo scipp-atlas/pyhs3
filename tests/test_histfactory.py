@@ -2569,13 +2569,12 @@ class TestBarlowBeestonLite:
         expected = 1.0 / (sigma_value * np.sqrt(2 * np.pi))
         np.testing.assert_allclose(result_val, expected, rtol=1e-6)
 
-    def test_lite_positive_yield_zero_sigma_not_skipped(self):
-        """A bin with nu > 0 and sigma = 0 must not be silently dropped from the constraint.
+    def test_lite_positive_yield_zero_sigma_skipped(self):
+        """A bin with nu > 0 and sigma = 0 has no relative uncertainty, so it gets no constraint.
 
-        If `sigma <= 0` fires when `nu > 0`, the gamma parameter floats free:
-        _compute_expected_rates() still scales rates by gamma but no constraint is added.
-        The parsing layer prevents sigma=0 with nu>0, so this check is dead code that
-        masks validation failures rather than surfacing them.
+        pyhf and ROOT fix such a bin's gamma at 1 instead of constraining it; in
+        HS3 the parameter point marks it ``const``. A Gauss term with sigma = 0
+        would make the log-constraint NaN.
         """
         axes = [{"name": "x", "min": 0.0, "max": 10.0, "nbins": 1}]
         samples = [
@@ -2601,11 +2600,8 @@ class TestBarlowBeestonLite:
 
         context = Context({"gamma_bin0": pt.constant(1.0)})
 
-        # With the old condition `nu <= 0 or sigma <= 0`, this bin (nu=10, sigma=0) was
-        # silently dropped → method returned None.  After the fix (`nu <= 0` only), the
-        # bin is included and the method returns a TensorVar (not None).
-        result = channel._make_barlow_beeston_lite_constraint(context)
-        assert result is not None
+        # The only bin is unconstrained, so the channel has no BB-lite constraint.
+        assert channel._make_barlow_beeston_lite_constraint(context) is None
 
     def test_full_mode_default_parameter_names(self):
         """BB-full: omitting 'parameters' defaults to staterror_{channel}_bin{i}."""

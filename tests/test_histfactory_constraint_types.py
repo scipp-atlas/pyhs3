@@ -135,3 +135,104 @@ class TestStatErrorConstraintTypes:
             channel._make_barlow_beeston_lite_log_constraint(context),
             constraint_type,
         )
+
+
+#: A third bin whose gamma is unconstrained: zero uncertainty or zero yield.
+#: pyhf and ROOT fix such a gamma at 1 and give it no constraint term; in HS3
+#: the parameter point marks it ``const``, and the modifier adds no term.
+UNCONSTRAINED_BINS = {
+    "zero_uncertainty": (40.0, 0.0),
+    "zero_yield": (0.0, 3.0),
+}
+
+
+@pytest.fixture
+def context3():
+    return Context(
+        {
+            **{p: pt.constant(g) for p, g in zip(PARAMETERS, GAMMA, strict=True)},
+            "gamma_2": pt.constant(1.0),
+        }
+    )
+
+
+class TestUnconstrainedGammaBins:
+    """A bin with zero uncertainty or zero yield adds no constraint term, and no NaN."""
+
+    @pytest.mark.parametrize("bin_kind", list(UNCONSTRAINED_BINS))
+    @pytest.mark.parametrize("constraint_type", CONSTRAINT_TYPES)
+    def test_shapesys(self, constraint_type, bin_kind, context3):
+        nominal, uncertainty = UNCONSTRAINED_BINS[bin_kind]
+        modifier = ShapeSysModifier(
+            name="shapesys",
+            parameters=[*PARAMETERS, "gamma_2"],
+            data=ShapeSysData(vals=[*(SIGMA_REL * NOMINAL), uncertainty]),
+            constraint=constraint_type,
+        )
+        sample = SampleData(contents=[*NOMINAL, nominal], errors=[0.0, 0.0, 0.0])
+        _assert_constraint(
+            modifier.make_constraint(context3, sample),
+            modifier.log_constraint(context3, sample),
+            constraint_type,
+        )
+
+    def test_shapesys_without_constrained_bins(self, context3):
+        """When every bin is unconstrained, the term is 1 (log term 0)."""
+        modifier = ShapeSysModifier(
+            name="shapesys",
+            parameters=["gamma_2"],
+            data=ShapeSysData(vals=[0.0]),
+        )
+        sample = SampleData(contents=[40.0], errors=[0.0])
+        assert modifier.make_constraint(context3, sample).eval() == 1.0
+        assert modifier.log_constraint(context3, sample).eval() == 0.0
+
+    @pytest.mark.parametrize("constraint_type", CONSTRAINT_TYPES)
+    def test_barlow_beeston_full_zero_uncertainty(self, constraint_type, context3):
+        nominal, uncertainty = UNCONSTRAINED_BINS["zero_uncertainty"]
+        modifier = StatErrorModifier(
+            name="staterror",
+            parameters=[*PARAMETERS, "gamma_2"],
+            data=StatErrorData(uncertainties=[*(SIGMA_REL * NOMINAL), uncertainty]),
+            constraint=constraint_type,
+        )
+        sample = SampleData(
+            contents=[*NOMINAL, nominal], errors=[*(SIGMA_REL * NOMINAL), uncertainty]
+        )
+        _assert_constraint(
+            modifier.make_constraint(context3, sample),
+            modifier.log_constraint(context3, sample),
+            constraint_type,
+        )
+
+    @pytest.mark.parametrize("bin_kind", list(UNCONSTRAINED_BINS))
+    @pytest.mark.parametrize("constraint_type", CONSTRAINT_TYPES)
+    def test_barlow_beeston_lite(self, constraint_type, bin_kind, context3):
+        nominal, uncertainty = UNCONSTRAINED_BINS[bin_kind]
+        channel = HistFactoryDistChannel(
+            name="channel",
+            axes=[{"name": "x", "min": 0.0, "max": 3.0, "nbins": 3}],
+            samples=[
+                {
+                    "name": "background",
+                    "data": {
+                        "contents": [*NOMINAL, nominal],
+                        "errors": [*(SIGMA_REL * NOMINAL), uncertainty],
+                    },
+                    "modifiers": [
+                        {
+                            "name": "staterror",
+                            "type": "staterror",
+                            "parameters": [*PARAMETERS, "gamma_2"],
+                            "constraint": constraint_type,
+                        }
+                    ],
+                }
+            ],
+            barlow_beeston_method="lite",
+        )
+        _assert_constraint(
+            channel._make_barlow_beeston_lite_constraint(context3),
+            channel._make_barlow_beeston_lite_log_constraint(context3),
+            constraint_type,
+        )

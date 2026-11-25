@@ -430,34 +430,52 @@ class ShapeSysModifier(HasConstraint, ParametersModifier):
 
     def _build_bin_constraint(
         self, context: Context, sample_data: SampleData
-    ) -> tuple[Distribution, Context]:
+    ) -> tuple[Distribution, Context] | None:
         """Construct a single vectorized constraint distribution over all bins.
 
-        Stacks the B per-bin nuisance parameters into one length-B tensor and
-        builds ONE distribution over vector-valued inputs (see
-        :func:`gamma_constraint`), instead of one scalar distribution per bin;
-        :meth:`make_constraint` and :meth:`log_constraint` reduce the resulting
-        (B,) vector with ``pt.prod``/``pt.sum``. Shared by both so the
-        parametrization is defined exactly once.
+        Stacks the B' constrained per-bin nuisance parameters into one
+        length-B' tensor and builds ONE distribution over vector-valued inputs
+        (see :func:`gamma_constraint`), instead of one scalar distribution per
+        bin; :meth:`make_constraint` and :meth:`log_constraint` reduce the
+        resulting (B',) vector with ``pt.prod``/``pt.sum``. Shared by both so
+        the parametrization is defined exactly once.
+
+        A bin with zero nominal yield or zero uncertainty has no relative
+        uncertainty and gets no constraint term; pyhf and ROOT fix its
+        parameter at 1 instead, which HS3 expresses as ``const`` in the
+        parameter point. Returns ``None`` when no bin is constrained.
         """
-        # Shape (B,): relative uncertainty per bin, in self.parameters order.
-        sigma_rel = np.asarray(self.data.vals, dtype=np.float64) / np.asarray(
-            sample_data.contents, dtype=np.float64
-        )
-        # gamma: (B,) stacked per-bin nuisance-parameter tensors.
-        gamma = pt.stack([context[parameter] for parameter in self.parameters])
+        # Shape (B,): per-bin nominal yields and absolute uncertainties.
+        nominal_yields = np.asarray(sample_data.contents, dtype=np.float64)
+        uncertainties = np.asarray(self.data.vals, dtype=np.float64)
+        keep = (nominal_yields > 0) & (uncertainties > 0)
+        parameters = [p for p, k in zip(self.parameters, keep, strict=True) if k]
+        if not parameters:
+            return None
+        # Shape (B',): relative uncertainty of the constrained bins.
+        sigma_rel = uncertainties[keep] / nominal_yields[keep]
+        # gamma: (B',) stacked per-bin nuisance-parameter tensors.
+        gamma = pt.stack([context[parameter] for parameter in parameters])
         return gamma_constraint(
             f"constraint_{self.name}", gamma, sigma_rel, self.constraint, context
         )
 
     def make_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
         """Create constraint term using PyTensor operations."""
-        dist, augmented_context = self._build_bin_constraint(context, sample_data)
+        pair = self._build_bin_constraint(context, sample_data)
+        if pair is None:
+            return pt.constant(1.0)
+
+        dist, augmented_context = pair
         return cast(TensorVar, pt.prod(dist.expression(augmented_context)))  # type: ignore[no-untyped-call]
 
     def log_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
         """Create constraint term as the sum of per-bin log-probabilities."""
-        dist, augmented_context = self._build_bin_constraint(context, sample_data)
+        pair = self._build_bin_constraint(context, sample_data)
+        if pair is None:
+            return pt.constant(0.0)
+
+        dist, augmented_context = pair
         return cast(TensorVar, pt.sum(dist.log_expression(augmented_context)))  # type: ignore[no-untyped-call]
 
 
@@ -492,8 +510,11 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
         bin (mirroring :meth:`ShapeSysModifier._build_bin_constraint`).
 
         Returns ``None`` when there is nothing to constrain: either
-        ``self.parameters`` is empty, or (Poisson only) every bin has
-        ``nominal_yield <= 0`` and was excluded. Gauss and LogNormal bins with
+        ``self.parameters`` is empty, or every bin was excluded. A bin with a
+        positive yield and zero uncertainty is excluded for every type; pyhf
+        and ROOT fix its parameter at 1 instead (``const`` in HS3). For
+        Poisson, every bin with ``nominal_yield <= 0`` is also excluded. Gauss
+        and LogNormal bins with
         a nonpositive yield are NOT excluded -- they fall back to a relative
         uncertainty of 1.0, matching the pre-vectorization per-bin Gauss
         behavior exactly. Poisson needs tau = 1 / sigma**2, which such a bin
@@ -516,22 +537,25 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
         nominal_yields = np.asarray(sample_data.contents[:n], dtype=np.float64)
         uncertainties = np.asarray(data.uncertainties[:n], dtype=np.float64)
         positive = nominal_yields > 0
+        # A zero uncertainty on a positive yield gives no constraint term: pyhf
+        # and ROOT fix that bin's parameter at 1 instead (``const`` in HS3).
+        unconstrained = positive & (uncertainties <= 0)
 
         if self.constraint == "Poisson":
             # Skip zero-yield bins: tau = (nu/sigma)^2 is undefined when nu <= 0.
-            parameters = [
-                p for p, k in zip(self.parameters[:n], positive, strict=True) if k
-            ]
-            if not parameters:
-                return None
+            keep = positive & ~unconstrained
             # Shape (B',): relative uncertainty of the surviving bins.
-            sigma_rel = uncertainties[positive] / nominal_yields[positive]
+            sigma_rel = uncertainties[keep] / nominal_yields[keep]
         else:  # "Gauss" or "LogNormal"
             # Relative uncertainty = uncertainty / nominal_yield, falling back
-            # to 1.0 for nonpositive yields (bin kept, not skipped). Shape: (B,).
-            parameters = self.parameters[:n]
+            # to 1.0 for nonpositive yields (bin kept, not skipped). Shape: (B',).
+            keep = ~unconstrained
             sigma_rel = np.ones_like(nominal_yields)
             sigma_rel[positive] = uncertainties[positive] / nominal_yields[positive]
+            sigma_rel = sigma_rel[keep]
+        parameters = [p for p, k in zip(self.parameters[:n], keep, strict=True) if k]
+        if not parameters:
+            return None
 
         gamma = pt.stack([context[parameter] for parameter in parameters])
         return gamma_constraint(

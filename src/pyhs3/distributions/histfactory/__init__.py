@@ -393,8 +393,10 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
 
         total_sigma = np.sqrt(total_variance)
 
-        # Skip bins with zero nominal yield; sigma=0 is caught by the parsing layer.
-        keep = total_nominal > 0
+        # Skip bins with zero nominal yield or zero uncertainty: neither has a
+        # relative uncertainty, and pyhf and ROOT fix that bin's parameter at 1
+        # instead of constraining it (``const`` in HS3).
+        keep = (total_nominal > 0) & (total_sigma > 0)
         params = [p for p, k in zip(gamma_params, keep, strict=True) if k]
         if not params:
             return None

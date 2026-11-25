@@ -9,6 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+# The HS3 distribution of pyhf channel ``c`` is ``model_c``.
+_CHANNEL_PREFIX = "model_"
+
 
 @dataclass(frozen=True)
 class _ParameterDefaults:

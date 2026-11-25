@@ -30,6 +30,7 @@ from pyhs3.likelihoods import Likelihood, Likelihoods
 from pyhs3.metadata import Metadata
 from pyhs3.model import Model
 from pyhs3.networks import build_dependency_graph
+from pyhs3.parameter_context import ParameterContext
 from pyhs3.parameter_points import ParameterPoints, ParameterSet
 
 log = logging.getLogger(__name__)
@@ -638,6 +639,154 @@ class Workspace(BaseModel):
         return ProductDomain(name="default")
 
     @singledispatchmethod
+    def parameter_context(
+        self,
+        target: int,
+        *,
+        parameter_set: int | str | ParameterSet | None = None,
+        domain: int | str | Domain | None = None,
+    ) -> ParameterContext:
+        """
+        Resolve the :class:`~pyhs3.parameter_context.ParameterContext` for ``target``.
+
+        The context is what :meth:`model` builds the model from: the
+        referenced parameter point, the domain bounds and the parameters of
+        interest.  Dispatch is based on the type of ``target``, as in
+        :meth:`model`:
+
+        - :class:`~pyhs3.analyses.Analysis` -- the analysis domains, merged
+          into one when there are several; its ``init`` parameter point (an
+          empty one when it has none) unless ``parameter_set`` overrides it;
+          and its ``parameters_of_interest``.  The analysis must satisfy
+          HS3 section 2.7 with that parameter point.  ``domain`` cannot be
+          overridden.
+        - :class:`~pyhs3.likelihoods.Likelihood` -- ``domain`` falls back to
+          ``default_domain`` then index 0, and ``parameter_set`` to the first
+          parameter point; no parameters of interest.
+        - ``str`` -- searches analyses then likelihoods by name and resolves
+          as above; otherwise the name selects a domain, as for an ``int``.
+        - ``int`` -- ``target`` indexes into the workspace domains (unless
+          ``domain`` overrides it) and ``parameter_set`` falls back to the
+          first parameter point; no parameters of interest.
+
+        Args:
+            target: Dispatch key, as for :meth:`model`.
+            parameter_set: Override parameter set: a
+                :class:`~pyhs3.parameter_points.ParameterSet`, or an index or
+                name into the workspace parameter points.
+            domain: Override domain: a :class:`~pyhs3.domains.Domain`, or an
+                index or name into the workspace domains (not for analyses).
+
+        Returns:
+            :class:`~pyhs3.parameter_context.ParameterContext`: The resolved context.
+
+        Raises:
+            UnlistedParameterError: If an analysis violates HS3 section 2.7.
+            ValueError: If an analysis references an unknown ``init``, if
+                ``domain`` is given for an analysis, or if an override is
+                requested from a workspace without parameter points or domains.
+        """
+        return ParameterContext(
+            parameter_set=self._select_parameterset(parameter_set),
+            domain=self._select_domain(domain, default_index=target),
+        )
+
+    @parameter_context.register
+    def _(
+        self,
+        target: Analysis,
+        *,
+        parameter_set: int | str | ParameterSet | None = None,
+        domain: int | str | Domain | None = None,
+    ) -> ParameterContext:
+        if domain is not None:
+            msg = "domain override not supported when target is an analysis"
+            raise ValueError(msg)
+
+        # _resolve_foreign_keys guarantees both are resolved objects by construction.
+        likelihood_obj = cast(Likelihood, target.likelihood)
+        domains = cast(Domains, target.domains)
+
+        if len(domains) == 1:
+            analysis_domain: Domain = domains[0]
+        else:
+            # Merge all domain axes into one ProductDomain
+            all_axes = [ax for d in domains for ax in getattr(d, "axes", [])]
+            analysis_domain = ProductDomain(name=f"{target.name}_merged", axes=all_axes)  # type: ignore[arg-type]
+
+        if target.init:
+            if self.parameter_points is None:
+                msg = f"Analysis '{target.name}' requires parameter set '{target.init}' but workspace has no parameter_points"
+                raise ValueError(msg)
+            param_set = self.parameter_points.get(target.init)
+            if param_set is None:
+                msg = f"Analysis '{target.name}' references unknown parameter set '{target.init}'"
+                raise ValueError(msg)
+        else:
+            param_set = None
+
+        # Explicit override takes priority; otherwise use analysis.init param_set or empty default.
+        # Do NOT fall back to parameter_points[0] when neither init nor override was given —
+        # that would silently impose workspace defaults that the caller did not request.
+        if parameter_set is not None:
+            parameterset = self._select_parameterset(
+                parameter_set, fallback_first=False
+            )
+        else:
+            parameterset = param_set or ParameterSet(name="default", parameters=[])
+
+        self._check_analysis_parameters(
+            target, likelihood_obj, analysis_domain, parameterset
+        )
+        self._check_initial_values(target, likelihood_obj, parameterset)
+
+        return ParameterContext(
+            parameter_set=parameterset,
+            domain=analysis_domain,
+            parameters_of_interest=tuple(target.parameters_of_interest or ()),
+        )
+
+    @parameter_context.register
+    def _(
+        self,
+        target: Likelihood,  # noqa: ARG002  # pylint: disable=unused-argument
+        *,
+        parameter_set: int | str | ParameterSet | None = None,
+        domain: int | str | Domain | None = None,
+    ) -> ParameterContext:
+        return ParameterContext(
+            parameter_set=self._select_parameterset(parameter_set),
+            domain=self._select_domain(domain),
+        )
+
+    @parameter_context.register
+    def _(
+        self,
+        target: str,
+        *,
+        parameter_set: int | str | ParameterSet | None = None,
+        domain: int | str | Domain | None = None,
+    ) -> ParameterContext:
+        # Search analyses first, then likelihoods; fall back to domain indexing.
+        if self.analyses:
+            analysis = self.analyses.get(target)
+            if analysis is not None:
+                if domain is not None:
+                    msg = "domain override not supported when target resolves to an analysis"
+                    raise ValueError(msg)
+                return self.parameter_context(analysis, parameter_set=parameter_set)
+        if self.likelihoods:
+            likelihood = self.likelihoods.get(target)
+            if likelihood is not None:
+                return self.parameter_context(
+                    likelihood, parameter_set=parameter_set, domain=domain
+                )
+        return ParameterContext(
+            parameter_set=self._select_parameterset(parameter_set),
+            domain=self._select_domain(domain, default_index=target),
+        )
+
+    @singledispatchmethod
     def model(
         self,
         target: int,
@@ -684,12 +833,12 @@ class Workspace(BaseModel):
             :class:`~pyhs3.model.Model`: The constructed model.
         """
         # Legacy int path: target indexes into workspace domains.
-        selected_domain = self._select_domain(domain, default_index=target)
-        parameterset = self._select_parameterset(parameter_set)
+        context = self.parameter_context(
+            target, parameter_set=parameter_set, domain=domain
+        )
         return Model(
-            parameterset=parameterset,
+            context=context,
             distributions=self.distributions or Distributions(),
-            domain=selected_domain or Domain(name="default", type="unknown"),
             functions=self.functions or Functions(),
             progress=progress,
             mode=mode,
@@ -706,47 +855,13 @@ class Workspace(BaseModel):
         progress: bool = True,
         mode: str = "CVM",
     ) -> Model:
-        # _resolve_foreign_keys guarantees both are resolved objects by construction.
+        # _resolve_foreign_keys guarantees the likelihood is a resolved object.
         likelihood_obj = cast(Likelihood, target.likelihood)
-        domains = cast(Domains, target.domains)
-
-        if len(domains) == 1:
-            analysis_domain: Domain = domains[0]
-        else:
-            # Merge all domain axes into one ProductDomain
-            all_axes = [ax for d in domains for ax in getattr(d, "axes", [])]
-            analysis_domain = ProductDomain(name=f"{target.name}_merged", axes=all_axes)  # type: ignore[arg-type]
-
-        if target.init:
-            if self.parameter_points is None:
-                msg = f"Analysis '{target.name}' requires parameter set '{target.init}' but workspace has no parameter_points"
-                raise ValueError(msg)
-            param_set = self.parameter_points.get(target.init)
-            if param_set is None:
-                msg = f"Analysis '{target.name}' references unknown parameter set '{target.init}'"
-                raise ValueError(msg)
-        else:
-            param_set = None
-
-        # Explicit override takes priority; otherwise use analysis.init param_set or empty default.
-        # Do NOT fall back to parameter_points[0] when neither init nor override was given —
-        # that would silently impose workspace defaults that the caller did not request.
-        if parameter_set is not None:
-            parameterset = self._select_parameterset(
-                parameter_set, fallback_first=False
-            )
-        else:
-            parameterset = param_set or ParameterSet(name="default", parameters=[])
-
-        self._check_analysis_parameters(
-            target, likelihood_obj, analysis_domain, parameterset
-        )
-        self._check_initial_values(target, likelihood_obj, parameterset)
+        context = self.parameter_context(target, parameter_set=parameter_set)
 
         return Model(
-            parameterset=parameterset,
+            context=context,
             distributions=self.distributions or Distributions(),
-            domain=analysis_domain,
             functions=self.functions or Functions(),
             progress=progress,
             mode=mode,
@@ -764,12 +879,12 @@ class Workspace(BaseModel):
         progress: bool = True,
         mode: str = "CVM",
     ) -> Model:
-        selected_domain = self._select_domain(domain)
-        parameterset = self._select_parameterset(parameter_set)
+        context = self.parameter_context(
+            target, parameter_set=parameter_set, domain=domain
+        )
         return Model(
-            parameterset=parameterset,
+            context=context,
             distributions=self.distributions or Distributions(),
-            domain=selected_domain or Domain(name="default", type="unknown"),
             functions=self.functions or Functions(),
             progress=progress,
             mode=mode,
@@ -811,12 +926,12 @@ class Workspace(BaseModel):
                     mode=mode,
                 )
         # Legacy fallback: treat target as a domain name.
-        selected_domain = self._select_domain(domain, default_index=target)
-        parameterset = self._select_parameterset(parameter_set)
+        context = self.parameter_context(
+            target, parameter_set=parameter_set, domain=domain
+        )
         return Model(
-            parameterset=parameterset,
+            context=context,
             distributions=self.distributions or Distributions(),
-            domain=selected_domain or Domain(name="default", type="unknown"),
             functions=self.functions or Functions(),
             progress=progress,
             mode=mode,

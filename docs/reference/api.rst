@@ -33,6 +33,7 @@ Modules
    axes
    domains
    parameter_points
+   parameter_context
    data
    likelihoods
    analyses
@@ -204,6 +205,17 @@ Parameter Points
    ParameterPoints
    ParameterSet
    ParameterPoint
+
+Parameter Context
+-----------------
+
+.. currentmodule:: pyhs3.parameter_context
+
+.. autosummary::
+   :toctree: _generated/
+   :nosignatures:
+
+   ParameterContext
 
 Data
 ----

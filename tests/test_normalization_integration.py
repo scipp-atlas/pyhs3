@@ -20,6 +20,7 @@ from pyhs3.domains import Domains, ProductDomain
 from pyhs3.functions import Functions
 from pyhs3.likelihoods import Likelihood, Likelihoods
 from pyhs3.metadata import Metadata
+from pyhs3.parameter_context import ParameterContext
 from pyhs3.parameter_points import ParameterPoint, ParameterPoints, ParameterSet
 
 
@@ -45,9 +46,8 @@ class TestModelNormalization:
         observables = {"x": (0.0, 10.0)}
 
         model = Model(
-            parameterset=parameterset,
+            context=ParameterContext(parameter_set=parameterset, domain=domain),
             distributions=distributions,
-            domain=domain,
             functions=functions,
             progress=False,
             observables=observables,
@@ -93,9 +93,8 @@ class TestModelNormalization:
         observables = {"x": (0.0, 10.0), "y": (-5.0, 5.0)}
 
         model = Model(
-            parameterset=parameterset,
+            context=ParameterContext(parameter_set=parameterset, domain=domain),
             distributions=distributions,
-            domain=domain,
             functions=functions,
             progress=False,
             observables=observables,
@@ -146,9 +145,8 @@ class TestModelNormalization:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
             model = Model(
-                parameterset=parameterset,
+                context=ParameterContext(parameter_set=parameterset, domain=domain),
                 distributions=distributions,
-                domain=domain,
                 functions=functions,
                 progress=False,
                 observables=None,

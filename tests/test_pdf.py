@@ -61,20 +61,20 @@ def test_rf501_simultaneouspdf(datadir):
 
     physicspdfval = model.pdf(
         "model",
-        x=np.array(model.parameterset["x"].value),
-        f=np.array(model.parameterset["f"].value),
-        mean=np.array(model.parameterset["mean"].value),
-        sigma=np.array(model.parameterset["sigma"].value),
-        mean2=np.array(model.parameterset["mean2"].value),
-        sigma2=np.array(model.parameterset["sigma2"].value),
+        x=np.array(model.context.values["x"]),
+        f=np.array(model.context.values["f"]),
+        mean=np.array(model.context.values["mean"]),
+        sigma=np.array(model.context.values["sigma"]),
+        mean2=np.array(model.context.values["mean2"]),
+        sigma2=np.array(model.context.values["sigma2"]),
     )
     physicspdfvalctl = model.pdf(
         "model_ctl",
-        x=np.array(model.parameterset["x"].value),
-        f_ctl=np.array(model.parameterset["f_ctl"].value),
-        mean_ctl=np.array(model.parameterset["mean_ctl"].value),
-        mean2_ctl=np.array(model.parameterset["mean2_ctl"].value),
-        sigma=np.array(model.parameterset["sigma"].value),
+        x=np.array(model.context.values["x"]),
+        f_ctl=np.array(model.context.values["f_ctl"]),
+        mean_ctl=np.array(model.context.values["mean_ctl"]),
+        mean2_ctl=np.array(model.context.values["mean2_ctl"]),
+        sigma=np.array(model.context.values["sigma"]),
     )
 
     assert np.allclose(physicspdfval, 1.3298076)
@@ -139,46 +139,46 @@ def test_rf501_manual(datadir):
     )
 
     val_physics = pdf_physics(
-        model.parameterset["x"].value,
-        model.parameterset["f"].value,
-        model.parameterset["mean"].value,
-        model.parameterset["sigma"].value,
-        model.parameterset["mean2"].value,
-        model.parameterset["sigma2"].value,
+        model.context.values["x"],
+        model.context.values["f"],
+        model.context.values["mean"],
+        model.context.values["sigma"],
+        model.context.values["mean2"],
+        model.context.values["sigma2"],
     )
 
     val_control = pdf_control(
-        model.parameterset["x"].value,
-        model.parameterset["f_ctl"].value,
-        model.parameterset["mean_ctl"].value,
-        model.parameterset["mean2_ctl"].value,
-        model.parameterset["sigma"].value,
+        model.context.values["x"],
+        model.context.values["f_ctl"],
+        model.context.values["mean_ctl"],
+        model.context.values["mean2_ctl"],
+        model.context.values["sigma"],
     )
 
     val_combined_physics = pdf_combined(
         0,  # sample
-        model.parameterset["x"].value,
-        model.parameterset["f"].value,
-        model.parameterset["mean"].value,
-        model.parameterset["sigma"].value,
-        model.parameterset["mean2"].value,
-        model.parameterset["sigma2"].value,
-        model.parameterset["f_ctl"].value,
-        model.parameterset["mean_ctl"].value,
-        model.parameterset["mean2_ctl"].value,
+        model.context.values["x"],
+        model.context.values["f"],
+        model.context.values["mean"],
+        model.context.values["sigma"],
+        model.context.values["mean2"],
+        model.context.values["sigma2"],
+        model.context.values["f_ctl"],
+        model.context.values["mean_ctl"],
+        model.context.values["mean2_ctl"],
     )
 
     val_combined_control = pdf_combined(
         1,  # sample
-        model.parameterset["x"].value,
-        model.parameterset["f"].value,
-        model.parameterset["mean"].value,
-        model.parameterset["sigma"].value,
-        model.parameterset["mean2"].value,
-        model.parameterset["sigma2"].value,
-        model.parameterset["f_ctl"].value,
-        model.parameterset["mean_ctl"].value,
-        model.parameterset["mean2_ctl"].value,
+        model.context.values["x"],
+        model.context.values["f"],
+        model.context.values["mean"],
+        model.context.values["sigma"],
+        model.context.values["mean2"],
+        model.context.values["sigma2"],
+        model.context.values["f_ctl"],
+        model.context.values["mean_ctl"],
+        model.context.values["mean2_ctl"],
     )
 
     assert np.allclose(val_physics, 1.3298076)
@@ -202,7 +202,9 @@ def test_combine_long_exercise_logpdf_evaluation(datadir):
     )
 
     # Get default parameter values
-    default_params = {par.name: np.array(par.value) for par in model.parameterset}
+    default_params = {
+        name: np.array(value) for name, value in model.context.values.items()
+    }
 
     # Test logPDF evaluation at default parameter values
     default_logpdf_val = model.logpdf("pdf_binsignal_region", **default_params)

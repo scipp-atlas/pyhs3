@@ -56,19 +56,19 @@ Parameter discovery and bounds
 Any name that appears in a distribution or function but is never itself the
 output of a function is a leaf of the graph — a parameter. pyhs3 does not
 require you to declare these in ``parameter_points``; it creates one for
-every leaf it finds. Clipping applies only to a **free** parameter: if a
-``domains`` entry names it, pyhs3 clips the resulting tensor to the stated
-``min``/``max`` at construction time (via ``pt.clip``), so pyhs3 itself
-never proposes a value outside it; if no domain names it, the parameter is
-created unbounded. A parameter marked ``const=True`` in ``parameter_points``
-is baked in at its literal value instead, before any clipping happens — an
-out-of-domain constant is used as-is (with a warning), never clipped.
+every leaf it finds. A **free** parameter becomes a plain graph input, and
+the graph evaluates it at whatever value you pass, inside or outside its
+domain. The ``min``/``max`` of a ``domains`` entry are bounds for the
+minimizer, not part of the graph: :meth:`~pyhs3.Model.compile_nll` returns
+them as ``nll.bounds`` for you to pass to SciPy or iminuit (see
+:doc:`/howto/minimize_nll`). A parameter marked ``const=True`` in
+``parameter_points`` is baked into the graph as a constant at its literal
+value instead; an out-of-domain constant is used as-is, with a warning.
 
-This clip has a consequence worth knowing if you hand ``model.log_prob`` to
-an external gradient-based minimizer: ``pt.clip``'s gradient is exactly zero
-outside the bound. A parameter the optimizer pushes past its bound during a
-line search sees no gradient there at all — indistinguishable from
-convergence, with no error or warning raised.
+Keeping bounds out of the graph keeps the graph smaller, and it means the
+gradient you get outside a bound is the likelihood's own gradient. If you
+hand ``model.log_prob`` to a minimizer yourself, that minimizer is
+responsible for keeping each parameter inside its domain.
 
 This is also why a minimal workspace with only a ``distributions`` list
 still builds a working model: the parameters it references did not need to

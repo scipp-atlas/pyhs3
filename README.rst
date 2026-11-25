@@ -124,7 +124,7 @@ This is how you use the ``pyhs3`` Python API to build a statistical model direct
        distributions: 1 (model)
        functions: 0 ()
    )
-   >>> parameters = {par.name: np.array(par.value) for par in model.parameterset}
+   >>> parameters = {name: np.array(value) for name, value in model.context.values.items()}
    >>> result = -2 * model.logpdf("model", **parameters)
    >>> print(f"parameters: {parameters}")
    parameters: {'x': array(0.), 'mu': array(0.), 'sigma': array(1.)}
@@ -190,7 +190,7 @@ This is the same model built using HS3 JSON-like dictionary format:
        distributions: 1 (model)
        functions: 0 ()
    )
-   >>> parameters = {par.name: np.array(par.value) for par in model.parameterset}
+   >>> parameters = {name: np.array(value) for name, value in model.context.values.items()}
    >>> result = -2 * model.logpdf("model", **parameters)
    >>> print(f"parameters: {parameters}")
    parameters: {'x': array(0.), 'mu': array(0.), 'sigma': array(1.)}
@@ -209,7 +209,7 @@ This is the same model built using HS3 JSON-like dictionary format:
    >>> ws_roundtrip = pyhs3.Workspace(**serialized_dict)
    >>> model_roundtrip = ws_roundtrip.model(0)
    <BLANKLINE>
-   >>> print("Round-trip model:", model_roundtrip.parameterset.name)
+   >>> print("Round-trip model:", model_roundtrip.context.name)
    Round-trip model: default_values
 
 Citation

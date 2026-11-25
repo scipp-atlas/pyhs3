@@ -190,6 +190,7 @@ class CompiledNLL:
         *,
         has_gradient: bool,
         from_cache: bool = False,
+        parameters_of_interest: Sequence[str] = (),
     ) -> None:
         """Wrap a compiled function of the parameter vector.
 
@@ -203,6 +204,8 @@ class CompiledNLL:
             dtype: Dtype of the parameter vector expected by ``fn``.
             has_gradient: Whether ``fn`` also returns the gradient.
             from_cache: Whether ``fn`` was loaded from the on-disk cache.
+            parameters_of_interest: Names of the parameters of interest; those
+                that are not free parameters are left out.
         """
         self._fn = fn
         #: Free parameter names, in the order of every parameter vector.
@@ -215,6 +218,17 @@ class CompiledNLL:
         self.has_gradient = has_gradient
         #: Whether the compiled function was loaded from the on-disk cache.
         self.from_cache = from_cache
+        #: Parameters of interest that are free parameters, in the order given
+        #: (for a model, the order the analysis lists them).  A parameter of
+        #: interest held ``const`` is baked into the function and left out.
+        self.parameters_of_interest: tuple[str, ...] = tuple(
+            name for name in parameters_of_interest if name in self.parameter_names
+        )
+        #: Index in :attr:`parameter_names` (and in every parameter vector) of
+        #: each of :attr:`parameters_of_interest`.
+        self.poi_indices: tuple[int, ...] = tuple(
+            self.parameter_names.index(name) for name in self.parameters_of_interest
+        )
         self._last_x: bytes | None = None
         self._last_out: list[npt.NDArray[np.float64]] = []
 
@@ -347,6 +361,7 @@ def compile_nll(
     mode: Mode | str | None = None,
     cache: bool | str | os.PathLike[str] | None = None,
     batched: bool = False,
+    parameters_of_interest: Sequence[str] = (),
 ) -> CompiledNLL:
     """Compile ``-sum(log_prob)`` as a function of one vector of ``free`` scalars.
 
@@ -369,6 +384,10 @@ def compile_nll(
             specific one, ``None``/``False`` for no on-disk cache.
         batched: Evaluate a ``(K, P)`` batch of parameter vectors per call
             (``backend="jax"`` only); returns a :class:`BatchedCompiledNLL`.
+        parameters_of_interest: Names of the parameters of interest, exposed
+            as :attr:`CompiledNLL.parameters_of_interest` with their
+            :attr:`CompiledNLL.poi_indices`; names of variables not in
+            ``free`` are left out.  They do not change the compiled function.
 
     Returns:
         CompiledNLL: The compiled likelihood.
@@ -436,6 +455,7 @@ def compile_nll(
             dtype,
             has_gradient=gradient,
             from_cache=from_cache,
+            parameters_of_interest=parameters_of_interest,
         )
 
     if not cache:

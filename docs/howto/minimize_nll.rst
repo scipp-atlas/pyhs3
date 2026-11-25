@@ -47,7 +47,15 @@ width ``sigma``:
     ...         }
     ...     ],
     ...     likelihoods=[{"name": "L", "distributions": ["g"], "data": ["d"]}],
-    ...     analyses=[{"name": "A", "likelihood": "L", "domains": ["main"], "init": "init"}],
+    ...     analyses=[
+    ...         {
+    ...             "name": "A",
+    ...             "likelihood": "L",
+    ...             "parameters_of_interest": ["mu"],
+    ...             "domains": ["main"],
+    ...             "init": "init",
+    ...         }
+    ...     ],
     ...     parameter_points=[
     ...         {
     ...             "name": "init",
@@ -73,7 +81,8 @@ Every method of the result takes or returns a 1-D array with one entry per
 free parameter, ordered as ``nll.parameter_names``. ``nll.initial`` is the
 starting point from the analysis' parameter set and ``nll.bounds`` holds each
 parameter's ``(lower, upper)`` domain bounds (``None`` where unbounded), in the
-same order:
+same order. The compiled function does not apply these bounds, so pass them to
+your minimizer:
 
 .. doctest:: minimize-nll
 
@@ -93,6 +102,16 @@ Convert between a ``{name: value}`` dict and the vector with
     >>> value, grad = nll.value_and_grad(x)
     >>> grad.shape
     (2,)
+
+``nll.parameters_of_interest`` lists the analysis' parameters of interest that
+are free, and ``nll.poi_indices`` their positions in the parameter vector:
+
+.. doctest:: minimize-nll
+
+    >>> nll.parameters_of_interest
+    ('mu',)
+    >>> nll.parameter_names[nll.poi_indices[0]]
+    'mu'
 
 Minimize with SciPy
 -------------------

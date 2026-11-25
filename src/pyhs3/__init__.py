@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pyhs3._version import version as __version__
 from pyhs3.compiled import CompiledNLL
+from pyhs3.hifa import from_hifa
 from pyhs3.model import Model
 from pyhs3.transpile import JaxifiedGraph, jaxify
 from pyhs3.workspace import Workspace
@@ -18,5 +19,6 @@ __all__ = [
     "Model",
     "Workspace",
     "__version__",
+    "from_hifa",
     "jaxify",
 ]

@@ -62,6 +62,14 @@ HISTOSYS = {
 SHAPEFACTOR = {"name": "sf", "type": "shapefactor", "data": None}
 SHAPESYS = {"name": "bkg_unc", "type": "shapesys", "data": [5.0, 6.0]}
 STATERROR = {"name": "staterror_SR", "type": "staterror", "data": [2.0, 3.0]}
+LUMI = {"name": "lumi", "type": "lumi", "data": None}
+LUMI_CONFIG = {
+    "name": "lumi",
+    "auxdata": [1.0],
+    "sigmas": [0.1],
+    "inits": [1.0],
+    "bounds": [[0.5, 1.5]],
+}
 
 
 def add_signal_modifiers(spec: dict[str, Any], *modifiers: dict[str, Any]) -> None:
@@ -860,12 +868,150 @@ class TestModifierSettings:
             from_hifa(make_spec(), modifier_settings={"normsys": {"interp": "code4"}})
 
 
-class TestUnsupportedModifiers:
-    """Modifier types later PRs add raise ``NotImplementedError`` for now."""
+class TestLumi:
+    """``lumi``: a normfactor with a Gauss constraint, all set by the config."""
 
-    def test_lumi_raises(self):
-        with pytest.raises(NotImplementedError, match="lumi"):
-            from_hifa(make_spec([{"name": "lumi", "type": "lumi", "data": None}]))
+    def test_modifier(self):
+        ws = from_hifa(make_spec([LUMI], parameters=[LUMI_CONFIG]))
+        assert modifiers_of(ws, "background") == [
+            {
+                "name": "lumi",
+                "type": "normfactor",
+                "parameter": "lumi",
+                "constraint": None,
+            }
+        ]
+
+    def test_constraint_distribution(self):
+        ws = from_hifa(make_spec([LUMI], parameters=[LUMI_CONFIG]))
+        assert ws.distributions["lumi_constraint_meas"].model_dump() == {
+            "name": "lumi_constraint_meas",
+            "type": "gaussian_dist",
+            "x": 1.0,
+            "mean": "lumi",
+            "sigma": 0.1,
+        }
+        likelihood = ws.likelihoods["meas"]
+        assert [d.name for d in likelihood.aux_distributions] == [
+            "lumi_constraint_meas"
+        ]
+        assert likelihood.distribution_names() == ["model_SR", "lumi_constraint_meas"]
+
+    def test_no_lumi_no_aux_distributions(self):
+        ws = from_hifa(make_spec([NORMSYS]))
+        assert ws.likelihoods["meas"].aux_distributions is None
+
+    def test_inits_bounds(self):
+        ws = from_hifa(make_spec([LUMI], parameters=[LUMI_CONFIG]))
+        assert points_of(ws)["lumi"] == {"value": 1.0, "const": False}
+        assert bounds_of(ws)["lumi"] == (0.5, 1.5)
+
+    def test_one_parameter_for_every_use(self):
+        spec = make_spec([LUMI], parameters=[LUMI_CONFIG])
+        add_signal_modifiers(spec, LUMI)
+        add_channel(spec, "CR", 3, LUMI)
+        ws = from_hifa(spec)
+        assert [p.name for p in ws.parameter_points["meas"].parameters] == [
+            "lumi",
+            "mu",
+        ]
+        for sample, channel in [
+            ("signal", "SR"),
+            ("background", "SR"),
+            ("background", "CR"),
+        ]:
+            assert modifiers_of(ws, sample, channel)[-1]["parameter"] == "lumi"
+        assert [d.name for d in ws.likelihoods["meas"].aux_distributions] == [
+            "lumi_constraint_meas"
+        ]
+
+    def test_constraint_per_measurement(self):
+        spec = make_spec([LUMI], parameters=[LUMI_CONFIG])
+        other = {**LUMI_CONFIG, "auxdata": [1.2], "sigmas": [0.05]}
+        spec["measurements"].append(
+            {"name": "other", "config": {"poi": "mu", "parameters": [other]}}
+        )
+        ws = from_hifa(spec)
+        for name, x, sigma in [("meas", 1.0, 0.1), ("other", 1.2, 0.05)]:
+            dist = ws.distributions[f"lumi_constraint_{name}"]
+            assert (dist.x, dist.mean, dist.sigma) == (x, "lumi", sigma)
+            assert [d.name for d in ws.likelihoods[name].aux_distributions] == [
+                f"lumi_constraint_{name}"
+            ]
+
+    def test_fixed_keeps_constraint(self):
+        entry = {**LUMI_CONFIG, "inits": [1.1], "fixed": True}
+        ws = from_hifa(make_spec([LUMI], parameters=[entry]))
+        assert points_of(ws)["lumi"] == {"value": 1.1, "const": True}
+        assert [d.name for d in ws.likelihoods["meas"].aux_distributions] == [
+            "lumi_constraint_meas"
+        ]
+
+    @pytest.mark.parametrize("key", ["inits", "bounds", "auxdata", "sigmas"])
+    def test_missing_config_key_raises(self, key):
+        entry = {k: v for k, v in LUMI_CONFIG.items() if k != key}
+        with pytest.raises(ValueError, match=rf"'meas'.*'lumi'.*{key}"):
+            from_hifa(make_spec([LUMI], parameters=[entry]))
+
+    def test_missing_config_entry_raises(self):
+        with pytest.raises(ValueError, match=r"'meas'.*'lumi'.*auxdata"):
+            from_hifa(make_spec([LUMI]))
+
+    def test_missing_in_second_measurement_raises(self):
+        spec = make_spec([LUMI], parameters=[LUMI_CONFIG])
+        spec["measurements"].append(
+            {"name": "other", "config": {"poi": "mu", "parameters": []}}
+        )
+        with pytest.raises(ValueError, match=r"'other'.*'lumi'"):
+            from_hifa(spec)
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            ("inits", [1.0, 1.0]),
+            ("bounds", [[0.5, 1.5], [0.5, 1.5]]),
+            ("auxdata", [1.0, 1.0]),
+            ("sigmas", [0.1, 0.1]),
+        ],
+    )
+    def test_wrong_length_raises(self, key, value):
+        entry = {**LUMI_CONFIG, key: value}
+        with pytest.raises(ValueError, match=rf"'lumi'.*2 {key}, expected 1"):
+            from_hifa(make_spec([LUMI], parameters=[entry]))
+
+    def test_factors_raises(self):
+        entry = {**LUMI_CONFIG, "factors": [1.0]}
+        with pytest.raises(ValueError, match=r"'lumi'.*factors"):
+            from_hifa(make_spec([LUMI], parameters=[entry]))
+
+    @pytest.mark.parametrize("sigma", [0.0, -0.1])
+    def test_non_positive_sigma_raises(self, sigma):
+        entry = {**LUMI_CONFIG, "sigmas": [sigma]}
+        with pytest.raises(ValueError, match=r"'lumi'.*sigmas.*positive"):
+            from_hifa(make_spec([LUMI], parameters=[entry]))
+
+    @pytest.mark.parametrize(
+        "modifier",
+        [
+            {"type": "normfactor", "data": None},
+            {"type": "normsys", "data": {"hi": 1.1, "lo": 0.9}},
+            {"type": "histosys", "data": HISTOSYS["data"]},
+            {"type": "shapefactor", "data": None},
+            {"type": "shapesys", "data": [5.0, 6.0]},
+            {"type": "staterror", "data": [2.0, 3.0]},
+        ],
+        ids=lambda m: m["type"],
+    )
+    def test_name_reused_by_other_type_raises(self, modifier):
+        spec = make_spec([LUMI], parameters=[LUMI_CONFIG])
+        add_signal_modifiers(spec, {"name": "lumi", **modifier})
+        with pytest.raises(ValueError, match=rf"'lumi'.*{modifier['type']}"):
+            from_hifa(spec)
+
+    def test_model_builds(self):
+        ws = from_hifa(make_spec([LUMI], parameters=[LUMI_CONFIG]))
+        model = ws.model(ws.analyses["meas"], progress=False)
+        assert set(model.free_params) == {"mu", "lumi"}
 
 
 class TestInputValidation:

@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
@@ -163,8 +163,9 @@ class _ModifierSettings(_Schema):
 class _ParameterDefaults:
     """pyhf's defaults for the parameter of one modifier type."""
 
-    init: float
-    bounds: tuple[float, float]
+    # None: pyhf has no default, so the measurement config must set it.
+    init: float | None
+    bounds: tuple[float, float] | None
     # The constraint pyhf puts on the parameter, if any.
     constraint: Literal["Gauss", "Poisson"] | None
     # One parameter per bin (``name_bin_i``) instead of a scalar.
@@ -186,9 +187,12 @@ _DEFAULTS: dict[str, _ParameterDefaults] = {
     "staterror": _ParameterDefaults(
         init=1.0, bounds=(1e-10, 10.0), constraint="Gauss", per_bin=True
     ),
+    "lumi": _ParameterDefaults(init=None, bounds=None, constraint="Gauss"),
 }
 # The auxiliary data and widths HS3 v0.2 expresses for a Gauss constraint.
-_GAUSS_AUX = {"auxdata": [0.0], "sigmas": [1.0]}
+_GAUSS_AUX: dict[str, list[float] | None] = {"auxdata": [0.0], "sigmas": [1.0]}
+# lumi's constraint takes its auxiliary data and width from each measurement.
+_LUMI_AUX: dict[str, list[float] | None] = {"auxdata": None, "sigmas": None}
 # Relative tolerance for config auxdata, factors and sigmas that pyhf derives
 # from the sample data, which a writer may have rounded.
 _AUX_RTOL = 1e-9
@@ -201,8 +205,9 @@ class _ParameterSet:
     modifier_type: str
     defaults: _ParameterDefaults
     # The config ``auxdata``, ``factors`` and ``sigmas`` pyhf derives; a
-    # measurement may repeat these but not change them.
-    aux: Mapping[str, list[float]]
+    # measurement may repeat these but not change them. None: pyhf derives
+    # nothing, so each measurement must set it.
+    aux: Mapping[str, list[float] | None]
     # Shape (size,): bins with no constraint term in HS3, which pyhf fixes.
     unconstrained: tuple[bool, ...] = (False,)
 
@@ -462,7 +467,6 @@ def _collect_parameters(
     different defaults cannot share a name (pyhf raises ``InvalidNameReuse``).
 
     Raises:
-        NotImplementedError: For a modifier type this converter does not support yet.
         ValueError: For a name shared by modifier types with different defaults,
             or a per-bin modifier pyhs3 cannot express as pyhf builds it.
     """
@@ -471,14 +475,7 @@ def _collect_parameters(
     for channel in hifa.channels:
         for sample in channel.samples:
             for modifier in sample.modifiers:
-                defaults = _DEFAULTS.get(modifier.type)
-                if defaults is None:
-                    msg = (
-                        f"from_hifa does not support '{modifier.type}' modifiers yet "
-                        f"(modifier '{modifier.name}' on sample '{sample.name}' in "
-                        f"channel '{channel.name}')"
-                    )
-                    raise NotImplementedError(msg)
+                defaults = _DEFAULTS[modifier.type]
                 first_type, first_defaults = types.setdefault(
                     modifier.name, (modifier.type, defaults)
                 )
@@ -499,6 +496,8 @@ def _collect_parameters(
             parameters[name] = _shapesys_parameter(name, defaults, uses[name])
         elif modifier_type == "staterror":
             parameters[name] = _staterror_parameter(name, defaults, layout)
+        elif modifier_type == "lumi":
+            parameters[name] = _ParameterSet(modifier_type, defaults, aux=_LUMI_AUX)
         else:
             aux = _GAUSS_AUX if defaults.constraint == "Gauss" else {}
             parameters[name] = _ParameterSet(modifier_type, defaults, aux=aux)
@@ -506,8 +505,11 @@ def _collect_parameters(
 
 
 def _emit_modifier(modifier: _Modifier, settings: _ModifierSettings) -> dict[str, Any]:
-    """HS3 modifier for a pyhf ``normfactor``, ``normsys`` or ``histosys``."""
+    """HS3 modifier for a pyhf ``normfactor``, ``normsys``, ``histosys`` or ``lumi``."""
     common = {"name": modifier.name, "type": modifier.type, "parameter": modifier.name}
+    if isinstance(modifier, _Lumi):
+        # Its constraint is the measurement's ``lumi_constraint_<m>``.
+        return {**common, "type": "normfactor"}
     if isinstance(modifier, _NormSys):
         return {
             **common,
@@ -631,14 +633,33 @@ def _resolve_parameter(
     entry setting ``fixed`` to false for such a parameter raises.
 
     Raises:
-        ValueError: For a config entry pyhf would reject or HS3 v0.2 cannot express.
+        ValueError: For a config entry pyhf would reject or HS3 v0.2 cannot
+            express, or a missing one pyhf has no default for.
     """
     defaults = parameter.defaults
     size = parameter.size
-    if entry is None:
-        return [(defaults.init, defaults.bounds, u) for u in parameter.unconstrained]
     where = f"Measurement '{measurement}': parameter '{name}'"
-    for key, values in (("inits", entry.inits), ("bounds", entry.bounds)):
+    # The config keys pyhf has no default for; pyhf fails without them.
+    required = [
+        key
+        for key, default in [
+            ("inits", defaults.init),
+            ("bounds", defaults.bounds),
+            *parameter.aux.items(),
+        ]
+        if default is None
+    ]
+    missing = [k for k in required if entry is None or getattr(entry, k) is None]
+    if missing:
+        msg = (
+            f"{where} is a {parameter.modifier_type}, which needs {missing} in "
+            f"the measurement config"
+        )
+        raise ValueError(msg)
+    if entry is None:
+        entry = _Parameter(name=name)
+    for key in ("inits", "bounds", *required):
+        values = getattr(entry, key)
         if values is not None and len(values) != size:
             msg = f"{where} has {len(values)} {key}, expected {size}"
             raise ValueError(msg)
@@ -650,6 +671,12 @@ def _resolve_parameter(
             msg = f"{where} is a {parameter.modifier_type}, which does not use {key}"
             raise ValueError(msg)
         expected = parameter.aux[key]
+        if expected is None:
+            if key == "sigmas" and min(values) <= 0:
+                # pyhf evaluates the constraint to NaN instead of raising.
+                msg = f"{where} sets sigmas={list(values)}, which must be positive"
+                raise ValueError(msg)
+            continue
         if len(values) != len(expected) or not np.allclose(
             values, expected, rtol=_AUX_RTOL, atol=0.0
         ):
@@ -665,8 +692,14 @@ def _resolve_parameter(
             f"in HS3 v0.2; pyhf would free them under a dummy constraint"
         )
         raise ValueError(msg)
-    inits = entry.inits if entry.inits is not None else [defaults.init] * size
-    bounds = entry.bounds if entry.bounds is not None else [defaults.bounds] * size
+    # The check of ``required`` above leaves no None default in use here.
+    inits = cast(
+        list[float], entry.inits if entry.inits is not None else [defaults.init] * size
+    )
+    bounds = cast(
+        list[tuple[float, float]],
+        entry.bounds if entry.bounds is not None else [defaults.bounds] * size,
+    )
     return [
         (init, bound, bool(entry.fixed) or unconstrained)
         for init, bound, unconstrained in zip(
@@ -680,8 +713,14 @@ def _emit_measurement(
     parameters: Mapping[str, _ParameterSet],
     distributions: list[str],
     data: list[str],
-) -> dict[str, dict[str, Any]]:
-    """HS3 likelihood, analysis, domain and parameter point for one measurement."""
+) -> dict[str, Any]:
+    """HS3 likelihood, analysis, domain, parameter point and constraints of one measurement.
+
+    ``lumi`` gets a Gauss constraint ``lumi_constraint_<m>`` in the likelihood's
+    ``aux_distributions``, built from this measurement's ``auxdata`` and
+    ``sigmas``. A fixed ``lumi`` keeps it: pyhf still evaluates the
+    constraint at the fixed value, so the likelihoods agree.
+    """
     name = measurement.name
     # Entries for parameters absent from the model are ignored, as in pyhf.
     entries = {p.name: p for p in measurement.config.parameters}
@@ -697,8 +736,30 @@ def _emit_measurement(
         ):
             points.append({"name": hs3_name, "value": init, "const": fixed})
             axes.append({"name": hs3_name, "min": lo, "max": hi})
+    likelihood: dict[str, Any] = {
+        "name": name,
+        "distributions": distributions,
+        "data": data,
+    }
+    constraints: list[dict[str, Any]] = []
+    if "lumi" in parameters:
+        lumi = entries["lumi"]
+        # _resolve_parameter checked that the config sets both, one value each.
+        assert lumi.auxdata is not None
+        assert lumi.sigmas is not None
+        constraints.append(
+            {
+                "type": "gaussian_dist",
+                "name": f"lumi_constraint_{name}",
+                "x": lumi.auxdata[0],
+                "mean": "lumi",
+                "sigma": lumi.sigmas[0],
+            }
+        )
+        likelihood["aux_distributions"] = [c["name"] for c in constraints]
     return {
-        "likelihood": {"name": name, "distributions": distributions, "data": data},
+        "likelihood": likelihood,
+        "constraints": constraints,
         "analysis": {
             "name": name,
             "likelihood": name,
@@ -723,8 +784,8 @@ def from_hifa(
     is a ``dict``). The result goes through all of :class:`~pyhs3.Workspace`'s
     validation.
 
-    Supported modifier types are ``normfactor``, ``normsys``, ``histosys``,
-    ``shapefactor``, ``shapesys`` and ``staterror``.
+    Every pyhf modifier type is supported: ``normfactor``, ``normsys``,
+    ``histosys``, ``shapefactor``, ``shapesys``, ``staterror`` and ``lumi``.
 
     **Names of the generated HS3 objects**
 
@@ -739,6 +800,8 @@ def from_hifa(
     scalar modifier ``x``         parameter ``x`` (no ``alpha_`` prefix)
     per-bin modifier ``x``        parameters ``x_bin_0``, ``x_bin_1``, ... (pyhf's
                                   ``x[i]``, which ROOT rejects as a name)
+    ``lumi`` in measurement ``m`` ``gaussian_dist`` ``lumi_constraint_m``, in
+                                  likelihood ``m``'s ``aux_distributions``
     ============================  =================================================
 
     A ``shapefactor`` or ``shapesys`` numbers the bins of its own channel. A
@@ -765,6 +828,8 @@ def from_hifa(
     ``shapesys``                 1     [1e-10, 10]  ``Poisson``, tau = (nu/delta)^2
     ``staterror``                1     [1e-10, 10]  ``Gauss``, width
                                                     sqrt(sum delta^2) / sum nu
+    ``lumi``                     none  none         ``Gauss``, config ``auxdata``
+                                                    and ``sigmas``
     ===========================  ====  ===========  ==============================
 
     For a per-bin parameter, ``inits`` and ``bounds`` hold one entry per bin
@@ -789,6 +854,13 @@ def from_hifa(
     parameter is ``const`` at its initial value (1 unless ``inits`` says
     otherwise).
 
+    **lumi.** pyhf requires ``inits``, ``bounds``, ``auxdata`` and ``sigmas``
+    (one value each) for ``lumi`` in every measurement. ``lumi`` maps to a
+    ``normfactor`` on parameter ``lumi`` plus, per measurement ``m``, a
+    ``gaussian_dist`` with ``x`` = auxdata, ``mean`` = ``lumi`` and ``sigma``
+    = sigmas. A fixed ``lumi`` is ``const`` and keeps its constraint, which
+    pyhf still evaluates at the fixed value.
+
     **Interpolation.** Each ``normsys`` and ``histosys`` modifier records its
     code in ``data.interpolation``. The defaults are pyhs3's (and ROOT's):
     ``code4`` for ``normsys`` and ``code4p`` for ``histosys``.
@@ -808,15 +880,14 @@ def from_hifa(
     Raises:
         pydantic.ValidationError: If ``spec`` does not follow pyhf's schema, or
             ``modifier_settings`` names an unknown modifier type, key or code.
-        NotImplementedError: For ``lumi`` modifiers, which are not supported yet.
         ValueError: For duplicate channel, observation, measurement or
             config-parameter names; a channel without an observation or an
             observation without a channel; bin counts that disagree within a
             channel, including a ``histosys``, ``shapesys`` or ``staterror``'s
             data; one name used by modifier types with different pyhf
-            defaults, such as ``normfactor`` and ``normsys`` or ``shapefactor``,
-            or ``shapesys`` and ``staterror``; a ``shapefactor`` on channels
-            with different bin counts; a ``shapesys`` name used on more than one
+            defaults, such as ``normfactor`` with ``normsys`` or ``shapefactor``,
+            ``shapesys`` with ``staterror``, and ``lumi`` with any other type; a
+            ``shapefactor`` on channels with different bin counts; a ``shapesys`` name used on more than one
             sample or channel, whose constraint pyhs3 would emit once per use;
             two ``staterror`` groups in one channel that each sit on more than
             one sample; a sample carrying a ``staterror`` in only some of the
@@ -833,7 +904,10 @@ def from_hifa(
             express: ``[0]`` and ``[1]`` for ``normsys``/``histosys``, tau
             (1 for a bin with no constraint term) for ``shapesys``, and
             auxdata 1 and the width (1 for a bin with no constraint term) for
-            ``staterror``.
+            ``staterror``; a ``lumi`` whose config lacks ``inits``,
+            ``bounds``, ``auxdata`` or ``sigmas``, sets more than one value
+            for any of them, sets ``factors``, or sets a non-positive
+            ``sigmas``.
 
     Examples:
         >>> import pyhs3
@@ -902,7 +976,8 @@ def from_hifa(
     ]
     hs3: dict[str, Any] = {
         "metadata": {"hs3_version": HS3_VERSION},
-        "distributions": distributions,
+        "distributions": distributions
+        + [c for m in measurements for c in m["constraints"]],
         "data": data,
         "likelihoods": [m["likelihood"] for m in measurements],
         "analyses": [m["analysis"] for m in measurements],

@@ -9,6 +9,7 @@ from there. ``tests/test_to_hifa_pyhf.py`` checks the output against pyhf.
 from __future__ import annotations
 
 import copy
+import json
 import logging
 from typing import Any
 
@@ -121,6 +122,14 @@ def axis(hs3: dict[str, Any], name: str) -> dict[str, Any]:
 
 def config(result: dict[str, Any], index: int = 0) -> dict[str, Any]:
     return result["measurements"][index]["config"]
+
+
+def renamed(hs3: dict[str, Any], names: dict[str, str]) -> dict[str, Any]:
+    """``hs3`` with each parameter ``old`` renamed to ``new`` everywhere."""
+    text = json.dumps(hs3)
+    for old, new in names.items():
+        text = text.replace(f'"{old}"', f'"{new}"')
+    return json.loads(text)
 
 
 class TestBasicMapping:
@@ -273,12 +282,60 @@ class TestPerBinModifiers:
 
     @pytest.mark.parametrize(
         "parameters",
-        [["sf_bin_0", "other_bin_1"], ["sf_0", "sf_1"], ["sf_bin_0", "sf_bin_2"]],
+        [
+            ["sf_bin_0", "other_bin_1"],
+            ["sf_bin_0", "sf_bin_2"],
+            ["sf_bin_0", "sf_1"],
+            ["sf_bin0", "sf_bin_1"],
+            ["sf_0", "sf_01"],
+            ["sf_1", "sf_0"],
+        ],
     )
     def test_parameters_not_one_bin_group_raise(self, parameters):
         hs3 = hs3_of(make_spec([SHAPEFACTOR]))
         sample(hs3, "background")["modifiers"][0]["parameters"] = parameters
         with pytest.raises(ValueError, match=r"not one group <name>_bin_<i>"):
+            convert(hs3)
+
+    def test_root_bin_names(self):
+        # ROOT names the bins of a per-bin modifier <name>_<i>.
+        parameters = [{"name": "bkg_unc", "inits": [1.2, 0.8]}]
+        hs3 = renamed(
+            hs3_of(make_spec([SHAPESYS], parameters=parameters)),
+            {"bkg_unc_bin_0": "bkg_unc_0", "bkg_unc_bin_1": "bkg_unc_1"},
+        )
+        result = convert(hs3)
+        assert result["channels"][0]["samples"][1]["modifiers"] == [SHAPESYS]
+        assert config(result)["parameters"] == parameters
+
+    def test_pyhs3_default_staterror_names(self):
+        # A staterror listing no parameters gets staterror_<channel>_bin<i>.
+        hs3 = renamed(
+            hs3_of(make_spec([STATERROR], signal_modifiers=[STATERROR])),
+            {
+                "staterror_SR_bin_0": "staterror_model_SR_bin0",
+                "staterror_SR_bin_1": "staterror_model_SR_bin1",
+            },
+        )
+        for name in ("signal", "background"):
+            for modifier in sample(hs3, name)["modifiers"]:
+                if modifier["type"] == "staterror":
+                    del modifier["parameters"]
+        point(hs3, "staterror_model_SR_bin0")["const"] = True
+        point(hs3, "staterror_model_SR_bin1")["const"] = True
+        result = convert(hs3)
+        staterror = {**STATERROR, "name": "staterror_model_SR"}
+        samples = result["channels"][0]["samples"]
+        assert samples[0]["modifiers"] == [MU, staterror]
+        assert samples[1]["modifiers"] == [staterror]
+        assert config(result)["parameters"] == [
+            {"name": "staterror_model_SR", "fixed": True}
+        ]
+
+    def test_two_names_for_one_pyhf_bin_raise(self):
+        hs3 = hs3_of(make_spec([SHAPEFACTOR], signal_modifiers=[SHAPEFACTOR]))
+        sample(hs3, "signal")["modifiers"][1]["parameters"] = ["sf_0", "sf_1"]
+        with pytest.raises(ValueError, match=r"pyhf's sf\[0\] would be both"):
             convert(hs3)
 
     def test_partly_overlapping_parameter_lists_raise(self):

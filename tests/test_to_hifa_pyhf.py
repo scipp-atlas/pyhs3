@@ -131,19 +131,7 @@ def test_interpolation_codes_round_trip(settings):
 # ``Lumi`` converts to a free normfactor, set to 1 at each point compared.
 ROOT_FIXTURES = [
     pytest.param("simplemodel_correlated-background", id="correlated"),
-    pytest.param(
-        "simplemodel_uncorrelated-background",
-        id="uncorrelated",
-        marks=pytest.mark.xfail(
-            raises=ValueError,
-            strict=True,
-            reason=(
-                "ROOT names the shapesys bins uncorr_bkguncrt_0 and "
-                "uncorr_bkguncrt_1, not uncorr_bkguncrt_bin_<i>, so to_hifa "
-                "cannot tell they are one per-bin parameter"
-            ),
-        ),
-    ),
+    pytest.param("simplemodel_uncorrelated-background", id="uncorrelated"),
 ]
 
 

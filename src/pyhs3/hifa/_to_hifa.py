@@ -670,7 +670,19 @@ def to_hifa(
     ``x_bin_<n-1>``                   ``i`` is ``x[i]``
     ================================  =========================================
 
-    A ``shapefactor`` or ``shapesys`` must number its bins from 0. A
+    A per-bin modifier's parameter list is one group ``x`` when every name in
+    it is ``x`` followed by one of these bin suffixes, the same one for the
+    whole list, with indices that count up by one in list order:
+
+    - ``x_bin_<i>``, as :func:`~pyhs3.from_hifa` writes them;
+    - ``x_bin<i>``, as pyhs3 names the parameters of a ``staterror`` that
+      lists none (``staterror_<channel>_bin<i>``);
+    - ``x_<i>``, as ROOT writes them.
+
+    The suffixes are tried in that order, so ``x_bin_0`` is bin 0 of ``x``,
+    not of ``x_bin``. One pyhf bin ``x[i]`` must come from one HS3 parameter
+    wherever ``x`` is used. A ``shapefactor`` or ``shapesys`` must number its
+    bins from 0. A
     ``staterror`` must number them as pyhf does: over the channels using its
     name, sorted by channel name, so a channel's first bin is the number of
     bins in the channels before it.
@@ -727,8 +739,9 @@ def to_hifa(
             ``normsys`` or ``histosys``; a ``LogNormal`` ``shapesys``; a
             non-``Gauss`` or Barlow-Beeston full ``staterror``, or lite
             ``staterror`` modifiers on different parameters in one channel;
-            per-bin parameters that are not one group ``<name>_bin_<i>``
-            with consecutive ``i``, or not numbered as pyhf numbers them;
+            per-bin parameters that are not one group (see above), not
+            numbered as pyhf numbers them, or naming one pyhf bin with two
+            HS3 parameters;
             per-bin parameter lists that only partly overlap, including a
             ``shapefactor`` with different bin counts in different channels;
             a ``shapesys`` whose parameters sit on more than one sample or

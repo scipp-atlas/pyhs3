@@ -184,6 +184,19 @@ class HasConstraint(ABC):
         underflow to 0.0.
         """
 
+    def unconstrained_parameters(
+        self,
+        sample_data: SampleData,  # noqa: ARG002  # pylint: disable=unused-argument
+    ) -> list[str]:
+        """Parameters that scale a positive yield but get no constraint term.
+
+        A per-bin parameter whose bin has a positive yield and zero
+        uncertainty is left out of the constraint; pyhf and ROOT fix it at its
+        nominal value, so it must be ``const``. Modifiers with one constrained
+        parameter have none.
+        """
+        return []
+
 
 class SingleParamConstraint(HasConstraint, ABC):
     """Mixin for single-parameter modifiers that use a standard Gauss/Poisson/LogNormal constraint."""
@@ -460,6 +473,14 @@ class ShapeSysModifier(HasConstraint, ParametersModifier):
             f"constraint_{self.name}", gamma, sigma_rel, self.constraint, context
         )
 
+    def unconstrained_parameters(self, sample_data: SampleData) -> list[str]:
+        """Parameters of bins with a positive yield and zero uncertainty."""
+        # Shape (B,): per-bin nominal yields and absolute uncertainties.
+        nominal_yields = np.asarray(sample_data.contents, dtype=np.float64)
+        uncertainties = np.asarray(self.data.vals, dtype=np.float64)
+        unconstrained = (nominal_yields > 0) & (uncertainties <= 0)
+        return [p for p, u in zip(self.parameters, unconstrained, strict=True) if u]
+
     def make_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
         """Create constraint term using PyTensor operations."""
         pair = self._build_bin_constraint(context, sample_data)
@@ -561,6 +582,20 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
         return gamma_constraint(
             f"constraint_{self.name}", gamma, sigma_rel, self.constraint, context
         )
+
+    def unconstrained_parameters(self, sample_data: SampleData) -> list[str]:
+        """Parameters of bins with a positive yield and zero uncertainty (BB-full only).
+
+        In BB-lite mode the channel finds them from its combined uncertainties.
+        """
+        if self.data is None:
+            return []
+        n = min(len(self.parameters), len(self.data.uncertainties))
+        # Shape (B,): concrete per-bin nominal yields and uncertainties.
+        nominal_yields = np.asarray(sample_data.contents[:n], dtype=np.float64)
+        uncertainties = np.asarray(self.data.uncertainties[:n], dtype=np.float64)
+        unconstrained = (nominal_yields > 0) & (uncertainties <= 0)
+        return [p for p, u in zip(self.parameters[:n], unconstrained, strict=True) if u]
 
     def make_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
         """Create constraint term using PyTensor operations.

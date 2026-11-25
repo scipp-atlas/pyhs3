@@ -285,7 +285,10 @@ Exceptions
    ExpressionEvaluationError
    WorkspaceValidationError
    UnlistedParameterError
+   AnalysisParameterError
    MissingInitialValueError
+   UnknownParameterOfInterestError
+   UnconstrainedParameterError
    DuplicateEntityError
    custom_error_msg
 

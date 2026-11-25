@@ -14,6 +14,7 @@ from typing import cast
 import numpy as np
 import numpy.typing as npt
 import pytensor.tensor as pt
+from pytensor.configdefaults import config
 
 # Import existing distributions for constraint terms
 from pyhs3.exceptions import HS3Exception
@@ -61,13 +62,16 @@ def _code4_coefficient_tensor(
     dtype: str,
 ) -> TensorVar:
     """Return a shared immutable code4 coefficient matrix tensor."""
-    return cast(
-        TensorVar,
-        pt.constant(
-            _code4_coefficient_matrix(alpha0),
-            dtype=dtype,
-        ),
-    )
+    # Shared by every model in the process, so built without creation
+    # tracebacks, like the models' graphs (see pyhs3.model.Model.__init__).
+    with config.change_flags(traceback__limit=0):
+        return cast(
+            TensorVar,
+            pt.constant(
+                _code4_coefficient_matrix(alpha0),
+                dtype=dtype,
+            ),
+        )
 
 
 @lru_cache(maxsize=128)
@@ -76,15 +80,17 @@ def _code4_exponent_tensor(
     alpha_ndim: int,
 ) -> TensorVar:
     """Return shared broadcast-ready powers 1 through 6."""
-    exponents = pt.constant(
-        np.arange(1, 7),
-        dtype=dtype,
-    )
-    pattern = (0,) + ("x",) * alpha_ndim
-    return cast(
-        TensorVar,
-        exponents.dimshuffle(pattern),  # type: ignore[no-untyped-call]
-    )
+    # Shared like _code4_coefficient_tensor, so also built without tracebacks.
+    with config.change_flags(traceback__limit=0):
+        exponents = pt.constant(
+            np.arange(1, 7),
+            dtype=dtype,
+        )
+        pattern = (0,) + ("x",) * alpha_ndim
+        return cast(
+            TensorVar,
+            exponents.dimshuffle(pattern),  # type: ignore[no-untyped-call]
+        )
 
 
 class InterpolationError(HS3Exception):

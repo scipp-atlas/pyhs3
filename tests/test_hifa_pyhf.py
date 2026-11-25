@@ -5,7 +5,8 @@ The specs are pyhf v0.7.6's validation models from ``tests/test_validation.py``
 ``validation/data/*.json`` and ``validation/shared_nuispar_across_types``, the
 zero-uncertainty and zero-yield ``shapesys`` and the multi-sample ``staterror``
 models of its ``tests/test_pdf.py``, specs written here for ``staterror``
-cases those do not cover, and the uncorrelated simplemodel in
+cases those do not cover and for an observation without a channel, and the
+uncorrelated simplemodel in
 ``tests/test_histfactory``. Most carry a measurement config, so suggested
 inits, bounds and fixed parameters are compared too.
 
@@ -358,6 +359,18 @@ SPECS = {
         },
         {"SR": [110.0, 190.0]},
         [lumi_config(inits=[1.05], fixed=True)],
+    ),
+    # A patch that removes channel CR leaves its observation, which pyhf
+    # ignores; its bin count need not match any channel.
+    "orphan_observation": workspace(
+        {
+            "SR": [
+                sample("signal", [10.0, 35.0], normfactor("mu")),
+                sample("background", [100.0, 150.0], normsys("bkg_norm", 0.9, 1.1)),
+            ]
+        },
+        {"SR": [110.0, 190.0], "CR": [205.0, 345.0, 12.0]},
+        [],
     ),
     "simplemodel_uncorrelated": json.loads(
         (

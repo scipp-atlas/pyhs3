@@ -9,6 +9,7 @@ subclass), checked by the private pydantic models in ``_schema``.
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -41,6 +42,8 @@ from pyhs3.hifa._schema import (
 from pyhs3.workspace import Workspace
 
 __all__ = ["from_hifa"]
+
+log = logging.getLogger(__name__)
 
 HS3_VERSION = "0.2"
 
@@ -114,9 +117,10 @@ def _check_consistency(hifa: _HiFaWorkspace) -> None:
 
     observations = {o.name: o for o in hifa.observations}
     channel_names = {c.name for c in hifa.channels}
-    for name in observations.keys() - channel_names:
-        msg = f"Observation '{name}' has no channel of that name"
-        raise ValueError(msg)
+    # A patch that removes a channel can leave its observation behind; pyhf
+    # ignores such observations, and so does the conversion.
+    for name in sorted(observations.keys() - channel_names):
+        log.debug("Observation '%s' has no channel of that name; ignoring it", name)
 
     for channel in hifa.channels:
         nbins = len(channel.samples[0].data)
@@ -636,20 +640,20 @@ def from_hifa(
 
     **Names of the generated HS3 objects**
 
-    ============================  =================================================
-    pyhf                          HS3
-    ============================  =================================================
-    channel ``c`` with ``n`` bins ``histfactory_dist`` ``model_c`` with axis
-                                  ``obs_x_c`` (``min=0``, ``max=n``, ``nbins=n``)
-    observation of channel ``c``  ``binned`` data ``obsData_c`` on axis ``obs_x_c``
-    measurement ``m``             likelihood, analysis, ``product_domain`` and
-                                  parameter point, all named ``m``
-    scalar modifier ``x``         parameter ``x`` (no ``alpha_`` prefix)
-    per-bin modifier ``x``        parameters ``x_bin_0``, ``x_bin_1``, ... (pyhf's
-                                  ``x[i]``, which ROOT rejects as a name)
-    ``lumi`` in measurement ``m`` ``gaussian_dist`` ``lumi_constraint_m``, in
-                                  likelihood ``m``'s ``aux_distributions``
-    ============================  =================================================
+    =============================  =================================================
+    pyhf                           HS3
+    =============================  =================================================
+    channel ``c`` with ``n`` bins  ``histfactory_dist`` ``model_c`` with axis
+                                   ``obs_x_c`` (``min=0``, ``max=n``, ``nbins=n``)
+    observation of channel ``c``   ``binned`` data ``obsData_c`` on axis ``obs_x_c``
+    measurement ``m``              likelihood, analysis, ``product_domain`` and
+                                   parameter point, all named ``m``
+    scalar modifier ``x``          parameter ``x`` (no ``alpha_`` prefix)
+    per-bin modifier ``x``         parameters ``x_bin_0``, ``x_bin_1``, ... (pyhf's
+                                   ``x[i]``, which ROOT rejects as a name)
+    ``lumi`` in measurement ``m``  ``gaussian_dist`` ``lumi_constraint_m``, in
+                                   likelihood ``m``'s ``aux_distributions``
+    =============================  =================================================
 
     A ``shapefactor`` or ``shapesys`` numbers the bins of its own channel. A
     ``staterror`` numbers them as pyhf does: over the channels using its name,
@@ -657,7 +661,9 @@ def from_hifa(
     stay per channel.
 
     Each likelihood pairs every channel's distribution with its data, in the
-    input's channel order. Each analysis has ``init`` and its one domain set to
+    input's channel order. An observation whose name matches no channel is
+    ignored, as pyhf ignores it, and logged at debug level: a patch that
+    removes a channel can leave its observation behind. Each analysis has ``init`` and its one domain set to
     ``m``, and ``parameters_of_interest`` set to the measurement's ``poi``,
     copied as given even when no modifier uses it. Parameter point ``m`` and
     domain ``m`` list every parameter of the model, sorted by pyhf name, with
@@ -692,7 +698,7 @@ def from_hifa(
     get no ``errors``. pyhs3's lite mode holds one staterror group per channel:
     the group on more than one sample if there is one, else the first to
     appear. Any other group in the channel sits on a single sample and maps to
-    a ``shapesys`` with ``constraint: Gauss`` and ``vals`` = |delta|, which
+    a ``shapesys`` with ``constraint: Gauss`` and ``vals`` = abs(delta), which
     gives the same width delta / nu.
 
     A ``shapesys`` bin with no positive yield or no positive uncertainty, and a
@@ -728,8 +734,7 @@ def from_hifa(
         pydantic.ValidationError: If ``spec`` does not follow pyhf's schema, or
             ``modifier_settings`` names an unknown modifier type, key or code.
         ValueError: For duplicate channel, observation, measurement or
-            config-parameter names; a channel without an observation or an
-            observation without a channel; bin counts that disagree within a
+            config-parameter names; a channel without an observation; bin counts that disagree within a
             channel, including a ``histosys``, ``shapesys`` or ``staterror``'s
             data; one name used by modifier types with different pyhf
             defaults, such as ``normfactor`` with ``normsys`` or ``shapefactor``,

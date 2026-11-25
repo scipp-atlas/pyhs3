@@ -1,6 +1,7 @@
 """Integration tests: ``pyhs3.from_hifa`` against pyhf.
 
-The specs are pyhf v0.7.6's validation models from ``tests/test_validation.py``,
+The specs are pyhf v0.7.6's validation models from ``tests/test_validation.py``
+(``1bin_lumi`` included),
 ``validation/data/*.json`` and ``validation/shared_nuispar_across_types``, the
 zero-uncertainty and zero-yield ``shapesys`` and the multi-sample ``staterror``
 models of its ``tests/test_pdf.py``, specs written here for ``staterror``
@@ -61,6 +62,21 @@ def shapesys(name: str, data: list[float]) -> dict[str, Any]:
 
 def staterror(name: str, data: list[float]) -> dict[str, Any]:
     return {"name": name, "type": "staterror", "data": data}
+
+
+LUMI = {"name": "lumi", "type": "lumi", "data": None}
+
+
+def lumi_config(**overrides: Any) -> dict[str, Any]:
+    """pyhf's ``1bin_lumi`` lumi config entry, with ``overrides`` applied."""
+    entry = {
+        "name": "lumi",
+        "auxdata": [1.0],
+        "sigmas": [0.1],
+        "inits": [1.0],
+        "bounds": [[0.0, 10.0]],
+    }
+    return {**entry, **overrides}
 
 
 def sample(name: str, data: list[float], *modifiers: dict[str, Any]) -> dict[str, Any]:
@@ -302,6 +318,46 @@ SPECS = {
         },
         {"SR": [90.0, 92.0]},
         [{"name": "stat_bkg1_extra", "inits": [0.9, 1.0]}],
+    ),
+    "1bin_lumi": workspace(
+        {
+            "channel1": [
+                sample("signal", [20.0], normfactor("mu")),
+                sample("background1", [100.0], LUMI),
+                sample("background2", [0.0], LUMI),
+            ]
+        },
+        {"channel1": [55.0]},
+        [lumi_config()],
+    ),
+    # lumi on signal and background in two channels, beside a normsys, with
+    # auxdata off 1.
+    "lumi_two_channels": workspace(
+        {
+            "SR": [
+                sample("signal", [10.0, 35.0], normfactor("mu"), LUMI),
+                sample(
+                    "background",
+                    [100.0, 150.0],
+                    LUMI,
+                    normsys("bkg_norm", 0.9, 1.1),
+                ),
+            ],
+            "CR": [sample("background", [200.0, 350.0], LUMI)],
+        },
+        {"SR": [110.0, 190.0], "CR": [205.0, 345.0]},
+        [lumi_config(auxdata=[1.02], sigmas=[0.017], bounds=[[0.5, 1.5]])],
+    ),
+    # A fixed lumi away from its auxdata: pyhf still evaluates its constraint.
+    "lumi_fixed": workspace(
+        {
+            "SR": [
+                sample("signal", [10.0, 35.0], normfactor("mu")),
+                sample("background", [100.0, 150.0], LUMI),
+            ]
+        },
+        {"SR": [110.0, 190.0]},
+        [lumi_config(inits=[1.05], fixed=True)],
     ),
     "simplemodel_uncorrelated": json.loads(
         (

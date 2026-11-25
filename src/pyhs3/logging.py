@@ -32,7 +32,7 @@ class AppFilter(logging.Filter):
 
 def rich_handler_factory() -> RichHandler:
     return RichHandler(
-        console=Console(width=160),
+        console=Console(width=160, stderr=True),
         rich_tracebacks=True,
         tracebacks_suppress=[],
         markup=True,

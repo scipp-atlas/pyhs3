@@ -12,10 +12,17 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
-from pyhs3.hifa._defaults import _DEFAULTS, _bin_names
+from pyhs3.hifa._defaults import _DEFAULTS
 
-# pyhf's per-bin parameter ``name[i]`` is ``name_bin_i`` in HS3.
-_BIN_NAME = re.compile(r"(?P<name>.+)_bin_(?P<index>\d+)")
+# The HS3 names of pyhf's per-bin parameter ``name[i]``, tried in order:
+# ``name_bin_i`` (from_hifa's), ``name_bin<i>`` (pyhs3's default staterror
+# parameters ``staterror_<channel>_bin<i>``) and ``name_i`` (ROOT's). The order
+# matters: ``x_bin_0`` also reads as ``name_i`` with name ``x_bin``.
+_BIN_NAMES = (
+    re.compile(r"(?P<name>.+)_bin_(?P<index>0|[1-9]\d*)"),
+    re.compile(r"(?P<name>.+)_bin(?P<index>0|[1-9]\d*)"),
+    re.compile(r"(?P<name>.+)_(?P<index>0|[1-9]\d*)"),
+)
 
 # pyhf's types of per-bin parameters, as this converter emits them.
 _PerBinType = Literal["shapefactor", "shapesys", "staterror"]
@@ -26,11 +33,16 @@ class _PerBinUse:
     """Where one pyhf per-bin parameter sits in one channel."""
 
     start: int
-    nbins: int
+    # The HS3 parameters of its bins here, in bin order.
+    parameters: list[str]
     # The HS3 modifiers carrying it there, for the error messages.
     modifiers: list[str] = field(default_factory=list)
     # A Barlow-Beeston lite group, which may span several samples.
     lite: bool = False
+
+    @property
+    def nbins(self) -> int:
+        return len(self.parameters)
 
 
 @dataclass
@@ -54,8 +66,32 @@ class _PyhfParameter:
             return [name]
         if self.modifier_type == "staterror":
             # pyhf numbers a staterror over the channels using it, by name.
-            return _bin_names(name, 0, sum(use.nbins for use in self.uses.values()))
-        return _bin_names(name, 0, next(iter(self.uses.values())).nbins)
+            return [
+                hs3_name
+                for channel in sorted(self.uses)
+                for hs3_name in self.uses[channel].parameters
+            ]
+        return next(iter(self.uses.values())).parameters
+
+
+def _bin_group(parameters: list[str]) -> tuple[str, int] | None:
+    """The pyhf name and first bin of one per-bin group of HS3 parameters.
+
+    The parameters are one group when, for one of the accepted naming
+    patterns, all share one name and their indices count up by one from the
+    first; None otherwise.
+    """
+    for pattern in _BIN_NAMES:
+        matches = [m for p in parameters if (m := pattern.fullmatch(p))]
+        if not parameters or len(matches) != len(parameters):
+            continue
+        name, start = matches[0]["name"], int(matches[0]["index"])
+        if all(
+            m["name"] == name and int(m["index"]) == start + offset
+            for offset, m in enumerate(matches)
+        ):
+            return name, start
+    return None
 
 
 def _format(name: str, index: int | None) -> str:
@@ -75,6 +111,8 @@ class _Registry:
         self._functions = functions
         # HS3 parameter -> the pyhf parameter (and bin) it becomes.
         self._owners: dict[str, tuple[str, int | None]] = {}
+        # pyhf parameter (and bin) -> the HS3 parameter behind it.
+        self._sources: dict[tuple[str, int | None], str] = {}
 
     def _claim(self, hs3_name: str, name: str, index: int | None) -> None:
         if hs3_name in self._functions:
@@ -88,6 +126,13 @@ class _Registry:
             msg = (
                 f"HS3 parameter '{hs3_name}' would be both pyhf's "
                 f"{_format(*owner)} and {_format(name, index)}"
+            )
+            raise ValueError(msg)
+        source = self._sources.setdefault((name, index), hs3_name)
+        if source != hs3_name:
+            msg = (
+                f"pyhf's {_format(name, index)} would be both HS3 parameter "
+                f"'{source}' and '{hs3_name}'"
             )
             raise ValueError(msg)
 
@@ -120,32 +165,29 @@ class _Registry:
         """Register the parameters of one per-bin modifier; return the pyhf name.
 
         Raises:
-            ValueError: For parameters that are not one group ``name_bin_i``
-                with consecutive ``i``, or a modifier pyhf cannot share where
-                HS3 shares it.
+            ValueError: For parameters that are not one group ``name_bin_i``,
+                ``name_bin<i>`` or ``name_i`` with consecutive ``i``, or a
+                modifier pyhf cannot share where HS3 shares it.
         """
-        match = _BIN_NAME.fullmatch(parameters[0]) if parameters else None
-        if match is None or _bin_names(
-            match["name"], int(match["index"]), len(parameters)
-        ) != list(parameters):
+        group = _bin_group(parameters)
+        if group is None:
             msg = (
                 f"{modifier_type} '{modifier}' in channel '{channel}' has parameters "
-                f"{parameters}, which are not one group <name>_bin_<i> with "
-                f"consecutive i; pyhf names the bins of one modifier name[0], "
-                f"name[1], ..."
+                f"{parameters}, which are not one group <name>_bin_<i>, "
+                f"<name>_bin<i> or <name>_<i> with consecutive i; pyhf names the "
+                f"bins of one modifier name[0], name[1], ..."
             )
             raise ValueError(msg)
-        name, start = match["name"], int(match["index"])
+        name, start = group
         parameter = self._parameter(modifier_type, name)
         for index, hs3_name in enumerate(parameters, start=start):
             self._claim(hs3_name, name, index)
-        use = parameter.uses.setdefault(channel, _PerBinUse(start, len(parameters)))
-        if (use.start, use.nbins) != (start, len(parameters)):
+        use = parameter.uses.setdefault(channel, _PerBinUse(start, list(parameters)))
+        if use.parameters != list(parameters):
             msg = (
                 f"{modifier_type} '{name}' has parameter lists "
-                f"{_bin_names(name, use.start, use.nbins)} and {parameters} in "
-                f"channel '{channel}'; pyhf gives every use of one name in a "
-                f"channel the same bins"
+                f"{use.parameters} and {parameters} in channel '{channel}'; pyhf "
+                f"gives every use of one name in a channel the same bins"
             )
             raise ValueError(msg)
         if use.modifiers and not (lite and use.lite):

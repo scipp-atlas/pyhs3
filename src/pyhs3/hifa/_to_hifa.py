@@ -33,11 +33,12 @@ from pyhs3.distributions.histfactory.modifiers import (
 )
 from pyhs3.distributions.histfactory.samples import Sample
 from pyhs3.domains import ProductDomain
+from pyhs3.exceptions import AnalysisParameterError, UnlistedParameterError
 from pyhs3.hifa._defaults import _CHANNEL_PREFIX, _DEFAULTS
 from pyhs3.hifa._parameters import _PerBinType, _PyhfParameter, _Registry
 from pyhs3.hifa._schema import _HiFaWorkspace, _ModifierSettings
 from pyhs3.likelihoods import Likelihood
-from pyhs3.parameter_points import ParameterPoint
+from pyhs3.parameter_points import ParameterPoint, ParameterSet
 from pyhs3.workspace import Workspace
 
 __all__ = ["hifa_modifier_settings", "to_hifa"]
@@ -519,17 +520,82 @@ def _config_entry(
     return entry
 
 
+def _suggested_parameter_set(ws: Workspace, analysis: Analysis) -> str | None:
+    """The parameter point to use for an analysis with no ``init``, if it needs one.
+
+    An analysis needs one when it violates HS3 section 2.7 without it, as ROOT
+    exports do by holding ``Lumi`` const only in their parameter points. The
+    first parameter point in which everything outside the domains is
+    ``const`` is chosen, as :class:`~pyhs3.exceptions.UnlistedParameterError`
+    suggests for :meth:`~pyhs3.Workspace.model`.
+
+    Raises:
+        ValueError: If the analysis needs a parameter point and no parameter
+            point holds every parameter outside its domains ``const``.
+    """
+    try:
+        ws.parameter_context(analysis)
+    except UnlistedParameterError as err:
+        if not err.const_parameter_sets:
+            msg = (
+                f"{err} Pass to_hifa(..., parameter_set=) to name a parameter "
+                f"point that holds them const."
+            )
+            raise ValueError(msg) from err
+        name = err.const_parameter_sets[0]
+        log.warning(
+            "Analysis '%s' has no init, and %s are in none of its domains; "
+            "taking initial values and const flags from parameter point '%s', "
+            "the first in which they are all const. Pass parameter_set= to "
+            "choose another.",
+            analysis.name,
+            err.parameters,
+            name,
+        )
+        return name
+    except AnalysisParameterError:
+        # HS3 section 2.7 holds without a parameter point; the other checks
+        # are about building a model, and pyhf has defaults for the rest.
+        pass
+    return None
+
+
+def _parameter_set(
+    ws: Workspace, analysis: Analysis, parameter_set: str | None
+) -> ParameterSet | None:
+    """The parameter point giving an analysis's initial values and const flags.
+
+    ``parameter_set`` overrides the analysis's ``init``; without either, see
+    :func:`_suggested_parameter_set`.
+
+    Raises:
+        ValueError: For a ``parameter_set`` the workspace does not have, or
+            no usable parameter point for an analysis that needs one.
+    """
+    if parameter_set is not None:
+        if ws.parameter_points is None or parameter_set not in ws.parameter_points:
+            msg = (
+                f"The workspace has no parameter point parameter_set='{parameter_set}'"
+            )
+            raise ValueError(msg)
+        return ws.parameter_points[parameter_set]
+    name = analysis.init or _suggested_parameter_set(ws, analysis)
+    if name is None or ws.parameter_points is None:
+        return None
+    return ws.parameter_points[name]
+
+
 def _measurement(
-    ws: Workspace,
     analysis: Analysis,
+    parameter_set: ParameterSet | None,
     registry: _Registry,
     lumi: _LumiConstraint | None,
     poi: str | None,
 ) -> dict[str, Any]:
     """pyhf measurement of one analysis, named after it."""
     points: dict[str, ParameterPoint] = {}
-    if analysis.init is not None and ws.parameter_points is not None:
-        points = {p.name: p for p in ws.parameter_points[analysis.init]}
+    if parameter_set is not None:
+        points = {p.name: p for p in parameter_set}
     bounds = _analysis_bounds(analysis)
     entries = [
         _config_entry(
@@ -550,17 +616,19 @@ def _measurement(
     }
 
 
-def _log_dropped(ws: Workspace, analyses: list[Analysis]) -> None:
-    """Log the HS3 content that has no place in a pyhf workspace."""
+def _log_dropped(ws: Workspace, used: set[str]) -> None:
+    """Log the HS3 content that has no place in a pyhf workspace.
+
+    ``used`` names the parameter points the measurements took values from.
+    """
     log.debug("Dropping the workspace metadata: pyhf workspaces have none")
     if ws.misc:
         log.debug("Dropping the workspace misc: pyhf workspaces have none")
-    inits = {a.init for a in analyses}
-    others = [p.name for p in ws.parameter_points or [] if p.name not in inits]
+    others = [p.name for p in ws.parameter_points or [] if p.name not in used]
     if others:
         log.debug(
-            "Dropping parameter points %s: pyhf takes initial values from each "
-            "analysis's init only",
+            "Dropping parameter points %s: pyhf takes initial values from one "
+            "parameter point per analysis only",
             others,
         )
 
@@ -638,6 +706,7 @@ def to_hifa(
     *,
     likelihood: str | int | None = None,
     poi: str | None = None,
+    parameter_set: str | None = None,
 ) -> dict[str, Any]:
     """Convert an HS3 workspace of HistFactory channels to a pyhf workspace.
 
@@ -670,7 +739,19 @@ def to_hifa(
     ``x_bin_<n-1>``                   ``i`` is ``x[i]``
     ================================  =========================================
 
-    A ``shapefactor`` or ``shapesys`` must number its bins from 0. A
+    A per-bin modifier's parameter list is one group ``x`` when every name in
+    it is ``x`` followed by one of these bin suffixes, the same one for the
+    whole list, with indices that count up by one in list order:
+
+    - ``x_bin_<i>``, as :func:`~pyhs3.from_hifa` writes them;
+    - ``x_bin<i>``, as pyhs3 names the parameters of a ``staterror`` that
+      lists none (``staterror_<channel>_bin<i>``);
+    - ``x_<i>``, as ROOT writes them.
+
+    The suffixes are tried in that order, so ``x_bin_0`` is bin 0 of ``x``,
+    not of ``x_bin``. One pyhf bin ``x[i]`` must come from one HS3 parameter
+    wherever ``x`` is used. A ``shapefactor`` or ``shapesys`` must number its
+    bins from 0. A
     ``staterror`` must number them as pyhf does: over the channels using its
     name, sorted by channel name, so a channel's first bin is the number of
     bins in the channels before it.
@@ -686,8 +767,14 @@ def to_hifa(
 
     **Measurement config.** ``poi`` is the analysis's one parameter of
     interest, or ``poi`` when given. Initial values and ``const`` flags come
-    from the analysis's ``init`` parameter point, and bounds from its domains
-    (intersected when a parameter is in several). The config lists only
+    from one parameter point: ``parameter_set`` when given, else the
+    analysis's ``init``. An analysis with neither that violates HS3 section
+    2.7 without a parameter point (ROOT exports, which hold ``Lumi`` const
+    only in their parameter points, do) takes the first parameter point in
+    which every parameter outside its domains is ``const``, as
+    :class:`~pyhs3.exceptions.UnlistedParameterError` suggests, and logs a
+    warning naming it. Bounds come from the analysis's domains (intersected
+    when a parameter is in several). The config lists only
     ``inits`` and ``bounds`` that differ from pyhf's defaults (see
     :func:`~pyhs3.from_hifa`) and ``fixed: true`` for ``const`` parameters,
     plus, for ``lumi``, the ``inits``, ``bounds``, ``auxdata`` and ``sigmas``
@@ -704,7 +791,7 @@ def to_hifa(
 
     **Dropped, with a debug log message:** each channel's binning, the
     workspace's ``metadata`` and ``misc``, ``errors`` on samples without a
-    ``staterror``, and parameter points other than the analyses' ``init``.
+    ``staterror``, and parameter points other than the ones used.
 
     Args:
         ws: The HS3 workspace.
@@ -712,6 +799,8 @@ def to_hifa(
             the workspace's likelihoods pair the channels with different data.
         poi: The parameter of interest, for an analysis listing several or
             none.
+        parameter_set: Name of the parameter point to take initial values
+            and ``const`` flags from, instead of each analysis's ``init``.
 
     Returns:
         The pyhf workspace, as a dict.
@@ -727,8 +816,9 @@ def to_hifa(
             ``normsys`` or ``histosys``; a ``LogNormal`` ``shapesys``; a
             non-``Gauss`` or Barlow-Beeston full ``staterror``, or lite
             ``staterror`` modifiers on different parameters in one channel;
-            per-bin parameters that are not one group ``<name>_bin_<i>``
-            with consecutive ``i``, or not numbered as pyhf numbers them;
+            per-bin parameters that are not one group (see above), not
+            numbered as pyhf numbers them, or naming one pyhf bin with two
+            HS3 parameters;
             per-bin parameter lists that only partly overlap, including a
             ``shapefactor`` with different bin counts in different channels;
             a ``shapesys`` whose parameters sit on more than one sample or
@@ -742,7 +832,10 @@ def to_hifa(
             unknown ``likelihood``, two channels with one pyhf name, a
             likelihood without an analysis, or an analysis with no or several
             parameters of interest and no ``poi`` (or a ``poi`` it does not
-            list).
+            list). Also for an unknown ``parameter_set``, or an analysis with
+            neither ``init`` nor ``parameter_set`` that violates HS3 section
+            2.7 without a parameter point when no parameter point holds every
+            parameter outside its domains ``const``.
 
     Examples:
         >>> import pyhs3
@@ -795,8 +888,12 @@ def to_hifa(
             f"measurement with a parameter of interest"
         )
         raise ValueError(msg)
-    measurements = [_measurement(ws, a, registry, lumi, poi) for a in analyses]
-    _log_dropped(ws, analyses)
+    parameter_sets = [_parameter_set(ws, a, parameter_set) for a in analyses]
+    measurements = [
+        _measurement(a, pset, registry, lumi, poi)
+        for a, pset in zip(analyses, parameter_sets, strict=True)
+    ]
+    _log_dropped(ws, {pset.name for pset in parameter_sets if pset is not None})
     result = {
         "channels": pyhf_channels,
         "observations": [

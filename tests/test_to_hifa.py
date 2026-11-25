@@ -9,6 +9,7 @@ from there. ``tests/test_to_hifa_pyhf.py`` checks the output against pyhf.
 from __future__ import annotations
 
 import copy
+import json
 import logging
 from typing import Any
 
@@ -121,6 +122,14 @@ def axis(hs3: dict[str, Any], name: str) -> dict[str, Any]:
 
 def config(result: dict[str, Any], index: int = 0) -> dict[str, Any]:
     return result["measurements"][index]["config"]
+
+
+def renamed(hs3: dict[str, Any], names: dict[str, str]) -> dict[str, Any]:
+    """``hs3`` with each parameter ``old`` renamed to ``new`` everywhere."""
+    text = json.dumps(hs3)
+    for old, new in names.items():
+        text = text.replace(f'"{old}"', f'"{new}"')
+    return json.loads(text)
 
 
 class TestBasicMapping:
@@ -273,12 +282,60 @@ class TestPerBinModifiers:
 
     @pytest.mark.parametrize(
         "parameters",
-        [["sf_bin_0", "other_bin_1"], ["sf_0", "sf_1"], ["sf_bin_0", "sf_bin_2"]],
+        [
+            ["sf_bin_0", "other_bin_1"],
+            ["sf_bin_0", "sf_bin_2"],
+            ["sf_bin_0", "sf_1"],
+            ["sf_bin0", "sf_bin_1"],
+            ["sf_0", "sf_01"],
+            ["sf_1", "sf_0"],
+        ],
     )
     def test_parameters_not_one_bin_group_raise(self, parameters):
         hs3 = hs3_of(make_spec([SHAPEFACTOR]))
         sample(hs3, "background")["modifiers"][0]["parameters"] = parameters
         with pytest.raises(ValueError, match=r"not one group <name>_bin_<i>"):
+            convert(hs3)
+
+    def test_root_bin_names(self):
+        # ROOT names the bins of a per-bin modifier <name>_<i>.
+        parameters = [{"name": "bkg_unc", "inits": [1.2, 0.8]}]
+        hs3 = renamed(
+            hs3_of(make_spec([SHAPESYS], parameters=parameters)),
+            {"bkg_unc_bin_0": "bkg_unc_0", "bkg_unc_bin_1": "bkg_unc_1"},
+        )
+        result = convert(hs3)
+        assert result["channels"][0]["samples"][1]["modifiers"] == [SHAPESYS]
+        assert config(result)["parameters"] == parameters
+
+    def test_pyhs3_default_staterror_names(self):
+        # A staterror listing no parameters gets staterror_<channel>_bin<i>.
+        hs3 = renamed(
+            hs3_of(make_spec([STATERROR], signal_modifiers=[STATERROR])),
+            {
+                "staterror_SR_bin_0": "staterror_model_SR_bin0",
+                "staterror_SR_bin_1": "staterror_model_SR_bin1",
+            },
+        )
+        for name in ("signal", "background"):
+            for modifier in sample(hs3, name)["modifiers"]:
+                if modifier["type"] == "staterror":
+                    del modifier["parameters"]
+        point(hs3, "staterror_model_SR_bin0")["const"] = True
+        point(hs3, "staterror_model_SR_bin1")["const"] = True
+        result = convert(hs3)
+        staterror = {**STATERROR, "name": "staterror_model_SR"}
+        samples = result["channels"][0]["samples"]
+        assert samples[0]["modifiers"] == [MU, staterror]
+        assert samples[1]["modifiers"] == [staterror]
+        assert config(result)["parameters"] == [
+            {"name": "staterror_model_SR", "fixed": True}
+        ]
+
+    def test_two_names_for_one_pyhf_bin_raise(self):
+        hs3 = hs3_of(make_spec([SHAPEFACTOR], signal_modifiers=[SHAPEFACTOR]))
+        sample(hs3, "signal")["modifiers"][1]["parameters"] = ["sf_0", "sf_1"]
+        with pytest.raises(ValueError, match=r"pyhf's sf\[0\] would be both"):
             convert(hs3)
 
     def test_partly_overlapping_parameter_lists_raise(self):
@@ -633,10 +690,73 @@ class TestMeasurementConfig:
         hs3["domains"][0]["axes"] = [axis(hs3, "mu")]
         assert config(convert(hs3))["parameters"] == []
 
-    def test_analysis_without_init_takes_pyhf_defaults(self):
+    def test_analysis_without_init_takes_pyhf_defaults(self, caplog):
         hs3 = hs3_of(make_spec([NORMSYS], parameters=[{"name": "mu", "inits": [2.0]}]))
         del hs3["analyses"][0]["init"]
-        assert config(convert(hs3))["parameters"] == []
+        with caplog.at_level(logging.WARNING, logger="pyhs3.hifa"):
+            assert config(convert(hs3))["parameters"] == []
+        assert caplog.text == ""
+
+
+class TestParameterSet:
+    """The parameter point that gives initial values and const flags."""
+
+    @staticmethod
+    def root_like() -> dict[str, Any]:
+        """An analysis with no init, as ROOT exports it.
+
+        ``bkg_norm`` is in no domain and const only in parameter points
+        ``held`` (at 0.5) and ``held_too`` (at 0.2), as ROOT holds ``Lumi``.
+        """
+        hs3 = hs3_of(make_spec([NORMSYS]))
+        del hs3["analyses"][0]["init"]
+        hs3["domains"][0]["axes"] = [axis(hs3, "mu")]
+        free = hs3["parameter_points"][0]
+        held = copy.deepcopy(free)
+        held_too = copy.deepcopy(free)
+        free["name"] = "free"
+        held["name"] = "held"
+        held_too["name"] = "held_too"
+        for pset, value in ((held, 0.5), (held_too, 0.2)):
+            entry = next(p for p in pset["parameters"] if p["name"] == "bkg_norm")
+            entry.update(value=value, const=True)
+        hs3["parameter_points"] = [free, held, held_too]
+        return hs3
+
+    def test_no_init_falls_back_to_the_first_const_set(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="pyhs3.hifa"):
+            result = convert(self.root_like())
+        assert config(result)["parameters"] == [
+            {"name": "bkg_norm", "inits": [0.5], "fixed": True}
+        ]
+        assert "'held'" in caplog.text
+        assert "parameter_set=" in caplog.text
+
+    def test_parameter_set_overrides(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="pyhs3.hifa"):
+            result = convert(self.root_like(), parameter_set="held_too")
+        assert config(result)["parameters"] == [
+            {"name": "bkg_norm", "inits": [0.2], "fixed": True}
+        ]
+        assert caplog.text == ""
+
+    def test_parameter_set_overrides_init(self):
+        hs3 = self.root_like()
+        hs3["analyses"][0]["init"] = "held"
+        result = convert(hs3, parameter_set="held_too")
+        assert config(result)["parameters"] == [
+            {"name": "bkg_norm", "inits": [0.2], "fixed": True}
+        ]
+
+    def test_no_const_set_raises(self):
+        hs3 = self.root_like()
+        hs3["parameter_points"] = hs3["parameter_points"][:1]
+        with pytest.raises(ValueError, match=r"HS3 section 2.7.*parameter_set="):
+            convert(hs3)
+
+    def test_unknown_parameter_set_raises(self):
+        with pytest.raises(ValueError, match=r"parameter_set='nope'"):
+            convert(self.root_like(), parameter_set="nope")
 
     def test_bounds_intersect_over_the_analysis_domains(self):
         hs3 = hs3_of(make_spec())

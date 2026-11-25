@@ -137,22 +137,11 @@ def test_interpolation_codes_round_trip(settings):
 # normsys/histosys parameter ``alpha_<modifier>`` and adds a normfactor
 # ``Lumi``, const at 1 in its parameter points; pyhf names the parameter after
 # the modifier and has no ``Lumi``. The analyses set no ``init``, so
-# ``Lumi`` converts to a free normfactor, set to 1 at each point compared.
+# ``to_hifa`` takes the first of those parameter points, which fixes ``Lumi``
+# in pyhf at its suggested init.
 ROOT_FIXTURES = [
     pytest.param("simplemodel_correlated-background", id="correlated"),
-    pytest.param(
-        "simplemodel_uncorrelated-background",
-        id="uncorrelated",
-        marks=pytest.mark.xfail(
-            raises=ValueError,
-            strict=True,
-            reason=(
-                "ROOT names the shapesys bins uncorr_bkguncrt_0 and "
-                "uncorr_bkguncrt_1, not uncorr_bkguncrt_bin_<i>, so to_hifa "
-                "cannot tell they are one per-bin parameter"
-            ),
-        ),
-    ),
+    pytest.param("simplemodel_uncorrelated-background", id="uncorrelated"),
 ]
 
 
@@ -182,6 +171,13 @@ def test_root_fixture_logpdf(fixture, seed):
     expected_data = companion.data(expected_model)
     assert list(data) == list(expected_data)
 
+    init = dict(zip(model.config.par_names, model.config.suggested_init(), strict=True))
+    fixed = dict(
+        zip(model.config.par_names, model.config.suggested_fixed(), strict=True)
+    )
+    assert fixed["Lumi"]
+    assert init["Lumi"] == 1.0
+
     rng = np.random.default_rng(seed)
     names = expected_model.config.par_names
     bounds = expected_model.config.suggested_bounds()
@@ -192,7 +188,7 @@ def test_root_fixture_logpdf(fixture, seed):
             for name, (lo, hi) in zip(names, bounds, strict=True)
         }
         pars = [
-            1.0 if name == "Lumi" else point[root_to_pyhf_name(name)]
+            init[name] if fixed[name] else point[root_to_pyhf_name(name)]
             for name in model.config.par_names
         ]
         expected = expected_model.logpdf([point[name] for name in names], expected_data)

@@ -59,9 +59,40 @@ HISTOSYS = {
 }
 
 
-def modifiers_of(ws: pyhs3.Workspace, sample: str) -> list[dict[str, Any]]:
-    """Serialized modifiers of one sample of channel ``SR``."""
-    dist = ws.distributions["model_SR"]
+SHAPEFACTOR = {"name": "sf", "type": "shapefactor", "data": None}
+SHAPESYS = {"name": "bkg_unc", "type": "shapesys", "data": [5.0, 6.0]}
+STATERROR = {"name": "staterror_SR", "type": "staterror", "data": [2.0, 3.0]}
+
+
+def add_signal_modifiers(spec: dict[str, Any], *modifiers: dict[str, Any]) -> None:
+    """Append modifiers to the signal sample of channel ``SR``."""
+    spec["channels"][0]["samples"][0]["modifiers"].extend(modifiers)
+
+
+def add_channel(
+    spec: dict[str, Any], name: str, nbins: int, *modifiers: dict[str, Any]
+) -> None:
+    """Append a channel with one background sample of ``nbins`` bins of 100."""
+    spec["channels"].append(
+        {
+            "name": name,
+            "samples": [
+                {
+                    "name": "background",
+                    "data": [100.0] * nbins,
+                    "modifiers": list(modifiers),
+                }
+            ],
+        }
+    )
+    spec["observations"].append({"name": name, "data": [100.0] * nbins})
+
+
+def modifiers_of(
+    ws: pyhs3.Workspace, sample: str, channel: str = "SR"
+) -> list[dict[str, Any]]:
+    """Serialized modifiers of one sample of one channel."""
+    dist = ws.distributions[f"model_{channel}"]
     return [m.model_dump() for m in dist.samples[sample].modifiers]
 
 
@@ -256,6 +287,459 @@ class TestHistoSys:
         assert points_of(ws)["bkg_norm"] == {"value": 0.0, "const": False}
 
 
+class TestShapeFactor:
+    """``shapefactor``: per-bin, unconstrained, init 1, bounds [0, 10]."""
+
+    def test_modifier(self):
+        ws = from_hifa(make_spec([SHAPEFACTOR]))
+        assert modifiers_of(ws, "background") == [
+            {
+                "name": "sf",
+                "type": "shapefactor",
+                "parameters": ["sf_bin_0", "sf_bin_1"],
+            }
+        ]
+
+    def test_defaults(self):
+        ws = from_hifa(make_spec([SHAPEFACTOR]))
+        points = points_of(ws)
+        bounds = bounds_of(ws)
+        for name in ("sf_bin_0", "sf_bin_1"):
+            assert points[name] == {"value": 1.0, "const": False}
+            assert bounds[name] == (0.0, 10.0)
+        assert "sf" not in points
+
+    def test_shared_across_samples_and_channels(self):
+        """pyhf shares a shapefactor's bin ``i`` wherever the name appears."""
+        spec = make_spec([SHAPEFACTOR])
+        add_signal_modifiers(spec, SHAPEFACTOR)
+        add_channel(spec, "CR", 2, SHAPEFACTOR)
+        ws = from_hifa(spec)
+        expected = ["sf_bin_0", "sf_bin_1"]
+        assert modifiers_of(ws, "signal")[1]["parameters"] == expected
+        assert modifiers_of(ws, "background")[0]["parameters"] == expected
+        assert modifiers_of(ws, "background", "CR")[0]["parameters"] == expected
+
+    def test_bin_count_mismatch_across_channels_raises(self):
+        spec = make_spec([SHAPEFACTOR])
+        add_channel(spec, "CR", 3, SHAPEFACTOR)
+        with pytest.raises(ValueError, match=r"'sf'.*3.*2|'sf'.*2.*3"):
+            from_hifa(spec)
+
+    def test_name_reused_by_normfactor_raises(self):
+        """pyhf rejects a name used by a scalar and a per-bin parameter."""
+        with pytest.raises(ValueError, match=r"'mu'.*normfactor.*shapefactor"):
+            from_hifa(make_spec([{**SHAPEFACTOR, "name": "mu"}]))
+
+
+class TestShapeSys:
+    """``shapesys``: per-bin, Poisson-constrained, init 1, bounds [1e-10, 10]."""
+
+    def test_modifier(self):
+        ws = from_hifa(make_spec([SHAPESYS]))
+        assert modifiers_of(ws, "background") == [
+            {
+                "name": "bkg_unc",
+                "type": "shapesys",
+                "parameters": ["bkg_unc_bin_0", "bkg_unc_bin_1"],
+                "constraint": "Poisson",
+                "data": {"vals": [5.0, 6.0]},
+            }
+        ]
+
+    def test_defaults(self):
+        ws = from_hifa(make_spec([SHAPESYS]))
+        points = points_of(ws)
+        bounds = bounds_of(ws)
+        for name in ("bkg_unc_bin_0", "bkg_unc_bin_1"):
+            assert points[name] == {"value": 1.0, "const": False}
+            assert bounds[name] == (1e-10, 10.0)
+
+    def test_zero_uncertainty_bin_const(self):
+        ws = from_hifa(make_spec([{**SHAPESYS, "data": [5.0, 0.0]}]))
+        points = points_of(ws)
+        assert points["bkg_unc_bin_0"] == {"value": 1.0, "const": False}
+        assert points["bkg_unc_bin_1"] == {"value": 1.0, "const": True}
+
+    def test_zero_yield_bin_const(self):
+        spec = make_spec([SHAPESYS])
+        spec["channels"][0]["samples"][1]["data"] = [0.0, 60.0]
+        points = points_of(from_hifa(spec))
+        assert points["bkg_unc_bin_0"] == {"value": 1.0, "const": True}
+        assert points["bkg_unc_bin_1"] == {"value": 1.0, "const": False}
+
+    def test_shared_across_samples_raises(self):
+        spec = make_spec([SHAPESYS])
+        add_signal_modifiers(spec, SHAPESYS)
+        with pytest.raises(ValueError, match=r"shapesys.*'bkg_unc'.*more than one"):
+            from_hifa(spec)
+
+    def test_shared_across_channels_raises(self):
+        spec = make_spec([SHAPESYS])
+        add_channel(spec, "CR", 2, SHAPESYS)
+        with pytest.raises(ValueError, match=r"shapesys.*'bkg_unc'.*more than one"):
+            from_hifa(spec)
+
+    def test_name_reused_by_staterror_raises(self):
+        """pyhf rejects one name for a Poisson and a Gauss constraint."""
+        spec = make_spec([SHAPESYS])
+        add_signal_modifiers(spec, {**STATERROR, "name": "bkg_unc"})
+        with pytest.raises(ValueError, match=r"'bkg_unc'.*shapesys.*staterror"):
+            from_hifa(spec)
+
+
+class TestStatError:
+    """``staterror``: Barlow-Beeston lite, Gauss, init 1, bounds [1e-10, 10]."""
+
+    def test_modifier(self):
+        ws = from_hifa(make_spec([STATERROR]))
+        dist = ws.distributions["model_SR"]
+        assert dist.barlow_beeston_method == "lite"
+        assert modifiers_of(ws, "background") == [
+            {
+                "name": "staterror_SR",
+                "type": "staterror",
+                "parameters": ["staterror_SR_bin_0", "staterror_SR_bin_1"],
+                "constraint": "Gauss",
+                "data": None,
+            }
+        ]
+        assert dist.samples["background"].data.errors == [2.0, 3.0]
+
+    def test_sample_without_staterror_has_no_errors(self):
+        ws = from_hifa(make_spec([STATERROR]))
+        signal = ws.distributions["model_SR"].samples["signal"]
+        assert signal.data.model_dump() == {"contents": [5.0, 10.0]}
+
+    def test_defaults(self):
+        ws = from_hifa(make_spec([STATERROR]))
+        points = points_of(ws)
+        bounds = bounds_of(ws)
+        for name in ("staterror_SR_bin_0", "staterror_SR_bin_1"):
+            assert points[name] == {"value": 1.0, "const": False}
+            assert bounds[name] == (1e-10, 10.0)
+
+    def test_shared_across_samples(self):
+        spec = make_spec([STATERROR])
+        add_signal_modifiers(spec, {**STATERROR, "data": [1.0, 1.5]})
+        ws = from_hifa(spec)
+        dist = ws.distributions["model_SR"]
+        expected = ["staterror_SR_bin_0", "staterror_SR_bin_1"]
+        assert modifiers_of(ws, "signal")[1]["parameters"] == expected
+        assert modifiers_of(ws, "background")[0]["parameters"] == expected
+        assert dist.samples["signal"].data.errors == [1.0, 1.5]
+        assert dist.samples["background"].data.errors == [2.0, 3.0]
+
+    def test_global_bin_index_across_channels(self):
+        """pyhf numbers the bins of the channels using the name, sorted by name.
+
+        Channel ``AA`` sorts first but does not use the name, so it takes no
+        index; ``CR`` (3 bins) takes 0-2 and ``SR`` (2 bins) takes 3-4.
+        """
+        spec = make_spec([STATERROR])
+        add_channel(spec, "CR", 3, {**STATERROR, "data": [1.0, 1.0, 1.0]})
+        add_channel(spec, "AA", 1)
+        ws = from_hifa(spec)
+        assert modifiers_of(ws, "background", "CR")[0]["parameters"] == [
+            "staterror_SR_bin_0",
+            "staterror_SR_bin_1",
+            "staterror_SR_bin_2",
+        ]
+        assert modifiers_of(ws, "background")[0]["parameters"] == [
+            "staterror_SR_bin_3",
+            "staterror_SR_bin_4",
+        ]
+
+    def test_sample_missing_from_a_channel_of_the_name_raises(self):
+        """pyhf (an ``AssertionError``) needs each sample on every channel's group."""
+        spec = make_spec([STATERROR])
+        add_signal_modifiers(spec, {**STATERROR, "data": [1.0, 1.5]})
+        add_channel(spec, "CR", 3, {**STATERROR, "data": [1.0, 1.0, 1.0]})
+        with pytest.raises(
+            ValueError, match=r"'staterror_SR'.*'signal'.*\['SR'\].*\['CR', 'SR'\]"
+        ):
+            from_hifa(spec)
+
+    def test_zero_uncertainty_bin_const(self):
+        ws = from_hifa(make_spec([{**STATERROR, "data": [2.0, 0.0]}]))
+        points = points_of(ws)
+        assert points["staterror_SR_bin_0"] == {"value": 1.0, "const": False}
+        assert points["staterror_SR_bin_1"] == {"value": 1.0, "const": True}
+
+    def test_zero_summed_yield_bin_const(self):
+        spec = make_spec([{**STATERROR, "data": [2.0, 1.0]}])
+        spec["channels"][0]["samples"][1]["data"] = [50.0, 0.0]
+        points = points_of(from_hifa(spec))
+        assert points["staterror_SR_bin_0"] == {"value": 1.0, "const": False}
+        assert points["staterror_SR_bin_1"] == {"value": 1.0, "const": True}
+
+    def test_extra_single_sample_group_becomes_gauss_shapesys(self):
+        """A second staterror group on one sample is a Gauss shapesys.
+
+        pyhs3's lite mode holds one staterror group per channel; a group on a
+        single sample has relative uncertainty delta / nominal, which a Gauss
+        shapesys with absolute ``vals`` = delta reproduces exactly.
+        """
+        extra = {"name": "stat_extra", "type": "staterror", "data": [4.0, 0.0]}
+        spec = make_spec([STATERROR, extra])
+        add_signal_modifiers(spec, {**STATERROR, "data": [1.0, 1.5]})
+        ws = from_hifa(spec)
+        assert modifiers_of(ws, "background")[1] == {
+            "name": "stat_extra",
+            "type": "shapesys",
+            "parameters": ["stat_extra_bin_0", "stat_extra_bin_1"],
+            "constraint": "Gauss",
+            "data": {"vals": [4.0, 0.0]},
+        }
+        # The sample's errors stay those of the lite group.
+        dist = ws.distributions["model_SR"]
+        assert dist.samples["background"].data.errors == [2.0, 3.0]
+        points = points_of(ws)
+        assert points["stat_extra_bin_0"] == {"value": 1.0, "const": False}
+        assert points["stat_extra_bin_1"] == {"value": 1.0, "const": True}
+        assert bounds_of(ws)["stat_extra_bin_0"] == (1e-10, 10.0)
+
+    def test_extra_group_negative_uncertainty(self):
+        """pyhf squares staterror uncertainties, so their sign does not matter."""
+        extra = {"name": "stat_extra", "type": "staterror", "data": [-4.0, 3.0]}
+        spec = make_spec([STATERROR, extra])
+        add_signal_modifiers(spec, {**STATERROR, "data": [1.0, 1.5]})
+        ws = from_hifa(spec)
+        assert modifiers_of(ws, "background")[1]["data"] == {"vals": [4.0, 3.0]}
+
+    def test_two_single_sample_groups(self):
+        """The first group to appear stays the lite group."""
+        spec = make_spec([STATERROR])
+        add_signal_modifiers(spec, {**STATERROR, "name": "stat_sig"})
+        ws = from_hifa(spec)
+        assert modifiers_of(ws, "signal")[1]["type"] == "staterror"
+        assert modifiers_of(ws, "background")[0]["type"] == "shapesys"
+        dist = ws.distributions["model_SR"]
+        assert dist.samples["signal"].data.errors == [2.0, 3.0]
+        assert dist.samples["background"].data.model_dump() == {
+            "contents": [50.0, 60.0]
+        }
+
+    def test_multi_sample_group_preferred_as_lite(self):
+        """The lite group is the one on several samples, wherever it appears."""
+        extra = {"name": "stat_extra", "type": "staterror", "data": [4.0, 4.0]}
+        spec = make_spec([extra, STATERROR])
+        add_signal_modifiers(spec, STATERROR)
+        ws = from_hifa(spec)
+        assert [m["type"] for m in modifiers_of(ws, "background")] == [
+            "shapesys",
+            "staterror",
+        ]
+
+    def test_two_multi_sample_groups_raises(self):
+        extra = {"name": "stat_extra", "type": "staterror", "data": [4.0, 4.0]}
+        spec = make_spec([STATERROR, extra])
+        add_signal_modifiers(spec, STATERROR, extra)
+        with pytest.raises(
+            ValueError, match=r"'SR'.*staterror_SR.*stat_extra|'SR'.*stat_extra"
+        ):
+            from_hifa(spec)
+
+    def test_lite_in_one_channel_extra_in_another(self):
+        """Lite or extra is decided per channel."""
+        extra = {"name": "stat_extra", "type": "staterror", "data": [4.0, 4.0]}
+        spec = make_spec([STATERROR, extra])
+        add_signal_modifiers(spec, {**STATERROR, "data": [1.0, 1.5]})
+        add_channel(spec, "CR", 2, extra)
+        ws = from_hifa(spec)
+        assert modifiers_of(ws, "background")[1]["type"] == "shapesys"
+        cr = modifiers_of(ws, "background", "CR")[0]
+        assert cr["type"] == "staterror"
+        # CR sorts before SR, so it takes the first global indices.
+        assert cr["parameters"] == ["stat_extra_bin_0", "stat_extra_bin_1"]
+        assert modifiers_of(ws, "background")[1]["parameters"] == [
+            "stat_extra_bin_2",
+            "stat_extra_bin_3",
+        ]
+
+    def test_model_builds(self):
+        extra = {"name": "stat_extra", "type": "staterror", "data": [4.0, 0.0]}
+        spec = make_spec([STATERROR, extra, SHAPESYS, SHAPEFACTOR])
+        add_signal_modifiers(spec, {**STATERROR, "data": [1.0, 1.5]})
+        ws = from_hifa(spec)
+        model = ws.model(ws.analyses["meas"], progress=False)
+        assert set(model.free_params) == {
+            "mu",
+            "staterror_SR_bin_0",
+            "staterror_SR_bin_1",
+            "stat_extra_bin_0",
+            "bkg_unc_bin_0",
+            "bkg_unc_bin_1",
+            "sf_bin_0",
+            "sf_bin_1",
+        }
+
+
+class TestPerBinMeasurementConfig:
+    """Measurement-config entries for per-bin parameters."""
+
+    def test_inits_bounds_per_bin(self):
+        ws = from_hifa(
+            make_spec(
+                [SHAPESYS],
+                parameters=[
+                    {
+                        "name": "bkg_unc",
+                        "inits": [1.1, 0.9],
+                        "bounds": [[0.5, 1.5], [0.1, 2.0]],
+                    }
+                ],
+            )
+        )
+        points = points_of(ws)
+        assert points["bkg_unc_bin_0"] == {"value": 1.1, "const": False}
+        assert points["bkg_unc_bin_1"] == {"value": 0.9, "const": False}
+        bounds = bounds_of(ws)
+        assert bounds["bkg_unc_bin_0"] == (0.5, 1.5)
+        assert bounds["bkg_unc_bin_1"] == (0.1, 2.0)
+
+    def test_fixed_applies_to_every_bin(self):
+        ws = from_hifa(
+            make_spec([SHAPEFACTOR], parameters=[{"name": "sf", "fixed": True}])
+        )
+        points = points_of(ws)
+        assert points["sf_bin_0"]["const"] is True
+        assert points["sf_bin_1"]["const"] is True
+
+    def test_init_of_unconstrained_bin_used(self):
+        """A bin with no constraint stays const, at its configured init."""
+        ws = from_hifa(
+            make_spec(
+                [{**STATERROR, "data": [2.0, 0.0]}],
+                parameters=[{"name": "staterror_SR", "inits": [1.2, 1.3]}],
+            )
+        )
+        assert points_of(ws)["staterror_SR_bin_1"] == {"value": 1.3, "const": True}
+
+    def test_fixed_false_with_unconstrained_bin_raises(self):
+        """pyhf would free the bin under a dummy constraint HS3 cannot express."""
+        with pytest.raises(ValueError, match=r"'staterror_SR'.*fixed.*bins \[1\]"):
+            from_hifa(
+                make_spec(
+                    [{**STATERROR, "data": [2.0, 0.0]}],
+                    parameters=[{"name": "staterror_SR", "fixed": False}],
+                )
+            )
+
+    def test_fixed_false_without_unconstrained_bin_accepted(self):
+        ws = from_hifa(
+            make_spec(
+                [STATERROR], parameters=[{"name": "staterror_SR", "fixed": False}]
+            )
+        )
+        assert points_of(ws)["staterror_SR_bin_1"]["const"] is False
+
+    @pytest.mark.parametrize(
+        ("modifier", "entry"),
+        [
+            (SHAPESYS, {"name": "bkg_unc", "inits": [1.0]}),
+            (SHAPESYS, {"name": "bkg_unc", "bounds": [[0.0, 2.0]]}),
+            (STATERROR, {"name": "staterror_SR", "inits": [1.0, 1.0, 1.0]}),
+            (SHAPEFACTOR, {"name": "sf", "inits": [1.0]}),
+        ],
+        ids=["shapesys-inits", "shapesys-bounds", "staterror-inits", "shapefactor"],
+    )
+    def test_wrong_length_raises(self, modifier, entry):
+        with pytest.raises(ValueError, match=rf"'{entry['name']}'.*expected 2"):
+            from_hifa(make_spec([modifier], parameters=[entry]))
+
+    def test_shapesys_default_aux_accepted(self):
+        # tau = (nominal / delta)^2 = (50 / 5)^2 = (60 / 6)^2 = 100.
+        ws = from_hifa(
+            make_spec(
+                [SHAPESYS],
+                parameters=[
+                    {
+                        "name": "bkg_unc",
+                        "auxdata": [100.0, 100.0],
+                        "factors": [100.0, 100.0],
+                    }
+                ],
+            )
+        )
+        assert points_of(ws)["bkg_unc_bin_0"]["const"] is False
+
+    def test_shapesys_unconstrained_bin_factor_is_one(self):
+        """pyhf sets tau = 1 for a bin it fixes."""
+        ws = from_hifa(
+            make_spec(
+                [{**SHAPESYS, "data": [5.0, 0.0]}],
+                parameters=[{"name": "bkg_unc", "auxdata": [100.0, 1.0]}],
+            )
+        )
+        assert points_of(ws)["bkg_unc_bin_1"]["const"] is True
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [("auxdata", [100.0, 50.0]), ("factors", [1.0, 1.0]), ("sigmas", [0.1, 0.1])],
+    )
+    def test_shapesys_non_default_aux_raises(self, key, value):
+        with pytest.raises(ValueError, match=rf"'bkg_unc'.*{key}"):
+            from_hifa(
+                make_spec([SHAPESYS], parameters=[{"name": "bkg_unc", key: value}])
+            )
+
+    def test_staterror_default_aux_accepted(self):
+        # sigma = delta / nominal = [2 / 50, 3 / 60].
+        ws = from_hifa(
+            make_spec(
+                [STATERROR],
+                parameters=[
+                    {
+                        "name": "staterror_SR",
+                        "auxdata": [1.0, 1.0],
+                        "sigmas": [0.04, 0.05],
+                    }
+                ],
+            )
+        )
+        assert points_of(ws)["staterror_SR_bin_0"]["const"] is False
+
+    def test_staterror_unconstrained_bin_sigma_is_one(self):
+        """pyhf sets sigma = 1 for a bin it fixes."""
+        ws = from_hifa(
+            make_spec(
+                [{**STATERROR, "data": [2.0, 0.0]}],
+                parameters=[{"name": "staterror_SR", "sigmas": [0.04, 1.0]}],
+            )
+        )
+        assert points_of(ws)["staterror_SR_bin_1"]["const"] is True
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [("auxdata", [0.0, 0.0]), ("sigmas", [0.1, 0.1]), ("factors", [1.0, 1.0])],
+    )
+    def test_staterror_non_default_aux_raises(self, key, value):
+        with pytest.raises(ValueError, match=rf"'staterror_SR'.*{key}"):
+            from_hifa(
+                make_spec(
+                    [STATERROR], parameters=[{"name": "staterror_SR", key: value}]
+                )
+            )
+
+    def test_extra_staterror_group_validated_as_staterror(self):
+        """The config of a group emitted as shapesys follows pyhf's staterror."""
+        extra = {"name": "stat_extra", "type": "staterror", "data": [4.0, 6.0]}
+        spec = make_spec(
+            [STATERROR, extra],
+            parameters=[{"name": "stat_extra", "sigmas": [0.08, 0.1]}],
+        )
+        add_signal_modifiers(spec, {**STATERROR, "data": [1.0, 1.5]})
+        assert points_of(from_hifa(spec))["stat_extra_bin_0"]["const"] is False
+
+    @pytest.mark.parametrize("key", ["auxdata", "sigmas", "factors"])
+    def test_shapefactor_aux_raises(self, key):
+        with pytest.raises(ValueError, match=rf"'sf'.*{key}"):
+            from_hifa(
+                make_spec([SHAPEFACTOR], parameters=[{"name": "sf", key: [1.0, 1.0]}])
+            )
+
+
 class TestMeasurementConfig:
     """``inits``, ``bounds``, ``fixed`` and the POI from the measurement config."""
 
@@ -379,19 +863,9 @@ class TestModifierSettings:
 class TestUnsupportedModifiers:
     """Modifier types later PRs add raise ``NotImplementedError`` for now."""
 
-    @pytest.mark.parametrize(
-        "modifier",
-        [
-            {"name": "sys", "type": "shapesys", "data": [1.0, 2.0]},
-            {"name": "sf", "type": "shapefactor", "data": None},
-            {"name": "staterror_SR", "type": "staterror", "data": [1.0, 2.0]},
-            {"name": "lumi", "type": "lumi", "data": None},
-        ],
-        ids=lambda m: m["type"],
-    )
-    def test_raises(self, modifier):
-        with pytest.raises(NotImplementedError, match=modifier["type"]):
-            from_hifa(make_spec([modifier]))
+    def test_lumi_raises(self):
+        with pytest.raises(NotImplementedError, match="lumi"):
+            from_hifa(make_spec([{"name": "lumi", "type": "lumi", "data": None}]))
 
 
 class TestInputValidation:
@@ -459,6 +933,14 @@ class TestConsistencyChecks:
             "data": {"hi_data": [55.0], "lo_data": [45.0, 58.0]},
         }
         with pytest.raises(ValueError, match=r"'bkg_shape'.*hi_data"):
+            from_hifa(make_spec([bad]))
+
+    @pytest.mark.parametrize(
+        "modifier", [SHAPESYS, STATERROR], ids=["shapesys", "staterror"]
+    )
+    def test_per_bin_data_length_mismatch(self, modifier):
+        bad = {**modifier, "data": [1.0, 2.0, 3.0]}
+        with pytest.raises(ValueError, match=rf"'{modifier['name']}'.*3 bins.*2"):
             from_hifa(make_spec([bad]))
 
     def test_missing_observation(self):

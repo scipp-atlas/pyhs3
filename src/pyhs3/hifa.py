@@ -14,6 +14,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
+import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from pyhs3.distributions.histfactory.modifiers import (
@@ -164,21 +165,81 @@ class _ParameterDefaults:
 
     init: float
     bounds: tuple[float, float]
-    # A Gauss-constrained parameter, whose auxiliary datum is 0 and width 1.
-    constrained: bool
+    # The constraint pyhf puts on the parameter, if any.
+    constraint: Literal["Gauss", "Poisson"] | None
+    # One parameter per bin (``name_bin_i``) instead of a scalar.
+    per_bin: bool = False
 
 
-_NORMFACTOR_DEFAULTS = _ParameterDefaults(
-    init=1.0, bounds=(0.0, 10.0), constrained=False
-)
-_NORMAL_DEFAULTS = _ParameterDefaults(init=0.0, bounds=(-5.0, 5.0), constrained=True)
+_NORMFACTOR_DEFAULTS = _ParameterDefaults(init=1.0, bounds=(0.0, 10.0), constraint=None)
+_NORMAL_DEFAULTS = _ParameterDefaults(init=0.0, bounds=(-5.0, 5.0), constraint="Gauss")
 _DEFAULTS: dict[str, _ParameterDefaults] = {
     "normfactor": _NORMFACTOR_DEFAULTS,
     "normsys": _NORMAL_DEFAULTS,
     "histosys": _NORMAL_DEFAULTS,
+    "shapefactor": _ParameterDefaults(
+        init=1.0, bounds=(0.0, 10.0), constraint=None, per_bin=True
+    ),
+    "shapesys": _ParameterDefaults(
+        init=1.0, bounds=(1e-10, 10.0), constraint="Poisson", per_bin=True
+    ),
+    "staterror": _ParameterDefaults(
+        init=1.0, bounds=(1e-10, 10.0), constraint="Gauss", per_bin=True
+    ),
 }
 # The auxiliary data and widths HS3 v0.2 expresses for a Gauss constraint.
 _GAUSS_AUX = {"auxdata": [0.0], "sigmas": [1.0]}
+# Relative tolerance for config auxdata, factors and sigmas that pyhf derives
+# from the sample data, which a writer may have rounded.
+_AUX_RTOL = 1e-9
+
+
+@dataclass(frozen=True)
+class _ParameterSet:
+    """One pyhf parameter: a scalar, or one entry per bin."""
+
+    modifier_type: str
+    defaults: _ParameterDefaults
+    # The config ``auxdata``, ``factors`` and ``sigmas`` pyhf derives; a
+    # measurement may repeat these but not change them.
+    aux: Mapping[str, list[float]]
+    # Shape (size,): bins with no constraint term in HS3, which pyhf fixes.
+    unconstrained: tuple[bool, ...] = (False,)
+
+    @property
+    def size(self) -> int:
+        """Number of parameters: 1 for a scalar, else the number of bins."""
+        return len(self.unconstrained)
+
+    def names(self, name: str) -> list[str]:
+        """HS3 names of the parameters of pyhf parameter ``name``."""
+        if not self.defaults.per_bin:
+            return [name]
+        return _bin_names(name, 0, self.size)
+
+
+@dataclass(frozen=True)
+class _StatErrorLayout:
+    """Where each pyhf ``staterror`` lives, and how pyhs3 holds it."""
+
+    # name -> channel -> the (sample, modifier) pairs carrying it there.
+    groups: Mapping[str, Mapping[str, list[tuple[_Sample, _StatError]]]]
+    # name -> channel -> pyhf's global index of that channel's first bin.
+    offsets: Mapping[str, Mapping[str, int]]
+    # channel -> the one staterror group pyhs3's Barlow-Beeston lite holds.
+    lite: Mapping[str, str]
+
+
+# Where a modifier sits: its channel, its sample and the modifier itself.
+_Use = tuple[_Channel, _Sample, _Modifier]
+
+
+def _bin_names(name: str, start: int, nbins: int) -> list[str]:
+    """``name_bin_i`` for ``i`` in ``[start, start + nbins)``.
+
+    ROOT rejects pyhf's ``name[i]`` as an object name.
+    """
+    return [f"{name}_bin_{i}" for i in range(start, start + nbins)]
 
 
 def _check_unique(kind: str, names: Iterable[str]) -> None:
@@ -215,13 +276,19 @@ def _check_consistency(hifa: _HiFaWorkspace) -> None:
                 )
                 raise ValueError(msg)
             for modifier in sample.modifiers:
-                if not isinstance(modifier, _HistoSys):
+                if isinstance(modifier, _HistoSys):
+                    lengths = {
+                        key: len(getattr(modifier.data, key))
+                        for key in ("hi_data", "lo_data")
+                    }
+                elif isinstance(modifier, _ShapeSys | _StatError):
+                    lengths = {"data": len(modifier.data)}
+                else:
                     continue
-                for key in ("hi_data", "lo_data"):
-                    n = len(getattr(modifier.data, key))
+                for key, n in lengths.items():
                     if n != nbins:
                         msg = (
-                            f"histosys modifier '{modifier.name}' on sample "
+                            f"{modifier.type} modifier '{modifier.name}' on sample "
                             f"'{sample.name}' in channel '{channel.name}': {key} "
                             f"has {n} bins, expected {nbins}"
                         )
@@ -238,19 +305,169 @@ def _check_consistency(hifa: _HiFaWorkspace) -> None:
             raise ValueError(msg)
 
 
+def _staterror_layout(hifa: _HiFaWorkspace) -> _StatErrorLayout:
+    """Group each channel's ``staterror`` modifiers and number their bins as pyhf does.
+
+    pyhf gives a ``staterror`` name one parameter per bin of the channels
+    using it, numbered over those channels sorted by name. pyhs3's
+    Barlow-Beeston lite holds one staterror group per channel: the group on
+    more than one sample if there is one, else the first group to appear.
+    Every other group sits on a single sample.
+
+    Raises:
+        ValueError: For two staterror groups in one channel that each sit on
+            more than one sample, or a sample carrying a staterror name in only
+            some of the channels using it (which pyhf rejects).
+    """
+    groups: dict[str, dict[str, list[tuple[_Sample, _StatError]]]] = {}
+    lite: dict[str, str] = {}
+    for channel in hifa.channels:
+        by_name: dict[str, list[tuple[_Sample, _StatError]]] = {}
+        for sample in channel.samples:
+            for modifier in sample.modifiers:
+                if isinstance(modifier, _StatError):
+                    by_name.setdefault(modifier.name, []).append((sample, modifier))
+        shared = [name for name, members in by_name.items() if len(members) > 1]
+        if len(shared) > 1:
+            msg = (
+                f"Channel '{channel.name}' has staterror modifiers {shared} each on "
+                f"more than one sample; pyhs3's Barlow-Beeston lite holds one "
+                f"staterror group per channel"
+            )
+            raise ValueError(msg)
+        if by_name:
+            lite[channel.name] = shared[0] if shared else next(iter(by_name))
+        for name, members in by_name.items():
+            groups.setdefault(name, {})[channel.name] = members
+
+    offsets: dict[str, dict[str, int]] = {}
+    for name, channels in groups.items():
+        carriers: dict[str, set[str]] = {}
+        for channel_name, members in channels.items():
+            for sample, _ in members:
+                carriers.setdefault(sample.name, set()).add(channel_name)
+        for sample_name, carried in carriers.items():
+            if carried != channels.keys():
+                msg = (
+                    f"staterror '{name}' is on sample '{sample_name}' in channels "
+                    f"{sorted(carried)}, but is used in channels {sorted(channels)}; "
+                    f"pyhf needs each sample carrying a staterror to carry it in "
+                    f"every channel using it"
+                )
+                raise ValueError(msg)
+        start = 0
+        offsets[name] = {}
+        for channel_name in sorted(channels):
+            offsets[name][channel_name] = start
+            start += len(channels[channel_name][0][0].data)
+    return _StatErrorLayout(groups=groups, offsets=offsets, lite=lite)
+
+
+def _shapefactor_parameter(
+    name: str, defaults: _ParameterDefaults, uses: list[_Use]
+) -> _ParameterSet:
+    """Parameter set of a ``shapefactor``, whose bin ``i`` is shared wherever it appears.
+
+    Raises:
+        ValueError: For a shapefactor on channels with different bin counts
+            (pyhf raises ``InvalidNameReuse``).
+    """
+    nbins = {len(sample.data) for _, sample, _ in uses}
+    if len(nbins) > 1:
+        msg = (
+            f"shapefactor '{name}' is used on channels with different bin counts "
+            f"{sorted(nbins)}; its parameters are shared bin by bin"
+        )
+        raise ValueError(msg)
+    return _ParameterSet(
+        "shapefactor", defaults, aux={}, unconstrained=(False,) * nbins.pop()
+    )
+
+
+def _shapesys_parameter(
+    name: str, defaults: _ParameterDefaults, uses: list[_Use]
+) -> _ParameterSet:
+    """Parameter set of a ``shapesys``, Poisson-constrained with tau = (nu / delta)**2.
+
+    A bin with no positive yield or no positive uncertainty has no tau; pyhf
+    fixes it (with tau = 1) and pyhs3 gives it no constraint term.
+
+    Raises:
+        ValueError: For a shapesys used on more than one sample or channel,
+            whose constraint pyhs3 would emit once per use (pyhf raises
+            ``InvalidModel``).
+    """
+    if len(uses) > 1:
+        where = [f"'{sample.name}' in '{channel.name}'" for channel, sample, _ in uses]
+        msg = (
+            f"shapesys modifier '{name}' is used on more than one sample or channel "
+            f"({', '.join(where)}); give each use its own name"
+        )
+        raise ValueError(msg)
+    ((_, sample, modifier),) = uses
+    assert isinstance(modifier, _ShapeSys)
+    # Shape (nbins,): nominal yields and absolute uncertainties.
+    nominal = np.asarray(sample.data, dtype=np.float64)
+    delta = np.asarray(modifier.data, dtype=np.float64)
+    valid = (nominal > 0) & (delta > 0)
+    tau = np.divide(nominal**2, delta**2, out=np.ones_like(nominal), where=valid)
+    return _ParameterSet(
+        "shapesys",
+        defaults,
+        aux={"auxdata": tau.tolist(), "factors": tau.tolist()},
+        unconstrained=tuple((~valid).tolist()),
+    )
+
+
+def _staterror_parameter(
+    name: str, defaults: _ParameterDefaults, layout: _StatErrorLayout
+) -> _ParameterSet:
+    """Parameter set of a ``staterror``, Gauss-constrained around 1.
+
+    Per bin, pyhf's width is sqrt(sum delta**2) / sum nu over the samples
+    carrying the name, the same as pyhs3's Barlow-Beeston lite. A bin whose
+    width is 0 (no positive summed yield, or no uncertainty) has none; pyhf
+    fixes it (with width 1) and pyhs3 gives it no constraint term.
+    """
+    channels = layout.groups[name]
+    size = sum(len(members[0][0].data) for members in channels.values())
+    # Shape (size,): pyhf's relative width of every bin of the parameter.
+    width = np.zeros(size)
+    for channel_name, members in channels.items():
+        # Shape (samples, nbins) -> (nbins,).
+        nominal = np.sum([sample.data for sample, _ in members], axis=0)
+        delta = np.sqrt(np.sum(np.square([m.data for _, m in members]), axis=0))
+        start = layout.offsets[name][channel_name]
+        width[start : start + len(nominal)] = np.divide(
+            delta, nominal, out=np.zeros_like(delta), where=nominal > 0
+        )
+    unconstrained = width == 0
+    return _ParameterSet(
+        "staterror",
+        defaults,
+        aux={
+            "auxdata": [1.0] * size,
+            "sigmas": np.where(unconstrained, 1.0, width).tolist(),
+        },
+        unconstrained=tuple(unconstrained.tolist()),
+    )
+
+
 def _collect_parameters(
-    hifa: _HiFaWorkspace,
-) -> dict[str, tuple[str, _ParameterDefaults]]:
-    """Map each model parameter to the first modifier type using it and its defaults.
+    hifa: _HiFaWorkspace, layout: _StatErrorLayout
+) -> dict[str, _ParameterSet]:
+    """Map each pyhf parameter to its parameter set.
 
     pyhf correlates modifiers by name. Modifier types whose parameters have
     different defaults cannot share a name (pyhf raises ``InvalidNameReuse``).
 
     Raises:
         NotImplementedError: For a modifier type this converter does not support yet.
-        ValueError: For a name shared by modifier types with different defaults.
+        ValueError: For a name shared by modifier types with different defaults,
+            or a per-bin modifier pyhs3 cannot express as pyhf builds it.
     """
-    parameters: dict[str, tuple[str, _ParameterDefaults]] = {}
+    types: dict[str, tuple[str, _ParameterDefaults]] = {}
+    uses: dict[str, list[_Use]] = {}
     for channel in hifa.channels:
         for sample in channel.samples:
             for modifier in sample.modifiers:
@@ -262,16 +479,29 @@ def _collect_parameters(
                         f"channel '{channel.name}')"
                     )
                     raise NotImplementedError(msg)
-                first_type, first_defaults = parameters.setdefault(
+                first_type, first_defaults = types.setdefault(
                     modifier.name, (modifier.type, defaults)
                 )
                 if first_defaults != defaults:
-                    types = " and ".join(sorted({first_type, modifier.type}))
+                    names = " and ".join(sorted({first_type, modifier.type}))
                     msg = (
                         f"Parameter '{modifier.name}' is used by modifier types "
-                        f"with different pyhf defaults: {types}"
+                        f"with different pyhf defaults: {names}"
                     )
                     raise ValueError(msg)
+                uses.setdefault(modifier.name, []).append((channel, sample, modifier))
+
+    parameters: dict[str, _ParameterSet] = {}
+    for name, (modifier_type, defaults) in types.items():
+        if modifier_type == "shapefactor":
+            parameters[name] = _shapefactor_parameter(name, defaults, uses[name])
+        elif modifier_type == "shapesys":
+            parameters[name] = _shapesys_parameter(name, defaults, uses[name])
+        elif modifier_type == "staterror":
+            parameters[name] = _staterror_parameter(name, defaults, layout)
+        else:
+            aux = _GAUSS_AUX if defaults.constraint == "Gauss" else {}
+            parameters[name] = _ParameterSet(modifier_type, defaults, aux=aux)
     return parameters
 
 
@@ -301,8 +531,71 @@ def _emit_modifier(modifier: _Modifier, settings: _ModifierSettings) -> dict[str
     return common
 
 
+def _emit_per_bin_modifier(
+    modifier: _ShapeFactor | _ShapeSys, parameters: list[str]
+) -> dict[str, Any]:
+    """HS3 modifier for a pyhf ``shapefactor`` or ``shapesys``."""
+    common = {"name": modifier.name, "type": modifier.type, "parameters": parameters}
+    if isinstance(modifier, _ShapeSys):
+        # Absolute uncertainties, as pyhf and pyhs3 (not ROOT) read ``vals``.
+        return {
+            **common,
+            "constraint": "Poisson",
+            "data": {"vals": list(modifier.data)},
+        }
+    return common
+
+
+def _emit_staterror(
+    modifier: _StatError, parameters: list[str], lite: bool
+) -> dict[str, Any]:
+    """HS3 modifier for a pyhf ``staterror``.
+
+    The channel's lite group is a Barlow-Beeston lite ``staterror``, whose
+    uncertainties go in the sample's ``errors``. Any other group sits on a
+    single sample, where pyhf's width is |delta| / nominal: exactly a Gauss
+    ``shapesys`` with absolute ``vals`` = |delta|.
+    """
+    common = {"name": modifier.name, "parameters": parameters, "constraint": "Gauss"}
+    if lite:
+        return {**common, "type": "staterror"}
+    # pyhf squares the uncertainties, so their sign does not matter.
+    vals = [abs(delta) for delta in modifier.data]
+    return {**common, "type": "shapesys", "data": {"vals": vals}}
+
+
+def _emit_sample(
+    sample: _Sample,
+    channel: str,
+    settings: _ModifierSettings,
+    layout: _StatErrorLayout,
+) -> dict[str, Any]:
+    """HS3 sample of one pyhf sample in channel ``channel``."""
+    nbins = len(sample.data)
+    data: dict[str, list[float]] = {"contents": list(sample.data)}
+    modifiers: list[dict[str, Any]] = []
+    for modifier in sample.modifiers:
+        if isinstance(modifier, _StatError):
+            start = layout.offsets[modifier.name][channel]
+            lite = layout.lite[channel] == modifier.name
+            if lite:
+                data["errors"] = list(modifier.data)
+            modifiers.append(
+                _emit_staterror(modifier, _bin_names(modifier.name, start, nbins), lite)
+            )
+        elif isinstance(modifier, _ShapeFactor | _ShapeSys):
+            parameters = _bin_names(modifier.name, 0, nbins)
+            modifiers.append(_emit_per_bin_modifier(modifier, parameters))
+        else:
+            modifiers.append(_emit_modifier(modifier, settings))
+    return {"name": sample.name, "data": data, "modifiers": modifiers}
+
+
 def _emit_channel(
-    channel: _Channel, observation: _Observation, settings: _ModifierSettings
+    channel: _Channel,
+    observation: _Observation,
+    settings: _ModifierSettings,
+    layout: _StatErrorLayout,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """HS3 ``histfactory_dist`` and ``binned`` data for one pyhf channel."""
     nbins = len(channel.samples[0].data)
@@ -313,11 +606,7 @@ def _emit_channel(
         "name": f"model_{channel.name}",
         "axes": [axis],
         "samples": [
-            {
-                "name": sample.name,
-                "data": {"contents": list(sample.data)},
-                "modifiers": [_emit_modifier(m, settings) for m in sample.modifiers],
-            }
+            _emit_sample(sample, channel.name, settings, layout)
             for sample in channel.samples
         ],
     }
@@ -333,44 +622,62 @@ def _emit_channel(
 def _resolve_parameter(
     measurement: str,
     name: str,
-    modifier_type: str,
-    defaults: _ParameterDefaults,
+    parameter: _ParameterSet,
     entry: _Parameter | None,
-) -> tuple[float, tuple[float, float], bool]:
-    """Initial value, bounds and fixed flag of one parameter in one measurement.
+) -> list[tuple[float, tuple[float, float], bool]]:
+    """Initial value, bounds and fixed flag of each entry of one parameter.
+
+    A bin with no constraint term is fixed whatever the config says, so an
+    entry setting ``fixed`` to false for such a parameter raises.
 
     Raises:
         ValueError: For a config entry pyhf would reject or HS3 v0.2 cannot express.
     """
+    defaults = parameter.defaults
+    size = parameter.size
     if entry is None:
-        return defaults.init, defaults.bounds, False
+        return [(defaults.init, defaults.bounds, u) for u in parameter.unconstrained]
     where = f"Measurement '{measurement}': parameter '{name}'"
     for key, values in (("inits", entry.inits), ("bounds", entry.bounds)):
-        if values is not None and len(values) != 1:
-            msg = f"{where} has {len(values)} {key}, expected 1"
+        if values is not None and len(values) != size:
+            msg = f"{where} has {len(values)} {key}, expected {size}"
             raise ValueError(msg)
-    allowed = _GAUSS_AUX if defaults.constrained else {}
     for key in ("auxdata", "sigmas", "factors"):
         values = getattr(entry, key)
         if values is None:
             continue
-        if key not in allowed:
-            msg = f"{where} is a {modifier_type}, which does not use {key}"
+        if key not in parameter.aux:
+            msg = f"{where} is a {parameter.modifier_type}, which does not use {key}"
             raise ValueError(msg)
-        if list(values) != allowed[key]:
+        expected = parameter.aux[key]
+        if len(values) != len(expected) or not np.allclose(
+            values, expected, rtol=_AUX_RTOL, atol=0.0
+        ):
             msg = (
-                f"{where} sets {key}={list(values)}; HS3 v0.2 only expresses the "
-                f"Gauss constraint's default {key}={allowed[key]}"
+                f"{where} sets {key}={list(values)}; HS3 v0.2 only expresses "
+                f"pyhf's default {key}={expected}"
             )
             raise ValueError(msg)
-    init = entry.inits[0] if entry.inits is not None else defaults.init
-    bounds = entry.bounds[0] if entry.bounds is not None else defaults.bounds
-    return init, bounds, bool(entry.fixed)
+    if entry.fixed is False and any(parameter.unconstrained):
+        bins = [i for i, u in enumerate(parameter.unconstrained) if u]
+        msg = (
+            f"{where} sets fixed=false, but bins {bins} have no constraint term "
+            f"in HS3 v0.2; pyhf would free them under a dummy constraint"
+        )
+        raise ValueError(msg)
+    inits = entry.inits if entry.inits is not None else [defaults.init] * size
+    bounds = entry.bounds if entry.bounds is not None else [defaults.bounds] * size
+    return [
+        (init, bound, bool(entry.fixed) or unconstrained)
+        for init, bound, unconstrained in zip(
+            inits, bounds, parameter.unconstrained, strict=True
+        )
+    ]
 
 
 def _emit_measurement(
     measurement: _Measurement,
-    parameters: Mapping[str, tuple[str, _ParameterDefaults]],
+    parameters: Mapping[str, _ParameterSet],
     distributions: list[str],
     data: list[str],
 ) -> dict[str, dict[str, Any]]:
@@ -381,12 +688,15 @@ def _emit_measurement(
     points: list[dict[str, Any]] = []
     axes: list[dict[str, Any]] = []
     for parameter in sorted(parameters):
-        modifier_type, defaults = parameters[parameter]
-        init, (lo, hi), fixed = _resolve_parameter(
-            name, parameter, modifier_type, defaults, entries.get(parameter)
+        parameter_set = parameters[parameter]
+        resolved = _resolve_parameter(
+            name, parameter, parameter_set, entries.get(parameter)
         )
-        points.append({"name": parameter, "value": init, "const": fixed})
-        axes.append({"name": parameter, "min": lo, "max": hi})
+        for hs3_name, (init, (lo, hi), fixed) in zip(
+            parameter_set.names(parameter), resolved, strict=True
+        ):
+            points.append({"name": hs3_name, "value": init, "const": fixed})
+            axes.append({"name": hs3_name, "min": lo, "max": hi})
     return {
         "likelihood": {"name": name, "distributions": distributions, "data": data},
         "analysis": {
@@ -413,7 +723,8 @@ def from_hifa(
     is a ``dict``). The result goes through all of :class:`~pyhs3.Workspace`'s
     validation.
 
-    Supported modifier types are ``normfactor``, ``normsys`` and ``histosys``.
+    Supported modifier types are ``normfactor``, ``normsys``, ``histosys``,
+    ``shapefactor``, ``shapesys`` and ``staterror``.
 
     **Names of the generated HS3 objects**
 
@@ -425,14 +736,22 @@ def from_hifa(
     observation of channel ``c``  ``binned`` data ``obsData_c`` on axis ``obs_x_c``
     measurement ``m``             likelihood, analysis, ``product_domain`` and
                                   parameter point, all named ``m``
-    modifier ``x``                parameter ``x`` (no ``alpha_`` prefix)
+    scalar modifier ``x``         parameter ``x`` (no ``alpha_`` prefix)
+    per-bin modifier ``x``        parameters ``x_bin_0``, ``x_bin_1``, ... (pyhf's
+                                  ``x[i]``, which ROOT rejects as a name)
     ============================  =================================================
+
+    A ``shapefactor`` or ``shapesys`` numbers the bins of its own channel. A
+    ``staterror`` numbers them as pyhf does: over the channels using its name,
+    sorted by channel name, so ``x_bin_i`` is pyhf's ``x[i]``. Its parameters
+    stay per channel.
 
     Each likelihood pairs every channel's distribution with its data, in the
     input's channel order. Each analysis has ``init`` and its one domain set to
     ``m``, and ``parameters_of_interest`` set to the measurement's ``poi``,
     copied as given even when no modifier uses it. Parameter point ``m`` and
-    domain ``m`` list every parameter of the model, sorted by name.
+    domain ``m`` list every parameter of the model, sorted by pyhf name, with
+    per-bin parameters in bin order.
 
     **Parameter defaults** (pyhf's), which the measurement config's ``inits``,
     ``bounds`` and ``fixed`` override; a fixed parameter is ``const``:
@@ -442,10 +761,33 @@ def from_hifa(
     ===========================  ====  ===========  ==============================
     ``normfactor``               1     [0, 10]      none
     ``normsys``, ``histosys``    0     [-5, 5]      ``Gauss`` (aux 0, width 1)
+    ``shapefactor``              1     [0, 10]      none
+    ``shapesys``                 1     [1e-10, 10]  ``Poisson``, tau = (nu/delta)^2
+    ``staterror``                1     [1e-10, 10]  ``Gauss``, width
+                                                    sqrt(sum delta^2) / sum nu
     ===========================  ====  ===========  ==============================
 
-    Config entries naming a parameter the model does not use are ignored, as
-    pyhf ignores them.
+    For a per-bin parameter, ``inits`` and ``bounds`` hold one entry per bin
+    and ``fixed`` applies to every bin. Config entries naming a parameter the
+    model does not use are ignored, as pyhf ignores them.
+
+    **Per-bin modifiers.** A ``shapefactor`` maps to HS3 ``shapefactor``, and
+    bin ``i`` is shared wherever its name appears, as in pyhf. A ``shapesys``
+    maps to HS3 ``shapesys`` with ``constraint: Poisson`` and its absolute
+    uncertainties as ``vals``. A ``staterror`` maps to Barlow-Beeston lite: an
+    HS3 ``staterror`` with ``constraint: Gauss`` on each sample carrying it,
+    whose uncertainties go in that sample's ``data.errors``; samples without it
+    get no ``errors``. pyhs3's lite mode holds one staterror group per channel:
+    the group on more than one sample if there is one, else the first to
+    appear. Any other group in the channel sits on a single sample and maps to
+    a ``shapesys`` with ``constraint: Gauss`` and ``vals`` = |delta|, which
+    gives the same width delta / nu.
+
+    A ``shapesys`` bin with no positive yield or no positive uncertainty, and a
+    ``staterror`` bin with no positive summed yield or a combined uncertainty
+    of 0, has no constraint term in pyhs3. pyhf fixes such a bin, so its
+    parameter is ``const`` at its initial value (1 unless ``inits`` says
+    otherwise).
 
     **Interpolation.** Each ``normsys`` and ``histosys`` modifier records its
     code in ``data.interpolation``. The defaults are pyhs3's (and ROOT's):
@@ -466,17 +808,32 @@ def from_hifa(
     Raises:
         pydantic.ValidationError: If ``spec`` does not follow pyhf's schema, or
             ``modifier_settings`` names an unknown modifier type, key or code.
-        NotImplementedError: For ``shapefactor``, ``shapesys``, ``staterror``
-            and ``lumi`` modifiers, which are not supported yet.
+        NotImplementedError: For ``lumi`` modifiers, which are not supported yet.
         ValueError: For duplicate channel, observation, measurement or
             config-parameter names; a channel without an observation or an
             observation without a channel; bin counts that disagree within a
-            channel; one name used by ``normfactor`` and ``normsys``/``histosys``;
-            config ``inits`` or ``bounds`` with more than one entry for a scalar
-            parameter; config ``auxdata``, ``sigmas`` or ``factors`` on a
-            ``normfactor``; ``factors`` on a ``normsys``/``histosys``; and
-            ``auxdata`` or ``sigmas`` other than ``[0]`` and ``[1]`` on a
-            ``normsys``/``histosys``, which HS3 v0.2 cannot express.
+            channel, including a ``histosys``, ``shapesys`` or ``staterror``'s
+            data; one name used by modifier types with different pyhf
+            defaults, such as ``normfactor`` and ``normsys`` or ``shapefactor``,
+            or ``shapesys`` and ``staterror``; a ``shapefactor`` on channels
+            with different bin counts; a ``shapesys`` name used on more than one
+            sample or channel, whose constraint pyhs3 would emit once per use;
+            two ``staterror`` groups in one channel that each sit on more than
+            one sample; a sample carrying a ``staterror`` in only some of the
+            channels using its name, which pyhf rejects; config ``inits`` or
+            ``bounds`` whose length is not the parameter's number of bins (1 for
+            a scalar); config ``fixed: false`` on a per-bin parameter with a bin
+            that has no constraint term, which pyhf would free under a dummy
+            constraint; config ``auxdata``, ``sigmas`` or ``factors`` a
+            modifier type does not use (all three on ``normfactor`` and
+            ``shapefactor``, ``factors`` on ``normsys``, ``histosys`` and
+            ``staterror``, ``sigmas`` on ``shapesys``); and config ``auxdata``,
+            ``sigmas`` or ``factors`` other than the values pyhf derives,
+            within a relative tolerance of 1e-9, which HS3 v0.2 cannot
+            express: ``[0]`` and ``[1]`` for ``normsys``/``histosys``, tau
+            (1 for a bin with no constraint term) for ``shapesys``, and
+            auxdata 1 and the width (1 for a bin with no constraint term) for
+            ``staterror``.
 
     Examples:
         >>> import pyhs3
@@ -521,14 +878,15 @@ def from_hifa(
     hifa = _HiFaWorkspace.model_validate(dict(spec))
     settings = _ModifierSettings.model_validate(dict(modifier_settings or {}))
     _check_consistency(hifa)
-    parameters = _collect_parameters(hifa)
+    layout = _staterror_layout(hifa)
+    parameters = _collect_parameters(hifa, layout)
 
     observations = {o.name: o for o in hifa.observations}
     distributions: list[dict[str, Any]] = []
     data: list[dict[str, Any]] = []
     for channel in hifa.channels:
         distribution, datum = _emit_channel(
-            channel, observations[channel.name], settings
+            channel, observations[channel.name], settings, layout
         )
         distributions.append(distribution)
         data.append(datum)

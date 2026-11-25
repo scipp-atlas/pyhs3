@@ -46,6 +46,7 @@ from pyhs3.distributions.cms import (
     GGZZBackgroundDist,
     QQZZBackgroundDist,
 )
+from pyhs3.distributions.composite import _weighted_logsumexp
 from pyhs3.distributions.core import Distribution
 from pyhs3.distributions.mathematical import (
     BernsteinPolyDist,
@@ -1754,3 +1755,33 @@ class TestLogNativeComposition:
             grads = fn(*(np.float64(values[v.name]) for v in inputs))
             assert len(grads) == len(wrt)
             assert np.all(np.isfinite(grads)), f"x={x}: {grads}"
+
+
+class TestWeightedLogsumexpShapes:
+    """``_weighted_logsumexp`` broadcasts mixed-type log terms and same-rank weights."""
+
+    def test_log_terms_of_different_types_are_broadcast(self) -> None:
+        """A per-event ``(N,)`` term and a scalar term combine to shape ``(N,)``."""
+        x = np.array([-1.0, 0.5, 2.0])
+        per_event = pt.as_tensor_variable(x)  # shape (3,)
+        scalar = pt.as_tensor_variable(np.float64(-0.7))  # shape ()
+        weights = [pt.as_tensor_variable(0.25), pt.as_tensor_variable(0.75)]
+
+        result = _weighted_logsumexp([per_event, scalar], weights).eval()
+
+        expected = logsumexp(
+            np.stack([x, np.full_like(x, -0.7)]), axis=0, b=[[0.25], [0.75]]
+        )
+        np.testing.assert_allclose(result, expected, rtol=1e-12)
+
+    def test_weights_with_the_terms_rank_are_not_padded(self) -> None:
+        """Scalar terms with scalar weights reduce to a scalar."""
+        terms = [pt.as_tensor_variable(np.float64(v)) for v in (-500.0, -501.0)]
+        weights = [pt.as_tensor_variable(0.4), pt.as_tensor_variable(0.6)]
+
+        result = _weighted_logsumexp(terms, weights).eval()
+
+        assert result.shape == ()
+        np.testing.assert_allclose(
+            result, logsumexp([-500.0, -501.0], b=[0.4, 0.6]), rtol=1e-12
+        )

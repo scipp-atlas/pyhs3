@@ -122,6 +122,13 @@ def to_pyhf(
             help="Parameter of interest, for an analysis listing several or none.",
         ),
     ] = None,
+    parameter_set: Annotated[
+        str | None,
+        typer.Option(
+            "--parameter-set",
+            help="Parameter point to take initial values and const flags from, instead of each analysis's init.",
+        ),
+    ] = None,
     modifier_settings: Annotated[
         Path | None,
         typer.Option(
@@ -141,7 +148,7 @@ def to_pyhf(
     """
     try:
         ws = Workspace(**read_spec(workspace))
-        spec = to_hifa(ws, likelihood=likelihood, poi=poi)
+        spec = to_hifa(ws, likelihood=likelihood, poi=poi, parameter_set=parameter_set)
         settings = hifa_modifier_settings(ws, likelihood=likelihood)
     except (ValueError, HS3Exception) as exc:
         raise typer.BadParameter(str(exc)) from exc

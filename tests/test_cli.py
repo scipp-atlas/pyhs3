@@ -1338,6 +1338,42 @@ def test_convert_to_pyhf_likelihood_and_poi():
     assert spec["measurements"][0]["config"]["poi"] == "mu"
 
 
+@pytest.mark.parametrize("parameter_set", ["default_values", "NominalParamValues"])
+def test_convert_to_pyhf_parameter_set(parameter_set):
+    result = runner.invoke(
+        app,
+        [
+            "convert",
+            "to-pyhf",
+            str(_ROOT_FIXTURE),
+            "--likelihood",
+            "simPdf_obsData",
+            "--parameter-set",
+            parameter_set,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    parameters = json.loads(result.stdout)["measurements"][0]["config"]["parameters"]
+    assert {"name": "Lumi", "fixed": True} in parameters
+
+
+def test_convert_to_pyhf_unknown_parameter_set():
+    result = runner.invoke(
+        app,
+        [
+            "convert",
+            "to-pyhf",
+            str(_ROOT_FIXTURE),
+            "--likelihood",
+            "simPdf_obsData",
+            "--parameter-set",
+            "nope",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "parameter_set='nope'" in result.stderr
+
+
 def test_convert_to_pyhf_ambiguous_likelihood():
     result = runner.invoke(app, ["convert", "to-pyhf", str(_ROOT_FIXTURE)])
     assert result.exit_code == 2

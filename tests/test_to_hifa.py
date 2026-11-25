@@ -690,10 +690,73 @@ class TestMeasurementConfig:
         hs3["domains"][0]["axes"] = [axis(hs3, "mu")]
         assert config(convert(hs3))["parameters"] == []
 
-    def test_analysis_without_init_takes_pyhf_defaults(self):
+    def test_analysis_without_init_takes_pyhf_defaults(self, caplog):
         hs3 = hs3_of(make_spec([NORMSYS], parameters=[{"name": "mu", "inits": [2.0]}]))
         del hs3["analyses"][0]["init"]
-        assert config(convert(hs3))["parameters"] == []
+        with caplog.at_level(logging.WARNING, logger="pyhs3.hifa"):
+            assert config(convert(hs3))["parameters"] == []
+        assert caplog.text == ""
+
+
+class TestParameterSet:
+    """The parameter point that gives initial values and const flags."""
+
+    @staticmethod
+    def root_like() -> dict[str, Any]:
+        """An analysis with no init, as ROOT exports it.
+
+        ``bkg_norm`` is in no domain and const only in parameter points
+        ``held`` (at 0.5) and ``held_too`` (at 0.2), as ROOT holds ``Lumi``.
+        """
+        hs3 = hs3_of(make_spec([NORMSYS]))
+        del hs3["analyses"][0]["init"]
+        hs3["domains"][0]["axes"] = [axis(hs3, "mu")]
+        free = hs3["parameter_points"][0]
+        held = copy.deepcopy(free)
+        held_too = copy.deepcopy(free)
+        free["name"] = "free"
+        held["name"] = "held"
+        held_too["name"] = "held_too"
+        for pset, value in ((held, 0.5), (held_too, 0.2)):
+            entry = next(p for p in pset["parameters"] if p["name"] == "bkg_norm")
+            entry.update(value=value, const=True)
+        hs3["parameter_points"] = [free, held, held_too]
+        return hs3
+
+    def test_no_init_falls_back_to_the_first_const_set(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="pyhs3.hifa"):
+            result = convert(self.root_like())
+        assert config(result)["parameters"] == [
+            {"name": "bkg_norm", "inits": [0.5], "fixed": True}
+        ]
+        assert "'held'" in caplog.text
+        assert "parameter_set=" in caplog.text
+
+    def test_parameter_set_overrides(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="pyhs3.hifa"):
+            result = convert(self.root_like(), parameter_set="held_too")
+        assert config(result)["parameters"] == [
+            {"name": "bkg_norm", "inits": [0.2], "fixed": True}
+        ]
+        assert caplog.text == ""
+
+    def test_parameter_set_overrides_init(self):
+        hs3 = self.root_like()
+        hs3["analyses"][0]["init"] = "held"
+        result = convert(hs3, parameter_set="held_too")
+        assert config(result)["parameters"] == [
+            {"name": "bkg_norm", "inits": [0.2], "fixed": True}
+        ]
+
+    def test_no_const_set_raises(self):
+        hs3 = self.root_like()
+        hs3["parameter_points"] = hs3["parameter_points"][:1]
+        with pytest.raises(ValueError, match=r"HS3 section 2.7.*parameter_set="):
+            convert(hs3)
+
+    def test_unknown_parameter_set_raises(self):
+        with pytest.raises(ValueError, match=r"parameter_set='nope'"):
+            convert(self.root_like(), parameter_set="nope")
 
     def test_bounds_intersect_over_the_analysis_domains(self):
         hs3 = hs3_of(make_spec())

@@ -8,6 +8,7 @@ for manual @model_validator methods in distributions and functions.
 from __future__ import annotations
 
 import inspect
+import math
 from typing import Literal
 from unittest.mock import patch
 
@@ -655,6 +656,34 @@ class TestContext:
         assert context["param1"] is view_tensor
         # But context.parameters still returns the raw value
         assert context.parameters["param1"] is raw
+
+    def test_add_log_density_registers_log_space_tensor(self):
+        """log_density returns the tensor registered by add_log_density."""
+        prob = pt.constant(0.5)
+        log_prob = pt.constant(-0.75)
+        context = Context({"dist": prob})
+        context.add_log_density("dist", log_prob)
+        assert context.log_density("dist") is log_prob
+        # The probability-space lookup is unaffected
+        assert context["dist"] is prob
+
+    def test_log_density_falls_back_to_log_of_value(self):
+        """Without a registered log-space tensor, log_density is log(context[key])."""
+        context = Context({"dist": pt.constant(0.5)})
+        assert context.log_density("dist").eval() == pytest.approx(math.log(0.5))
+
+    def test_log_density_missing_key_raises(self):
+        """log_density raises KeyError for a name the context does not hold."""
+        context = Context({})
+        with pytest.raises(KeyError, match="not found in context"):
+            context.log_density("missing")
+
+    def test_context_copy_keeps_log_densities(self):
+        """copy() carries the registered log-space tensors."""
+        log_prob = pt.constant(-0.75)
+        context = Context({"dist": pt.constant(0.5)})
+        context.add_log_density("dist", log_prob)
+        assert context.copy().log_density("dist") is log_prob
 
 
 class TestEvaluableAdvanced:

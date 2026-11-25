@@ -18,12 +18,15 @@ These tests assert that:
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from typing import ClassVar, Literal, cast
 
 import numpy as np
 import pytensor
 import pytensor.tensor as pt
 import pytest
+from scipy.special import logsumexp
+from scipy.stats import norm
 
 import pyhs3 as hs3
 from pyhs3.context import Context
@@ -43,6 +46,7 @@ from pyhs3.distributions.cms import (
     GGZZBackgroundDist,
     QQZZBackgroundDist,
 )
+from pyhs3.distributions.composite import _weighted_logsumexp
 from pyhs3.distributions.core import Distribution
 from pyhs3.distributions.mathematical import (
     BernsteinPolyDist,
@@ -1570,3 +1574,214 @@ class TestArgusLogLikelihood:
         fn = pytensor.function([m_var], grad, mode=mode)
         grad_val = fn(1.0)
         assert np.isfinite(grad_val), f"gradient has NaN/Inf: {grad_val}"
+
+
+# --------------------------------------------------------------------------
+# Log-native composition (#282): MixtureDist and ProductDist build their
+# log-density from their components' log-space tensors, so logpdf of the
+# composite stays finite where every component underflows in probability
+# space (a Gaussian evaluated tens of sigma from its mean).
+# --------------------------------------------------------------------------
+
+_COMPOSITE_PARAMS: dict[str, float] = {
+    "m1": 0.0,
+    "m2": 1.0,
+    "c": 0.3,
+    "n1": 10.0,
+    "n2": 20.0,
+}
+
+
+def _composite_workspace() -> hs3.Workspace:
+    """Two unit-width Gaussians on x in [-100, 100] combined by every composite form.
+
+    The domain is wide enough that each Gaussian's normalization over it is
+    exactly 1.0 in float64, so the reference log-density is scipy's
+    untruncated ``norm.logpdf``.
+    """
+    gaussians = [
+        {"name": name, "type": "gaussian_dist", "x": "x", "mean": mean, "sigma": 1.0}
+        for name, mean in (("g1", "m1"), ("g2", "m2"))
+    ]
+    composites = [
+        {
+            "name": "mix",
+            "type": "mixture_dist",
+            "summands": ["g1", "g2"],
+            "coefficients": ["c"],
+        },
+        {
+            "name": "mix_ext",
+            "type": "mixture_dist",
+            "summands": ["g1", "g2"],
+            "coefficients": ["n1", "n2"],
+            "extended": True,
+        },
+        {
+            "name": "mix_ref",
+            "type": "mixture_dist",
+            "summands": ["g1", "g2"],
+            "coefficients": ["n1", "n2"],
+            "extended": True,
+            "ref_coef_norm": "n1",
+        },
+        {"name": "prod", "type": "product_dist", "factors": ["g1", "g2"]},
+    ]
+    return hs3.Workspace(
+        metadata={"hs3_version": "0.2"},
+        distributions=[*gaussians, *composites],
+        domains=[
+            {
+                "name": "default",
+                "type": "product_domain",
+                "axes": [{"name": "x", "min": -100.0, "max": 100.0}],
+            }
+        ],
+        parameter_points=[
+            {
+                "name": "default_values",
+                "parameters": [
+                    {"name": "x", "value": 0.0},
+                    *(
+                        {"name": name, "value": value}
+                        for name, value in _COMPOSITE_PARAMS.items()
+                    ),
+                ],
+            }
+        ],
+    )
+
+
+def _composite_reference(name: str, x: np.ndarray) -> np.ndarray:
+    """log-density of composite ``name`` at ``x`` (shape ``(N,)``), via scipy.
+
+    The components' log-densities are combined with ``logsumexp`` (mixtures,
+    with each coefficient as a ``b`` weight) or summed (product), so the
+    reference is finite where the components underflow.
+    """
+    p = _COMPOSITE_PARAMS
+    # (2, N): the two components' log-densities at every x
+    log_f = np.stack([norm.logpdf(x, p["m1"], 1.0), norm.logpdf(x, p["m2"], 1.0)])
+    if name == "prod":
+        return cast(np.ndarray, log_f.sum(axis=0))
+    weights = {
+        "mix": [p["c"], 1.0 - p["c"]],
+        "mix_ext": [p["n1"] / (p["n1"] + p["n2"]), p["n2"] / (p["n1"] + p["n2"])],
+        "mix_ref": [p["n1"] / p["n1"], p["n2"] / p["n1"]],
+    }[name]
+    # (2, 1) weights broadcast against the (2, N) log-densities
+    return cast(np.ndarray, logsumexp(log_f, axis=0, b=np.array(weights)[:, None]))
+
+
+def _evaluate_at(
+    evaluate: Callable[..., np.ndarray], name: str, x: np.ndarray
+) -> np.ndarray:
+    """Evaluate ``evaluate(name, x=xi, ...)`` at each point of ``x`` (shape ``(N,)``).
+
+    ``x`` is a scalar parameter of the workspace (it has no data), so each
+    point is a separate scalar evaluation; the result has shape ``(N,)``.
+    """
+    return np.array(
+        [float(np.asarray(evaluate(name, x=xi, **_COMPOSITE_PARAMS))) for xi in x]
+    )
+
+
+@pytest.fixture(scope="module", params=["CVM", "FAST_COMPILE"])
+def composite_model(request: pytest.FixtureRequest) -> hs3.Model:
+    """The composite workspace built once per compile mode for TestLogNativeComposition."""
+    return _composite_workspace().model(0, progress=False, mode=request.param)
+
+
+class TestLogNativeComposition:
+    """logpdf of MixtureDist/ProductDist is composed from component log-densities."""
+
+    COMPOSITES: ClassVar[list[str]] = ["mix", "mix_ext", "mix_ref", "prod"]
+
+    # FAST_COMPILE skips the stabilizing rewrites that could otherwise rescue
+    # a probability-space round trip (e.g. log(exp(a) * exp(b)) -> a + b), so
+    # the stability must come from the graph itself.
+    @pytest.mark.parametrize("name", COMPOSITES)
+    def test_logpdf_finite_where_components_underflow(
+        self, composite_model: hs3.Model, name: str
+    ) -> None:
+        """Both Gaussians 40-60 sigma away underflow to 0.0, yet logpdf is finite."""
+        x = np.array([40.0, 50.0, -60.0])
+        # Precondition: every component's probability density underflows.
+        for component in ("g1", "g2"):
+            pdf_val = _evaluate_at(composite_model.pdf_unsafe, component, x)
+            assert np.all(pdf_val == 0.0)
+
+        logpdf_val = _evaluate_at(composite_model.logpdf_unsafe, name, x)
+        assert np.all(np.isfinite(logpdf_val))
+        np.testing.assert_allclose(
+            logpdf_val, _composite_reference(name, x), rtol=1e-12
+        )
+
+    @pytest.mark.parametrize("name", COMPOSITES)
+    def test_logpdf_unchanged_at_ordinary_points(
+        self, composite_model: hs3.Model, name: str
+    ) -> None:
+        """Where nothing underflows, logpdf is the log of the probability-space composition."""
+        x = np.array([-1.5, 0.0, 0.5, 2.0])
+        p = _COMPOSITE_PARAMS
+        f1 = norm.pdf(x, p["m1"], 1.0)
+        f2 = norm.pdf(x, p["m2"], 1.0)
+        prob = {
+            "mix": p["c"] * f1 + (1.0 - p["c"]) * f2,
+            "mix_ext": (p["n1"] * f1 + p["n2"] * f2) / (p["n1"] + p["n2"]),
+            "mix_ref": (p["n1"] * f1 + p["n2"] * f2) / p["n1"],
+            "prod": f1 * f2,
+        }[name]
+        logpdf_val = _evaluate_at(composite_model.logpdf_unsafe, name, x)
+        np.testing.assert_allclose(logpdf_val, np.log(prob), rtol=1e-12)
+
+    @pytest.mark.parametrize("name", COMPOSITES)
+    def test_gradient_finite_where_components_underflow(
+        self, composite_model: hs3.Model, name: str
+    ) -> None:
+        """The log-density's gradient in every parameter stays finite where components underflow."""
+        log_expr = pt.sum(composite_model.log_distributions[name])
+        inputs = [
+            v
+            for v in pytensor.graph.traversal.explicit_graph_inputs([log_expr])
+            if v.name
+        ]
+        wrt = [v for v in inputs if v.name != "x"]
+        fn = pytensor.function(
+            inputs, pt.grad(log_expr, wrt), mode=composite_model.mode
+        )
+        for x in (40.0, 50.0, -60.0):
+            values = {"x": x, **_COMPOSITE_PARAMS}
+            grads = fn(*(np.float64(values[v.name]) for v in inputs))
+            assert len(grads) == len(wrt)
+            assert np.all(np.isfinite(grads)), f"x={x}: {grads}"
+
+
+class TestWeightedLogsumexpShapes:
+    """``_weighted_logsumexp`` broadcasts mixed-type log terms and same-rank weights."""
+
+    def test_log_terms_of_different_types_are_broadcast(self) -> None:
+        """A per-event ``(N,)`` term and a scalar term combine to shape ``(N,)``."""
+        x = np.array([-1.0, 0.5, 2.0])
+        per_event = pt.as_tensor_variable(x)  # shape (3,)
+        scalar = pt.as_tensor_variable(np.float64(-0.7))  # shape ()
+        weights = [pt.as_tensor_variable(0.25), pt.as_tensor_variable(0.75)]
+
+        result = _weighted_logsumexp([per_event, scalar], weights).eval()
+
+        expected = logsumexp(
+            np.stack([x, np.full_like(x, -0.7)]), axis=0, b=[[0.25], [0.75]]
+        )
+        np.testing.assert_allclose(result, expected, rtol=1e-12)
+
+    def test_weights_with_the_terms_rank_are_not_padded(self) -> None:
+        """Scalar terms with scalar weights reduce to a scalar."""
+        terms = [pt.as_tensor_variable(np.float64(v)) for v in (-500.0, -501.0)]
+        weights = [pt.as_tensor_variable(0.4), pt.as_tensor_variable(0.6)]
+
+        result = _weighted_logsumexp(terms, weights).eval()
+
+        assert result.shape == ()
+        np.testing.assert_allclose(
+            result, logsumexp([-500.0, -501.0], b=[0.4, 0.6]), rtol=1e-12
+        )

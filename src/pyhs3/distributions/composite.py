@@ -7,7 +7,7 @@ multiple other distributions, including mixtures and products of distributions.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import pytensor.tensor as pt
@@ -91,6 +91,40 @@ def _stable_logsumexp(
     return cast(TensorVar, pt.squeeze(result, axis=axis))  # type: ignore[no-untyped-call]
 
 
+def _weighted_logsumexp(
+    log_terms: Sequence[TensorVar], weights: Sequence[TensorVar]
+) -> TensorVar:
+    """log(Σᵢ wᵢ·exp(log_termsᵢ)) via :func:`_stable_logsumexp`, term by term.
+
+    ``log_terms[i]`` and ``weights[i]`` belong to the same summand.  The log
+    terms share a shape (e.g. ``(N, M)`` per event, ``(N, 1)`` for an
+    observable with scalar parameters, or a scalar); terms of different
+    types are first broadcast against each other.  Each weight is a scalar
+    or a parameter batch (``(M,)`` or a ``(1, M)`` view).  The weights are
+    padded with leading broadcastable axes to the terms' rank, (1, 1) or
+    (1, M), and given a common shape among themselves only, so that their
+    stack ``(n_summands, 1, 1 or M)`` broadcasts against the stacked terms
+    ``(n_summands, N, M)``; the reduction over the stacking axis gives the
+    terms' shape back.  Broadcasting each weight to its term's full shape
+    would need that term's symbolic shape, which is slow to build for large
+    expressions.
+    """
+    if len({term.type for term in log_terms}) > 1:
+        log_terms = list(pt.broadcast_arrays(*log_terms))
+    ndim = max(term.ndim for term in log_terms)
+    padded = [
+        weight.dimshuffle(("x",) * (ndim - weight.ndim) + tuple(range(weight.ndim)))  # type: ignore[no-untyped-call]
+        if weight.ndim < ndim
+        else weight
+        for weight in weights
+    ]
+    if len({weight.type for weight in padded}) > 1:
+        padded = list(pt.broadcast_arrays(*padded))
+    return _stable_logsumexp(
+        pt.stack(log_terms, axis=0), axis=0, weights=pt.stack(padded, axis=0)
+    )
+
+
 class MixtureDist(Distribution):
     r"""
     Mixture of probability distributions.
@@ -116,15 +150,15 @@ class MixtureDist(Distribution):
 
         f(x) = \frac{\sum_{i=1}^{n} c_i \cdot f_i(x)}{\sum_{j \in \text{ref\_coef\_norm}} c_j}
 
-    :meth:`log_prob_terms` is the log-space-safe path for an extended mixture:
-    it builds log(Σcᵢfᵢ) via logsumexp over each summand's own log-space
-    expression rather than pt.log of the probability-space sum, so it stays
-    finite even when every component underflows to 0.0.  The base-class
-    :meth:`~pyhs3.distributions.Distribution.log_expression` (used for
-    non-extended mixtures and standalone evaluation) still round-trips
-    through probability-space component tensors and cannot be converted
-    until composite distributions receive log-space component context (see
-    https://github.com/scipp-atlas/pyhs3/issues/254, phase 4).
+    Both log-space paths build log(Σcᵢfᵢ) via logsumexp over each summand's
+    own log-space expression rather than pt.log of the probability-space
+    sum, so they stay finite even when every component underflows to 0.0:
+    :meth:`log_prob_terms` for an extended mixture in the joint likelihood,
+    and :meth:`log_likelihood` (behind
+    :meth:`~pyhs3.distributions.Distribution.log_expression`, used for
+    non-extended mixtures and standalone evaluation), which reads the
+    summands' log-space tensors from the context (see
+    https://github.com/scipp-atlas/pyhs3/issues/282).
 
     Parameters:
         coefficients (list[str]): Names of coefficient parameters.
@@ -349,6 +383,47 @@ class MixtureDist(Distribution):
 
         return mixturesum
 
+    def log_likelihood(self, context: Context) -> TensorVar:
+        """
+        Log-space mixture density built from the summands' log-densities.
+
+        Evaluates log(Σᵢ wᵢ·fᵢ) as a weighted logsumexp over each summand's
+        log-space tensor (``context.log_density(summand)``) rather than
+        ``pt.log`` of the probability-space sum, so it stays finite where
+        every fᵢ underflows to 0.0.  The weights are the same as in
+        :meth:`likelihood`:
+
+        - N coefficients: wᵢ = cᵢ / Σⱼcⱼ, or cᵢ / Σ_{j ∈ ref_coef_norm} cⱼ.
+        - N-1 coefficients: wᵢ = cᵢ for the first N-1 summands and
+          w_N = 1 - Σᵢcᵢ for the last.
+
+        The weights enter linearly (see ``_stable_logsumexp``), so negative
+        weights are allowed: the result is NaN exactly where the mixture
+        density itself is negative.
+
+        Args:
+            context: Mapping of names to pytensor variables, with the
+                summands' log-space tensors registered by the model builder.
+
+        Returns:
+            TensorVar: Log of the mixture PDF, with the summands' shape.
+        """
+        log_terms = [context.log_density(summand) for summand in self.summands]
+
+        if len(self.coefficients) == len(self.summands):
+            # likelihood() fills the coefficient and yield caches that
+            # log_prob_terms() and expected_yield() read; reuse its nodes.
+            self.likelihood(context)
+            coeffs = cast(list[TensorVar], self._cached_coeffs)
+            nu = cast(TensorVar, self._cached_nu_expr)
+            weights = [coeff / nu for coeff in coeffs]
+        else:
+            coeffs = [context[coeff] for coeff in self.coefficients]
+            last = 1 - balanced_sum(coeffs, pt.constant(0.0))
+            weights = [*coeffs, cast(TensorVar, last)]
+
+        return _weighted_logsumexp(log_terms, weights)
+
     def expected_yield(self, context: Context) -> TensorVar:
         """
         Compute the total expected yield nu in the extended case.
@@ -482,26 +557,12 @@ class MixtureDist(Distribution):
             )
             raise RuntimeError(msg)
 
-        log_terms = [log_expressions[summand] for summand in self.summands]
         # Each log f_i has the per-event shape (N, M); each coefficient is a
-        # scalar or a (M,) batch.  Pad the coefficients with leading
-        # broadcastable axes to the terms' rank, (1, 1) or (1, M), and give
-        # them a common shape among themselves only, so that their stack
-        # (n_summands, 1, 1 or M) broadcasts against the stacked terms
-        # (n_summands, N, M).  Broadcasting each coefficient to its term's
-        # full shape would need that term's symbolic shape, which is slow to
-        # build for large expressions.
-        ndim = max(term.ndim for term in log_terms)
-        coeffs = [
-            coeff.dimshuffle(("x",) * (ndim - coeff.ndim) + tuple(range(coeff.ndim)))  # type: ignore[no-untyped-call]
-            if coeff.ndim < ndim
-            else coeff
-            for coeff in self._cached_coeffs
-        ]
-        if len({coeff.type for coeff in coeffs}) > 1:
-            coeffs = list(pt.broadcast_arrays(*coeffs))
-        per_event_term = _stable_logsumexp(
-            pt.stack(log_terms, axis=0), axis=0, weights=pt.stack(coeffs, axis=0)
+        # scalar or a (M,) batch.  The weighted reduction over the summands
+        # gives the (N, M) per-event term.
+        per_event_term = _weighted_logsumexp(
+            [log_expressions[summand] for summand in self.summands],
+            self._cached_coeffs,
         )
 
         return LogProbTerms(
@@ -552,6 +613,28 @@ class ProductDist(Distribution):
 
         vals = [context[factor] for factor in self.factors]
         return cast(TensorVar, pt.mul(*vals))
+
+    def log_likelihood(self, context: Context) -> TensorVar:
+        """
+        Log-space product density: the sum of the factors' log-densities.
+
+        Sums each factor's log-space tensor (``context.log_density(factor)``)
+        rather than taking ``pt.log`` of the probability-space product, so
+        the result stays finite where a factor underflows to 0.0.  The
+        factors broadcast against each other as in :meth:`likelihood`.
+
+        Args:
+            context: Mapping of names to pytensor variables, with the
+                factors' log-space tensors registered by the model builder.
+
+        Returns:
+            TensorVar: Log of the product PDF.
+        """
+        if not self.factors:
+            return cast(TensorVar, pt.constant(0.0))
+
+        log_vals = [context.log_density(factor) for factor in self.factors]
+        return cast(TensorVar, pt.add(*log_vals))
 
     def log_prob_terms(  # pylint: disable=redefined-outer-name
         self,

@@ -763,6 +763,19 @@ def test_nll_missing_free_parameter_value(tmp_path):
     assert "--parameter-set" in _plain(result.output)
 
 
+def test_nll_likelihood_target_missing_parameter_value(tmp_path):
+    """A likelihood target selects no parameter set, so a parameter with no
+    value in any parameter point is reported when the NLL is evaluated."""
+    spec = json.loads(json.dumps(_WS_DICT))
+    del spec["analyses"]
+    spec["parameter_points"][0]["parameters"] = []
+    path = tmp_path / "likelihood_no_mean_value.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    result = runner.invoke(app, ["nll", str(path)])
+    assert result.exit_code != 0
+    assert "no value available for model input(s): mean" in _plain(result.output)
+
+
 # ---------------------------------------------------------------------------
 # plot
 # ---------------------------------------------------------------------------

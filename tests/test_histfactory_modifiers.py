@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+import pyhf.interpolators
 import pytensor.tensor as pt
 import pytest
 from pydantic import ValidationError
@@ -82,6 +83,33 @@ class TestNormSysModifier:
         assert not modifier.is_additive
         assert modifier.constraint == "Gauss"
         assert modifier.auxdata == 0.0
+
+    @pytest.mark.parametrize(
+        ("interpolation", "pyhf_interpolator"),
+        [("code1", pyhf.interpolators.code1), ("code4", pyhf.interpolators.code4)],
+    )
+    @pytest.mark.parametrize("alpha", [-1.5, -0.7, -0.3, 0.3, 0.7, 1.5])
+    def test_normsys_float32_exact_factors_keep_float64_precision(
+        self, interpolation, pyhf_interpolator, alpha
+    ):
+        """hi/lo values exact in float32 (0.5, 1.5) still interpolate in float64.
+
+        PyTensor infers float32 for a Python float that float32 represents
+        exactly, so an expression built only from the hi/lo constants would be
+        evaluated in float32 (about 1e-8 relative error) unless the constants
+        are float64.
+        """
+        data = NormSysData(hi=1.5, lo=0.5, interpolation=interpolation)
+        modifier = NormSysModifier(name="ns", parameter="alpha", data=data)
+        context = Context({"alpha": pt.constant(np.float64(alpha))})
+
+        factor = modifier.expression(context).eval()
+
+        interpolator = pyhf_interpolator([[[[0.5], [1.0], [1.5]]]], subscribe=False)
+        expected = pyhf.tensorlib.tolist(
+            interpolator(pyhf.tensorlib.astensor([[alpha]]))
+        )[0][0][0][0]
+        np.testing.assert_allclose(factor, expected, rtol=1e-14)
 
     def test_normsys_apply_positive_alpha(self):
         """Test applying normsys modifier with positive alpha."""

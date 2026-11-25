@@ -4,7 +4,7 @@ Conversion of pyhf workspaces (HistFactory JSON, "HiFa") to HS3.
 :func:`from_hifa` turns a pyhf workspace into a :class:`~pyhs3.Workspace`.
 pyhf is not a dependency: the input is any mapping that follows pyhf's
 ``schemas/1.0.0/workspace.json`` (a :class:`pyhf.Workspace` is a ``dict``
-subclass), checked by the private pydantic models below.
+subclass), checked by the private pydantic models in ``_schema``.
 """
 
 from __future__ import annotations
@@ -12,14 +12,26 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, cast
+from typing import Any, cast
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field
 
-from pyhs3.distributions.histfactory.modifiers import (
-    HistoSysInterpolation,
-    NormSysInterpolation,
+from pyhs3.hifa._defaults import _DEFAULTS, _bin_names, _ParameterDefaults
+from pyhs3.hifa._schema import (
+    _Channel,
+    _HiFaWorkspace,
+    _HistoSys,
+    _Lumi,
+    _Measurement,
+    _Modifier,
+    _ModifierSettings,
+    _NormSys,
+    _Observation,
+    _Parameter,
+    _Sample,
+    _ShapeFactor,
+    _ShapeSys,
+    _StatError,
 )
 from pyhs3.workspace import Workspace
 
@@ -27,168 +39,6 @@ __all__ = ["from_hifa"]
 
 HS3_VERSION = "0.2"
 
-NonEmptyFloats = Annotated[list[float], Field(min_length=1)]
-
-
-class _Schema(BaseModel):
-    """Base of the models mirroring pyhf's ``schemas/1.0.0/defs.json``.
-
-    pyhf's schema sets ``additionalProperties: false`` on every object, so an
-    unknown key is an error here too.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class _NormFactor(_Schema):
-    name: str
-    type: Literal["normfactor"]
-    data: None
-
-
-class _NormSysData(_Schema):
-    hi: float
-    lo: float
-
-
-class _NormSys(_Schema):
-    name: str
-    type: Literal["normsys"]
-    data: _NormSysData
-
-
-class _HistoSysData(_Schema):
-    hi_data: NonEmptyFloats
-    lo_data: NonEmptyFloats
-
-
-class _HistoSys(_Schema):
-    name: str
-    type: Literal["histosys"]
-    data: _HistoSysData
-
-
-class _ShapeFactor(_Schema):
-    name: str
-    type: Literal["shapefactor"]
-    data: None
-
-
-class _ShapeSys(_Schema):
-    name: str
-    type: Literal["shapesys"]
-    data: NonEmptyFloats
-
-
-class _StatError(_Schema):
-    name: str
-    type: Literal["staterror"]
-    data: NonEmptyFloats
-
-
-class _Lumi(_Schema):
-    name: Literal["lumi"]
-    type: Literal["lumi"]
-    data: None
-
-
-_Modifier = Annotated[
-    _NormFactor | _NormSys | _HistoSys | _ShapeFactor | _ShapeSys | _StatError | _Lumi,
-    Field(discriminator="type"),
-]
-
-
-class _Sample(_Schema):
-    name: str
-    data: NonEmptyFloats
-    modifiers: list[_Modifier]
-
-
-class _Channel(_Schema):
-    name: str
-    samples: Annotated[list[_Sample], Field(min_length=1)]
-
-
-class _Observation(_Schema):
-    name: str
-    data: NonEmptyFloats
-
-
-class _Parameter(_Schema):
-    name: str
-    inits: NonEmptyFloats | None = None
-    bounds: Annotated[list[tuple[float, float]], Field(min_length=1)] | None = None
-    auxdata: NonEmptyFloats | None = None
-    factors: NonEmptyFloats | None = None
-    sigmas: NonEmptyFloats | None = None
-    fixed: bool | None = None
-
-
-class _Config(_Schema):
-    poi: str
-    parameters: list[_Parameter]
-
-
-class _Measurement(_Schema):
-    name: str
-    config: _Config
-
-
-class _HiFaWorkspace(_Schema):
-    channels: Annotated[list[_Channel], Field(min_length=1)]
-    measurements: Annotated[list[_Measurement], Field(min_length=1)]
-    observations: Annotated[list[_Observation], Field(min_length=1)]
-    version: Literal["1.0.0"]
-
-
-class _NormSysSettings(_Schema):
-    interpcode: NormSysInterpolation
-
-
-class _HistoSysSettings(_Schema):
-    interpcode: HistoSysInterpolation
-
-
-class _ModifierSettings(_Schema):
-    """pyhf's ``modifier_settings``, defaulting to pyhs3's (and ROOT's) codes.
-
-    A modifier type left out keeps pyhs3's default.
-    """
-
-    normsys: _NormSysSettings = _NormSysSettings(interpcode="code4")
-    histosys: _HistoSysSettings = _HistoSysSettings(interpcode="code4p")
-
-
-@dataclass(frozen=True)
-class _ParameterDefaults:
-    """pyhf's defaults for the parameter of one modifier type."""
-
-    # None: pyhf has no default, so the measurement config must set it.
-    init: float | None
-    bounds: tuple[float, float] | None
-    # The constraint pyhf puts on the parameter, if any.
-    constraint: Literal["Gauss", "Poisson"] | None
-    # One parameter per bin (``name_bin_i``) instead of a scalar.
-    per_bin: bool = False
-
-
-_NORMFACTOR_DEFAULTS = _ParameterDefaults(init=1.0, bounds=(0.0, 10.0), constraint=None)
-_NORMAL_DEFAULTS = _ParameterDefaults(init=0.0, bounds=(-5.0, 5.0), constraint="Gauss")
-_DEFAULTS: dict[str, _ParameterDefaults] = {
-    "normfactor": _NORMFACTOR_DEFAULTS,
-    "normsys": _NORMAL_DEFAULTS,
-    "histosys": _NORMAL_DEFAULTS,
-    "shapefactor": _ParameterDefaults(
-        init=1.0, bounds=(0.0, 10.0), constraint=None, per_bin=True
-    ),
-    "shapesys": _ParameterDefaults(
-        init=1.0, bounds=(1e-10, 10.0), constraint="Poisson", per_bin=True
-    ),
-    "staterror": _ParameterDefaults(
-        init=1.0, bounds=(1e-10, 10.0), constraint="Gauss", per_bin=True
-    ),
-    "lumi": _ParameterDefaults(init=None, bounds=None, constraint="Gauss"),
-}
 # The auxiliary data and widths HS3 v0.2 expresses for a Gauss constraint.
 _GAUSS_AUX: dict[str, list[float] | None] = {"auxdata": [0.0], "sigmas": [1.0]}
 # lumi's constraint takes its auxiliary data and width from each measurement.
@@ -237,14 +87,6 @@ class _StatErrorLayout:
 
 # Where a modifier sits: its channel, its sample and the modifier itself.
 _Use = tuple[_Channel, _Sample, _Modifier]
-
-
-def _bin_names(name: str, start: int, nbins: int) -> list[str]:
-    """``name_bin_i`` for ``i`` in ``[start, start + nbins)``.
-
-    ROOT rejects pyhf's ``name[i]`` as an object name.
-    """
-    return [f"{name}_bin_{i}" for i in range(start, start + nbins)]
 
 
 def _check_unique(kind: str, names: Iterable[str]) -> None:

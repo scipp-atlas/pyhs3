@@ -27,6 +27,11 @@ from pyhs3.exceptions import custom_error_msg
 from pyhs3.networks import HasDependencies
 from pyhs3.typing.aliases import TensorVar
 
+# Interpolation codes each modifier type accepts, named so other modules (such
+# as the pyhf converter) validate against the same set.
+NormSysInterpolation = Literal["code1", "code4"]
+HistoSysInterpolation = Literal["code0", "code2", "code4p"]
+
 
 class ModifierData(BaseModel):
     """Base class for modifier data."""
@@ -37,7 +42,7 @@ class NormSysData(ModifierData):
 
     hi: float
     lo: float
-    interpolation: Literal["code1", "code4"] = Field(default="code4")
+    interpolation: NormSysInterpolation = Field(default="code4")
 
 
 class HistoSysDataContents(BaseModel):
@@ -51,7 +56,7 @@ class HistoSysData(ModifierData):
 
     hi: HistoSysDataContents
     lo: HistoSysDataContents
-    interpolation: Literal["code0", "code2", "code4p"] = Field(default="code4p")
+    interpolation: HistoSysInterpolation = Field(default="code4p")
 
     @model_validator(mode="after")
     def validate_lengths(self) -> HistoSysData:

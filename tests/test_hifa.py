@@ -8,6 +8,7 @@ converted models numerically against pyhf.
 from __future__ import annotations
 
 import copy
+import logging
 from typing import Any
 
 import pytest
@@ -1095,11 +1096,15 @@ class TestConsistencyChecks:
         with pytest.raises(ValueError, match="channel 'CR' has no observation"):
             from_hifa(spec)
 
-    def test_observation_for_unknown_channel(self):
+    def test_observation_for_unknown_channel_is_ignored(self, caplog):
+        # A signal patch can remove a channel and leave its observation;
+        # pyhf ignores the observation, so the conversion does too.
         spec = make_spec()
-        spec["observations"].append({"name": "CR", "data": [1.0, 2.0]})
-        with pytest.raises(ValueError, match=r"'CR'.*no channel"):
-            from_hifa(spec)
+        spec["observations"].append({"name": "CR", "data": [1.0, 2.0, 3.0]})
+        with caplog.at_level(logging.DEBUG, logger="pyhs3.hifa"):
+            ws = from_hifa(spec)
+        assert [d.name for d in ws.data] == ["obsData_SR"]
+        assert "Observation 'CR' has no channel" in caplog.text
 
     @pytest.mark.parametrize("key", ["channels", "observations", "measurements"])
     def test_duplicate_names(self, key):

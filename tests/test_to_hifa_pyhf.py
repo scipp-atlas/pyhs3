@@ -98,7 +98,16 @@ def test_pyhf_to_hs3_to_pyhf(name):
     spec = SPECS[name]
     ws = from_hifa(spec)
     result = to_hifa(ws)
-    assert normalized(result) == normalized(spec)
+    # from_hifa drops observations without a channel, as pyhf ignores them,
+    # so they cannot come back.
+    channels = {channel["name"] for channel in spec["channels"]}
+    expected = {
+        **spec,
+        "observations": [
+            obs for obs in spec["observations"] if obs["name"] in channels
+        ],
+    }
+    assert normalized(result) == normalized(expected)
     # pyhf accepts the output and builds its model.
     pyhf.Workspace(result).model(modifier_settings=hifa_modifier_settings(ws))
 

@@ -305,8 +305,11 @@ class NormSysModifier(SingleParamConstraint, ParameterModifier):
     def model_post_init(self, __context: Any, /) -> None:
         """Initialize computed collections after Pydantic validation."""
         self._nominal_factor = pt.constant(1.0)
-        self._hi_factor_tensor = pt.constant(self.data.hi)
-        self._lo_factor_tensor = pt.constant(self.data.lo)
+        # PyTensor infers float32 for a float that float32 represents exactly
+        # (0.5, 1.5); the interpolation coefficients are built from these
+        # constants alone, so they must be float64 to keep float64 precision.
+        self._hi_factor_tensor = pt.constant(self.data.hi, dtype="float64")
+        self._lo_factor_tensor = pt.constant(self.data.lo, dtype="float64")
 
     @property
     def auxdata(self) -> float:

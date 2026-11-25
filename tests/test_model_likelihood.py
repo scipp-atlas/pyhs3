@@ -33,7 +33,7 @@ from pyhs3.distributions.basic import GaussianDist
 from pyhs3.distributions.composite import MixtureDist, ProductDist
 from pyhs3.distributions.histfactory import HistFactoryDistChannel
 from pyhs3.domains import ProductDomain
-from pyhs3.exceptions import WorkspaceValidationError
+from pyhs3.exceptions import MissingInitialValueError, WorkspaceValidationError
 from pyhs3.functions import Functions
 from pyhs3.likelihoods import Likelihood
 from pyhs3.model import Model
@@ -192,7 +192,17 @@ def test_likelihood_model_retains_aux_distribution_branch():
         **{
             **_WS_DICT,
             # gauss2 is auxiliary (no paired data), so y_obs is a parameter, not
-            # an observable, and HS3 section 2.7 needs it in a referenced domain.
+            # an observable, so HS3 section 2.7 needs it in a referenced domain and
+            # it needs a starting value in init.
+            "parameter_points": [
+                {
+                    "name": "params",
+                    "parameters": [
+                        {"name": "mean", "value": 2.0},
+                        {"name": "y_obs", "value": 0.0},
+                    ],
+                }
+            ],
             "domains": [
                 {
                     **_WS_DICT["domains"][0],
@@ -220,8 +230,8 @@ def test_likelihood_model_retains_aux_distribution_branch():
     assert "y_obs" in model.parameters
 
 
-def test_model_from_analysis_no_init_uses_empty_parameterset():
-    """ws.model(analysis) with no init uses an empty default ParameterSet."""
+def test_model_from_analysis_no_init_has_no_starting_values():
+    """ws.model(analysis) with no init uses an empty ParameterSet, so free parameters lack values."""
     ws = Workspace(
         **{
             **_WS_DICT,
@@ -231,9 +241,8 @@ def test_model_from_analysis_no_init_uses_empty_parameterset():
             ],
         }
     )
-    model = ws.model(ws.analyses["A"], progress=False)
-    assert isinstance(model, Model)
-    assert model.parameterset.name == "default"
+    with pytest.raises(MissingInitialValueError, match="mean"):
+        ws.model(ws.analyses["A"], progress=False)
 
 
 def test_model_from_analysis_no_parameter_points_raises():
@@ -404,6 +413,77 @@ def test_model_from_analysis_suggestion_must_hold_every_unlisted_parameter_const
     assert excinfo.value.parameters == ["shift"]
     assert excinfo.value.const_parameter_sets == ["both"]
     assert "only_shift" not in str(excinfo.value)
+
+
+def _ws_with_listed_sigma(init_parameters: list[dict]) -> Workspace:
+    """_WS_DICT with gauss1's sigma as a domain-listed parameter, and an init point."""
+    distributions = [
+        {**_WS_DICT["distributions"][0], "sigma": "sigma"},
+        _WS_DICT["distributions"][1],
+    ]
+    axes = [
+        {"name": "mean", "min": -10.0, "max": 10.0},
+        {"name": "sigma", "min": 0.1, "max": 10.0},
+    ]
+    return Workspace(
+        **{
+            **_WS_DICT,
+            "distributions": distributions,
+            "domains": [{**_WS_DICT["domains"][0], "axes": axes}],
+            "analyses": [
+                {"name": "A", "likelihood": "L", "domains": ["main"], "init": "init"}
+            ],
+            "parameter_points": [{"name": "init", "parameters": init_parameters}],
+        }
+    )
+
+
+def test_model_from_analysis_free_parameter_missing_from_init_raises():
+    """A free parameter with no starting value in init is an error at model construction."""
+    ws = _ws_with_listed_sigma([{"name": "mean", "value": 2.0}])
+    with pytest.raises(MissingInitialValueError, match="sigma") as excinfo:
+        ws.model(ws.analyses["A"], progress=False)
+    assert excinfo.value.parameters == ["sigma"]
+    assert "init" in str(excinfo.value)
+
+
+def test_model_from_analysis_complete_init_builds_and_compiles():
+    """With a starting value for every free parameter the model builds and compiles."""
+    ws = _ws_with_listed_sigma(
+        [{"name": "mean", "value": 2.0}, {"name": "sigma", "value": 1.0}]
+    )
+    model = ws.model(ws.analyses["A"], progress=False)
+    nll = model.compile_nll(gradient=False)
+    assert set(nll.parameter_names) == {"mean", "sigma"}
+
+
+def test_model_from_analysis_const_parameter_needs_no_init_entry_beyond_const():
+    """A const parameter in init is not free, so it needs no further starting value."""
+    ws = _ws_with_listed_sigma(
+        [
+            {"name": "mean", "value": 2.0},
+            {"name": "sigma", "value": 1.0, "const": True},
+        ]
+    )
+    model = ws.model(ws.analyses["A"], progress=False)
+    assert model.compile_nll(gradient=False).parameter_names == ("mean",)
+
+
+def test_compile_nll_missing_starting_values_lists_all_names():
+    """compile_nll names every free parameter lacking a starting value and points at parameter_set=."""
+    ws = _ws_with_listed_sigma(
+        [{"name": "mean", "value": 2.0}, {"name": "sigma", "value": 1.0}]
+    )
+    # A model built from the likelihood with an empty parameter set has no values.
+    model = ws.model(
+        ws.likelihoods["L"],
+        parameter_set=ParameterSet(name="empty", parameters=[]),
+        progress=False,
+    )
+    with pytest.raises(ValueError, match="parameter_set=") as excinfo:
+        model.compile_nll(gradient=False)
+    assert "mean" in str(excinfo.value)
+    assert "sigma" in str(excinfo.value)
 
 
 def test_model_from_analysis_multi_domain_merges():
@@ -925,7 +1005,7 @@ _WS_POINT: dict = {
         }
     ],
     "likelihoods": [{"name": "L", "distributions": ["g"], "data": ["obs"]}],
-    "analyses": [{"name": "A", "likelihood": "L", "domains": ["d"]}],
+    "analyses": [{"name": "A", "likelihood": "L", "domains": ["d"], "init": "default"}],
 }
 
 

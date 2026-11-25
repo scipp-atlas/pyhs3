@@ -354,7 +354,9 @@ class Model:
 
         Raises:
             RuntimeError: If the model was built without a likelihood.
-            ValueError: If a free parameter is batched (``kind=pt.vector``);
+            ValueError: If a free parameter has no starting value in the
+                parameter set (the message lists every such name).  Also if a
+                free parameter is batched (``kind=pt.vector``);
                 the parameter vector has one entry per scalar parameter.  Also
                 for an unknown backend, for ``fuse=True`` combined with
                 ``mode=``, for ``fuse``/``mode`` with ``backend="jax"``, and
@@ -387,6 +389,13 @@ class Model:
                     "in the parameter vector."
                 )
                 raise ValueError(msg)
+        if missing := sorted(set(names) - start.keys()):
+            msg = (
+                f"No starting value for free parameter(s): {', '.join(missing)}. "
+                "Set them in the parameter point, or pass a complete "
+                "parameter_set= to Workspace.model."
+            )
+            raise ValueError(msg)
         bounds = [self.domain.get(name, (None, None)) for name in names]
         return compile_nll(
             log_prob,

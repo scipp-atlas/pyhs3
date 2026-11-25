@@ -18,6 +18,7 @@ import pyhs3 as hs3
 from pyhs3.distributions import Distributions
 from pyhs3.distributions.mathematical import GenericDist
 from pyhs3.domains import ProductDomain
+from pyhs3.exceptions import MissingInitialValueError
 from pyhs3.functions import Functions
 from pyhs3.parameter_points import ParameterPoint, ParameterSet
 
@@ -1577,6 +1578,7 @@ class TestWorkspaceModelDispatch:
             parameters=[
                 ParameterPoint(name="mu", value=99.0),
                 ParameterPoint(name="sigma", value=0.5),
+                ParameterPoint(name="x", value=0.0),
             ],
         )
         analysis = ws.analyses["sig_analysis"]
@@ -1607,7 +1609,7 @@ class TestWorkspaceModelDispatch:
         assert model.parameterset.get("mu").value == pytest.approx(0.0)
 
     def test_analysis_no_init_no_override_uses_empty_default(self):
-        """Analysis without init + no parameter_set override → model is built with empty ParameterSet."""
+        """Analysis without init + no parameter_set override → empty ParameterSet, so free parameters lack values."""
         ws_no_init = hs3.Workspace(
             metadata={"hs3_version": "0.2"},
             distributions=[
@@ -1642,9 +1644,8 @@ class TestWorkspaceModelDispatch:
                 }
             ],
         )
-        model = ws_no_init.model("a", progress=False)
-        assert model is not None
-        assert model.parameterset.name == "default"
+        with pytest.raises(MissingInitialValueError, match="mu, sigma, x"):
+            ws_no_init.model("a", progress=False)
 
     def test_analysis_parameterset_missing_no_parameter_points_raises(self):
         """parameter_set given but workspace has no parameter_points → ValueError."""

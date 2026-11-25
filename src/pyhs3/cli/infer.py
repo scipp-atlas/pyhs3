@@ -17,7 +17,7 @@ from rich.console import Console
 
 from pyhs3.analyses import Analysis
 from pyhs3.cli._shared import load_workspace, parse_param
-from pyhs3.exceptions import UnlistedParameterError
+from pyhs3.exceptions import MissingInitialValueError, UnlistedParameterError
 from pyhs3.likelihoods import Likelihood
 from pyhs3.model import Model
 from pyhs3.workspace import Workspace
@@ -74,7 +74,7 @@ def _check_parameter_set(ws: Workspace, name: str | None) -> None:
 def _build_model(
     ws: Workspace, target: Analysis | Likelihood, parameter_set: str | None
 ) -> Model:
-    """Build the model for *target*, turning an HS3 section 2.7 violation into a CLI error.
+    """Build the model for *target*, turning an HS3 section 2.7 or missing-start violation into a CLI error.
 
     The library error suggests ``ws.model(..., parameter_set=...)``; from the
     command line the same fix is ``--parameter-set``, so that is appended.
@@ -89,6 +89,9 @@ def _build_model(
             )
             msg += f" From the command line: {options}."
         raise typer.BadParameter(msg) from exc
+    except MissingInitialValueError as exc:
+        msg = f"{exc} From the command line: --parameter-set NAME."
+        raise typer.BadParameter(msg) from exc
 
 
 def _compute_nll(
@@ -100,8 +103,10 @@ def _compute_nll(
     """Compile the joint log-prob and evaluate ``NLL = -2 * log_prob``.
 
     Parameter values are layered, later layers winning: the workspace's own
-    ``parameter_points`` (a convenience base so an analysis without an ``init``
-    set is still evaluable), then the model's free (non-const) parameter values,
+    ``parameter_points`` (a convenience base for targets that select no
+    parameter set, such as a likelihood or distribution name; an analysis must
+    give every free parameter a value in its ``init`` or via ``--parameter-set``),
+    then the model's free (non-const) parameter values,
     then the caller's *overrides*. Observable data is taken from the likelihood
     the model was built from, and always wins over an override of the same
     name: ``--param`` overrides a free parameter, never the observed data.
@@ -118,8 +123,9 @@ def _compute_nll(
     }
 
     # Base layer: every value declared in the workspace's parameter_points.
-    # A model built from an analysis with no `init` has empty free_params, so
-    # this base makes it evaluable from the workspace's nominal values. When
+    # A model built from a likelihood or distribution name may have no
+    # parameter set, so this base makes it evaluable from the workspace's
+    # nominal values (an analysis must set every free parameter). When
     # multiple sets declare the same name, the last one seen wins; the model's
     # own set (applied next) takes precedence for names it defines.
     params: dict[str, float] = {}

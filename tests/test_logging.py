@@ -111,6 +111,15 @@ class TestSetup:
             logging.getLogger("pyhs3.test").warning("careful")
         assert "careful" in caplog.text
 
+    @pytest.mark.usefixtures("restore_pyhs3_logger")
+    def test_writes_to_stderr(self, capsys):
+        """Commands such as ``convert to-pyhf`` write their result to stdout."""
+        pyhs3.logging.setup()
+        logging.getLogger("pyhs3.test").warning("careful")
+        captured = capsys.readouterr()
+        assert "careful" in captured.err
+        assert "careful" not in captured.out
+
     def test_sets_the_requested_level(self, restore_pyhs3_logger):
         pyhs3.logging.setup(level=logging.DEBUG)
         assert restore_pyhs3_logger.level == logging.DEBUG

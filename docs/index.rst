@@ -19,6 +19,7 @@
    howto/fit_model
    howto/check_a_workspace_from_the_cli
    howto/evaluate_and_visualize_from_the_cli
+   howto/convert_pyhf
    defining_components
 
 .. toctree::

@@ -14,6 +14,7 @@ import numpy.typing as npt
 import pytensor.tensor as pt
 from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode
+from pytensor.configdefaults import config
 from pytensor.graph.traversal import applys_between, explicit_graph_inputs
 from rich.progress import (
     BarColumn,
@@ -224,8 +225,14 @@ class Model:
         # distribution, keyed by Distribution.structural_key(), so that
         # distributions identical apart from their name are built once.
         self._shared_expressions: dict[str, tuple[TensorVar, TensorVar]] = {}
-        # Build dependency graph with proper entity identification
-        self._build_dependency_graph(functions, distributions, progress)
+        # Build dependency graph with proper entity identification.
+        # PyTensor's rewrites concatenate the creation tracebacks of a node's
+        # inputs onto the variable that replaces it, without deduplication; on a
+        # graph with many shared subexpressions (thousands of HistFactory
+        # modifiers) the lists grow until compilation runs out of memory.
+        # The graph is therefore built without tracebacks.
+        with config.change_flags(traceback__limit=0):
+            self._build_dependency_graph(functions, distributions, progress)
 
     @property
     def data(self) -> dict[str, npt.NDArray[np.float64]]:
@@ -445,6 +452,11 @@ class Model:
             jg = pyhs3.jaxify(nll)
             val = jg(**model.data, **model.free_params)
         """
+        with config.change_flags(traceback__limit=0):  # see __init__
+            return self._build_log_prob()
+
+    def _build_log_prob(self) -> TensorVar:
+        """Build :attr:`log_prob`."""
         if self._likelihood is None:
             msg = "log_prob requires a likelihood context; build via ws.model(analysis)"
             raise RuntimeError(msg)

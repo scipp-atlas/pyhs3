@@ -17,6 +17,9 @@ Top-Level
    Model
    jaxify
    JaxifiedGraph
+   from_hifa
+   to_hifa
+   hifa_modifier_settings
    metadata.Metadata
    metadata.PackageInfo
 

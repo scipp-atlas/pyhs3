@@ -634,20 +634,34 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         if self._cached_context is context and self._cached_bin_log_probs is not None:
             log_probs = self._cached_bin_log_probs
         else:
-            total_bins = self._get_total_bins()
-            if (
-                self._cached_context is context
-                and self._cached_expected_rates is not None
-            ):
-                expected_rates = self._cached_expected_rates
-            else:
-                expected_rates = self._compute_expected_rates(context, total_bins)
-                self._cached_expected_rates = expected_rates
-                self._cached_context = context
+            expected_rates = self.expected_rates(context)
             log_probs = self._bin_log_probs(context, expected_rates)
             self._cached_bin_log_probs = log_probs
             self._cached_context = context
         return cast(TensorVar, pt.sum(log_probs))  # type: ignore[no-untyped-call]
+
+    def expected_rates(self, context: Context) -> TensorVar:
+        r"""Expected Poisson mean of each bin, all modifiers applied.
+
+        This is :math:`\lambda(x)` of the class docstring, the rate that
+        :meth:`log_likelihood` compares the observed counts with.  The expression is cached for ``context`` like the
+        likelihood terms, so calling this after :meth:`log_likelihood` with
+        the same context reuses its subgraph.
+
+        Args:
+            context: Mapping of parameter names to PyTensor variables
+
+        Returns:
+            PyTensor expression of shape ``(B,)``, ``B`` the total number of
+            bins over all axes, when every parameter is a scalar.
+        """
+        if self._cached_context is context and self._cached_expected_rates is not None:
+            return self._cached_expected_rates
+        expected_rates = self._compute_expected_rates(context, self._get_total_bins())
+        self._cached_expected_rates = expected_rates
+        self._cached_bin_log_probs = None
+        self._cached_context = context
+        return expected_rates
 
     def log_extended_likelihood(self, context: Context) -> TensorVar:
         """Log-space constraint sum for this channel.

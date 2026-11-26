@@ -631,7 +631,7 @@ def from_hifa(
     """Convert a pyhf workspace (HistFactory JSON) to an HS3 workspace.
 
     The input is a workspace following pyhf's ``schemas/1.0.0/workspace.json``,
-    with any patches already applied (a :class:`pyhf.Workspace` works, since it
+    with any patches already applied (a ``pyhf.Workspace`` works, since it
     is a ``dict``). The result goes through all of :class:`~pyhs3.Workspace`'s
     validation.
 
@@ -731,7 +731,7 @@ def from_hifa(
         The HS3 workspace.
 
     Raises:
-        pydantic.ValidationError: If ``spec`` does not follow pyhf's schema, or
+        pydantic_core.ValidationError: If ``spec`` does not follow pyhf's schema, or
             ``modifier_settings`` names an unknown modifier type, key or code.
         ValueError: For duplicate channel, observation, measurement or
             config-parameter names; a channel without an observation; bin counts that disagree within a

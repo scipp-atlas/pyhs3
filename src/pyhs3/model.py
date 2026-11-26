@@ -233,6 +233,16 @@ class Model:
         # one distinct from equal constants, so that compile_nll(data_inputs=True)
         # can replace exactly these.
         self._observed_constants: dict[str, TensorConstant[Any]] = {}
+        # Expected Poisson mean of every bin of each HFDC channel, shape (B,)
+        # per channel, keyed by channel name; what expected_data() evaluates.
+        self._hfdc_expected_rates: dict[str, TensorVar] = {}
+        # The function expected_data() compiles on its first call, with the
+        # names of its inputs in positional order and of its outputs'
+        # channels in output order.
+        self._expected_data_function: (
+            tuple[Callable[..., list[npt.NDArray[np.float64]]], list[str], list[str]]
+            | None
+        ) = None
         # (log-space, probability-space) expressions of each distinct
         # distribution, keyed by Distribution.structural_key(), so that
         # distributions identical apart from their name are built once.
@@ -491,7 +501,7 @@ class Model:
             )
             raise ValueError(msg)
         domain_bounds = self.context.bounds
-        bounds = [domain_bounds.get(name, (None, None)) for name in names]
+        bounds = [domain_bounds.get(name, (-np.inf, np.inf)) for name in names]
         swappable: dict[str, tuple[TensorVar, npt.NDArray[np.float64]]] = {}
         if data_inputs:
             if not self._observed_constants:
@@ -519,6 +529,110 @@ class Model:
             parameters_of_interest=self.context.parameters_of_interest,
             data=swappable,
         )
+
+    def expected_data(
+        self, **parametervalues: float | npt.NDArray[np.float64]
+    ) -> dict[str, npt.NDArray[np.float64]]:
+        """Expected Poisson mean of every bin of each HistFactory channel.
+
+        These are the rates the main Poisson terms of :attr:`log_prob` compare
+        the observed bin counts with, evaluated at the given parameter values:
+        the Asimov data of the main measurement.  Every ``const`` parameter is
+        baked in at its parameter-set value.
+
+        The result covers only the main measurement.  It holds no auxiliary
+        data (the Asimov values of the constraint terms' global observables):
+        the constraint centres are constants in the graph, so a fit could not
+        use them.  Channels other than HistFactory channels have no expected
+        bin counts and are left out.
+
+        The first call compiles one function for all channels, which later
+        calls reuse.
+
+        Args:
+            **parametervalues: Scalar value of each free parameter, keyed by
+                name.  Names the channels do not depend on are ignored, so a
+                full parameter point, such as :attr:`free_params` or
+                ``dict(zip(nll.parameter_names, x))`` for a
+                :class:`~pyhs3.compiled.CompiledNLL` ``nll``, can be passed
+                as is.
+
+        Returns:
+            dict[str, numpy.ndarray]: For each HistFactory channel built in
+            the model, keyed by distribution name in the order of the
+            workspace's distributions, a float64 array of shape ``(B,)``,
+            ``B`` the channel's total number of bins.
+
+        Raises:
+            ValueError: If the model has no HistFactory channel, or if a free
+                parameter a channel depends on has no value (the message
+                lists every such name).
+
+        Examples:
+            >>> import pyhs3
+            >>> ws = pyhs3.from_hifa(
+            ...     {
+            ...         "channels": [
+            ...             {
+            ...                 "name": "SR",
+            ...                 "samples": [
+            ...                     {
+            ...                         "name": "signal",
+            ...                         "data": [5.0, 10.0],
+            ...                         "modifiers": [
+            ...                             {"name": "mu", "type": "normfactor", "data": None}
+            ...                         ],
+            ...                     },
+            ...                     {"name": "background", "data": [50.0, 60.0], "modifiers": []},
+            ...                 ],
+            ...             }
+            ...         ],
+            ...         "observations": [{"name": "SR", "data": [52.0, 75.0]}],
+            ...         "measurements": [{"name": "meas", "config": {"poi": "mu", "parameters": []}}],
+            ...         "version": "1.0.0",
+            ...     }
+            ... )
+            >>> model = ws.model(ws.analyses["meas"], progress=False)
+            >>> model.expected_data(mu=2.0)["model_SR"]  # shape (2,): one mean per bin
+            array([60., 80.])
+        """
+        if not self._hfdc_expected_rates:
+            msg = (
+                "The model has no HistFactory channel; expected data is defined "
+                "only for the bins of HistFactory channels."
+            )
+            raise ValueError(msg)
+        if self._expected_data_function is None:
+            # Workspace order; the build order is the dependency graph's.
+            channels = [
+                dist.name
+                for dist in self._distribution_objects
+                if dist.name in self._hfdc_expected_rates
+            ]
+            outputs = [self._hfdc_expected_rates[name] for name in channels]
+            inputs = [
+                var for var in explicit_graph_inputs(outputs) if var.name is not None
+            ]
+            compiled = function(
+                inputs=inputs,
+                outputs=outputs,
+                mode=self.mode,
+                on_unused_input="ignore",
+                name="expected_data",
+            )
+            self._expected_data_function = (
+                cast(Callable[..., list[npt.NDArray[np.float64]]], compiled),
+                [cast(str, var.name) for var in inputs],
+                channels,
+            )
+        compiled_function, names, channels = self._expected_data_function
+        if missing := sorted(set(names) - parametervalues.keys()):
+            msg = f"No value for free parameter(s): {', '.join(missing)}."
+            raise ValueError(msg)
+        values = compiled_function(
+            *[np.asarray(parametervalues[name], dtype=np.float64) for name in names]
+        )
+        return dict(zip(channels, values, strict=True))
 
     @cached_property
     def log_prob(self) -> TensorVar:
@@ -896,6 +1010,8 @@ class Model:
         # pt.exp() of the log expression instead.
         try:
             log_poisson = dist.log_likelihood(context)
+            # Reuses the expected-rates subgraph log_likelihood just built.
+            self._hfdc_expected_rates[node_name] = dist.expected_rates(context)
         finally:
             # The captured TensorVar owns everything this Model needs. Do not
             # leave the shared workspace channel retaining the Context (and

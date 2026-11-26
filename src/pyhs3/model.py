@@ -634,6 +634,95 @@ class Model:
         )
         return dict(zip(channels, values, strict=True))
 
+    def sample_data(
+        self,
+        n: int,
+        *,
+        rng: np.random.Generator,
+        **parametervalues: float | npt.NDArray[np.float64],
+    ) -> dict[str, npt.NDArray[np.float64]]:
+        """Toy datasets of the main measurement: Poisson draws around :meth:`expected_data`.
+
+        Each bin of each HistFactory channel is drawn independently from a
+        Poisson distribution whose mean is the bin's :meth:`expected_data` at
+        the given parameter values.  Row ``i`` of every channel together is
+        one toy dataset, keyed like :attr:`observed_data`, so it can be passed
+        as the ``data`` of a likelihood compiled with
+        ``compile_nll(data_inputs=True)``::
+
+            nll.value(x, data={name: counts[i] for name, counts in toys.items()})
+
+        Only the main measurement is randomized.  The auxiliary data (the
+        centres of the constraint terms, the global observables) stay at
+        their observed values, which are constants in the graph.  These are
+        toys conditional on the observed auxiliary data, not the fully
+        frequentist toys of pyhf's ``sample``, which also draws the auxiliary
+        data: a test statistic distribution built from them leaves out the
+        fluctuations of the auxiliary measurements.
+
+        Args:
+            n: Number of toy datasets.
+            rng: Source of the random draws; the draws advance its state.
+                Seed it, e.g. ``numpy.random.default_rng(0)``, for
+                reproducible toys.
+            **parametervalues: Scalar value of each free parameter, as for
+                :meth:`expected_data`.
+
+        Returns:
+            dict[str, numpy.ndarray]: For each HistFactory channel, keyed as
+            :meth:`expected_data`, a float64 array of whole-number counts of
+            shape ``(n, B)``, ``B`` the channel's total number of bins.
+
+        Raises:
+            ValueError: As for :meth:`expected_data`, or if an expected bin
+                count is negative or NaN, which no Poisson distribution has
+                as its mean.
+
+        Examples:
+            For the model of :meth:`expected_data`, three toys at ``mu = 2``:
+
+            >>> import numpy as np
+            >>> import pyhs3
+            >>> ws = pyhs3.from_hifa(
+            ...     {
+            ...         "channels": [
+            ...             {
+            ...                 "name": "SR",
+            ...                 "samples": [
+            ...                     {
+            ...                         "name": "signal",
+            ...                         "data": [5.0, 10.0],
+            ...                         "modifiers": [
+            ...                             {"name": "mu", "type": "normfactor", "data": None}
+            ...                         ],
+            ...                     },
+            ...                     {"name": "background", "data": [50.0, 60.0], "modifiers": []},
+            ...                 ],
+            ...             }
+            ...         ],
+            ...         "observations": [{"name": "SR", "data": [52.0, 75.0]}],
+            ...         "measurements": [{"name": "meas", "config": {"poi": "mu", "parameters": []}}],
+            ...         "version": "1.0.0",
+            ...     }
+            ... )
+            >>> model = ws.model(ws.analyses["meas"], progress=False)
+            >>> toys = model.sample_data(3, rng=np.random.default_rng(0), mu=2.0)
+            >>> toys["model_SR"].shape  # (n, B): 3 toys of 2 bins
+            (3, 2)
+        """
+        toys = {}
+        for name, rates in self.expected_data(**parametervalues).items():
+            # NaN >= 0 is False, so this rejects NaN as well as negative means.
+            if not np.all(rates >= 0):
+                msg = (
+                    f"Channel '{name}' has expected bin counts {rates}; a "
+                    "Poisson mean must be non-negative and not NaN."
+                )
+                raise ValueError(msg)
+            # rates has shape (B,); size (n, B) draws each row around it.
+            toys[name] = rng.poisson(rates, size=(n, rates.shape[0])).astype(np.float64)
+        return toys
+
     @cached_property
     def log_prob(self) -> TensorVar:
         """Symbolic joint log-probability expression for the full likelihood.

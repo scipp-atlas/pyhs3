@@ -165,8 +165,14 @@ class Model:
             _compiled_functions (dict[str, Callable[..., npt.NDArray[np.float64]]]): Cache of compiled PyTensor functions.
         """
         self.context = context
+        # PyTensor infers float32 for a bound float32 represents exactly (0.0,
+        # 3.0); terms built from the bounds alone, such as a uniform density's
+        # -log(upper - lower), would then lose float64 precision.
         self._observables = {
-            name: (pt.constant(lower), pt.constant(upper))
+            name: (
+                pt.constant(lower, dtype="float64"),
+                pt.constant(upper, dtype="float64"),
+            )
             for name, (lower, upper) in (observables or {}).items()
         }
         self._distribution_objects = (

@@ -85,6 +85,14 @@ class TestProductFunction:
         f = function([], result)
         assert np.isclose(f(), 1.0)
 
+    def test_product_function_integer_factors_do_not_overflow(self):
+        """Integer factors multiply as float64, not as int8 that wraps around."""
+        func = ProductFunction(name="int_product", factors=[100, 100])
+
+        result = func.expression(func.constants)
+
+        assert function([], result)() == pytest.approx(10000.0)
+
     def test_product_function_skips_same_dtype_scalar_identities(self):
         """Scalar ones should not create redundant multiplication nodes."""
         func = ProductFunction(
@@ -972,6 +980,21 @@ class TestProcessNormalizationFunction:
 
         # Should return 1.0 (baseline in simplified implementation)
         assert np.isclose(f(), 1.0)
+
+    def test_process_normalization_float32_exact_nominal_keeps_float64(self):
+        """A float32-exact nominalValue alone still yields a float64 result.
+
+        With no variations the result is the constant alone, so a float32
+        constant would carry float32 precision into whatever consumes it.
+        """
+        func = ProcessNormalizationFunction(name="exact_nominal", nominalValue=1.5)
+
+        result = func.expression({})
+
+        assert result.dtype == "float64"
+        np.testing.assert_allclose(
+            function([], pt.log(result))(), np.log(1.5), rtol=1e-15
+        )
 
     def test_process_normalization_symmetric_variations(self):
         """Test ProcessNormalizationFunction with symmetric variations only."""

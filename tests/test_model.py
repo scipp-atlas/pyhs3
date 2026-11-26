@@ -17,6 +17,7 @@ from scipy.stats import norm
 
 import pyhs3 as hs3
 from pyhs3.distributions import Distributions
+from pyhs3.distributions.basic import UniformDist
 from pyhs3.distributions.histfactory.interpolations import (
     _code4_coefficient_tensor,
     _code4_exponent_tensor,
@@ -1866,6 +1867,30 @@ class TestWorkspaceModelDispatch:
         # 'unknown_name' falls through to legacy; domain=0 should pick first_domain
         model = ws.model("first_domain", domain=0, progress=False)
         assert model is not None
+
+
+class TestObservableBoundsPrecision:
+    """Observable bounds keep float64 precision when float32 represents them exactly."""
+
+    def test_uniform_log_density_over_float32_exact_bounds(self):
+        """``-log(upper - lower)`` depends on the bounds alone, so float32 bounds
+        would compute it in float32."""
+        model = hs3.Model(
+            context=ParameterContext(
+                parameter_set=ParameterSet(name="default", parameters=[]),
+                domain=ProductDomain(name="default"),
+            ),
+            distributions=Distributions([UniformDist(name="u", x=["x"])]),
+            functions=Functions([]),
+            progress=False,
+            observables={"x": (0.0, 3.0)},
+        )
+
+        # x has shape (1,): one event; the density does not depend on its value.
+        result = model.logpdf("u", x=np.array([1.0]))
+
+        assert result.dtype == np.float64
+        npt.assert_allclose(result, -np.log(3.0), rtol=1e-14)
 
 
 class TestObservedSuffixHeuristic:

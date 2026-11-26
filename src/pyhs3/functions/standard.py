@@ -867,8 +867,10 @@ class ProcessNormalizationFunction(Function):
         Returns:
             TensorVar: PyTensor expression representing the normalization factor.
         """
-        # Start with nominal value
-        result = pt.constant(self.nominalValue)
+        # Start with nominal value; float64 explicitly, since PyTensor infers
+        # float32 for a value float32 represents exactly (1.5) and the result
+        # is this constant alone when there are no variations or factors.
+        result = pt.constant(self.nominalValue, dtype="float64")
 
         # Symmetric variations: symShift = sum(logKappa[i] * theta[i])
         sym_terms = [

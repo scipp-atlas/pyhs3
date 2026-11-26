@@ -79,11 +79,11 @@ def _code4_exponent_tensor(
     dtype: str,
     alpha_ndim: int,
 ) -> TensorVar:
-    """Return shared broadcast-ready powers 1 through 6."""
+    """Return shared broadcast-ready powers 2 through 6."""
     # Shared like _code4_coefficient_tensor, so also built without tracebacks.
     with config.change_flags(traceback__limit=0):
         exponents = pt.constant(
-            np.arange(1, 7),
+            np.arange(2, 7),
             dtype=dtype,
         )
         pattern = (0,) + ("x",) * alpha_ndim
@@ -276,9 +276,15 @@ def interpolate_code4(
     )
     coeffs = pt.tensordot(coefficient_matrix, b, axes=[[1], [0]])
 
-    # Evaluate a1*alpha + ... + a6*alpha**6 as one tensor contraction. Pad
-    # immediately after the coefficient axis so alpha and coefficient batch
-    # dimensions retain standard right-aligned broadcasting semantics.
+    # Evaluate a2*alpha**2 + ... + a6*alpha**6 as one tensor contraction and
+    # add a1*alpha separately: the second derivative of pt.power(alpha, 1)
+    # contains 0 * alpha**-1, which is NaN at alpha = 0, the nominal point
+    # where fits start and Asimov fits end. Pad immediately after the
+    # coefficient axis so alpha and coefficient batch dimensions retain
+    # standard right-aligned broadcasting semantics.
+    # linear_coeff: (*coeff_batch); coeffs: (5, *coeff_batch) for a2..a6.
+    linear_coeff = coeffs[0]
+    coeffs = coeffs[1:]
     exponents = _code4_exponent_tensor(
         alpha.dtype,
         alpha.ndim,
@@ -293,7 +299,7 @@ def interpolate_code4(
         pattern = (
             (0,) + ("x",) * (target_ndim - coeffs.ndim) + tuple(range(1, coeffs.ndim))
         )
-        coeffs = coeffs.dimshuffle(pattern)  # type: ignore[no-untyped-call]
+        coeffs = coeffs.dimshuffle(pattern)
     if alpha_powers_tensor.ndim < target_ndim:
         pattern = (
             (0,)
@@ -302,7 +308,8 @@ def interpolate_code4(
         )
         alpha_powers_tensor = alpha_powers_tensor.dimshuffle(pattern)
 
-    poly_sum = pt.sum(coeffs * alpha_powers_tensor, axis=0)  # type: ignore[no-untyped-call]
+    higher_sum = pt.sum(coeffs * alpha_powers_tensor, axis=0)  # type: ignore[no-untyped-call]
+    poly_sum = linear_coeff * alpha + higher_sum
     one = pt.constant(1.0, dtype=poly_sum.dtype)
     poly_result = nom * (one + poly_sum)
 

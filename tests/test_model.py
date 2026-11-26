@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import numpy as np
 import numpy.testing as npt
+import pytensor
 import pytensor.tensor as pt
 import pytest
 from pytensor.compile.mode import get_mode
@@ -2149,6 +2150,78 @@ class TestModelParameterContext:
         bounds = dict(zip(nll.parameter_names, nll.bounds, strict=True))
         assert bounds == {"mu": (0.0, np.inf), "sigma": (-np.inf, np.inf)}
         assert all(isinstance(bound, float) for pair in nll.bounds for bound in pair)
+
+
+class TestNormsysHessianAtNominal:
+    """The NLL Hessian of a normsys model is finite at the nominal point.
+
+    The nominal point (normsys alpha = 0) is where every fit starts and where
+    an Asimov fit ends, so minimizers and uncertainty estimates evaluate the
+    Hessian there.
+    """
+
+    @pytest.fixture
+    def model(self):
+        spec = {
+            "channels": [
+                {
+                    "name": "SR",
+                    "samples": [
+                        {
+                            "name": "signal",
+                            "data": [5.0],
+                            "modifiers": [
+                                {"name": "mu", "type": "normfactor", "data": None}
+                            ],
+                        },
+                        {
+                            "name": "background",
+                            "data": [50.0],
+                            "modifiers": [
+                                {
+                                    "name": "bkg_norm",
+                                    "type": "normsys",
+                                    "data": {"hi": 1.1, "lo": 0.9},
+                                },
+                            ],
+                        },
+                    ],
+                }
+            ],
+            "observations": [{"name": "SR", "data": [55.0]}],
+            "measurements": [
+                {"name": "meas", "config": {"poi": "mu", "parameters": []}}
+            ],
+            "version": "1.0.0",
+        }
+        ws = hs3.from_hifa(spec)
+        return ws.model(ws.analyses["meas"], progress=False)
+
+    @pytest.mark.parametrize("mode", ["FAST_RUN", "JAX"])
+    def test_hessian_is_finite_at_nominal(self, model, mode):
+        if mode == "JAX":
+            jax = pytest.importorskip("jax")
+            jax.config.update("jax_enable_x64", True)
+        inputs = [var for var in explicit_graph_inputs([model.log_prob]) if var.name]
+        free = [var for var in inputs if var.name not in model.data]
+        givens = [
+            (var, pt.constant(model.data[var.name], dtype=var.dtype))
+            for var in inputs
+            if var.name in model.data
+        ]
+        nll = -pt.sum(model.log_prob)
+        gradient = pt.grad(nll, free)
+        # (P, P): row i is the gradient of dNLL/dx_i over the free parameters.
+        hessian = pt.stack([pt.stack(pt.grad(g, free)) for g in gradient])
+        evaluate = pytensor.function(free, hessian, givens=givens, mode=mode)
+
+        point = model.free_params
+        assert point["bkg_norm"] == 0.0
+        values = np.asarray(evaluate(*(point[var.name] for var in free)))
+
+        assert {var.name for var in free} == {"mu", "bkg_norm"}
+        assert values.shape == (2, 2)
+        assert np.all(np.isfinite(values))
 
 
 class TestGraphCreationTracebacks:

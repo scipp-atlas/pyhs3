@@ -925,6 +925,31 @@ class TestInterpolationFunction:
         # Expected: 100.0 + 0.2 * (110.0 - 100.0) = 102.0
         np.testing.assert_allclose(result_val, 102.0, rtol=1e-10)
 
+    @pytest.mark.parametrize("code", range(7))
+    def test_second_derivative_finite_at_zero(self, code):
+        """d2/dtheta2 is finite at the nominal point theta = 0 for every code."""
+        func = InterpolationFunction(
+            name="test_interp",
+            high=["high"],
+            low=["low"],
+            nom="nominal",
+            interpolationCodes=[code],
+            positiveDefinite=False,
+            vars=["theta"],
+        )
+        theta = pt.dscalar("theta")
+        context = {
+            "nominal": pt.constant(100.0, dtype="float64"),
+            "high": pt.constant(120.0, dtype="float64"),
+            "low": pt.constant(80.0, dtype="float64"),
+            "theta": theta,
+        }
+
+        result = func.expression(context)
+        second = pt.grad(pt.grad(result, theta), theta)
+
+        assert np.isfinite(function([theta], second)(0.0))
+
 
 class TestProcessNormalizationFunction:
     """Test ProcessNormalizationFunction implementation."""

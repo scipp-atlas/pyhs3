@@ -16,6 +16,7 @@ from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.graph.traversal import applys_between, explicit_graph_inputs
+from pytensor.tensor.variable import TensorConstant
 from rich.progress import (
     BarColumn,
     Progress,
@@ -227,6 +228,11 @@ class Model:
         # instead of log(exp(...)) so the joint NLL stays finite where the
         # probability-space product would underflow.
         self._hfdc_log_poisson: dict[str, TensorVar] = {}
+        # Constant holding the observed bin counts, shape (B,), of each channel
+        # paired with binned data, keyed by channel name.  log_prob keeps each
+        # one distinct from equal constants, so that compile_nll(data_inputs=True)
+        # can replace exactly these.
+        self._observed_constants: dict[str, TensorConstant[Any]] = {}
         # Expected Poisson mean of every bin of each HFDC channel, shape (B,)
         # per channel, keyed by channel name; what expected_data() evaluates.
         self._hfdc_expected_rates: dict[str, TensorVar] = {}
@@ -267,6 +273,33 @@ class Model:
             msg = "data requires a likelihood context; build via ws.model(analysis)"
             raise RuntimeError(msg)
         return self._likelihood.data_arrays()
+
+    @property
+    def observed_data(self) -> dict[str, npt.NDArray[np.float64]]:
+        """Observed bin counts of each HistFactory channel, keyed by channel name.
+
+        Unlike :attr:`data`, which holds unbinned events keyed by observable,
+        this holds the binned data each HistFactory channel of the likelihood
+        is paired with: for each channel, keyed by distribution name in the
+        order of the workspace's distributions, a float64 array of shape
+        ``(B,)``, ``B`` the channel's total number of bins.  These are the
+        counts :attr:`log_prob` bakes in as constants, and the default
+        ``data`` of a likelihood compiled with
+        ``compile_nll(data_inputs=True)``, whose ``data`` argument takes a
+        mapping of the same keys and shapes.  The arrays are copies.  The
+        mapping is empty if the likelihood has no binned channel.
+
+        Raises:
+            RuntimeError: If the model was built without a likelihood.
+        """
+        if self._likelihood is None:
+            msg = "observed_data requires a likelihood context; build via ws.model(analysis)"
+            raise RuntimeError(msg)
+        return {
+            dist.name: np.array(self._observed_constants[dist.name].data)
+            for dist in self._distribution_objects
+            if dist.name in self._observed_constants
+        }
 
     @property
     def nominal_params(self) -> dict[str, float]:
@@ -310,15 +343,18 @@ class Model:
         mode: Mode | str | None = None,
         cache: bool | str | os.PathLike[str] | None = None,
         batched: bool = False,
+        data_inputs: bool = False,
+        fixed: Mapping[str, float] | None = None,
     ) -> CompiledNLL:
         """Compile the negative log-likelihood for a minimizer.
 
         Returns a :class:`~pyhs3.compiled.CompiledNLL`: ``-sum(log_prob)``
         and, by default, its gradient, compiled once as a function of a single
         1-D vector of the free parameters (ordered as
-        :attr:`~pyhs3.compiled.CompiledNLL.parameter_names`).  The observed
-        data and every ``const`` parameter are baked into the compiled
-        function, so each call passes only the free parameters.  The result
+        :attr:`~pyhs3.compiled.CompiledNLL.parameter_names`).  Every
+        ``const`` parameter, and unless ``data_inputs=True`` the observed
+        data, are baked into the compiled function, so each call passes only
+        the free parameters.  The result
         also carries the starting point (:attr:`free_params`), the domain
         bounds of each parameter, ready for SciPy or iminuit, and the
         positions of the analysis parameters of interest
@@ -371,6 +407,29 @@ class Model:
                 a ``(K, P)`` array with one parameter vector per row and
                 return values ``(K,)`` and gradients ``(K, P)``; XLA compiles
                 once per batch size ``K``, at the first call with that size.
+            data_inputs: Make the binned observed counts of the HistFactory
+                channels inputs of the compiled function instead of
+                constants, so that one compiled likelihood evaluates on other
+                datasets (toys, Asimov data) without recompiling: its
+                ``value``, ``grad`` and ``value_and_grad`` then take a
+                ``data`` mapping keyed and shaped like :attr:`observed_data`,
+                which is the default.  The data of channels that are not
+                HistFactory channels (unbinned data) stay baked in, as do the
+                constraint centres (auxiliary data).  Off by default, since
+                data-dependent terms such as ``log(n!)`` are then computed on
+                each call instead of folded once at compile time.
+            fixed: Free parameters to hold at the given values, keyed by
+                name, e.g. ``{"mu": 0.0}`` for a fixed-POI or profile fit.
+                Each is baked into the compiled function like a ``const``
+                parameter, without rebuilding the model, and left out of
+                :attr:`~pyhs3.compiled.CompiledNLL.parameter_names`, the
+                starting point and the bounds.  A fixed parameter of interest
+                is left out of
+                :attr:`~pyhs3.compiled.CompiledNLL.parameters_of_interest`
+                and :attr:`~pyhs3.compiled.CompiledNLL.poi_indices`, as a
+                ``const`` one is.  A value outside the parameter's domain
+                warns, as for ``const``.  Each distinct set of values
+                compiles anew.
 
         Returns:
             CompiledNLL: The compiled likelihood.
@@ -383,7 +442,11 @@ class Model:
                 the parameter vector has one entry per scalar parameter.  Also
                 for an unknown backend, for ``fuse=True`` combined with
                 ``mode=``, for ``fuse``/``mode`` with ``backend="jax"``, and
-                for ``batched=True`` without ``backend="jax"``.
+                for ``batched=True`` without ``backend="jax"``, and for
+                ``data_inputs=True`` when the likelihood has no binned
+                HistFactory channel.  Also if ``fixed`` names a ``const``
+                parameter, or a name that is not a free parameter of the
+                likelihood.
             ImportError: If ``backend="jax"`` and JAX is not installed.
         """
         if mode is None and backend == "c" and not fuse and self.mode != _DEFAULT_MODE:
@@ -391,6 +454,13 @@ class Model:
         log_prob = self.log_prob
         data = self.data
         start = self.context.values
+        fixed = dict(fixed or {})
+        if already_const := sorted(set(fixed) & self.context.const):
+            msg = (
+                f"Cannot fix parameter(s) {', '.join(already_const)}: they are "
+                "const, so already baked in at their parameter-set values."
+            )
+            raise ValueError(msg)
         free: list[TensorVar] = []
         baked: dict[TensorVar, npt.NDArray[np.float64]] = {}
         names: list[str] = []
@@ -402,16 +472,27 @@ class Model:
         for var in inputs:
             if var.name in data:
                 baked[var] = data[var.name]
-            elif var.ndim == 0:
-                free.append(var)
-                names.append(cast(str, var.name))
-            else:
+            elif var.ndim != 0:
                 msg = (
                     f"Free parameter '{var.name}' is batched (ndim={var.ndim}); "
                     "compile_nll needs scalar free parameters, one entry each "
                     "in the parameter vector."
                 )
                 raise ValueError(msg)
+            elif var.name in fixed:
+                value = np.float64(fixed[var.name])
+                self._warn_outside_domain(var.name, value, "is fixed at")
+                baked[var] = np.asarray(value)
+            else:
+                free.append(var)
+                names.append(cast(str, var.name))
+        parameters = {var.name for var in inputs if var.name not in data}
+        if unknown := sorted(set(fixed) - parameters):
+            msg = (
+                f"Cannot fix {', '.join(unknown)}: not free parameters of this "
+                "likelihood."
+            )
+            raise ValueError(msg)
         if missing := sorted(set(names) - start.keys()):
             msg = (
                 f"No starting value for free parameter(s): {', '.join(missing)}. "
@@ -421,6 +502,18 @@ class Model:
             raise ValueError(msg)
         domain_bounds = self.context.bounds
         bounds = [domain_bounds.get(name, (-np.inf, np.inf)) for name in names]
+        swappable: dict[str, tuple[TensorVar, npt.NDArray[np.float64]]] = {}
+        if data_inputs:
+            if not self._observed_constants:
+                msg = (
+                    "data_inputs=True swaps the observed counts of binned "
+                    "HistFactory channels; this likelihood has none."
+                )
+                raise ValueError(msg)
+            swappable = {
+                name: (self._observed_constants[name], counts)
+                for name, counts in self.observed_data.items()
+            }
         return compile_nll(
             log_prob,
             free,
@@ -434,6 +527,7 @@ class Model:
             cache=cache,
             batched=batched,
             parameters_of_interest=self.context.parameters_of_interest,
+            data=swappable,
         )
 
     def expected_data(
@@ -729,8 +823,10 @@ class Model:
         )
         # Distributions that share parameters build identical subgraphs (e.g.
         # mixture summands with the same shape); merge them here so that
-        # PyTensor's rewriter does not have to.
-        return merge_duplicate_nodes(joint)
+        # PyTensor's rewriter does not have to.  The observed-count constants
+        # are kept apart from equal constants (a sample with the same
+        # contents, say) so that compile_nll can replace them alone.
+        return merge_duplicate_nodes(joint, keep=self._observed_constants.values())
 
     def _try_bake_hfdc_observed(self, node_name: str) -> TensorVar | None:
         """Return a baked constant for an HFDC ``{name}_observed`` parameter, or None.
@@ -744,7 +840,12 @@ class Model:
         datum = self._likelihood.binned_observed_inputs().get(node_name)
         if datum is None:
             return None
-        return pt.constant(np.asarray(datum.contents, dtype=np.float64), name=node_name)
+        constant = pt.constant(
+            np.asarray(datum.contents, dtype=np.float64), name=node_name
+        )
+        # The input is named "{channel}_observed" (see binned_observed_inputs).
+        self._observed_constants[node_name.removesuffix("_observed")] = constant
+        return constant
 
     def _build_parameter_node(self, node_name: str, context: Context) -> TensorVar:
         """Build a parameter node: baked constant (const=True) or free variable.
@@ -761,16 +862,7 @@ class Model:
             # Bake as a compile-time constant so it is invisible to
             # explicit_graph_inputs and JAX transpilation.
             val = np.float64(param_point.value)
-            lower, upper = self.context.domain.get(node_name, (None, None))
-            if (lower is not None and val < lower) or (
-                upper is not None and val > upper
-            ):
-                warnings.warn(
-                    f"Parameter '{node_name}' has const=True with value"
-                    f" {val} outside domain [{lower}, {upper}];"
-                    f" using the specified value as-is.",
-                    stacklevel=2,
-                )
+            self._warn_outside_domain(node_name, val, "has const=True with value")
             return pt.constant(val, name=node_name)
 
         is_observable = (
@@ -808,6 +900,22 @@ class Model:
             self._views[node_name] = view
 
         return tensor
+
+    def _warn_outside_domain(self, name: str, value: float, held: str) -> None:
+        """Warn if a parameter baked in at ``value`` lies outside its domain.
+
+        ``held`` says how it is baked in, e.g. ``"has const=True with value"``.
+        """
+        lower, upper = self.context.domain.get(name, (None, None))
+        if (lower is not None and value < lower) or (
+            upper is not None and value > upper
+        ):
+            warnings.warn(
+                f"Parameter '{name}' {held}"
+                f" {value} outside domain [{lower}, {upper}];"
+                f" using the specified value as-is.",
+                stacklevel=3,
+            )
 
     def _build_constant_node(
         self, node_name: str, constants_map: dict[str, TensorVar]

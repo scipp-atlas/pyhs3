@@ -14,6 +14,8 @@ jax = pytest.importorskip("jax")
 
 # Reuse the workspace builder and reference of the C-backend tests.
 from test_compiled import _EVENTS, _reference_nll, _workspace
+from test_compiled_data import _SWAPPED
+from test_compiled_data import _model as _binned_model
 
 from pyhs3.compiled import BatchedCompiledNLL, CompiledNLL
 
@@ -311,3 +313,51 @@ class TestJaxParametersOfInterest:
 
         assert nll.parameters_of_interest == ("mu",)
         assert nll.parameter_names[nll.poi_indices[0]] == "mu"
+
+
+class TestJaxSwappedData:
+    @pytest.fixture
+    def binned(self):
+        """The two-channel HistFactory model and two (P,) parameter vectors."""
+        model = _binned_model()
+        x = model.compile_nll().initial
+        return model, np.stack([x, np.linspace(0.8, 1.3, len(x))])
+
+    def test_matches_the_c_backend(self, binned):
+        model, X = binned
+        c_nll = model.compile_nll(data_inputs=True)
+        jax_nll = model.compile_nll(backend="jax", data_inputs=True)
+
+        for x in X:
+            for data in (None, _SWAPPED):
+                value, grad = jax_nll.value_and_grad(x, data=data)
+                assert value == pytest.approx(c_nll.value(x, data=data), rel=1e-12)
+                np.testing.assert_allclose(grad, c_nll.grad(x, data=data), rtol=1e-10)
+
+    def test_batched_rows_share_the_data(self, binned):
+        model, X = binned
+        one = model.compile_nll(data_inputs=True)
+        nll = model.compile_nll(backend="jax", batched=True, data_inputs=True)
+
+        values, grads = nll.value_and_grad(X, data=_SWAPPED)
+
+        assert values.shape == (2,)
+        assert grads.shape == X.shape
+        for row, value, grad in zip(X, values, grads, strict=True):
+            assert value == pytest.approx(one.value(row, data=_SWAPPED), rel=1e-12)
+            np.testing.assert_allclose(grad, one.grad(row, data=_SWAPPED), rtol=1e-10)
+        np.testing.assert_allclose(
+            nll.value(X), [one.value(row) for row in X], rtol=1e-12
+        )
+
+    def test_cache_round_trip(self, tmp_path, binned):
+        model, X = binned
+        first = model.compile_nll(backend="jax", data_inputs=True, cache=tmp_path)
+        second = _binned_model(_SWAPPED).compile_nll(
+            backend="jax", data_inputs=True, cache=tmp_path
+        )
+
+        assert (first.from_cache, second.from_cache) == (False, True)
+        assert second.value(X[1]) == pytest.approx(
+            first.value(X[1], data=_SWAPPED), rel=1e-14
+        )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from typing import Any, cast
 
 import numpy as np
@@ -20,7 +20,9 @@ def is_scalar_multiplicative_identity(value: TensorVar) -> bool:
     )
 
 
-def merge_duplicate_nodes(output: TensorVar) -> TensorVar:
+def merge_duplicate_nodes(
+    output: TensorVar, keep: Collection[Variable[Any, Any]] = ()
+) -> TensorVar:
     """Return ``output`` with every structurally identical subgraph built once.
 
     Separately built HS3 objects often produce the same subexpression, for
@@ -46,7 +48,9 @@ def merge_duplicate_nodes(output: TensorVar) -> TensorVar:
     - constants that differ in dtype (``2.0`` as float64 vs float32) or
       shape (``[2.0]`` vs ``2.0``), even if their values print the same;
     - distinct graph inputs, even with the same name or the same value at
-      evaluation time.
+      evaluation time;
+    - the constants in ``keep``, each of which stays its own input, so that a
+      caller can later replace it (and only it) in the merged graph.
 
     PyTensor's own merge rewrite finds the same duplicates during
     compilation, but it runs inside the rewriter, replacing one node at a
@@ -92,6 +96,7 @@ def merge_duplicate_nodes(output: TensorVar) -> TensorVar:
 
     Args:
         output: Output variable of the graph to merge.
+        keep: Constants never merged with an equal constant.
 
     Returns:
         A variable computing the same value from the same inputs.  It is
@@ -100,10 +105,14 @@ def merge_duplicate_nodes(output: TensorVar) -> TensorVar:
     replacement: dict[Variable[Any, Any], Variable[Any, Any]] = {}
     constants: dict[tuple[object, ...], Variable[Any, Any]] = {}
     kept: dict[tuple[object, ...], Apply[Any]] = {}
+    kept_constants = set(keep)
 
     def resolve(var: Variable[Any, Any]) -> Variable[Any, Any]:
         if var in replacement:
             return replacement[var]
+        if var in kept_constants:
+            replacement[var] = var
+            return var
         if isinstance(var, Constant):
             data = np.asarray(var.data)
             key = (var.type, data.shape, data.tobytes())

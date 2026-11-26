@@ -91,3 +91,16 @@ class TestMergeDuplicateNodes:
         """An output with no apply nodes is returned as is."""
         x = pt.dscalar("x")
         assert merge_duplicate_nodes(x) is x
+
+    def test_kept_constants_are_not_merged(self):
+        """A constant in ``keep`` stays its own input, even next to an equal one."""
+        x = pt.dvector("x")
+        kept = pt.constant(np.array([1.0, 2.0]), name="kept")
+        equal = pt.constant(np.array([1.0, 2.0]))
+        output = ((x + kept) * (x + equal)).sum()
+
+        merged = merge_duplicate_nodes(output, keep=[kept])
+
+        used = {id(var) for node in io_toposort([], [merged]) for var in node.inputs}
+        assert id(kept) in used
+        assert id(equal) in used

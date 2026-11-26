@@ -3,8 +3,8 @@ Compiled negative log-likelihood for minimizers.
 
 :class:`CompiledNLL` is what :meth:`pyhs3.Model.compile_nll` returns: the
 model's negative log-likelihood (and its gradient) compiled once as a function
-of a single vector of free parameters, with the data and every constant
-parameter baked in.
+of a single vector of free parameters, with every constant parameter baked in
+and the observed data either baked in or passed per call.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import logging
 import os
 import pickle
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
 from typing import IO, Any, Literal, cast
 
@@ -46,7 +46,8 @@ log = logging.getLogger(__name__)
 
 Bounds = tuple[float, float]
 Backend = Literal["c", "jax"]
-EvalFn = Callable[[npt.NDArray[np.float64]], list[npt.NDArray[np.float64]]]
+# Takes the parameter vector, then one array per data input, in order.
+EvalFn = Callable[..., list[npt.NDArray[np.float64]]]
 
 
 def default_nll_mode(*, fuse: bool = False) -> Mode:
@@ -87,20 +88,25 @@ def default_nll_mode(*, fuse: bool = False) -> Mode:
     )
 
 
-def _graph_fingerprint(outputs: Sequence[Variable[Any, Any]]) -> str:
+def _graph_fingerprint(
+    outputs: Sequence[Variable[Any, Any]],
+    as_inputs: Collection[Variable[Any, Any]] = (),
+) -> str:
     """Structural hash of a graph, independent of object identity.
 
-    Each variable is identified by how it is computed: graph inputs by name
-    and type, constants by type, shape and value, and apply nodes by their
-    ``Op`` (class and properties) and the identities of their inputs.  Two
-    graphs with the same fingerprint compute the same outputs from inputs of
-    the same names and types.
+    Each variable is identified by how it is computed: graph inputs, and the
+    variables in ``as_inputs`` (constants that the compiled function takes
+    as inputs instead), by name and type, other constants by type, shape and
+    value, and apply nodes by their ``Op`` (class and properties) and the
+    identities of their inputs.  Two graphs with the same fingerprint
+    compute the same outputs from inputs of the same names and types.
     """
     ids: dict[Variable[Any, Any], str] = {}
+    replaced = set(as_inputs)
 
     def ident(var: Variable[Any, Any]) -> str:
         if var not in ids:
-            if isinstance(var, Constant):
+            if isinstance(var, Constant) and var not in replaced:
                 data = np.asarray(var.data)
                 digest = hashlib.sha256(data.tobytes()).hexdigest()
                 ids[var] = f"const:{var.type}:{data.shape}:{digest}"
@@ -152,13 +158,16 @@ class CompiledNLL:
 
     Build it with :meth:`pyhs3.Model.compile_nll`.  The free parameters are
     ordered as :attr:`parameter_names`; every method takes or returns a 1-D
-    ``float`` array of that length.  Data and constant parameters are baked
-    into the compiled function.
+    ``float`` array of that length.  Constant parameters are baked into the
+    compiled function.  The observed data are baked in too, unless the
+    likelihood was compiled with ``data_inputs=True``: then each method takes
+    an optional ``data`` mapping that replaces the binned observed counts for
+    that call (see :meth:`value`).
 
     :meth:`value`, :meth:`grad` and :meth:`value_and_grad` share one cached
-    evaluation per parameter vector, so a minimizer that asks for the value
-    and then the gradient at the same point (SciPy with separate ``fun`` and
-    ``jac``, iminuit with ``grad``) pays for one evaluation.
+    evaluation per parameter vector and data, so a minimizer that asks for
+    the value and then the gradient at the same point (SciPy with separate
+    ``fun`` and ``jac``, iminuit with ``grad``) pays for one evaluation.
 
     Examples:
         With SciPy:
@@ -182,7 +191,7 @@ class CompiledNLL:
 
     def __init__(
         self,
-        fn: Callable[[npt.NDArray[np.float64]], list[npt.NDArray[np.float64]]],
+        fn: EvalFn,
         parameter_names: Sequence[str],
         initial: Sequence[float],
         bounds: Sequence[Bounds],
@@ -191,12 +200,14 @@ class CompiledNLL:
         has_gradient: bool,
         from_cache: bool = False,
         parameters_of_interest: Sequence[str] = (),
+        data: Mapping[str, npt.ArrayLike] | None = None,
     ) -> None:
         """Wrap a compiled function of the parameter vector.
 
         Args:
-            fn: Compiled function taking the ``(P,)`` parameter vector and
-                returning ``[nll]``, or ``[nll, grad]`` if ``has_gradient``.
+            fn: Compiled function taking the ``(P,)`` parameter vector, then
+                one array per entry of ``data`` in its order, and returning
+                ``[nll]``, or ``[nll, grad]`` if ``has_gradient``.
             parameter_names: Names of the ``P`` free parameters, in vector
                 order.
             initial: Starting value per parameter.
@@ -207,6 +218,9 @@ class CompiledNLL:
             from_cache: Whether ``fn`` was loaded from the on-disk cache.
             parameters_of_interest: Names of the parameters of interest; those
                 that are not free parameters are left out.
+            data: Default value of each data input of ``fn``, keyed by the
+                name the ``data`` argument of :meth:`value` uses; empty or
+                ``None`` if the data are baked into ``fn``.
         """
         self._fn = fn
         #: Free parameter names, in the order of every parameter vector.
@@ -230,6 +244,10 @@ class CompiledNLL:
         #: each of :attr:`parameters_of_interest`.
         self.poi_indices: tuple[int, ...] = tuple(
             self.parameter_names.index(name) for name in self.parameters_of_interest
+        )
+        self._data_names: tuple[str, ...] = tuple(data or {})
+        self._default_data: tuple[npt.NDArray[np.float64], ...] = tuple(
+            np.asarray(value, dtype=np.float64) for value in (data or {}).values()
         )
         self._last_x: bytes | None = None
         self._last_out: list[npt.NDArray[np.float64]] = []
@@ -272,28 +290,95 @@ class CompiledNLL:
         """Validate the argument of :meth:`value` and :meth:`value_and_grad`."""
         return self._check(x)
 
-    def _evaluate(self, x: npt.ArrayLike) -> list[npt.NDArray[np.float64]]:
+    def _check_data(
+        self, data: Mapping[str, npt.ArrayLike] | None
+    ) -> tuple[npt.NDArray[np.float64], ...]:
+        """Arrays to pass for the data inputs, in order; the defaults if ``data`` is ``None``."""
+        if data is None:
+            return self._default_data
+        if not self._data_names:
+            msg = (
+                "This likelihood has its observed data baked in; compile it "
+                "with data_inputs=True to pass data=."
+            )
+            raise ValueError(msg)
+        unknown = sorted(set(data) - set(self._data_names))
+        if unknown:
+            msg = f"No observed data input for: {unknown}; the inputs are {list(self._data_names)}"
+            raise KeyError(msg)
+        missing = [name for name in self._data_names if name not in data]
+        if missing:
+            msg = f"Missing observed data for: {missing}"
+            raise KeyError(msg)
+        arrays = []
+        for name, default in zip(self._data_names, self._default_data, strict=True):
+            array = np.asarray(data[name], dtype=np.float64)
+            if array.shape != default.shape:
+                msg = (
+                    f"Observed data for '{name}' has shape {array.shape}; "
+                    f"expected {default.shape}, one count per bin."
+                )
+                raise ValueError(msg)
+            arrays.append(array)
+        return tuple(arrays)
+
+    def _evaluate(
+        self, x: npt.ArrayLike, data: Mapping[str, npt.ArrayLike] | None
+    ) -> list[npt.NDArray[np.float64]]:
         array = self._check_argument(x)
-        key = array.tobytes()
+        arrays = self._check_data(data)
+        # The data arrays have fixed shapes, so the concatenated bytes
+        # identify the parameter vector (or batch) and the data together.
+        key = b"".join(item.tobytes() for item in (array, *arrays))
         if key != self._last_x:
-            self._last_out = self._fn(array)
+            self._last_out = self._fn(array, *arrays)
             self._last_x = key
         return self._last_out
 
-    def value(self, x: npt.ArrayLike) -> float:
-        """Negative log-likelihood at ``x``."""
-        return float(self._evaluate(x)[0])
+    def value(
+        self, x: npt.ArrayLike, data: Mapping[str, npt.ArrayLike] | None = None
+    ) -> float:
+        """Negative log-likelihood at ``x``.
 
-    def grad(self, x: npt.ArrayLike) -> npt.NDArray[np.float64]:
-        """Gradient of the negative log-likelihood at ``x``, shape ``(P,)``."""
-        return self.value_and_grad(x)[1]
+        Args:
+            x: Parameter vector, shape ``(P,)``, ordered as
+                :attr:`parameter_names`.
+            data: Binned observed counts to evaluate on instead of the
+                model's own (``data_inputs=True`` only), keyed like
+                :attr:`pyhs3.Model.observed_data`: one ``(B,)`` array per
+                HistFactory channel, ``B`` the channel's total number of
+                bins, for every channel.  ``None`` uses the model's observed
+                data.
 
-    def value_and_grad(self, x: npt.ArrayLike) -> tuple[float, npt.NDArray[np.float64]]:
-        """Negative log-likelihood and its gradient at ``x`` from one evaluation."""
+        Raises:
+            ValueError: If ``x`` or an array of ``data`` has the wrong shape,
+                or if ``data`` is given to a likelihood compiled without
+                ``data_inputs=True``.
+            KeyError: If ``data`` names a channel without observed data, or
+                misses one.
+        """
+        return float(self._evaluate(x, data)[0])
+
+    def grad(
+        self, x: npt.ArrayLike, data: Mapping[str, npt.ArrayLike] | None = None
+    ) -> npt.NDArray[np.float64]:
+        """Gradient of the negative log-likelihood at ``x``, shape ``(P,)``.
+
+        ``data`` is as for :meth:`value`.
+        """
+        return self.value_and_grad(x, data)[1]
+
+    def value_and_grad(
+        self, x: npt.ArrayLike, data: Mapping[str, npt.ArrayLike] | None = None
+    ) -> tuple[float, npt.NDArray[np.float64]]:
+        """Negative log-likelihood and its gradient at ``x`` from one evaluation.
+
+        ``data`` is as for :meth:`value`.
+        """
         if not self.has_gradient:
             msg = "This likelihood was compiled with gradient=False."
             raise RuntimeError(msg)
-        out = self._evaluate(x)
+        out = self._evaluate(x, data)
         return float(out[0]), np.array(out[1])
 
 
@@ -311,6 +396,10 @@ class BatchedCompiledNLL(CompiledNLL):
 
     XLA compiles the function once per batch size, at the first call with
     that ``K``; later calls with the same ``K`` reuse it.
+
+    With ``data_inputs=True``, the ``data`` argument holds one ``(B,)`` array
+    per channel, as for :class:`CompiledNLL`, shared by every row of the
+    batch.
 
     Example:
         A grid of 9 values of one parameter, the others at their initial
@@ -335,18 +424,20 @@ class BatchedCompiledNLL(CompiledNLL):
             raise ValueError(msg)
         return array
 
-    def value(self, x: npt.ArrayLike) -> npt.NDArray[np.float64]:  # type: ignore[override]
+    def value(  # type: ignore[override]
+        self, x: npt.ArrayLike, data: Mapping[str, npt.ArrayLike] | None = None
+    ) -> npt.NDArray[np.float64]:
         """Negative log-likelihood per row of ``x``, shape ``(K,)``."""
-        return np.array(self._evaluate(x)[0])
+        return np.array(self._evaluate(x, data)[0])
 
     def value_and_grad(  # type: ignore[override]
-        self, x: npt.ArrayLike
+        self, x: npt.ArrayLike, data: Mapping[str, npt.ArrayLike] | None = None
     ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         """Negative log-likelihood ``(K,)`` and gradient ``(K, P)`` per row of ``x``."""
         if not self.has_gradient:
             msg = "This likelihood was compiled with gradient=False."
             raise RuntimeError(msg)
-        out = self._evaluate(x)
+        out = self._evaluate(x, data)
         return np.array(out[0]), np.array(out[1])
 
 
@@ -364,6 +455,7 @@ def compile_nll(
     cache: bool | str | os.PathLike[str] | None = None,
     batched: bool = False,
     parameters_of_interest: Sequence[str] = (),
+    data: Mapping[str, tuple[TensorVar, npt.ArrayLike]] | None = None,
 ) -> CompiledNLL:
     """Compile ``-sum(log_prob)`` as a function of one vector of ``free`` scalars.
 
@@ -390,6 +482,11 @@ def compile_nll(
             as :attr:`CompiledNLL.parameters_of_interest` with their
             :attr:`CompiledNLL.poi_indices`; names of variables not in
             ``free`` are left out.  They do not change the compiled function.
+        data: Variables of ``log_prob`` (e.g. the constants holding observed
+            bin counts) to replace by per-call inputs, each with its default
+            value, keyed by the name the ``data`` argument of
+            :meth:`CompiledNLL.value` uses.  The compiled function takes them
+            after the parameter vector, in this order.
 
     Returns:
         CompiledNLL: The compiled likelihood.
@@ -433,18 +530,31 @@ def compile_nll(
         (var, pt.constant(np.asarray(value, dtype=var.dtype)))
         for var, value in baked.items()
     )
+    # Each data variable is replaced by a fresh variable of its type (and so
+    # of its static shape), an input of the compiled function.
+    data = data or {}
+    data_inputs: list[TensorVar] = []
+    for var, _ in data.values():
+        data_inputs.append(cast(TensorVar, var.type(name=var.name)))
+        givens.append((var, data_inputs[-1]))
+    defaults = {name: value for name, (_, value) in data.items()}
     names = [var.name or f"x[{index}]" for index, var in enumerate(free)]
 
     builder: _CBuilder | _JaxBuilder
     if backend == "jax":
         builder = _JaxBuilder(
-            outputs, givens, x, len(free), gradient=gradient, batched=batched
+            outputs,
+            givens,
+            [x, *data_inputs],
+            len(free),
+            gradient=gradient,
+            batched=batched,
         )
     else:
         builder = _CBuilder(
             outputs,
             givens,
-            x,
+            [x, *data_inputs],
             default_nll_mode(fuse=fuse) if mode is None else mode,
         )
 
@@ -458,6 +568,7 @@ def compile_nll(
             has_gradient=gradient,
             from_cache=from_cache,
             parameters_of_interest=parameters_of_interest,
+            data=defaults,
         )
 
     if not cache:
@@ -468,7 +579,10 @@ def compile_nll(
         "|".join(
             [
                 backend,
-                _graph_fingerprint([*outputs, *(new for _, new in givens)]),
+                _graph_fingerprint(
+                    [*outputs, *(new for _, new in givens)],
+                    as_inputs=[var for var, _ in data.values()],
+                ),
                 repr(names),
                 _mode_key(mode, fuse=fuse),
                 str(gradient),
@@ -538,12 +652,12 @@ class _CBuilder:
         self,
         outputs: list[TensorVar],
         givens: list[tuple[Variable[Any, Any], Variable[Any, Any]]],
-        x: TensorVar,
+        inputs: list[TensorVar],
         mode: Mode | str,
     ) -> None:
         self._outputs = outputs
         self._givens = givens
-        self._x = x
+        self._inputs = inputs
         self._mode = mode
         self._fn: EvalFn | None = None
 
@@ -551,7 +665,7 @@ class _CBuilder:
         self._fn = cast(
             EvalFn,
             function(
-                [self._x],
+                self._inputs,
                 self._outputs,
                 givens=self._givens,
                 mode=self._mode,
@@ -588,7 +702,7 @@ class _JaxBuilder:
         self,
         outputs: list[TensorVar],
         givens: list[tuple[Variable[Any, Any], Variable[Any, Any]]],
-        x: TensorVar,
+        inputs: list[TensorVar],
         n_free: int,
         *,
         gradient: bool,
@@ -599,11 +713,16 @@ class _JaxBuilder:
         jax.config.update("jax_enable_x64", True)
         self._outputs = outputs
         self._givens = givens
-        self._x = x
+        # The parameter vector x, then the data inputs.
+        self._inputs = inputs
         # Batched input is (K, P) with a symbolic batch size, so one exported
-        # module serves every K.
+        # module serves every K.  Data inputs have their static (B,) shapes
+        # and are shared by every row of a batch.
         shape = jax_export.symbolic_shape(f"K, {n_free}") if batched else (n_free,)
-        self._spec = jax.ShapeDtypeStruct(shape, np.float64)
+        self._specs = [
+            jax.ShapeDtypeStruct(shape, np.float64),
+            *(jax.ShapeDtypeStruct(var.type.shape, np.float64) for var in inputs[1:]),
+        ]
         self._gradient = gradient
         self._batched = batched
         self._exported: Any = None
@@ -617,13 +736,15 @@ class _JaxBuilder:
         """
         self._exported = exported
         call = jax.jit(exported.call)
-        compiled = call if self._batched else call.lower(self._spec).compile()
+        compiled = call if self._batched else call.lower(*self._specs).compile()
         gradient = self._gradient
 
-        def evaluate(x: npt.NDArray[np.float64]) -> list[npt.NDArray[np.float64]]:
+        def evaluate(
+            x: npt.NDArray[np.float64], *data: npt.NDArray[np.float64]
+        ) -> list[npt.NDArray[np.float64]]:
             # [nll] or [nll, *grad] on the last axis: shape (1 + P,), or
             # (K, 1 + P) for a (K, P) batch.
-            out = np.asarray(compiled(x))
+            out = np.asarray(compiled(x, *data))
             return [out[..., 0], out[..., 1:]] if gradient else [out[..., 0]]
 
         return evaluate
@@ -637,15 +758,19 @@ class _JaxBuilder:
             if self._gradient
             else nll[None]
         )
-        graph = jaxify(cast(TensorVar, joint), inputs=[self._x])
+        graph = jaxify(cast(TensorVar, joint), inputs=self._inputs)
 
-        def one_point(xv: Any) -> Any:
-            return cast(Sequence[Any], graph.call_positional(xv))[0]
+        def one_point(xv: Any, *data: Any) -> Any:
+            return cast(Sequence[Any], graph.call_positional(xv, *data))[0]
 
-        # A batch maps the one-point function over the rows; this has to
-        # happen before export, since JAX cannot vmap an exported module.
-        traced = jax.jit(jax.vmap(one_point) if self._batched else one_point)
-        return self._compile(jax_export.export(traced)(self._spec))
+        # A batch maps the one-point function over the rows of x, with the
+        # data shared by every row; this has to happen before export, since
+        # JAX cannot vmap an exported module.
+        in_axes = (0, *(None for _ in self._inputs[1:]))
+        traced = jax.jit(
+            jax.vmap(one_point, in_axes=in_axes) if self._batched else one_point
+        )
+        return self._compile(jax_export.export(traced)(*self._specs))
 
     def dump(self, sink: IO[bytes]) -> None:
         sink.write(self._exported.serialize())

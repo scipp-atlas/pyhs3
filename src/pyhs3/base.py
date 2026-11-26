@@ -167,8 +167,11 @@ class Evaluable(NamedModel, ABC):
             Empty if all fields are string references.
         """
         if self._constants_cache is None:
+            # PyTensor infers float32 or int8 for a number those represent exactly
+            # (1.5, 100); expressions built from these constants alone would then
+            # lose float64 precision or overflow, so the dtype is explicit.
             self._constants_cache = {
-                name: cast(TensorVar, pt.constant(value))
+                name: cast(TensorVar, pt.constant(value, dtype="float64"))
                 for name, value in self._constants_values.items()
             }
         return self._constants_cache

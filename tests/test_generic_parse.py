@@ -61,6 +61,28 @@ class TestAnalyzeSymPyExpr:
 class TestSymPyToPyTensor:
     """Test the sympy_to_pytensor function."""
 
+    @pytest.mark.parametrize(
+        ("expr_str", "expected"),
+        [("1.5", 1.5), ("3", 3.0)],
+        ids=["float32-exact-float", "integer"],
+    )
+    def test_constant_expression_is_float64(self, expr_str, expected):
+        """A variable-free expression gives a float64 constant, not float32/int8."""
+        result = sympy_to_pytensor(parse_expression(expr_str), [])
+
+        assert result.dtype == "float64"
+        np.testing.assert_allclose(
+            function([], pt.log(result))(), np.log(expected), rtol=1e-15
+        )
+
+    def test_function_of_literal_keeps_float64_precision(self):
+        """``sqrt(2)`` evaluates in float64 even though ``2`` fits in int8."""
+        x = pt.dscalar("x")
+
+        result = sympy_to_pytensor(parse_expression("x*sqrt(2)"), [x])
+
+        np.testing.assert_allclose(function([x], result)(1.0), np.sqrt(2.0), rtol=1e-15)
+
     def test_simple_polynomial(self):
         """Test conversion of simple polynomial expression."""
         x = pt.scalar("x")

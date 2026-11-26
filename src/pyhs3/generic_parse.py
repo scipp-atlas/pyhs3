@@ -20,6 +20,8 @@ from sympy.parsing.sympy_parser import (
 from pyhs3.exceptions import ExpressionEvaluationError, ExpressionParseError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pyhs3.context import Context
     from pyhs3.typing.aliases import TensorVar
 
@@ -104,6 +106,26 @@ def parse_expression(expr_str: str) -> sp.Expr:
         raise ExpressionParseError(msg) from exc
 
 
+def _float64_literals(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap ``func`` so each numeric literal argument becomes a float64 constant.
+
+    PyTensor infers int8 or float32 for a number those represent exactly (``2``,
+    ``1.5``), so ``sqrt(2)`` would otherwise evaluate in float32.
+    """
+
+    def wrapped(*args: Any) -> Any:
+        return func(
+            *(
+                arg
+                if isinstance(arg, pt.variable.TensorVariable)
+                else pt.constant(arg, dtype="float64")
+                for arg in args
+            )
+        )
+
+    return wrapped
+
+
 def sympy_to_pytensor(
     sympy_expr: sp.Expr,
     variables: list[pt.variable.TensorVariable[TensorType, Any]],
@@ -144,15 +166,21 @@ def sympy_to_pytensor(
 
         # Convert SymPy expression to a PyTensor-compatible function
         pytensor_func = sp.lambdify(
-            list(sympy_vars.values()), sympy_expr, modules=custom_modules
+            list(sympy_vars.values()),
+            sympy_expr,
+            modules={
+                name: _float64_literals(func) for name, func in custom_modules.items()
+            },
         )
 
         # Apply the function to PyTensor variables
         result = pytensor_func(*variables)
 
-        # Handle case where result is a constant (not a PyTensor variable)
+        # Handle case where result is a constant (not a PyTensor variable);
+        # float64 explicitly, since PyTensor infers float32 or int8 for a
+        # number those represent exactly (1.5, 3)
         if not isinstance(result, pt.variable.TensorVariable):
-            result = pt.constant(result)
+            result = pt.constant(result, dtype="float64")
 
         return cast(pt.variable.TensorVariable[TensorType, Any], result)
 

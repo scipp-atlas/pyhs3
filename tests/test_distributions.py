@@ -1407,6 +1407,18 @@ class TestNumericParameters:
         assert "constant_numeric_gauss_sigma" in dist.constants
         assert "constant_numeric_gauss_x" in dist.constants
 
+    def test_gaussian_float32_exact_constants_keep_float64_precision(self):
+        """Numeric fields that float32 represents exactly keep float64 precision.
+
+        ``-log(sigma)`` depends on the constant ``sigma`` alone, so a float32
+        constant would compute it in float32.
+        """
+        dist = GaussianDist(name="exact_gauss", mean=0.5, sigma=1.5, x=0.25)
+
+        assert all(c.dtype == "float64" for c in dist.constants.values())
+        result = function([], dist.log_expression(Context(dist.constants)))()
+        np.testing.assert_allclose(result, norm.logpdf(0.25, 0.5, 1.5), rtol=1e-14)
+
     def test_gaussian_mixed_parameters(self):
         """Test GaussianDist with mix of string and numeric parameters."""
         config = {

@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from pyhs3.axes import DomainCoordinateAxis
 from pyhs3.domains import Domain, ProductDomain
 from pyhs3.parameter_points import ParameterSet
-from pyhs3.typing.aliases import DomainBounds
 
 
 @dataclass(frozen=True)
@@ -79,7 +78,7 @@ class ParameterContext:
         return frozenset(point.name for point in self.parameter_set if point.const)
 
     @property
-    def bounds(self) -> dict[str, DomainBounds]:
+    def bounds(self) -> dict[str, tuple[float, float]]:
         """``(lower, upper)`` of every coordinate axis of the domain; ``-inf``/``inf`` for an open side.
 
         Constant axes have no bounds and are left out.

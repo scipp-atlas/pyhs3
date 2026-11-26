@@ -524,6 +524,38 @@ def test_expected_rates(models, seed):
             )
 
 
+def assert_expected_data_matches(pyhf_model, model, point: dict[str, float]) -> None:
+    """``Model.expected_data`` against pyhf's expected main-measurement data."""
+    # (total bins,) concatenated over pyhf's channels, sliced per channel.
+    expected = pyhf_model.expected_data(
+        pyhf_pars(pyhf_model, point), include_auxdata=False
+    )
+    actual = model.expected_data(**point)
+    channels = pyhf_model.config.channels
+    assert set(actual) == {f"model_{channel}" for channel in channels}
+    for channel in channels:
+        assert_allclose(
+            actual[f"model_{channel}"],
+            expected[pyhf_model.config.channel_slices[channel]],
+            rtol=1e-12,
+        )
+
+
+def test_model_expected_data_at_init(models):
+    pyhf_model, _, ws, _ = models
+    model = ws.model(ws.analyses[measurement(ws)], progress=False)
+    init = {p.name: p.value for p in ws.parameter_points[measurement(ws)]}
+    assert_expected_data_matches(pyhf_model, model, init)
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_model_expected_data_random_points(models, seed):
+    pyhf_model, _, ws, _ = models
+    model = ws.model(ws.analyses[measurement(ws)], progress=False)
+    for point in random_points(ws, seed):
+        assert_expected_data_matches(pyhf_model, model, point)
+
+
 def test_logpdf_at_init(models):
     pyhf_model, data, ws, offset = models
     init = {p.name: p.value for p in ws.parameter_points[measurement(ws)]}

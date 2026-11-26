@@ -524,3 +524,148 @@ class TestCompiledNLLFixed:
             # conditional MLE of sigma is the RMS deviation from mu.
             expected = np.sqrt(np.mean((np.asarray(_EVENTS) - mu) ** 2))
             assert nll.to_dict(result.x)["sigma"] == pytest.approx(expected, abs=1e-4)
+
+
+def _reference_hessian(nll: CompiledNLL, mu: float, sigma: float) -> np.ndarray:
+    """Hessian of the untruncated Gaussian NLL, shape (2, 2), ordered as ``nll``.
+
+    The events sit far inside [-10, 10], so the truncation changes it by far
+    less than the test tolerances.
+    """
+    residuals = np.asarray(_EVENTS) - mu
+    n = len(_EVENTS)
+    d2_mu = n / sigma**2
+    d2_mu_sigma = 2 * np.sum(residuals) / sigma**3
+    d2_sigma = -n / sigma**2 + 3 * np.sum(residuals**2) / sigma**4
+    hessian = np.array([[d2_mu, d2_mu_sigma], [d2_mu_sigma, d2_sigma]])
+    order = [["mu", "sigma"].index(name) for name in nll.parameter_names]
+    return hessian[np.ix_(order, order)]
+
+
+def _finite_difference_hessian(nll: CompiledNLL, x: np.ndarray, **kwargs) -> np.ndarray:
+    """Central differences of the gradient, shape (P, P), row i = d grad / d x_i."""
+    step = 1e-6
+    rows = []
+    for i in range(len(x)):
+        up, down = x.copy(), x.copy()
+        up[i] += step
+        down[i] -= step
+        rows.append((nll.grad(up, **kwargs) - nll.grad(down, **kwargs)) / (2 * step))
+    return np.array(rows)
+
+
+class TestCompiledNLLHessian:
+    def test_matches_the_analytic_hessian(self, model):
+        nll = model.compile_nll()
+        point = {"mu": 0.7, "sigma": 1.4}
+
+        hessian = nll.hessian(nll.to_vector(point))
+
+        np.testing.assert_allclose(hessian, _reference_hessian(nll, **point), rtol=1e-7)
+
+    def test_matches_finite_differences_of_the_gradient(self, model):
+        nll = model.compile_nll()
+        x = nll.to_vector({"mu": -0.3, "sigma": 2.2})
+
+        np.testing.assert_allclose(
+            nll.hessian(x), _finite_difference_hessian(nll, x), rtol=1e-6
+        )
+
+    def test_shape_dtype_and_symmetry(self, model):
+        nll = model.compile_nll()
+
+        hessian = nll.hessian(nll.to_vector({"mu": 0.7, "sigma": 1.4}))
+
+        assert hessian.shape == (2, 2)
+        assert hessian.dtype == np.float64
+        np.testing.assert_array_equal(hessian, hessian.T)
+
+    def test_inverse_at_the_minimum_is_the_mle_covariance(self, model):
+        """For a Gaussian, the inverse Hessian at the MLE is diag(s^2/N, s^2/(2N))."""
+        nll = model.compile_nll()
+        result = minimize(
+            nll.value_and_grad, nll.initial, jac=True, bounds=nll.bounds, tol=1e-12
+        )
+
+        covariance = np.linalg.inv(nll.hessian(result.x))
+
+        sigma_hat = np.sqrt(np.mean((np.asarray(_EVENTS) - np.mean(_EVENTS)) ** 2))
+        n = len(_EVENTS)
+        expected = {"mu": sigma_hat**2 / n, "sigma": sigma_hat**2 / (2 * n)}
+        np.testing.assert_allclose(
+            np.diag(covariance),
+            [expected[name] for name in nll.parameter_names],
+            rtol=1e-5,
+        )
+
+    def test_compiled_on_first_call_only(self, model, monkeypatch):
+        """compile_nll does not build the Hessian; the first hessian() call does."""
+
+        def fail(*_args, **_kwargs):
+            msg = "Hessian built"
+            raise AssertionError(msg)
+
+        monkeypatch.setattr(compiled_module, "jacobian", fail)
+        nll = model.compile_nll()
+        assert np.isfinite(nll.value(nll.initial))
+
+        with pytest.raises(AssertionError, match="Hessian built"):
+            nll.hessian(nll.initial)
+
+    def test_without_gradient(self, model):
+        nll = model.compile_nll(gradient=False)
+        x = nll.to_vector({"mu": 0.7, "sigma": 1.4})
+        np.testing.assert_allclose(
+            nll.hessian(x), model.compile_nll().hessian(x), rtol=1e-12
+        )
+
+    def test_is_not_served_stale(self, model):
+        nll = model.compile_nll()
+        x = nll.to_vector({"mu": 0.7, "sigma": 1.4})
+        y = nll.to_vector({"mu": 0.2, "sigma": 1.2})
+
+        first = nll.hessian(x)
+        nll.hessian(y)
+
+        np.testing.assert_array_equal(nll.hessian(x), first)
+        np.testing.assert_allclose(
+            nll.hessian(y), _reference_hessian(nll, 0.2, 1.2), rtol=1e-7
+        )
+
+    def test_no_free_parameters(self):
+        ws = _workspace()
+        for name in ("mu", "sigma"):
+            ws.parameter_points["init"][name].const = True
+        nll = ws.model(ws.analyses["A"], progress=False).compile_nll()
+
+        assert nll.hessian(np.array([])).shape == (0, 0)
+
+    def test_wrong_length_vector_raises(self, model):
+        nll = model.compile_nll()
+        with pytest.raises(ValueError, match="expected 2"):
+            nll.hessian(np.array([1.0, 2.0, 3.0]))
+
+    def test_fixed_parameter_drops_its_row_and_column(self, model):
+        full = model.compile_nll()
+        fixed = model.compile_nll(fixed={"mu": 0.7})
+        x = full.to_vector({"mu": 0.7, "sigma": 1.4})
+        keep = [full.parameter_names.index("sigma")]
+
+        hessian = fixed.hessian(fixed.to_vector({"sigma": 1.4}))
+
+        np.testing.assert_allclose(
+            hessian, full.hessian(x)[np.ix_(keep, keep)], rtol=1e-12
+        )
+
+    def test_cache_round_trip(self, tmp_path, monkeypatch):
+        ws = _workspace()
+        first = ws.model(ws.analyses["A"], progress=False).compile_nll(cache=tmp_path)
+        x = first.to_vector({"mu": 0.7, "sigma": 1.4})
+        expected = first.hessian(x)
+        assert len(list(tmp_path.glob("hessian-*"))) == 1
+
+        second = ws.model(ws.analyses["A"], progress=False).compile_nll(cache=tmp_path)
+        # A cache hit loads the Hessian instead of building it.
+        monkeypatch.setattr(compiled_module, "jacobian", None)
+
+        np.testing.assert_array_equal(second.hessian(x), expected)

@@ -348,7 +348,9 @@ class Model:
         also carries the starting point (:attr:`free_params`), the domain
         bounds of each parameter, ready for SciPy or iminuit, and the
         positions of the analysis parameters of interest
-        (:attr:`~pyhs3.compiled.CompiledNLL.poi_indices`).
+        (:attr:`~pyhs3.compiled.CompiledNLL.poi_indices`).  Its Hessian
+        (:meth:`~pyhs3.compiled.CompiledNLL.hessian`) is compiled at the
+        first call, with the same backend, mode and cache.
 
         This is the recommended way to evaluate a likelihood repeatedly; see
         :doc:`/howto/fit_model`.

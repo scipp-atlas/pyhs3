@@ -181,6 +181,40 @@ class TestSwappedData:
         assert second.value(x) == pytest.approx(reference.value(x), rel=1e-12)
 
 
+class TestSwappedDataHessian:
+    def test_default_data_is_the_observed_data(self, model, points):
+        baked = model.compile_nll()
+        swappable = model.compile_nll(data_inputs=True)
+
+        for x in points:
+            assert_allclose(swappable.hessian(x), baked.hessian(x), rtol=1e-10)
+
+    def test_matches_a_model_built_with_that_data(self, model, points):
+        swappable = model.compile_nll(data_inputs=True)
+        reference = _model(_SWAPPED).compile_nll()
+
+        for x in points:
+            assert_allclose(
+                swappable.hessian(x, data=_SWAPPED), reference.hessian(x), rtol=1e-10
+            )
+
+    def test_switching_back_to_the_default_data(self, model, points):
+        """Hessians are cached per parameter vector and data, like the values."""
+        swappable = model.compile_nll(data_inputs=True)
+        x = points[1]
+        default = swappable.hessian(x)
+
+        swapped = swappable.hessian(x, data=_SWAPPED)
+
+        assert not np.allclose(swapped, default)
+        assert_allclose(swappable.hessian(x), default, rtol=0)
+
+    def test_data_needs_data_inputs(self, model, points):
+        nll = model.compile_nll()
+        with pytest.raises(ValueError, match="data_inputs=True"):
+            nll.hessian(points[0], data=_SWAPPED)
+
+
 class TestSwappedDataErrors:
     def test_data_needs_data_inputs(self, model, points):
         nll = model.compile_nll()

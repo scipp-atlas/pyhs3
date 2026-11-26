@@ -146,6 +146,32 @@ vector, so each point still costs one evaluation:
     minuit.migrad()
     best_fit = dict(zip(minuit.parameters, minuit.values))
 
+Estimate uncertainties from the Hessian
+---------------------------------------
+
+``nll.hessian(x)`` returns the second derivatives of the NLL at ``x``, shape
+``(P, P)`` with rows and columns ordered as ``nll.parameter_names``. At the best
+fit, its inverse is the covariance matrix of the fitted parameters, and the
+square roots of its diagonal are their uncertainties:
+
+.. doctest:: minimize-nll
+
+    >>> from scipy.optimize import minimize
+    >>> result = minimize(
+    ...     nll.value_and_grad, nll.initial, jac=True, bounds=nll.bounds, method="L-BFGS-B"
+    ... )
+    >>> covariance = np.linalg.inv(nll.hessian(result.x))  # (2, 2)
+    >>> errors = dict(zip(nll.parameter_names, np.sqrt(np.diag(covariance))))
+    >>> {name: round(float(errors[name]), 3) for name in ("mu", "sigma")}
+    {'mu': 0.43, 'sigma': 0.304}
+
+The Hessian is compiled at the first ``hessian`` call, so a fit that never asks
+for it does not pay for its compile. It takes the same ``data`` argument as
+``value`` (see `Fit other datasets without recompiling`_), and with
+``batched=True`` it returns one ``(P, P)`` matrix per row, shape ``(K, P, P)``.
+The inverse is a covariance estimate only where the best fit lies inside the
+bounds; at a bound, the curvature there does not describe the uncertainty.
+
 Hold parameters fixed
 ---------------------
 
@@ -354,7 +380,9 @@ compiler can stop with:
 
 The gradient of a parameter that many terms depend on sums all their
 contributions in one operation, and the C code PyTensor generates for a very
-wide sum nests deeper than Apple clang's default limit. Raise the limit before
+wide sum nests deeper than Apple clang's default limit. ``nll.hessian`` joins
+one column per free parameter in one operation, so with many free parameters
+its first call can stop with the same error. Raise the limit before
 the first compile, either in the environment:
 
 .. code-block:: bash

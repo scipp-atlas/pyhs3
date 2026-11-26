@@ -1,4 +1,8 @@
-"""Tests for Model.expected_data: expected Poisson means of HistFactory channels."""
+"""Tests for Model.expected_data and Model.sample_data on HistFactory channels.
+
+expected_data gives the expected Poisson means; sample_data draws toy
+datasets around them.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +10,8 @@ from typing import Any
 
 import numpy as np
 import pytest
-from numpy.testing import assert_allclose
+from numpy.testing import assert_allclose, assert_array_equal
+from scipy.stats import poisson
 
 import pyhs3
 from pyhs3 import model as model_module
@@ -122,6 +127,31 @@ def _workspace(*, gaussian: bool = False) -> pyhs3.Workspace:
     )
 
 
+def _gaussian_workspace() -> pyhs3.Workspace:
+    """A single Gaussian in ``x`` with mean ``mu``: no HistFactory channel."""
+    return pyhs3.Workspace(
+        metadata={"hs3_version": "0.2"},
+        distributions=[
+            {
+                "name": "gauss",
+                "type": "gaussian_dist",
+                "x": "x",
+                "mean": "mu",
+                "sigma": 1.0,
+            }
+        ],
+        parameter_points=[
+            {
+                "name": "init",
+                "parameters": [
+                    {"name": "x", "value": 0.0},
+                    {"name": "mu", "value": 0.0},
+                ],
+            }
+        ],
+    )
+
+
 @pytest.fixture
 def model():
     ws = _workspace()
@@ -184,27 +214,75 @@ class TestExpectedData:
         assert list(expected) == ["SR", "CR"]
 
     def test_model_without_histfactory_channel_raises(self):
-        ws = pyhs3.Workspace(
-            metadata={"hs3_version": "0.2"},
-            distributions=[
-                {
-                    "name": "gauss",
-                    "type": "gaussian_dist",
-                    "x": "x",
-                    "mean": "mu",
-                    "sigma": 1.0,
-                }
-            ],
-            parameter_points=[
-                {
-                    "name": "init",
-                    "parameters": [
-                        {"name": "x", "value": 0.0},
-                        {"name": "mu", "value": 0.0},
-                    ],
-                }
-            ],
-        )
+        ws = _gaussian_workspace()
         model = ws.model(0, progress=False)
         with pytest.raises(ValueError, match="no HistFactory channel"):
             model.expected_data(mu=0.0)
+
+
+class TestSampleData:
+    def test_keys_shapes_and_dtype(self, model):
+        toys = model.sample_data(4, rng=np.random.default_rng(0), mu=1.0, alpha=0.0)
+        assert list(toys) == list(model.observed_data)
+        assert toys["SR"].shape == (4, 2)
+        assert toys["CR"].shape == (4, 3)
+        assert toys["SR"].dtype == np.float64
+        # Poisson counts: whole numbers.
+        assert_array_equal(toys["CR"], np.round(toys["CR"]))
+
+    def test_seeded_reproducibility(self, model):
+        first = model.sample_data(5, rng=np.random.default_rng(42), mu=1.0, alpha=0.0)
+        second = model.sample_data(5, rng=np.random.default_rng(42), mu=1.0, alpha=0.0)
+        other = model.sample_data(5, rng=np.random.default_rng(43), mu=1.0, alpha=0.0)
+        for name in first:
+            assert_array_equal(first[name], second[name])
+        assert not all(np.array_equal(first[name], other[name]) for name in first)
+
+    def test_generator_state_advances(self, model):
+        rng = np.random.default_rng(7)
+        first = model.sample_data(5, rng=rng, mu=1.0, alpha=0.0)
+        second = model.sample_data(5, rng=rng, mu=1.0, alpha=0.0)
+        assert not np.array_equal(first["CR"], second["CR"])
+
+    def test_mean_approaches_expected_data(self, model):
+        n = 20_000
+        params = {"mu": 3.0, "alpha": 0.5}
+        toys = model.sample_data(n, rng=np.random.default_rng(1), **params)
+        expected = model.expected_data(**params)
+        for name, counts in toys.items():
+            # Standard error of the mean of n Poisson draws: sqrt(lambda / n),
+            # shape (B,); a seeded draw within 5 standard errors.
+            stderr = np.sqrt(expected[name] / n)
+            assert np.all(np.abs(counts.mean(axis=0) - expected[name]) < 5 * stderr)
+            # The variance of a Poisson draw equals its mean.
+            assert_allclose(counts.var(axis=0), expected[name], rtol=0.05)
+
+    def test_toys_feed_compiled_nll(self, model):
+        nll = model.compile_nll(data_inputs=True)
+        x = np.array(nll.initial)
+        params = dict(zip(nll.parameter_names, x, strict=True))
+        toys = model.sample_data(3, rng=np.random.default_rng(2), **params)
+        rates = model.expected_data(**params)
+        observed = model.observed_data
+        reference = nll.value(x)
+        for i in range(3):
+            toy = {name: counts[i] for name, counts in toys.items()}
+            # Only the main Poisson terms depend on the data, so the NLL
+            # changes by the difference of their log-pmfs.
+            shift = sum(
+                poisson.logpmf(observed[name], rates[name]).sum()
+                - poisson.logpmf(toy[name], rates[name]).sum()
+                for name in toy
+            )
+            assert nll.value(x, data=toy) == pytest.approx(reference + shift, rel=1e-10)
+
+    def test_negative_expected_rate_raises(self, model):
+        # mu = -30 makes both SR means negative: 5 * -30 + 100 and 10 * -30 + 120.
+        with pytest.raises(ValueError, match="'SR'"):
+            model.sample_data(2, rng=np.random.default_rng(0), mu=-30.0, alpha=0.0)
+
+    def test_model_without_histfactory_channel_raises(self):
+        ws = _gaussian_workspace()
+        model = ws.model(0, progress=False)
+        with pytest.raises(ValueError, match="no HistFactory channel"):
+            model.sample_data(2, rng=np.random.default_rng(0), mu=0.0)

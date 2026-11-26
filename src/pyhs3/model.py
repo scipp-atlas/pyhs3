@@ -410,7 +410,7 @@ class Model:
             )
             raise ValueError(msg)
         domain_bounds = self.context.bounds
-        bounds = [domain_bounds.get(name, (None, None)) for name in names]
+        bounds = [domain_bounds.get(name, (-np.inf, np.inf)) for name in names]
         return compile_nll(
             log_prob,
             free,

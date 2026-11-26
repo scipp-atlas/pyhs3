@@ -2070,8 +2070,10 @@ class TestModelParameterContext:
         )
         npt.assert_allclose(result, norm.logpdf(0.5, loc=-1.0, scale=1.5))
 
-    def test_compile_nll_bounds_from_context(self):
-        ws = hs3.Workspace(
+    @staticmethod
+    def _workspace(axes):
+        """Workspace of one Gaussian in ``x`` with free ``mu`` and ``sigma`` and domain ``axes``."""
+        return hs3.Workspace(
             metadata={"hs3_version": "0.2"},
             distributions=[
                 {
@@ -2095,10 +2097,7 @@ class TestModelParameterContext:
                 {
                     "name": "d",
                     "type": "product_domain",
-                    "axes": [
-                        {"name": "mu", "min": 0.0, "max": 5.0},
-                        {"name": "sigma", "min": 0.1, "max": 3.0},
-                    ],
+                    "axes": axes,
                 }
             ],
             data=[
@@ -2113,6 +2112,14 @@ class TestModelParameterContext:
             analyses=[
                 {"name": "A", "likelihood": "L", "domains": ["d"], "init": "init"}
             ],
+        )
+
+    def test_compile_nll_bounds_from_context(self):
+        ws = self._workspace(
+            [
+                {"name": "mu", "min": 0.0, "max": 5.0},
+                {"name": "sigma", "min": 0.1, "max": 3.0},
+            ]
         )
         model = ws.model("A", progress=False)
         nll = model.compile_nll()
@@ -2131,6 +2138,17 @@ class TestModelParameterContext:
         assert value == pytest.approx(expected)
         assert np.all(np.isfinite(grad))
         assert grad[nll.parameter_names.index("mu")] != 0.0
+
+    def test_compile_nll_missing_bounds_are_infinite(self):
+        """An open side of a domain axis, or a parameter outside the domain, is +-inf."""
+        ws = self._workspace([{"name": "mu", "min": 0.0}])
+        # Built from the likelihood: HS3 section 2.7 requires an analysis to
+        # list every parameter in its domains, but a likelihood does not.
+        likelihood = ws.likelihoods["L"]
+        nll = ws.model(likelihood, progress=False).compile_nll()
+        bounds = dict(zip(nll.parameter_names, nll.bounds, strict=True))
+        assert bounds == {"mu": (0.0, np.inf), "sigma": (-np.inf, np.inf)}
+        assert all(isinstance(bound, float) for pair in nll.bounds for bound in pair)
 
 
 class TestGraphCreationTracebacks:

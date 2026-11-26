@@ -10,13 +10,17 @@ import numpy.testing as npt
 import pytensor.tensor as pt
 import pytest
 from pytensor.compile.mode import get_mode
-from pytensor.graph.traversal import explicit_graph_inputs
+from pytensor.graph.traversal import ancestors, explicit_graph_inputs
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.tensor.basic import TensorConstant
 from scipy.stats import norm
 
 import pyhs3 as hs3
 from pyhs3.distributions import Distributions
+from pyhs3.distributions.histfactory.interpolations import (
+    _code4_coefficient_tensor,
+    _code4_exponent_tensor,
+)
 from pyhs3.distributions.mathematical import GenericDist
 from pyhs3.domains import ProductDomain
 from pyhs3.exceptions import MissingInitialValueError
@@ -2101,3 +2105,75 @@ class TestModelParameterContext:
         assert value == pytest.approx(expected)
         assert np.all(np.isfinite(grad))
         assert grad[nll.parameter_names.index("mu")] != 0.0
+
+
+class TestGraphCreationTracebacks:
+    """The model's graph carries no PyTensor creation tracebacks.
+
+    PyTensor's rewrites concatenate the tracebacks of a node's inputs onto
+    the variable that replaces it, without deduplication, so on a graph with many
+    shared subexpressions the lists grow without bound during compilation.
+    """
+
+    @pytest.fixture
+    def model(self):
+        spec = {
+            "channels": [
+                {
+                    "name": "SR",
+                    "samples": [
+                        {
+                            "name": "signal",
+                            "data": [5.0, 10.0],
+                            "modifiers": [
+                                {"name": "mu", "type": "normfactor", "data": None}
+                            ],
+                        },
+                        {
+                            "name": "background",
+                            "data": [50.0, 60.0],
+                            "modifiers": [
+                                {
+                                    "name": "bkg_norm",
+                                    "type": "normsys",
+                                    "data": {"hi": 1.1, "lo": 0.9},
+                                },
+                                {
+                                    "name": "bkg_shape",
+                                    "type": "histosys",
+                                    "data": {
+                                        "hi_data": [52.0, 63.0],
+                                        "lo_data": [48.0, 58.0],
+                                    },
+                                },
+                            ],
+                        },
+                    ],
+                }
+            ],
+            "observations": [{"name": "SR", "data": [55.0, 70.0]}],
+            "measurements": [
+                {"name": "meas", "config": {"poi": "mu", "parameters": []}}
+            ],
+            "version": "1.0.0",
+        }
+        ws = hs3.from_hifa(spec)
+        return ws.model(ws.analyses["meas"], progress=False)
+
+    def test_log_prob_graph_has_no_tracebacks(self, model):
+        traced = [
+            var for var in ancestors([model.log_prob]) if getattr(var.tag, "trace", [])
+        ]
+        assert traced == []
+
+    def test_shared_code4_constants_have_no_tracebacks(self):
+        # Cached for the whole process, so they must be traceback-free even
+        # when first built outside a Model.
+        _code4_coefficient_tensor.cache_clear()
+        _code4_exponent_tensor.cache_clear()
+        shared = [
+            _code4_coefficient_tensor(1.0, "float64"),
+            _code4_exponent_tensor("float64", 1),
+        ]
+        traced = [var for var in ancestors(shared) if getattr(var.tag, "trace", [])]
+        assert traced == []

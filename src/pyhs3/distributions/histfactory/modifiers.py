@@ -15,6 +15,7 @@ from pydantic import (
     RootModel,
     model_validator,
 )
+from pytensor.configdefaults import config
 
 from pyhs3.context import Context
 from pyhs3.distributions.basic import GaussianDist, LogNormalDist, PoissonDist
@@ -322,12 +323,15 @@ class NormSysModifier(SingleParamConstraint, ParameterModifier):
 
     def model_post_init(self, __context: Any, /) -> None:
         """Initialize computed collections after Pydantic validation."""
-        self._nominal_factor = pt.constant(1.0)
-        # PyTensor infers float32 for a float that float32 represents exactly
-        # (0.5, 1.5); the interpolation coefficients are built from these
-        # constants alone, so they must be float64 to keep float64 precision.
-        self._hi_factor_tensor = pt.constant(self.data.hi, dtype="float64")
-        self._lo_factor_tensor = pt.constant(self.data.lo, dtype="float64")
+        # Built without creation tracebacks, like the rest of the model's
+        # graph (see pyhs3.model.Model.__init__).
+        with config.change_flags(traceback__limit=0):
+            self._nominal_factor = pt.constant(1.0)
+            # PyTensor infers float32 for a float that float32 represents exactly
+            # (0.5, 1.5); the interpolation coefficients are built from these
+            # constants alone, so they must be float64 to keep float64 precision.
+            self._hi_factor_tensor = pt.constant(self.data.hi, dtype="float64")
+            self._lo_factor_tensor = pt.constant(self.data.lo, dtype="float64")
 
     @property
     def auxdata(self) -> float:

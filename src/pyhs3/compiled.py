@@ -44,7 +44,7 @@ except ImportError:  # pragma: no cover - exercised by the non-JAX CI variants
 
 log = logging.getLogger(__name__)
 
-Bounds = tuple[float | None, float | None]
+Bounds = tuple[float, float]
 Backend = Literal["c", "jax"]
 EvalFn = Callable[[npt.NDArray[np.float64]], list[npt.NDArray[np.float64]]]
 
@@ -200,7 +200,8 @@ class CompiledNLL:
             parameter_names: Names of the ``P`` free parameters, in vector
                 order.
             initial: Starting value per parameter.
-            bounds: ``(lower, upper)`` per parameter; ``None`` if unbounded.
+            bounds: ``(lower, upper)`` per parameter; ``-inf``/``inf`` for an
+                open side.
             dtype: Dtype of the parameter vector expected by ``fn``.
             has_gradient: Whether ``fn`` also returns the gradient.
             from_cache: Whether ``fn`` was loaded from the on-disk cache.
@@ -213,7 +214,8 @@ class CompiledNLL:
         self._dtype = dtype
         #: Starting point from the model's parameter set, shape ``(P,)``.
         self.initial: npt.NDArray[np.float64] = np.asarray(initial, dtype=dtype)
-        #: ``(lower, upper)`` per parameter from the domain; ``None`` if unbounded.
+        #: ``(lower, upper)`` per parameter from the domain; ``-inf``/``inf`` for
+        #: an open side or a parameter outside the domain.
         self.bounds: list[Bounds] = list(bounds)
         self.has_gradient = has_gradient
         #: Whether the compiled function was loaded from the on-disk cache.

@@ -91,8 +91,8 @@
       "reason": "The likelihood cannot be built without the HS3 integral function."
     },
     "rf309_ndimplot::twice_delta_nll_scan": {
-      "category": "numerical_mismatch",
-      "reason": "The multidimensional likelihood evaluates but disagrees with the frozen RooFit reference values."
+      "category": "evaluation_error",
+      "reason": "Building the model raises NotImplementedError: the Gaussian mean depends on y through fy(y), so the PDF needs normalization over both x and y, and pyhs3 does not support multi-dimensional normalization (issue #214)."
     },
     "rf703_effpdfprod::structure_import": {
       "category": "unsupported_distribution",

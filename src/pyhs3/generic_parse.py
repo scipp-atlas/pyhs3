@@ -5,6 +5,7 @@ import logging
 import re
 from collections.abc import Callable
 from functools import lru_cache, reduce
+from itertools import pairwise
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -150,8 +151,7 @@ def _rewrite_ternary(text: str) -> str:
     commas = [i for i, char in _top_level(text) if char == ","]
     bounds = [-1, *commas, len(text)]
     return ",".join(
-        _rewrite_conditional(text[start + 1 : stop])
-        for start, stop in zip(bounds, bounds[1:])
+        _rewrite_conditional(text[start + 1 : stop]) for start, stop in pairwise(bounds)
     )
 
 
@@ -190,10 +190,11 @@ class _SympyBuilder:
     """Build a SymPy expression from a Python AST, accepting only HS3 grammar."""
 
     def build(self, node: ast.AST) -> sp.Basic:
-        method = getattr(self, f"_build_{type(node).__name__}", None)
-        if method is None:
+        try:
+            method = getattr(self, f"_build_{type(node).__name__}")
+        except AttributeError as exc:
             msg = f"unsupported syntax '{type(node).__name__}'"
-            raise ValueError(msg)
+            raise ValueError(msg) from exc
         return cast(sp.Basic, method(node))
 
     def _build_Expression(self, node: ast.Expression) -> sp.Basic:
@@ -201,9 +202,9 @@ class _SympyBuilder:
 
     def _build_Constant(self, node: ast.Constant) -> sp.Basic:
         # bool is a subclass of int, but TRUE/FALSE are the only boolean literals
-        if type(node.value) is int:
+        if isinstance(node.value, int) and not isinstance(node.value, bool):
             return sp.Integer(node.value)
-        if type(node.value) is float:
+        if isinstance(node.value, float):
             return sp.Float(node.value)
         msg = f"unsupported literal {node.value!r}"
         raise ValueError(msg)
@@ -247,7 +248,7 @@ class _SympyBuilder:
     def _build_Compare(self, node: ast.Compare) -> sp.Basic:
         operands = [self.build(node.left), *map(self.build, node.comparators)]
         pairs = []
-        for op, left, right in zip(node.ops, operands, operands[1:]):
+        for op, (left, right) in zip(node.ops, pairwise(operands), strict=True):
             if type(op) not in _COMPARISONS:
                 msg = f"unsupported comparison '{type(op).__name__}'"
                 raise ValueError(msg)
@@ -422,7 +423,7 @@ def sympy_to_pytensor(
     """
     try:
         # Bind each symbol to the caller's variable by name
-        symbols = {var.name: var for var in variables}
+        symbols = {var.name: var for var in variables if var.name is not None}
 
         # Log the expression for debugging
         analyze_sympy_expr(sympy_expr)

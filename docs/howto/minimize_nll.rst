@@ -8,7 +8,8 @@ You have an analysis in a workspace and want the best-fit parameters, using a
 minimizer such as ``scipy.optimize.minimize`` or iminuit.
 :meth:`~pyhs3.Model.compile_nll` compiles the negative log-likelihood and its
 gradient once, as a function of a single vector of the free parameters, with
-the observed data and every ``const`` parameter baked in.
+every ``const`` parameter baked in and, unless you ask otherwise (see
+`Fit other datasets without recompiling`_), the observed data too.
 
 The workspace below has one unbinned Gaussian with a free mean ``mu`` and
 width ``sigma``:
@@ -144,6 +145,61 @@ vector, so each point still costs one evaluation:
     minuit.errordef = Minuit.LIKELIHOOD
     minuit.migrad()
     best_fit = dict(zip(minuit.parameters, minuit.values))
+
+Fit other datasets without recompiling
+--------------------------------------
+
+To fit toys or an Asimov dataset, pass ``data_inputs=True``. The binned
+observed counts of each HistFactory channel then become inputs of the compiled
+function: ``value``, ``grad`` and ``value_and_grad`` take a ``data`` mapping
+with the same keys and shapes as ``model.observed_data``, one ``(B,)`` array
+per channel for a channel of ``B`` bins, keyed by channel name. Without
+``data``, they use the model's observed data. Unbinned data and the
+constraint centres (auxiliary data) stay baked in.
+
+.. doctest:: minimize-nll-data
+
+    >>> import numpy as np
+    >>> import pyhs3
+    >>> from scipy.optimize import minimize
+    >>> ws = pyhs3.from_hifa(
+    ...     {
+    ...         "channels": [
+    ...             {
+    ...                 "name": "SR",
+    ...                 "samples": [
+    ...                     {
+    ...                         "name": "signal",
+    ...                         "data": [5.0, 10.0],
+    ...                         "modifiers": [
+    ...                             {"name": "mu", "type": "normfactor", "data": None}
+    ...                         ],
+    ...                     },
+    ...                     {"name": "background", "data": [50.0, 60.0], "modifiers": []},
+    ...                 ],
+    ...             }
+    ...         ],
+    ...         "observations": [{"name": "SR", "data": [52.0, 75.0]}],
+    ...         "measurements": [{"name": "meas", "config": {"poi": "mu", "parameters": []}}],
+    ...         "version": "1.0.0",
+    ...     }
+    ... )
+    >>> model = ws.model(ws.analyses["meas"], progress=False)
+    >>> model.observed_data  # shape (2,): one count per bin of SR
+    {'model_SR': array([52., 75.])}
+    >>> nll = model.compile_nll(data_inputs=True)
+    >>> asimov = {"model_SR": np.array([60.0, 80.0])}  # expected counts at mu = 2
+    >>> result = minimize(
+    ...     nll.value_and_grad, nll.initial, args=(asimov,), jac=True, bounds=nll.bounds
+    ... )
+    >>> round(float(result.x[0]), 3)
+    2.0
+
+A wrong channel name raises ``KeyError`` and an array of the wrong shape raises
+``ValueError``. With ``backend="jax", batched=True``, every row of the batch
+uses the same ``data``. Leave ``data_inputs`` off when you fit only the
+observed data: the compiled function then folds data-dependent terms such as
+``log(n!)`` into constants once, instead of computing them on every call.
 
 Reuse the compiled function across sessions
 -------------------------------------------

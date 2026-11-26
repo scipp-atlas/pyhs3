@@ -13,6 +13,7 @@ import numpy as np
 import pyhf.interpolators
 import pytensor.tensor as pt
 import pytest
+from numpy.polynomial import Polynomial
 from pytensor import function
 from pytensor.graph.traversal import io_toposort
 from pytensor.tensor.elemwise import Elemwise
@@ -22,6 +23,7 @@ from pytensor.tensor.rewriting.elemwise import (
 
 from pyhs3.distributions.histfactory.interpolations import (
     InterpolationError,
+    _code4_coefficient_matrix,
     _code4_coefficient_tensor,
     _code4_exponent_tensor,
     apply_interpolation,
@@ -65,8 +67,8 @@ class TestCode4ConstantCaching:
         assert _code4_exponent_tensor("float32", 0) is not exponents
         assert _code4_exponent_tensor("float64", 1) is not exponents
 
-        assert exponents.type.shape == (6,)
-        assert _code4_exponent_tensor("float64", 1).type.shape == (6, 1)
+        assert exponents.type.shape == (5,)
+        assert _code4_exponent_tensor("float64", 1).type.shape == (5, 1)
 
 
 class TestInterpolationFunctions:
@@ -1348,3 +1350,109 @@ class TestCode2BoundaryContinuity:
         )
 
         np.testing.assert_array_equal(code2_vals, parabolic_vals)
+
+
+_ALL_INTERPOLATIONS = [
+    interpolate_lin,
+    interpolate_log,
+    interpolate_exp,
+    interpolate_code0,
+    interpolate_code1,
+    interpolate_code2,
+    interpolate_code4,
+    interpolate_code4p,
+    interpolate_parabolic,
+    interpolate_poly6,
+]
+
+
+def _second_derivative(fn, alpha):
+    """Elementwise d2f/dalpha2 of ``fn`` at the templates below.
+
+    Every interpolation is elementwise in alpha, so the Hessian of the summed
+    output is diagonal and ``grad(sum(grad(sum(f))))`` is that diagonal, with
+    alpha's shape.
+    """
+    nom = pt.constant(np.asarray([100.0, 2.0, 4.0]))  # (3,)
+    hi = pt.constant(np.asarray([120.0, 2.6, 5.5]))  # (3,)
+    lo = pt.constant(np.asarray([80.0, 1.4, 2.7]))  # (3,)
+    result = fn(alpha, nom, hi, lo)
+    first = pt.grad(result.sum(), alpha)
+    return pt.grad(first.sum(), alpha)
+
+
+class TestSecondDerivativeAtZero:
+    """The second derivative in alpha is finite at alpha = 0.
+
+    alpha = 0 is the nominal starting point of every fit and the minimum of an
+    Asimov fit, where minimizers and uncertainty estimates evaluate the Hessian.
+    """
+
+    @pytest.mark.parametrize("fn", _ALL_INTERPOLATIONS, ids=lambda fn: fn.__name__)
+    def test_scalar_alpha(self, fn):
+        alpha = pt.dscalar("alpha")
+        second = function([alpha], _second_derivative(fn, alpha))(0.0)
+        assert np.isfinite(second)
+
+    @pytest.mark.parametrize("fn", _ALL_INTERPOLATIONS, ids=lambda fn: fn.__name__)
+    def test_vector_alpha(self, fn):
+        # alpha (3,) pairs elementwise with the (3,) templates.
+        alpha = pt.dvector("alpha")
+        second = function([alpha], _second_derivative(fn, alpha))(
+            np.asarray([0.0, 0.5, -0.3])
+        )
+        assert second.shape == (3,)
+        assert np.all(np.isfinite(second))
+
+    @pytest.mark.parametrize("fn", _ALL_INTERPOLATIONS, ids=lambda fn: fn.__name__)
+    def test_matrix_alpha(self, fn):
+        # alpha (2, 1) broadcasts against the (3,) templates to (2, 3); the
+        # gradient sums over the broadcast axis back to alpha's (2, 1).
+        alpha = pt.tensor("alpha", shape=(None, 1), dtype="float64")
+        second = function([alpha], _second_derivative(fn, alpha))(
+            np.asarray([[0.0], [0.4]])
+        )
+        assert second.shape == (2, 1)
+        assert np.all(np.isfinite(second))
+
+
+class TestCode4DerivativesMatchPolynomial:
+    """Code4's value and first two derivatives match the closed-form polynomial.
+
+    Inside |alpha| < 1 the code4 factor is ``1 + sum_i a_i alpha**i``, whose
+    coefficients follow from the boundary conditions in numpy.
+    """
+
+    @staticmethod
+    def _coefficients(nom, hi, lo):
+        hi_ratio, lo_ratio = hi / nom, lo / nom
+        log_hi, log_lo = np.log(hi_ratio), np.log(lo_ratio)
+        b = np.asarray(
+            [
+                hi_ratio - 1.0,
+                lo_ratio - 1.0,
+                log_hi * hi_ratio,
+                -log_lo * lo_ratio,
+                log_hi**2 * hi_ratio,
+                log_lo**2 * lo_ratio,
+            ]
+        )
+        return _code4_coefficient_matrix(1.0) @ b  # (6,): a_1 .. a_6
+
+    @pytest.mark.parametrize("alpha_value", [-0.9, -0.35, 0.0, 1e-3, 0.35, 0.9])
+    def test_value_first_and_second_derivative(self, alpha_value):
+        nom_value, hi_value, lo_value = 100.0, 120.0, 80.0
+        factor = Polynomial([1.0, *self._coefficients(nom_value, hi_value, lo_value)])
+        expected = [nom_value * factor.deriv(order)(alpha_value) for order in range(3)]
+
+        alpha = pt.dscalar("alpha")
+        nom, hi, lo = (
+            pt.constant(value, dtype="float64")
+            for value in (nom_value, hi_value, lo_value)
+        )
+        result = interpolate_code4(alpha, nom, hi, lo)
+        first = pt.grad(result, alpha)
+        second = pt.grad(first, alpha)
+        actual = function([alpha], [result, first, second])(alpha_value)
+
+        np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)

@@ -146,6 +146,40 @@ vector, so each point still costs one evaluation:
     minuit.migrad()
     best_fit = dict(zip(minuit.parameters, minuit.values))
 
+Hold parameters fixed
+---------------------
+
+For a fit with the parameter of interest held at a value, or a profile
+likelihood scan, pass ``fixed`` with the values to hold. Each fixed parameter
+is baked into the compiled function like a ``const`` parameter, without
+rebuilding the model, and drops out of ``nll.parameter_names``,
+``nll.initial`` and ``nll.bounds``. A fixed parameter of interest also drops
+out of ``nll.parameters_of_interest``. The scan below profiles ``sigma`` at
+three values of ``mu``:
+
+.. doctest:: minimize-nll
+
+    >>> from scipy.optimize import minimize
+    >>> profile = {}
+    >>> for mu in (1.0, 2.0, 3.0):
+    ...     fixed_nll = model.compile_nll(fixed={"mu": mu})
+    ...     result = minimize(
+    ...         fixed_nll.value_and_grad,
+    ...         fixed_nll.initial,
+    ...         jac=True,
+    ...         bounds=fixed_nll.bounds,
+    ...         method="L-BFGS-B",
+    ...     )
+    ...     profile[mu] = round(float(result.fun), 3)
+    ...
+    >>> fixed_nll.parameter_names, fixed_nll.parameters_of_interest
+    (('sigma',), ())
+    >>> profile
+    {1.0: 10.803, 2.0: 8.831, 3.0: 10.708}
+
+Each value compiles the likelihood anew. A name that is ``const`` or not a free
+parameter of the likelihood raises ``ValueError``.
+
 Fit other datasets without recompiling
 --------------------------------------
 

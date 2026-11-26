@@ -334,6 +334,7 @@ class Model:
         cache: bool | str | os.PathLike[str] | None = None,
         batched: bool = False,
         data_inputs: bool = False,
+        fixed: Mapping[str, float] | None = None,
     ) -> CompiledNLL:
         """Compile the negative log-likelihood for a minimizer.
 
@@ -407,6 +408,18 @@ class Model:
                 constraint centres (auxiliary data).  Off by default, since
                 data-dependent terms such as ``log(n!)`` are then computed on
                 each call instead of folded once at compile time.
+            fixed: Free parameters to hold at the given values, keyed by
+                name, e.g. ``{"mu": 0.0}`` for a fixed-POI or profile fit.
+                Each is baked into the compiled function like a ``const``
+                parameter, without rebuilding the model, and left out of
+                :attr:`~pyhs3.compiled.CompiledNLL.parameter_names`, the
+                starting point and the bounds.  A fixed parameter of interest
+                is left out of
+                :attr:`~pyhs3.compiled.CompiledNLL.parameters_of_interest`
+                and :attr:`~pyhs3.compiled.CompiledNLL.poi_indices`, as a
+                ``const`` one is.  A value outside the parameter's domain
+                warns, as for ``const``.  Each distinct set of values
+                compiles anew.
 
         Returns:
             CompiledNLL: The compiled likelihood.
@@ -421,7 +434,9 @@ class Model:
                 ``mode=``, for ``fuse``/``mode`` with ``backend="jax"``, and
                 for ``batched=True`` without ``backend="jax"``, and for
                 ``data_inputs=True`` when the likelihood has no binned
-                HistFactory channel.
+                HistFactory channel.  Also if ``fixed`` names a ``const``
+                parameter, or a name that is not a free parameter of the
+                likelihood.
             ImportError: If ``backend="jax"`` and JAX is not installed.
         """
         if mode is None and backend == "c" and not fuse and self.mode != _DEFAULT_MODE:
@@ -429,6 +444,13 @@ class Model:
         log_prob = self.log_prob
         data = self.data
         start = self.context.values
+        fixed = dict(fixed or {})
+        if already_const := sorted(set(fixed) & self.context.const):
+            msg = (
+                f"Cannot fix parameter(s) {', '.join(already_const)}: they are "
+                "const, so already baked in at their parameter-set values."
+            )
+            raise ValueError(msg)
         free: list[TensorVar] = []
         baked: dict[TensorVar, npt.NDArray[np.float64]] = {}
         names: list[str] = []
@@ -440,16 +462,27 @@ class Model:
         for var in inputs:
             if var.name in data:
                 baked[var] = data[var.name]
-            elif var.ndim == 0:
-                free.append(var)
-                names.append(cast(str, var.name))
-            else:
+            elif var.ndim != 0:
                 msg = (
                     f"Free parameter '{var.name}' is batched (ndim={var.ndim}); "
                     "compile_nll needs scalar free parameters, one entry each "
                     "in the parameter vector."
                 )
                 raise ValueError(msg)
+            elif var.name in fixed:
+                value = np.float64(fixed[var.name])
+                self._warn_outside_domain(var.name, value, "is fixed at")
+                baked[var] = np.asarray(value)
+            else:
+                free.append(var)
+                names.append(cast(str, var.name))
+        parameters = {var.name for var in inputs if var.name not in data}
+        if unknown := sorted(set(fixed) - parameters):
+            msg = (
+                f"Cannot fix {', '.join(unknown)}: not free parameters of this "
+                "likelihood."
+            )
+            raise ValueError(msg)
         if missing := sorted(set(names) - start.keys()):
             msg = (
                 f"No starting value for free parameter(s): {', '.join(missing)}. "
@@ -715,16 +748,7 @@ class Model:
             # Bake as a compile-time constant so it is invisible to
             # explicit_graph_inputs and JAX transpilation.
             val = np.float64(param_point.value)
-            lower, upper = self.context.domain.get(node_name, (None, None))
-            if (lower is not None and val < lower) or (
-                upper is not None and val > upper
-            ):
-                warnings.warn(
-                    f"Parameter '{node_name}' has const=True with value"
-                    f" {val} outside domain [{lower}, {upper}];"
-                    f" using the specified value as-is.",
-                    stacklevel=2,
-                )
+            self._warn_outside_domain(node_name, val, "has const=True with value")
             return pt.constant(val, name=node_name)
 
         is_observable = (
@@ -762,6 +786,22 @@ class Model:
             self._views[node_name] = view
 
         return tensor
+
+    def _warn_outside_domain(self, name: str, value: float, held: str) -> None:
+        """Warn if a parameter baked in at ``value`` lies outside its domain.
+
+        ``held`` says how it is baked in, e.g. ``"has const=True with value"``.
+        """
+        lower, upper = self.context.domain.get(name, (None, None))
+        if (lower is not None and value < lower) or (
+            upper is not None and value > upper
+        ):
+            warnings.warn(
+                f"Parameter '{name}' {held}"
+                f" {value} outside domain [{lower}, {upper}];"
+                f" using the specified value as-is.",
+                stacklevel=3,
+            )
 
     def _build_constant_node(
         self, node_name: str, constants_map: dict[str, TensorVar]

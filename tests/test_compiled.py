@@ -438,3 +438,89 @@ class TestCompiledNLLParametersOfInterest:
 
         assert nll.parameters_of_interest == ("mu",)
         assert nll.poi_indices == (1,)
+
+
+def _const_model(**const: float):
+    """The _workspace model with each named parameter const at the given value."""
+    ws = _workspace()
+    for name, value in const.items():
+        ws.parameter_points["init"][name].value = value
+        ws.parameter_points["init"][name].const = True
+    return ws.model(ws.analyses["A"], progress=False)
+
+
+class TestCompiledNLLFixed:
+    def test_matches_a_model_with_the_parameter_const(self, model):
+        nll = model.compile_nll(fixed={"mu": 0.5})
+        reference = _const_model(mu=0.5).compile_nll()
+
+        assert nll.parameter_names == reference.parameter_names == ("sigma",)
+        for sigma in (0.7, 1.4, 3.0):
+            x = np.array([sigma])
+            value, grad = nll.value_and_grad(x)
+            assert value == pytest.approx(reference.value(x), rel=1e-12)
+            np.testing.assert_allclose(grad, reference.grad(x), rtol=1e-10)
+            assert value == pytest.approx(_reference_nll(0.5, sigma), rel=1e-8)
+
+    def test_initial_and_bounds_drop_the_fixed_parameter(self, model):
+        nll = model.compile_nll(fixed={"sigma": 1.5})
+
+        assert nll.parameter_names == ("mu",)
+        assert nll.initial.tolist() == [1.0]
+        assert nll.bounds == [(-5.0, 5.0)]
+
+    def test_every_parameter_fixed(self, model):
+        nll = model.compile_nll(fixed={"mu": 0.3, "sigma": 1.2})
+
+        value, grad = nll.value_and_grad(np.array([]))
+
+        assert nll.parameter_names == ()
+        assert value == pytest.approx(_reference_nll(0.3, 1.2), rel=1e-8)
+        assert grad.shape == (0,)
+
+    def test_fixed_parameter_of_interest_is_not_listed(self):
+        """Like a const one, a fixed POI is baked into the function, so it has no index."""
+        nll = _poi_model(["mu"]).compile_nll(fixed={"mu": 0.0})
+
+        assert nll.parameters_of_interest == ()
+        assert nll.poi_indices == ()
+
+    def test_the_model_is_unchanged(self, model):
+        model.compile_nll(fixed={"mu": 0.5})
+        assert set(model.compile_nll().parameter_names) == {"mu", "sigma"}
+
+    def test_value_outside_the_domain_warns(self, model):
+        with pytest.warns(UserWarning, match="outside domain"):
+            model.compile_nll(fixed={"mu": 7.0})
+
+    def test_unknown_name_is_rejected(self, model):
+        with pytest.raises(ValueError, match="nope"):
+            model.compile_nll(fixed={"nope": 1.0})
+
+    def test_observable_is_rejected(self, model):
+        with pytest.raises(ValueError, match="x_obs"):
+            model.compile_nll(fixed={"x_obs": 1.0})
+
+    def test_const_parameter_is_rejected(self):
+        model = _const_model(sigma=2.0)
+        with pytest.raises(ValueError, match=r"sigma.*const"):
+            model.compile_nll(fixed={"sigma": 1.0})
+
+    def test_profile_likelihood_with_scipy(self, model):
+        """Profiling sigma at fixed mu gives the closed-form conditional MLE."""
+        for mu in (0.5, 1.5, 2.5):
+            nll = model.compile_nll(fixed={"mu": mu})
+
+            result = minimize(
+                nll.value_and_grad,
+                nll.initial,
+                jac=True,
+                bounds=nll.bounds,
+                method="L-BFGS-B",
+            )
+
+            assert result.success
+            # The data sit far inside [-10, 10], so the truncated-Gaussian
+            # conditional MLE of sigma is the RMS deviation from mu.
+            expected = np.sqrt(np.mean((np.asarray(_EVENTS) - mu) ** 2))
+            assert nll.to_dict(result.x)["sigma"] == pytest.approx(expected, abs=1e-4)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import warnings
 from pathlib import Path
@@ -2177,3 +2178,45 @@ class TestGraphCreationTracebacks:
         ]
         traced = [var for var in ancestors(shared) if getattr(var.tag, "trace", [])]
         assert traced == []
+
+
+def test_compile_many_constraints_without_rewrite_failures(caplog):
+    """Compiling a model with more than 32 constraint terms logs no rewrite failure.
+
+    PyTensor folds the constant part of each Gaussian constraint into one
+    Add with an input per constraint; before PyTensor 3.1.3 constant folding
+    of an Elemwise with more than 32 operands failed and logged an error.
+    """
+    background_modifiers = [
+        {"name": f"np_{i}", "type": "normsys", "data": {"hi": 1.1, "lo": 0.9}}
+        for i in range(40)
+    ]
+    spec = {
+        "channels": [
+            {
+                "name": "SR",
+                "samples": [
+                    {
+                        "name": "signal",
+                        "data": [5.0, 10.0],
+                        "modifiers": [
+                            {"name": "mu", "type": "normfactor", "data": None}
+                        ],
+                    },
+                    {
+                        "name": "background",
+                        "data": [50.0, 60.0],
+                        "modifiers": background_modifiers,
+                    },
+                ],
+            }
+        ],
+        "observations": [{"name": "SR", "data": [55.0, 70.0]}],
+        "measurements": [{"name": "meas", "config": {"poi": "mu", "parameters": []}}],
+        "version": "1.0.0",
+    }
+    ws = hs3.from_hifa(spec)
+    model = ws.model(ws.analyses["meas"], progress=False)
+    with caplog.at_level(logging.ERROR, logger="pytensor.graph.rewriting.basic"):
+        model.compile_nll(gradient=False)
+    assert "Rewrite failure" not in caplog.text

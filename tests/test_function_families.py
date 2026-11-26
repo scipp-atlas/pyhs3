@@ -10,7 +10,7 @@ import pytensor
 import pytensor.tensor as pt
 import pytest
 from pytensor.graph.traversal import io_toposort
-from pytensor.tensor.subtensor import AdvancedIncSubtensor1, IncSubtensor
+from pytensor.tensor.subtensor import AdvancedIncSubtensor, IncSubtensor
 
 from pyhs3.compiled import default_nll_mode
 from pyhs3.distributions import Distributions
@@ -334,7 +334,7 @@ class TestBatchedInterpolationGraph:
 
         def scatters(n_functions):
             ops = [type(node.op) for node in self._gradient_ops(n_functions)]
-            return ops.count(IncSubtensor) + ops.count(AdvancedIncSubtensor1)
+            return ops.count(IncSubtensor) + ops.count(AdvancedIncSubtensor)
 
         assert scatters(20) == scatters(5)
         assert scatters(5) <= 4

@@ -261,6 +261,37 @@ uses the same ``data``. Leave ``data_inputs`` off when you fit only the
 observed data: the compiled function then folds data-dependent terms such as
 ``log(n!)`` into constants once, instead of computing them on every call.
 
+Fit toy datasets
+----------------
+
+For toys, call ``model.sample_data`` with the number of toys, a seeded
+``numpy.random.Generator`` and the parameter values to draw around. It returns
+one ``(n, B)`` array of Poisson counts per HistFactory channel, keyed like
+``model.observed_data``. Row ``i`` of every channel together is one toy, which
+you pass as ``data`` to the likelihood compiled above:
+
+.. doctest:: minimize-nll-data
+
+    >>> toys = model.sample_data(3, rng=np.random.default_rng(0), mu=1.0)
+    >>> toys["model_SR"].shape  # (n, B): 3 toys of 2 bins
+    (3, 2)
+    >>> fits = []
+    >>> for i in range(3):
+    ...     toy = {name: counts[i] for name, counts in toys.items()}
+    ...     result = minimize(
+    ...         nll.value_and_grad, nll.initial, args=(toy,), jac=True, bounds=nll.bounds
+    ...     )
+    ...     fits.append(round(float(result.x[0]), 2))
+    ...
+    >>> fits
+    [0.0, 1.17, 2.15]
+
+The toys randomize only the main measurement. The auxiliary data (the
+centres of the constraint terms) stay at their observed values, so the toys are
+conditional on them. pyhf's ``sample`` also draws the auxiliary data; a test
+statistic distribution built from these toys leaves out the fluctuations of
+the auxiliary measurements.
+
 Reuse the compiled function across sessions
 -------------------------------------------
 

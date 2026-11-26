@@ -682,6 +682,13 @@ class TestHS3GenericExpressionGrammar:
             pytest.param("PI", {}, np.pi, id="PI"),
             pytest.param("EULER", {}, np.e, id="EULER"),
             pytest.param("PI*x", {"x": 3.0}, 3 * np.pi, id="PI-times-x"),
+            # issue #425: a constant inside a function call
+            pytest.param(
+                "exp(-x^2/2)/sqrt(2*PI)",
+                {"x": 0.5},
+                np.exp(-0.125) / np.sqrt(2 * np.pi),
+                id="gaussian-normalization",
+            ),
             pytest.param("TRUE", {}, True, id="TRUE"),
             pytest.param("FALSE", {}, False, id="FALSE"),
             # arithmetic

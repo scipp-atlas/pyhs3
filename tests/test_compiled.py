@@ -632,6 +632,27 @@ class TestCompiledNLLHessian:
             nll.hessian(y), _reference_hessian(nll, 0.2, 1.2), rtol=1e-7
         )
 
+    def test_repeated_point_reuses_the_result(self, model):
+        """A second call at the same point returns the cached matrix as a copy."""
+        nll = model.compile_nll()
+        x = nll.to_vector({"mu": 0.7, "sigma": 1.4})
+        first = nll.hessian(x)
+
+        calls = []
+        evaluate = nll._hessian_fn
+
+        def counting(*args):
+            calls.append(args)
+            return evaluate(*args)
+
+        nll._hessian_fn = counting
+        first[0, 0] = np.nan  # the caller's copy, not the cache
+        second = nll.hessian(x)
+
+        assert calls == []
+        assert np.isfinite(second).all()
+        np.testing.assert_allclose(second, _reference_hessian(nll, 0.7, 1.4), rtol=1e-7)
+
     def test_no_free_parameters(self):
         ws = _workspace()
         for name in ("mu", "sigma"):

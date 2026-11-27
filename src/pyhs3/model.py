@@ -425,6 +425,7 @@ class Model:
         cache: bool | str | os.PathLike[str] | None = None,
         batched: bool = False,
         data_inputs: bool = False,
+        auxdata_inputs: bool = False,
         fixed: Mapping[str, float] | None = None,
     ) -> CompiledNLL:
         """Compile the negative log-likelihood for a minimizer.
@@ -433,9 +434,10 @@ class Model:
         and, by default, its gradient, compiled once as a function of a single
         1-D vector of the free parameters (ordered as
         :attr:`~pyhs3.compiled.CompiledNLL.parameter_names`).  Every
-        ``const`` parameter, and unless ``data_inputs=True`` the observed
-        data, are baked into the compiled function, so each call passes only
-        the free parameters.  The result
+        ``const`` parameter, the observed data unless ``data_inputs=True``,
+        and the auxiliary data unless ``auxdata_inputs=True``, are baked
+        into the compiled function, so each call passes only the free
+        parameters.  The result
         also carries the starting point (:attr:`free_params`), the domain
         bounds of each parameter, ready for SciPy or iminuit, and the
         positions of the analysis parameters of interest
@@ -497,10 +499,25 @@ class Model:
                 ``value``, ``grad`` and ``value_and_grad`` then take a
                 ``data`` mapping keyed and shaped like :attr:`observed_data`,
                 which is the default.  The data of channels that are not
-                HistFactory channels (unbinned data) stay baked in, as do the
-                constraint centres (auxiliary data).  Off by default, since
+                HistFactory channels (unbinned data) stay baked in, and so
+                do the constraint centres (auxiliary data) unless
+                ``auxdata_inputs=True``.  Off by default, since
                 data-dependent terms such as ``log(n!)`` are then computed on
                 each call instead of folded once at compile time.
+            auxdata_inputs: Make the global observables of the constraint
+                terms (:attr:`auxiliary_data`) inputs of the compiled
+                function instead of constants, so that one compiled
+                likelihood evaluates on toys that randomize them: the
+                ``data`` mapping then also takes them, keyed and shaped like
+                :attr:`auxiliary_data`, which is the default.  With
+                ``data_inputs=True`` as well, one mapping holds the observed
+                counts and the auxiliary data, as
+                ``sample_data(include_auxdata=True)`` returns them.  Constraint
+                terms with no entry in :attr:`auxiliary_data` stay baked in.
+                A separate flag from ``data_inputs``, so that a likelihood
+                compiled for swapped counts alone keeps folding its constraint
+                terms at compile time, and its ``data`` keeps one key per
+                channel.
             fixed: Free parameters to hold at the given values, keyed by
                 name, e.g. ``{"mu": 0.0}`` for a fixed-POI or profile fit.
                 Each is baked into the compiled function like a ``const``
@@ -525,9 +542,10 @@ class Model:
                 the parameter vector has one entry per scalar parameter.  Also
                 for an unknown backend, for ``fuse=True`` combined with
                 ``mode=``, for ``fuse``/``mode`` with ``backend="jax"``, and
-                for ``batched=True`` without ``backend="jax"``, and for
+                for ``batched=True`` without ``backend="jax"``, for
                 ``data_inputs=True`` when the likelihood has no binned
-                HistFactory channel.  Also if ``fixed`` names a ``const``
+                HistFactory channel, and for ``auxdata_inputs=True`` when it
+                has no auxiliary data.  Also if ``fixed`` names a ``const``
                 parameter, or a name that is not a free parameter of the
                 likelihood.
             ImportError: If ``backend="jax"`` and JAX is not installed.
@@ -597,6 +615,17 @@ class Model:
                 name: (self._observed_constants[name], counts)
                 for name, counts in self.observed_data.items()
             }
+        if auxdata_inputs:
+            if not self._auxiliary_terms:
+                msg = (
+                    "auxdata_inputs=True swaps the auxiliary data of the "
+                    "constraint terms; this likelihood has none."
+                )
+                raise ValueError(msg)
+            swappable.update(
+                (name, (self._auxiliary_terms[name].observable, values))
+                for name, values in self.auxiliary_data.items()
+            )
         return compile_nll(
             log_prob,
             free,

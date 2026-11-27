@@ -8,6 +8,7 @@ Gaussian of ``from_hifa``.  ``Model.auxiliary_data`` names them.
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 import numpy as np
@@ -15,6 +16,8 @@ import pytest
 from numpy.testing import assert_allclose
 from pytensor.graph.traversal import ancestors
 from pytensor.tensor.variable import TensorConstant
+from scipy.special import gammaln
+from scipy.stats import norm
 
 import pyhs3
 
@@ -492,3 +495,235 @@ def test_product_constraint_factor():
     ws = product_workspace()
     model = ws.model(ws.analyses["A"], progress=False)
     assert model.auxiliary_data == {"mu_constraint": pytest.approx(0.2)}
+
+
+# Swapped auxiliary data of SPEC: every global observable off its observed value.
+SWAPPED_AUXILIARY_DATA = {
+    "constraint_bkg_norm": np.array(0.4),
+    "constraint_bblite_model_SR": np.array([1.1, 0.95]),
+    "constraint_sys_CR": np.array([93.0, 151.0]),
+    "lumi_constraint_meas": np.array(0.99),
+}
+
+# Swapped observed counts of SPEC.
+SWAPPED_COUNTS = {
+    "model_SR": np.array([61.5, 70.0]),
+    "model_CR": np.array([97.0, 83.0, 58.0]),
+}
+
+
+def spec_model_with_lumi_auxdata(auxdata: float) -> pyhs3.Model:
+    """SPEC's model, with lumi's configured auxiliary datum replaced."""
+    spec = copy.deepcopy(SPEC)
+    spec["measurements"][0]["config"]["parameters"][0]["auxdata"] = [auxdata]
+    ws = pyhs3.from_hifa(spec)
+    return ws.model(ws.analyses["meas"], progress=False)
+
+
+def log_poisson(k: np.ndarray, rate: np.ndarray) -> np.ndarray:
+    """Continuous Poisson log-pmf, as the constraint terms evaluate it."""
+    return k * np.log(rate) - rate - gammaln(k + 1.0)
+
+
+def constraint_log_delta(point: dict[str, float]) -> float:
+    """log L(swapped auxiliary data) - log L(observed auxiliary data) of SPEC at ``point``.
+
+    Only the constraint terms depend on the auxiliary data; the per-bin
+    rates use the observed tau (pyhf's convention), not the swapped datum.
+    """
+    swapped, observed = SWAPPED_AUXILIARY_DATA, SPEC_AUXILIARY_DATA
+    alpha, lumi = point["bkg_norm"], point["lumi"]
+    gamma_sr = np.array([point["stat_SR_bin_0"], point["stat_SR_bin_1"]])
+    gamma_cr = np.array([point["sys_CR_bin_0"], point["sys_CR_bin_2"]])
+    sigma_sr = np.array([5.0 / 50.0, 4.0 / 60.0])
+    tau = observed["constraint_sys_CR"]
+    delta = norm.logpdf(swapped["constraint_bkg_norm"], alpha, 1.0) - norm.logpdf(
+        0.0, alpha, 1.0
+    )
+    delta += np.sum(
+        norm.logpdf(swapped["constraint_bblite_model_SR"], gamma_sr, sigma_sr)
+        - norm.logpdf(1.0, gamma_sr, sigma_sr)
+    )
+    delta += np.sum(
+        log_poisson(swapped["constraint_sys_CR"], gamma_cr * tau)
+        - log_poisson(tau, gamma_cr * tau)
+    )
+    delta += norm.logpdf(swapped["lumi_constraint_meas"], lumi, 0.017) - norm.logpdf(
+        1.02, lumi, 0.017
+    )
+    return float(delta)
+
+
+@pytest.fixture(scope="module")
+def model():
+    return spec_model()
+
+
+@pytest.fixture(scope="module")
+def points(model):
+    """Two parameter vectors of the compiled NLL, shape (P,) each."""
+    nll = model.compile_nll()
+    other = nll.initial.copy()
+    other[:] = np.linspace(0.8, 1.3, len(other))
+    return [nll.initial, other]
+
+
+class TestCompiledAuxiliaryData:
+    def test_default_is_the_observed_auxiliary_data(self, model, points):
+        baked = model.compile_nll()
+        swappable = model.compile_nll(auxdata_inputs=True)
+
+        for x in points:
+            value, grad = swappable.value_and_grad(x)
+            assert value == pytest.approx(baked.value(x), rel=1e-12)
+            assert_allclose(grad, baked.grad(x), rtol=1e-10)
+            assert swappable.value(x, data=model.auxiliary_data) == value
+
+    def test_swapped_auxiliary_data_change_only_the_constraints(self, model, points):
+        swappable = model.compile_nll(auxdata_inputs=True)
+
+        for x in points:
+            expected = swappable.value(x) - constraint_log_delta(swappable.to_dict(x))
+            assert swappable.value(x, data=SWAPPED_AUXILIARY_DATA) == pytest.approx(
+                expected, rel=1e-12
+            )
+
+    def test_matches_a_model_built_with_that_lumi_auxdata(self, model, points):
+        swappable = model.compile_nll(auxdata_inputs=True)
+        reference = spec_model_with_lumi_auxdata(0.99).compile_nll()
+        data = {**model.auxiliary_data, "lumi_constraint_meas": np.array(0.99)}
+
+        for x in points:
+            value, grad = swappable.value_and_grad(x, data=data)
+            assert value == pytest.approx(reference.value(x), rel=1e-12)
+            assert_allclose(grad, reference.grad(x), rtol=1e-10)
+            assert_allclose(
+                swappable.hessian(x, data=data), reference.hessian(x), rtol=1e-9
+            )
+
+    def test_with_observed_counts(self, model, points):
+        """With both flags, one data mapping holds the counts and the auxiliary data."""
+        counts_only = model.compile_nll(data_inputs=True)
+        both = model.compile_nll(data_inputs=True, auxdata_inputs=True)
+
+        for x in points:
+            expected = counts_only.value(x, data=SWAPPED_COUNTS) - constraint_log_delta(
+                both.to_dict(x)
+            )
+            value = both.value(x, data={**SWAPPED_COUNTS, **SWAPPED_AUXILIARY_DATA})
+            assert value == pytest.approx(expected, rel=1e-12)
+            assert both.value(x) == pytest.approx(counts_only.value(x), rel=1e-12)
+
+    def test_switching_back_to_the_default(self, model, points):
+        swappable = model.compile_nll(auxdata_inputs=True)
+        x = points[1]
+        default = swappable.value(x)
+        default_hessian = swappable.hessian(x)
+
+        assert swappable.value(x, data=SWAPPED_AUXILIARY_DATA) != pytest.approx(default)
+        assert not np.allclose(
+            swappable.hessian(x, data=SWAPPED_AUXILIARY_DATA), default_hessian
+        )
+        assert swappable.value(x) == default
+        assert_allclose(swappable.hessian(x), default_hessian, rtol=0)
+
+    def test_cache_entry_is_shared_across_auxiliary_data(self, tmp_path, points):
+        """The cached function does not hold the auxiliary data; each model passes its own."""
+        first = spec_model().compile_nll(auxdata_inputs=True, cache=tmp_path)
+        other = spec_model_with_lumi_auxdata(0.99)
+        second = other.compile_nll(auxdata_inputs=True, cache=tmp_path)
+
+        assert (first.from_cache, second.from_cache) == (False, True)
+        x = points[1]
+        assert second.value(x) == pytest.approx(other.compile_nll().value(x), rel=1e-12)
+
+    def test_cache_entries_differ_by_inputs(self, tmp_path):
+        spec_model().compile_nll(auxdata_inputs=True, cache=tmp_path)
+        counts = spec_model().compile_nll(data_inputs=True, cache=tmp_path)
+        both = spec_model().compile_nll(
+            data_inputs=True, auxdata_inputs=True, cache=tmp_path
+        )
+        assert (counts.from_cache, both.from_cache) == (False, False)
+
+
+class TestCompiledAuxiliaryDataErrors:
+    def test_data_needs_the_inputs(self, model, points):
+        nll = model.compile_nll()
+        with pytest.raises(ValueError, match="auxdata_inputs=True"):
+            nll.value(points[0], data=SWAPPED_AUXILIARY_DATA)
+
+    def test_counts_without_data_inputs(self, model, points):
+        nll = model.compile_nll(auxdata_inputs=True)
+        with pytest.raises(KeyError, match="model_SR"):
+            nll.value(points[0], data={**SWAPPED_AUXILIARY_DATA, **SWAPPED_COUNTS})
+
+    def test_missing_auxiliary_datum(self, model, points):
+        nll = model.compile_nll(data_inputs=True, auxdata_inputs=True)
+        data = {**SWAPPED_COUNTS, **SWAPPED_AUXILIARY_DATA}
+        del data["constraint_sys_CR"]
+        with pytest.raises(KeyError, match="constraint_sys_CR"):
+            nll.value(points[0], data=data)
+
+    @pytest.mark.parametrize(
+        ("name", "values", "shape"),
+        [
+            pytest.param(
+                "constraint_sys_CR", np.array([1.0, 2.0, 3.0]), r"\(2,\)", id="bins"
+            ),
+            pytest.param("constraint_bkg_norm", np.array([0.0]), r"\(\)", id="scalar"),
+        ],
+    )
+    def test_wrong_shape(self, model, points, name, values, shape):
+        nll = model.compile_nll(auxdata_inputs=True)
+        with pytest.raises(ValueError, match=rf"{name}.*{shape}"):
+            nll.value(points[0], data={**SWAPPED_AUXILIARY_DATA, name: values})
+
+    def test_no_auxiliary_data(self):
+        spec = copy.deepcopy(SPEC)
+        for channel in spec["channels"]:
+            for sample in channel["samples"]:
+                sample["modifiers"] = [
+                    m for m in sample["modifiers"] if m["type"] == "normfactor"
+                ]
+        spec["measurements"][0]["config"]["parameters"] = []
+        ws = pyhs3.from_hifa(spec)
+        model = ws.model(ws.analyses["meas"], progress=False)
+        with pytest.raises(ValueError, match="auxiliary data"):
+            model.compile_nll(auxdata_inputs=True)
+
+
+def test_cache_key_tells_unnamed_global_observables_apart(tmp_path):
+    """Two literal observables of the same type, keyed the other way round."""
+
+    def two_constraints(first: str, second: str) -> pyhs3.Model:
+        aux = [
+            {
+                "name": first,
+                "type": "gaussian_dist",
+                "x": 0.0,
+                "mean": "alpha",
+                "sigma": 1.0,
+            },
+            {
+                "name": second,
+                "type": "gaussian_dist",
+                "x": 0.0,
+                "mean": "beta",
+                "sigma": 2.0,
+            },
+        ]
+        return hs3_model(
+            [normsys("Gauss")], aux=aux, parameters={"alpha": 0.0, "beta": 0.0}
+        )
+
+    first = two_constraints("c1", "c2")
+    second = two_constraints("c2", "c1")
+    first.compile_nll(auxdata_inputs=True, cache=tmp_path)
+    nll = second.compile_nll(auxdata_inputs=True, cache=tmp_path)
+    reference = second.compile_nll(auxdata_inputs=True)
+
+    data = {**second.auxiliary_data, "c1": np.array(1.5), "c2": np.array(-0.5)}
+    x = nll.initial
+    assert nll.value(x, data=data) == pytest.approx(
+        reference.value(x, data=data), rel=1e-12
+    )

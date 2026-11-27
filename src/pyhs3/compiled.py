@@ -4,7 +4,7 @@ Compiled negative log-likelihood for minimizers.
 :class:`CompiledNLL` is what :meth:`pyhs3.Model.compile_nll` returns: the
 model's negative log-likelihood (and its gradient) compiled once as a function
 of a single vector of free parameters, with every constant parameter baked in
-and the observed data either baked in or passed per call.  Its Hessian is
+and the observed and auxiliary data either baked in or passed per call.  Its Hessian is
 compiled on the first call to :meth:`CompiledNLL.hessian`.
 """
 
@@ -161,9 +161,11 @@ class CompiledNLL:
     ordered as :attr:`parameter_names`; every method takes or returns a 1-D
     ``float`` array of that length.  Constant parameters are baked into the
     compiled function.  The observed data are baked in too, unless the
-    likelihood was compiled with ``data_inputs=True``: then each method takes
-    an optional ``data`` mapping that replaces the binned observed counts for
-    that call (see :meth:`value`).
+    likelihood was compiled with ``data_inputs=True``, and so are the
+    auxiliary data, unless it was compiled with ``auxdata_inputs=True``: then
+    each method takes an optional ``data`` mapping that replaces the binned
+    observed counts, the auxiliary data, or both, for that call (see
+    :meth:`value`).
 
     :meth:`value`, :meth:`grad` and :meth:`value_and_grad` share one cached
     evaluation per parameter vector and data, so a minimizer that asks for
@@ -309,25 +311,28 @@ class CompiledNLL:
             return self._default_data
         if not self._data_names:
             msg = (
-                "This likelihood has its observed data baked in; compile it "
-                "with data_inputs=True to pass data=."
+                "This likelihood has its observed and auxiliary data baked "
+                "in; compile it with data_inputs=True or auxdata_inputs=True "
+                "to pass data=."
             )
             raise ValueError(msg)
         unknown = sorted(set(data) - set(self._data_names))
         if unknown:
-            msg = f"No observed data input for: {unknown}; the inputs are {list(self._data_names)}"
+            msg = (
+                f"No data input for: {unknown}; the inputs are {list(self._data_names)}"
+            )
             raise KeyError(msg)
         missing = [name for name in self._data_names if name not in data]
         if missing:
-            msg = f"Missing observed data for: {missing}"
+            msg = f"Missing data for: {missing}"
             raise KeyError(msg)
         arrays = []
         for name, default in zip(self._data_names, self._default_data, strict=True):
             array = np.asarray(data[name], dtype=np.float64)
             if array.shape != default.shape:
                 msg = (
-                    f"Observed data for '{name}' has shape {array.shape}; "
-                    f"expected {default.shape}, one count per bin."
+                    f"Data for '{name}' has shape {array.shape}; expected "
+                    f"{default.shape}, as for the model's own."
                 )
                 raise ValueError(msg)
             arrays.append(array)
@@ -359,19 +364,21 @@ class CompiledNLL:
         Args:
             x: Parameter vector, shape ``(P,)``, ordered as
                 :attr:`parameter_names`.
-            data: Binned observed counts to evaluate on instead of the
-                model's own (``data_inputs=True`` only), keyed like
-                :attr:`pyhs3.Model.observed_data`: one ``(B,)`` array per
+            data: Data to evaluate on instead of the model's own, with one
+                entry for every data input: with ``data_inputs=True``, the
+                binned observed counts keyed like
+                :attr:`pyhs3.Model.observed_data`, one ``(B,)`` array per
                 HistFactory channel, ``B`` the channel's total number of
-                bins, for every channel.  ``None`` uses the model's observed
-                data.
+                bins; with ``auxdata_inputs=True``, the global observables
+                keyed and shaped like :attr:`pyhs3.Model.auxiliary_data`.
+                ``None`` uses the model's own data.
 
         Raises:
             ValueError: If ``x`` or an array of ``data`` has the wrong shape,
                 or if ``data`` is given to a likelihood compiled without
-                ``data_inputs=True``.
-            KeyError: If ``data`` names a channel without observed data, or
-                misses one.
+                ``data_inputs=True`` or ``auxdata_inputs=True``.
+            KeyError: If ``data`` names something that is not a data input,
+                or misses one.
         """
         return float(self._evaluate(x, data)[0])
 
@@ -437,9 +444,9 @@ class BatchedCompiledNLL(CompiledNLL):
     XLA compiles the function once per batch size, at the first call with
     that ``K``; later calls with the same ``K`` reuse it.
 
-    With ``data_inputs=True``, the ``data`` argument holds one ``(B,)`` array
-    per channel, as for :class:`CompiledNLL`, shared by every row of the
-    batch.
+    With ``data_inputs=True`` or ``auxdata_inputs=True``, the ``data``
+    argument holds one array per data input, as for :class:`CompiledNLL`,
+    shared by every row of the batch.
 
     Example:
         A grid of 9 values of one parameter, the others at their initial
@@ -523,7 +530,7 @@ def compile_nll(
             :attr:`CompiledNLL.poi_indices`; names of variables not in
             ``free`` are left out.  They do not change the compiled function.
         data: Variables of ``log_prob`` (e.g. the constants holding observed
-            bin counts) to replace by per-call inputs, each with its default
+            bin counts or global observables) to replace by per-call inputs, each with its default
             value, keyed by the name the ``data`` argument of
             :meth:`CompiledNLL.value` uses.  The compiled function takes them
             after the parameter vector, in this order.
@@ -570,11 +577,13 @@ def compile_nll(
         for var, value in baked.items()
     )
     # Each data variable is replaced by a fresh variable of its type (and so
-    # of its static shape), an input of the compiled function.
+    # of its static shape), an input of the compiled function.  It is named
+    # after its key, since the variable it replaces may be an unnamed
+    # constant and the JAX transpiler needs unique input names.
     data = data or {}
     data_inputs: list[TensorVar] = []
-    for var, _ in data.values():
-        data_inputs.append(cast(TensorVar, var.type(name=var.name)))
+    for name, (var, _) in data.items():
+        data_inputs.append(cast(TensorVar, var.type(name=f"data[{name}]")))
         givens.append((var, data_inputs[-1]))
     defaults = {name: value for name, (_, value) in data.items()}
     names = [var.name or f"x[{index}]" for index, var in enumerate(free)]
@@ -825,8 +834,8 @@ class _JaxBuilder:
         # The parameter vector x, then the data inputs.
         self._inputs = inputs
         # Batched input is (K, P) with a symbolic batch size, so one exported
-        # module serves every K.  Data inputs have their static (B,) shapes
-        # and are shared by every row of a batch.
+        # module serves every K.  Data inputs have their static shapes, (B,)
+        # or (), and are shared by every row of a batch.
         shape = jax_export.symbolic_shape(f"K, {n_free}") if batched else (n_free,)
         self._specs = [
             jax.ShapeDtypeStruct(shape, np.float64),

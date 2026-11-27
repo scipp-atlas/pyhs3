@@ -5,6 +5,7 @@ import logging
 import os
 import warnings
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -15,7 +16,7 @@ import pytensor.tensor as pt
 from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
-from pytensor.graph.traversal import applys_between, explicit_graph_inputs
+from pytensor.graph.traversal import ancestors, applys_between, explicit_graph_inputs
 from pytensor.tensor.variable import TensorConstant
 from rich.progress import (
     BarColumn,
@@ -31,7 +32,11 @@ from pyhs3.compiled import CompiledNLL, compile_nll
 from pyhs3.context import Context
 from pyhs3.data import BinnedData
 from pyhs3.distributions import Distribution, Distributions, HistFactoryDistChannel
-from pyhs3.distributions.core import BatchableDistribution
+from pyhs3.distributions.core import BatchableDistribution, SampleableDistribution
+from pyhs3.distributions.histfactory.modifiers import (
+    ConstraintPair,
+    constraint_log_probability,
+)
 from pyhs3.functions import Functions
 from pyhs3.functions.core import BatchableFunction, Function
 from pyhs3.graph_viz import (
@@ -72,6 +77,20 @@ def _drop_view_axis(term: TensorVar) -> TensorVar:
         # Fails at graph construction if the leading axis is not length 1.
         return cast(TensorVar, pt.squeeze(term, axis=0))  # type: ignore[no-untyped-call]
     return term
+
+
+@dataclass(frozen=True)
+class _AuxiliaryTerm:
+    """A constraint term of the likelihood and its global observable.
+
+    ``distribution``'s field ``field_name``, in ``context``, is the constant
+    ``observable``: the term's auxiliary datum, a scalar or ``(B',)`` array.
+    """
+
+    distribution: SampleableDistribution
+    context: Context
+    field_name: str
+    observable: TensorConstant[Any]
 
 
 class Model:
@@ -233,6 +252,25 @@ class Model:
         # one distinct from equal constants, so that compile_nll(data_inputs=True)
         # can replace exactly these.
         self._observed_constants: dict[str, TensorConstant[Any]] = {}
+        # Constraint terms of the likelihood whose global observable is a
+        # constant, keyed by constraint name in the order they enter log_prob;
+        # log_prob keeps each observable distinct from equal constants, so
+        # that compile_nll(auxdata_inputs=True) can replace exactly these.
+        # HistFactory constraints are collected while the graph is built,
+        # auxiliary and ProductDist constraint distributions when log_prob is.
+        self._auxiliary_terms: dict[str, _AuxiliaryTerm] = {}
+        # Constraint terms with no global observable a toy can draw, mapped to
+        # the distribution type, for sample_data's NotImplementedError.
+        self._unsampleable_auxiliary_terms: dict[str, str] = {}
+        # The function sample_data() compiles for the parameters of the
+        # auxiliary distributions on its first call with include_auxdata=True,
+        # with the names of its inputs in positional order.
+        self._auxiliary_parameters_function: (
+            tuple[Callable[..., list[npt.NDArray[np.float64]]], list[str]] | None
+        ) = None
+        # The context the graph was built in; constraint distributions of the
+        # workspace evaluate their sampling parameters in it.
+        self._build_context: Context | None = None
         # Expected Poisson mean of every bin of each HFDC channel, shape (B,)
         # per channel, keyed by channel name; what expected_data() evaluates.
         self._hfdc_expected_rates: dict[str, TensorVar] = {}
@@ -299,6 +337,49 @@ class Model:
             dist.name: np.array(self._observed_constants[dist.name].data)
             for dist in self._distribution_objects
             if dist.name in self._observed_constants
+        }
+
+    @property
+    def auxiliary_data(self) -> dict[str, npt.NDArray[np.float64]]:
+        """Observed global observables of the constraint terms, keyed by constraint name.
+
+        Each constraint term of the likelihood measures its parameters
+        through a global observable (auxiliary datum), a constant of
+        :attr:`log_prob`:
+
+        - a HistFactory modifier's constraint, keyed ``constraint_{modifier}``
+          (``constraint_bblite_{channel}`` for a channel's Barlow-Beeston-lite
+          ``staterror`` group): 0 for a ``Gauss`` and 1 for a ``Poisson`` or
+          ``LogNormal`` single-parameter constraint (``normsys``,
+          ``histosys``), of shape ``()``; for a per-bin constraint
+          (``shapesys``, ``staterror``) an array of shape ``(B',)``, ``B'``
+          the number of constrained bins, of ``tau = 1 / sigma_rel**2``
+          (``Poisson``) or 1 (``Gauss``, ``LogNormal``).  A name a workspace
+          distribution or an earlier constraint already has gets a suffix
+          ``_1``, ``_2``, ...
+        - an auxiliary distribution of the likelihood, or a constraint factor
+          of a ``ProductDist`` channel, keyed by its name: its ``x``, if
+          that is a number or a ``const`` parameter, else, for a Gaussian, its
+          ``mean`` (ROOT writes Gauss(alpha | nom_alpha, 1)), of shape
+          ``()``.  Terms with neither, or of another distribution type than
+          Gaussian, Poisson or log-normal, have no entry.
+
+        These are the values :attr:`log_prob` bakes in, the default
+        auxiliary data of a likelihood compiled with
+        ``compile_nll(auxdata_inputs=True)``, and what
+        ``sample_data(include_auxdata=True)`` draws.  The arrays are float64
+        copies, in the order the terms enter :attr:`log_prob`.
+
+        Raises:
+            RuntimeError: If the model was built without a likelihood.
+        """
+        if self._likelihood is None:
+            msg = "auxiliary_data requires a likelihood context; build via ws.model(analysis)"
+            raise RuntimeError(msg)
+        _ = self.log_prob
+        return {
+            name: np.array(term.observable.data, dtype=np.float64)
+            for name, term in self._auxiliary_terms.items()
         }
 
     @property
@@ -888,15 +969,17 @@ class Model:
                 if factor_name not in seen_constraint_factors:
                     seen_constraint_factors.add(factor_name)
                     terms.append(constraint_expr)
+                    self._register_workspace_auxiliary_term(
+                        factor_name, constraint_expr
+                    )
 
         # Auxiliary distributions (constraint terms) are scalars; they broadcast
         # onto the parameter-scan axis when non-scalar params are present.
-        if self._likelihood.aux_distributions:
-            terms.extend(
-                self.log_distributions[
-                    aux_name if isinstance(aux_name, str) else aux_name.name
-                ]
-                for aux_name in self._likelihood.aux_distributions
+        for aux in self._likelihood.aux_distributions or []:
+            aux_name = aux if isinstance(aux, str) else aux.name
+            terms.append(self.log_distributions[aux_name])
+            self._register_workspace_auxiliary_term(
+                aux_name, self.log_distributions[aux_name]
             )
 
         # HFDC constraint terms: collected once per unique nuisance parameter
@@ -915,9 +998,25 @@ class Model:
         # Distributions that share parameters build identical subgraphs (e.g.
         # mixture summands with the same shape); merge them here so that
         # PyTensor's rewriter does not have to.  The observed-count constants
-        # are kept apart from equal constants (a sample with the same
-        # contents, say) so that compile_nll can replace them alone.
-        return merge_duplicate_nodes(joint, keep=self._observed_constants.values())
+        # and the global observables are kept apart from equal constants (a
+        # sample with the same contents, say, or the many 0s and 1s of the
+        # graph) so that compile_nll can replace them alone.
+        return merge_duplicate_nodes(
+            joint,
+            keep=[
+                *self._observed_constants.values(),
+                *(term.observable for term in self._auxiliary_terms.values()),
+            ],
+        )
+
+    def _register_workspace_auxiliary_term(
+        self, name: str, log_term: TensorVar
+    ) -> None:
+        """Record the global observable of a workspace distribution used as a constraint."""
+        assert self._build_context is not None
+        self._register_auxiliary_term(
+            name, self._distribution_objects[name], self._build_context, log_term
+        )
 
     def _try_bake_hfdc_observed(self, node_name: str) -> TensorVar | None:
         """Return a baked constant for an HFDC ``{name}_observed`` parameter, or None.
@@ -1160,7 +1259,8 @@ class Model:
         channel_seen: set[str] = set()
         channel_log_constraints: list[TensorVar] = []
         for dedup_key, modifier, sample_data in dist.constraint_specs():
-            log_constraint = modifier.log_constraint(context, sample_data)
+            pair = modifier.constraint_distribution(context, sample_data)
+            log_constraint = constraint_log_probability(pair)
 
             if dedup_key is None or dedup_key not in channel_seen:
                 if dedup_key is not None:
@@ -1168,7 +1268,7 @@ class Model:
                 channel_log_constraints.append(log_constraint)
 
             if in_likelihood:
-                self._add_global_histfactory_constraint(dedup_key, log_constraint)
+                self._add_global_histfactory_constraint(dedup_key, log_constraint, pair)
 
         # BB-lite mode's channel-level constraint (shared gamma parameters
         # combining all samples' statistical uncertainties) is not a
@@ -1177,13 +1277,14 @@ class Model:
         # channel-local (like shapesys/staterror dedup_key=None specs above),
         # so it is always appended, with no cross-channel dedup key.
         if dist.barlow_beeston_method == "lite":
-            lite_log_constraint = dist._make_barlow_beeston_lite_log_constraint(  # pylint: disable=protected-access
-                context
-            )
-            if lite_log_constraint is not None:
+            lite_pair = dist._build_barlow_beeston_lite_dist(context)  # pylint: disable=protected-access
+            if lite_pair is not None:
+                lite_log_constraint = constraint_log_probability(lite_pair)
                 channel_log_constraints.append(lite_log_constraint)
                 if in_likelihood:
-                    self._hfdc_log_constraints.append(lite_log_constraint)
+                    self._add_global_histfactory_constraint(
+                        None, lite_log_constraint, lite_pair
+                    )
 
         return channel_log_constraints
 
@@ -1198,19 +1299,64 @@ class Model:
         )
 
     def _add_global_histfactory_constraint(
-        self, dedup_key: str | None, log_constraint: TensorVar
+        self,
+        dedup_key: str | None,
+        log_constraint: TensorVar,
+        pair: ConstraintPair | None,
     ) -> None:
         """Contribute a HistFactory log-constraint to log_prob at most once.
 
         Constraints keyed by a nuisance parameter (``dedup_key``) are added the
         first time any channel builds them; channel-local constraints
-        (``dedup_key is None``) are always added.
+        (``dedup_key is None``) are always added.  The global observable of
+        an added constraint, the ``x`` of its distribution ``pair``, is
+        registered as auxiliary data.  Its name is the distribution's,
+        followed by ``_1``, ``_2``, ... if a workspace distribution or an
+        earlier constraint already has that name.
         """
         if dedup_key is not None:
             if dedup_key in self._hfdc_constraint_params_seen:
                 return
             self._hfdc_constraint_params_seen.add(dedup_key)
         self._hfdc_log_constraints.append(log_constraint)
+        if pair is not None:
+            dist, context = pair
+            taken = set(self._auxiliary_terms) | {
+                other.name for other in self._distribution_objects
+            }
+            name, suffix = dist.name, 0
+            while name in taken:
+                suffix += 1
+                name = f"{dist.name}_{suffix}"
+            self._register_auxiliary_term(name, dist, context, log_constraint)
+
+    def _register_auxiliary_term(
+        self, name: str, dist: Distribution, context: Context, log_term: TensorVar
+    ) -> None:
+        """Record the global observable of the constraint term ``log_term``.
+
+        The global observable is the first of the distribution's
+        :attr:`~pyhs3.distributions.SampleableDistribution.sampled_fields`
+        that is a constant ``log_term`` depends on; for a Gaussian written as
+        Gauss(alpha | nom_alpha, sigma), as ROOT does, that is its ``mean``.
+        A term without one, or whose observable an earlier term already
+        holds, is recorded as unsampleable.
+        """
+        if isinstance(dist, SampleableDistribution):
+            graph = set(ancestors([log_term]))
+            for field_name in dist.sampled_fields:
+                tensor = dist.field_tensor(context, field_name)
+                if not isinstance(tensor, TensorConstant) or tensor not in graph:
+                    continue
+                if any(
+                    term.observable is tensor for term in self._auxiliary_terms.values()
+                ):
+                    break
+                self._auxiliary_terms[name] = _AuxiliaryTerm(
+                    dist, context, field_name, tensor
+                )
+                return
+        self._unsampleable_auxiliary_terms[name] = type(dist).__name__
 
     def _build_dependency_graph(
         self,
@@ -1374,6 +1520,8 @@ class Model:
                 context.add_parameter(node_name, built)
 
                 progress_bar.advance(task)
+
+        self._build_context = context
 
     @staticmethod
     def _check_family_outputs(

@@ -1053,11 +1053,11 @@ class TestHFDCSubgraphBuildCounts:
 
         assert calls == [], f"expected make_constraint to never be called, got {calls}"
 
-    def test_log_constraint_called_once_per_spec(self, monkeypatch):
-        """``log_constraint`` (#243 Layer 2) must build each log-space constraint
-        factor exactly once during model construction."""
+    def test_constraint_distribution_built_once_per_spec(self, monkeypatch):
+        """Model construction (#243 Layer 2) must build each log-space constraint
+        factor exactly once: one ``constraint_distribution`` call per spec."""
         calls: list[str] = []
-        original = SingleParamConstraint.log_constraint
+        original = SingleParamConstraint.constraint_distribution
 
         def counted(
             self: SingleParamConstraint, context: Context, sample_data: object
@@ -1065,14 +1065,15 @@ class TestHFDCSubgraphBuildCounts:
             calls.append(self.name)
             return original(self, context, sample_data)  # type: ignore[arg-type]
 
-        monkeypatch.setattr(SingleParamConstraint, "log_constraint", counted)
+        monkeypatch.setattr(SingleParamConstraint, "constraint_distribution", counted)
 
         ws = _single_channel_normsys_workspace()
         likelihood = next(iter(ws.likelihoods))
         ws.model(likelihood, progress=False)
 
         assert calls == ["lumi"], (
-            f"expected exactly one log_constraint call per constraint spec, got {calls}"
+            "expected exactly one constraint_distribution call per constraint "
+            f"spec, got {calls}"
         )
 
     def test_logpdf_matches_log_pdf_for_hfdc_with_constraint(self):

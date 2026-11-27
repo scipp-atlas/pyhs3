@@ -585,3 +585,51 @@ def test_staterror_global_bin_index():
     sr = ws.distributions["model_SR"].samples["bkg"].modifiers[0]
     assert cr.parameters == [hs3_name(name) for name in shared[:3]]
     assert sr.parameters == [hs3_name(name) for name in shared[3:]]
+
+
+@pytest.fixture
+def pyhf_minuit():
+    """pyhf's numpy backend with the iminuit optimizer, restored afterwards."""
+    pytest.importorskip("iminuit")
+    saved = pyhf.get_backend()
+    pyhf.set_backend("numpy", pyhf.optimize.minuit_optimizer(tolerance=1e-6))
+    yield
+    pyhf.set_backend(*saved)
+
+
+@pytest.mark.usefixtures("pyhf_minuit")
+def test_inverse_hessian_matches_pyhf_covariance():
+    """The inverse Hessian at pyhf's best fit is the covariance Minuit's HESSE gives."""
+    # Observed counts above the background put the best fit of mu inside its
+    # bounds, where HESSE's covariance is not distorted by the limit.
+    spec = {**SPECS["simplemodel_uncorrelated"]}
+    spec["observations"] = [{"name": "singlechannel", "data": [64.0, 61.0]}]
+    pyhf_ws = pyhf.Workspace(spec)
+    pyhf_model = pyhf_ws.model(modifier_settings=MODIFIER_SETTINGS)
+    # Minuit's limits distort HESSE's errors near them, so mu gets wide ones.
+    bounds = pyhf_model.config.suggested_bounds()
+    bounds[pyhf_model.config.poi_index] = (-10.0, 10.0)
+    # (P, 2): best-fit value and uncertainty per parameter; (P, P) correlations.
+    fit, correlations = pyhf.infer.mle.fit(
+        pyhf_ws.data(pyhf_model),
+        pyhf_model,
+        par_bounds=bounds,
+        return_uncertainties=True,
+        return_correlations=True,
+    )
+    pyhf_order = [hs3_name(name) for name in pyhf_model.config.par_names]
+    ws = from_hifa(spec)
+    nll = ws.model(ws.analyses[measurement(ws)], progress=False).compile_nll()
+    best_fit = dict(zip(pyhf_order, fit[:, 0], strict=True))
+
+    covariance = np.linalg.inv(nll.hessian(nll.to_vector(best_fit)))
+
+    # Reorder pyhf's results to nll.parameter_names.
+    order = [pyhf_order.index(name) for name in nll.parameter_names]
+    errors = np.sqrt(np.diag(covariance))
+    assert_allclose(errors, fit[order, 1], rtol=1e-3)
+    assert_allclose(
+        covariance / np.outer(errors, errors),
+        correlations[np.ix_(order, order)],
+        atol=1e-3,
+    )

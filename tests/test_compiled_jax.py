@@ -315,14 +315,15 @@ class TestJaxParametersOfInterest:
         assert nll.parameter_names[nll.poi_indices[0]] == "mu"
 
 
-class TestJaxSwappedData:
-    @pytest.fixture
-    def binned(self):
-        """The two-channel HistFactory model and two (P,) parameter vectors."""
-        model = _binned_model()
-        x = model.compile_nll().initial
-        return model, np.stack([x, np.linspace(0.8, 1.3, len(x))])
+@pytest.fixture
+def binned():
+    """The two-channel HistFactory model and two (P,) parameter vectors."""
+    model = _binned_model()
+    x = model.compile_nll().initial
+    return model, np.stack([x, np.linspace(0.8, 1.3, len(x))])
 
+
+class TestJaxSwappedData:
     def test_matches_the_c_backend(self, binned):
         model, X = binned
         c_nll = model.compile_nll(data_inputs=True)
@@ -361,3 +362,94 @@ class TestJaxSwappedData:
         assert second.value(X[1]) == pytest.approx(
             first.value(X[1], data=_SWAPPED), rel=1e-14
         )
+
+
+class TestJaxHessian:
+    def test_matches_the_c_backend(self, model):
+        c_nll = model.compile_nll()
+        jax_nll = model.compile_nll(backend="jax")
+        x = c_nll.to_vector({"mu": 0.7, "sigma": 1.4})
+
+        hessian = jax_nll.hessian(x)
+
+        assert hessian.shape == (2, 2)
+        assert hessian.dtype == np.float64
+        np.testing.assert_array_equal(hessian, hessian.T)
+        np.testing.assert_allclose(hessian, c_nll.hessian(x), rtol=1e-10)
+
+    def test_binned_model_with_swapped_data(self, binned):
+        model, X = binned
+        c_nll = model.compile_nll(data_inputs=True)
+        jax_nll = model.compile_nll(backend="jax", data_inputs=True)
+
+        for x in X:
+            for data in (None, _SWAPPED):
+                np.testing.assert_allclose(
+                    jax_nll.hessian(x, data=data),
+                    c_nll.hessian(x, data=data),
+                    rtol=1e-10,
+                    atol=1e-12,
+                )
+
+    def test_fixed_parameter(self, model):
+        c_nll = model.compile_nll(fixed={"mu": 0.7})
+        jax_nll = model.compile_nll(backend="jax", fixed={"mu": 0.7})
+        x = np.array([1.4])
+        np.testing.assert_allclose(jax_nll.hessian(x), c_nll.hessian(x), rtol=1e-10)
+
+    def test_without_gradient(self, model):
+        nll = model.compile_nll(backend="jax", gradient=False)
+        x = nll.to_vector({"mu": 0.7, "sigma": 1.4})
+        np.testing.assert_allclose(
+            nll.hessian(x), model.compile_nll().hessian(x), rtol=1e-10
+        )
+
+    def test_no_free_parameters(self):
+        ws = _workspace()
+        for name in ("mu", "sigma"):
+            ws.parameter_points["init"][name].const = True
+        nll = ws.model(ws.analyses["A"], progress=False).compile_nll(backend="jax")
+
+        assert nll.hessian(np.array([])).shape == (0, 0)
+
+    def test_batched_rows_match_the_one_point_function(self, model, batch):
+        X, one = batch
+        nll = model.compile_nll(backend="jax", batched=True)
+
+        hessians = nll.hessian(X)
+
+        assert hessians.shape == (3, 2, 2)
+        np.testing.assert_array_equal(hessians, np.swapaxes(hessians, 1, 2))
+        for row, hessian in zip(X, hessians, strict=True):
+            np.testing.assert_allclose(hessian, one.hessian(row), rtol=1e-10)
+
+    def test_batched_rows_share_the_data(self, binned):
+        model, X = binned
+        one = model.compile_nll(data_inputs=True)
+        nll = model.compile_nll(backend="jax", batched=True, data_inputs=True)
+
+        hessians = nll.hessian(X, data=_SWAPPED)
+
+        assert hessians.shape == (2, X.shape[1], X.shape[1])
+        for row, hessian in zip(X, hessians, strict=True):
+            np.testing.assert_allclose(
+                hessian, one.hessian(row, data=_SWAPPED), rtol=1e-10, atol=1e-12
+            )
+
+    @pytest.mark.parametrize("batched", [False, True])
+    def test_cache_round_trip(self, tmp_path, batch, batched):
+        X, _ = batch
+        points = X if batched else X[0]
+        ws = _workspace()
+        first = ws.model(ws.analyses["A"], progress=False).compile_nll(
+            backend="jax", batched=batched, cache=tmp_path
+        )
+        expected = first.hessian(points)
+        assert len(list(tmp_path.glob("hessian-*.jaxexport"))) == 1
+
+        second = ws.model(ws.analyses["A"], progress=False).compile_nll(
+            backend="jax", batched=batched, cache=tmp_path
+        )
+
+        np.testing.assert_allclose(second.hessian(points), expected, rtol=1e-14)
+        assert len(list(tmp_path.glob("hessian-*.jaxexport"))) == 1

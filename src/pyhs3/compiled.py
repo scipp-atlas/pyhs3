@@ -4,7 +4,8 @@ Compiled negative log-likelihood for minimizers.
 :class:`CompiledNLL` is what :meth:`pyhs3.Model.compile_nll` returns: the
 model's negative log-likelihood (and its gradient) compiled once as a function
 of a single vector of free parameters, with every constant parameter baked in
-and the observed data either baked in or passed per call.
+and the observed data either baked in or passed per call.  Its Hessian is
+compiled on the first call to :meth:`CompiledNLL.hessian`.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ import pytensor.tensor as pt
 from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode, get_mode
 from pytensor.configdefaults import config
-from pytensor.gradient import grad
+from pytensor.gradient import grad, jacobian
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import io_toposort
@@ -168,6 +169,8 @@ class CompiledNLL:
     evaluation per parameter vector and data, so a minimizer that asks for
     the value and then the gradient at the same point (SciPy with separate
     ``fun`` and ``jac``, iminuit with ``grad``) pays for one evaluation.
+    :meth:`hessian` is a separate function, compiled at its first call and
+    cached the same way.
 
     Examples:
         With SciPy:
@@ -198,6 +201,7 @@ class CompiledNLL:
         dtype: str,
         *,
         has_gradient: bool,
+        build_hessian: Callable[[], EvalFn],
         from_cache: bool = False,
         parameters_of_interest: Sequence[str] = (),
         data: Mapping[str, npt.ArrayLike] | None = None,
@@ -215,6 +219,9 @@ class CompiledNLL:
                 open side.
             dtype: Dtype of the parameter vector expected by ``fn``.
             has_gradient: Whether ``fn`` also returns the gradient.
+            build_hessian: Compiles the Hessian, a function with the
+                arguments of ``fn`` returning ``[hessian]``; called at the
+                first call to :meth:`hessian`.
             from_cache: Whether ``fn`` was loaded from the on-disk cache.
             parameters_of_interest: Names of the parameters of interest; those
                 that are not free parameters are left out.
@@ -251,6 +258,10 @@ class CompiledNLL:
         )
         self._last_x: bytes | None = None
         self._last_out: list[npt.NDArray[np.float64]] = []
+        self._build_hessian = build_hessian
+        self._hessian_fn: EvalFn | None = None
+        self._last_hessian_x: bytes | None = None
+        self._last_hessian: npt.NDArray[np.float64] = np.empty((0, 0))
 
     def __len__(self) -> int:
         return len(self.parameter_names)
@@ -322,14 +333,19 @@ class CompiledNLL:
             arrays.append(array)
         return tuple(arrays)
 
+    def _arguments(
+        self, x: npt.ArrayLike, data: Mapping[str, npt.ArrayLike] | None
+    ) -> tuple[bytes, tuple[npt.NDArray[np.float64], ...]]:
+        """Results-cache key and the arguments of the compiled functions."""
+        arrays = (self._check_argument(x), *self._check_data(data))
+        # The data arrays have fixed shapes, so the concatenated bytes
+        # identify the parameter vector (or batch) and the data together.
+        return b"".join(item.tobytes() for item in arrays), arrays
+
     def _evaluate(
         self, x: npt.ArrayLike, data: Mapping[str, npt.ArrayLike] | None
     ) -> list[npt.NDArray[np.float64]]:
-        array = self._check_argument(x)
-        arrays = self._check_data(data)
-        # The data arrays have fixed shapes, so the concatenated bytes
-        # identify the parameter vector (or batch) and the data together.
-        key = b"".join(item.tobytes() for item in (array, *arrays))
+        key, (array, *arrays) = self._arguments(x, data)
         if key != self._last_x:
             self._last_out = self._fn(array, *arrays)
             self._last_x = key
@@ -380,6 +396,30 @@ class CompiledNLL:
             raise RuntimeError(msg)
         out = self._evaluate(x, data)
         return float(out[0]), np.array(out[1])
+
+    def hessian(
+        self, x: npt.ArrayLike, data: Mapping[str, npt.ArrayLike] | None = None
+    ) -> npt.NDArray[np.float64]:
+        """Hessian of the negative log-likelihood at ``x``, shape ``(P, P)``.
+
+        Entry ``[i, j]`` is the second derivative with respect to parameters
+        ``i`` and ``j`` of :attr:`parameter_names`.  The matrix is float64
+        and exactly symmetric.  At a minimum, its inverse is the covariance
+        estimate of the fitted parameters.  The Hessian is compiled at the
+        first call, so a likelihood that never needs it pays nothing.
+        ``data`` is as for :meth:`value`.
+        """
+        key, arrays = self._arguments(x, data)
+        if key != self._last_hessian_x:
+            if self._hessian_fn is None:
+                self._hessian_fn = self._build_hessian()
+            out = np.asarray(self._hessian_fn(*arrays)[0], dtype=np.float64)
+            # The two derivative orders agree only up to rounding; averaging
+            # with the transpose (of the last two axes, for a batch) makes the
+            # result exactly symmetric.
+            self._last_hessian = 0.5 * (out + np.swapaxes(out, -1, -2))
+            self._last_hessian_x = key
+        return self._last_hessian.copy()
 
 
 class BatchedCompiledNLL(CompiledNLL):
@@ -509,17 +549,16 @@ def compile_nll(
 
     dtype = str(config.floatX)
     nll = -pt.sum(log_prob)  # type: ignore[no-untyped-call]
-    outputs: list[TensorVar] = [nll]
-    if gradient:
-        # Differentiate with respect to the original scalars and stack, rather
-        # than with respect to x[i], which would scatter each component back
-        # into x with an IncSubtensor.  With no free parameters the gradient
-        # is an empty (0,) vector.
-        outputs.append(
-            pt.stack(cast(list[TensorVar], grad(nll, list(free))))
-            if free
-            else cast(TensorVar, pt.zeros((0,), dtype=dtype))
-        )
+    # Differentiate with respect to the original scalars and stack, rather
+    # than with respect to x[i], which would scatter each component back
+    # into x with an IncSubtensor.  With no free parameters the gradient
+    # is an empty (0,) vector.
+    gradient_graph = (
+        pt.stack(cast(list[TensorVar], grad(nll, list(free))))
+        if free
+        else cast(TensorVar, pt.zeros((0,), dtype=dtype))
+    )
+    outputs: list[TensorVar] = [nll, gradient_graph] if gradient else [nll]
 
     x = cast(TensorVar, pt.vector("x", dtype=dtype))
     givens: list[tuple[Variable[Any, Any], Variable[Any, Any]]] = [
@@ -540,71 +579,103 @@ def compile_nll(
     defaults = {name: value for name, (_, value) in data.items()}
     names = [var.name or f"x[{index}]" for index, var in enumerate(free)]
 
+    inputs = [x, *data_inputs]
+    c_mode = default_nll_mode(fuse=fuse) if mode is None else mode
     builder: _CBuilder | _JaxBuilder
     if backend == "jax":
         builder = _JaxBuilder(
-            outputs,
-            givens,
-            [x, *data_inputs],
-            len(free),
-            gradient=gradient,
-            batched=batched,
+            outputs, givens, inputs, len(free), gradient=gradient, batched=batched
         )
     else:
-        builder = _CBuilder(
-            outputs,
-            givens,
-            [x, *data_inputs],
-            default_nll_mode(fuse=fuse) if mode is None else mode,
-        )
+        builder = _CBuilder(outputs, givens, inputs, c_mode)
 
-    def make(fn: EvalFn, *, from_cache: bool = False) -> CompiledNLL:
-        return (BatchedCompiledNLL if batched else CompiledNLL)(
-            fn,
-            names,
-            initial,
-            bounds,
-            dtype,
-            has_gradient=gradient,
-            from_cache=from_cache,
-            parameters_of_interest=parameters_of_interest,
-            data=defaults,
-        )
+    cache_dir: Path | None = None
+    if cache:
+        cache_dir = _default_cache_dir() if cache is True else Path(cache)
+        if backend == "jax":
+            _use_xla_cache(cache_dir / "xla")
 
-    if not cache:
-        return make(builder.build())
+    def cache_path(kind: str, graph: Sequence[TensorVar], variant: str) -> Path | None:
+        """Cache file of the function of ``graph``; ``None`` without a cache."""
+        if cache_dir is None:
+            return None
+        key = hashlib.sha256(
+            "|".join(
+                [
+                    backend,
+                    _graph_fingerprint(
+                        [*graph, *(new for _, new in givens)],
+                        as_inputs=[var for var, _ in data.values()],
+                    ),
+                    repr(names),
+                    _mode_key(mode, fuse=fuse),
+                    variant,
+                    str(batched),
+                    pyhs3_version,
+                    pytensor.__version__,
+                    jax.__version__ if backend == "jax" and jax is not None else "",
+                ]
+            ).encode()
+        ).hexdigest()
+        return cache_dir / f"{kind}-{key}.{builder.suffix}"
 
-    cache_dir = _default_cache_dir() if cache is True else Path(cache)
-    key = hashlib.sha256(
-        "|".join(
-            [
-                backend,
-                _graph_fingerprint(
-                    [*outputs, *(new for _, new in givens)],
-                    as_inputs=[var for var, _ in data.values()],
-                ),
-                repr(names),
-                _mode_key(mode, fuse=fuse),
-                str(gradient),
-                str(batched),
-                pyhs3_version,
-                pytensor.__version__,
-                jax.__version__ if backend == "jax" and jax is not None else "",
-            ]
-        ).encode()
-    ).hexdigest()
-    if backend == "jax":
-        _use_xla_cache(cache_dir / "xla")
-    path = cache_dir / f"nll-{key}.{builder.suffix}"
+    def build_hessian() -> EvalFn:
+        # JAX differentiates the transpiled NLL twice; the C backend takes
+        # the Jacobian of the symbolic gradient.
+        hessian_builder: _CBuilder | _JaxBuilder
+        if backend == "jax":
+            hessian_builder = _JaxBuilder(
+                [nll],
+                givens,
+                inputs,
+                len(free),
+                gradient=False,
+                batched=batched,
+                hessian=True,
+            )
+            graph = nll
+        else:
+            hessian_builder = _CBuilder(
+                [gradient_graph], givens, inputs, c_mode, hessian_wrt=free
+            )
+            graph = gradient_graph
+        return _load_or_build(
+            hessian_builder, cache_path("hessian", [graph], "hessian")
+        )[0]
+
+    fn, from_cache = _load_or_build(builder, cache_path("nll", outputs, str(gradient)))
+    return (BatchedCompiledNLL if batched else CompiledNLL)(
+        fn,
+        names,
+        initial,
+        bounds,
+        dtype,
+        has_gradient=gradient,
+        build_hessian=build_hessian,
+        from_cache=from_cache,
+        parameters_of_interest=parameters_of_interest,
+        data=defaults,
+    )
+
+
+def _load_or_build(
+    builder: _CBuilder | _JaxBuilder, path: Path | None
+) -> tuple[EvalFn, bool]:
+    """Load the compiled function from ``path``, or build it and write it there.
+
+    Returns the function and whether it was loaded.  Without a ``path``
+    (no cache) the function is built and not written.
+    """
+    if path is None:
+        return builder.build(), False
     if path.exists():
         fn = builder.load(path.read_bytes())
-        log.debug("Loaded compiled likelihood from %s", path)
-        return make(fn, from_cache=True)
-
+        log.debug("Loaded compiled function from %s", path)
+        return fn, True
     fn = builder.build()
     _publish(path, builder.dump)
-    log.debug("Cached compiled likelihood at %s", path)
-    return make(fn)
+    log.debug("Cached compiled function at %s", path)
+    return fn, False
 
 
 def _use_xla_cache(directory: Path) -> None:
@@ -654,21 +725,52 @@ class _CBuilder:
         givens: list[tuple[Variable[Any, Any], Variable[Any, Any]]],
         inputs: list[TensorVar],
         mode: Mode | str,
+        *,
+        hessian_wrt: Sequence[TensorVar] | None = None,
     ) -> None:
+        """Hold the graph to compile.
+
+        With ``hessian_wrt``, ``outputs`` is the ``(P,)`` gradient with
+        respect to those ``P`` scalars, and the compiled function returns
+        its ``(P, P)`` Jacobian, the Hessian, instead.
+        """
         self._outputs = outputs
         self._givens = givens
         self._inputs = inputs
         self._mode = mode
+        self._hessian_wrt = hessian_wrt
         self._fn: EvalFn | None = None
 
     def build(self) -> EvalFn:
+        outputs = self._outputs
+        mode = self._mode
+        if self._hessian_wrt is not None:
+            # Vectorizing the backward pass turns the gradient's
+            # IncSubtensors into Blockwise ones.  Rewriting those back into
+            # plain IncSubtensors infers static shapes over the whole graph
+            # each time, which on a large workspace makes the compile an
+            # order of magnitude slower than the gradient's.  Kept as
+            # Blockwise they loop over the P columns in Python instead: a
+            # slower evaluation, but a Hessian is evaluated a few times per
+            # fit, not once per minimizer step.
+            mode = get_mode(mode).excluding("local_blockwise_inc_subtensor")  # type: ignore[no-untyped-call]
+            wrt = list(self._hessian_wrt)
+            hessian = cast(TensorVar, pt.zeros((0, 0), dtype=outputs[0].dtype))
+            if wrt:
+                # Column j of the Hessian is the (P,) derivative of the
+                # gradient with respect to scalar j; vectorize=True computes
+                # all P columns in one batched backward pass rather than a
+                # scan over rows.
+                columns = jacobian(outputs[0], wrt, vectorize=True)  # type: ignore[no-untyped-call]
+                hessian = pt.stack(cast(list[TensorVar], columns), axis=1)
+            outputs = [hessian]
         self._fn = cast(
             EvalFn,
             function(
                 self._inputs,
-                self._outputs,
+                outputs,
                 givens=self._givens,
-                mode=self._mode,
+                mode=mode,
                 on_unused_input="ignore",
                 trust_input=True,
             ),
@@ -707,7 +809,14 @@ class _JaxBuilder:
         *,
         gradient: bool,
         batched: bool,
+        hessian: bool = False,
     ) -> None:
+        """Hold the graph to transpile.
+
+        With ``hessian=True``, ``outputs`` is ``[nll]`` and the compiled
+        function returns its ``(P, P)`` Hessian (``(K, P, P)`` for a batch)
+        from ``jax.hessian``.
+        """
         # Likelihoods need double precision; JAX defaults to float32.  This
         # is a process-wide JAX setting.
         jax.config.update("jax_enable_x64", True)
@@ -725,6 +834,7 @@ class _JaxBuilder:
         ]
         self._gradient = gradient
         self._batched = batched
+        self._hessian = hessian
         self._exported: Any = None
 
     def _compile(self, exported: Any) -> EvalFn:
@@ -738,13 +848,17 @@ class _JaxBuilder:
         call = jax.jit(exported.call)
         compiled = call if self._batched else call.lower(*self._specs).compile()
         gradient = self._gradient
+        hessian = self._hessian
 
         def evaluate(
             x: npt.NDArray[np.float64], *data: npt.NDArray[np.float64]
         ) -> list[npt.NDArray[np.float64]]:
             # [nll] or [nll, *grad] on the last axis: shape (1 + P,), or
-            # (K, 1 + P) for a (K, P) batch.
+            # (K, 1 + P) for a (K, P) batch.  A Hessian is (P, P), or
+            # (K, P, P) for a batch.
             out = np.asarray(compiled(x, *data))
+            if hessian:
+                return [out]
             return [out[..., 0], out[..., 1:]] if gradient else [out[..., 0]]
 
         return evaluate
@@ -760,8 +874,16 @@ class _JaxBuilder:
         )
         graph = jaxify(cast(TensorVar, joint), inputs=self._inputs)
 
-        def one_point(xv: Any, *data: Any) -> Any:
+        def evaluate_graph(xv: Any, *data: Any) -> Any:
             return cast(Sequence[Any], graph.call_positional(xv, *data))[0]
+
+        # jax.hessian differentiates with respect to the parameter vector,
+        # the first argument: forward-over-reverse on the (1,) NLL, then the
+        # leading axis of length 1 is dropped.
+        def hessian_at(xv: Any, *data: Any) -> Any:
+            return jax.hessian(evaluate_graph)(xv, *data)[0]
+
+        one_point = hessian_at if self._hessian else evaluate_graph
 
         # A batch maps the one-point function over the rows of x, with the
         # data shared by every row; this has to happen before export, since

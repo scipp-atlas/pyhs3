@@ -104,6 +104,7 @@ Distributions
    Distributions
    Distribution
    BatchableDistribution
+   SampleableDistribution
    LogProbTerms
    GaussianDist
    UniformDist

@@ -214,8 +214,9 @@ observed counts of each HistFactory channel then become inputs of the compiled
 function: ``value``, ``grad`` and ``value_and_grad`` take a ``data`` mapping
 with the same keys and shapes as ``model.observed_data``, one ``(B,)`` array
 per channel for a channel of ``B`` bins, keyed by channel name. Without
-``data``, they use the model's observed data. Unbinned data and the
-constraint centres (auxiliary data) stay baked in.
+``data``, they use the model's observed data. Unbinned data stay baked in, and
+so do the auxiliary data (the global observables of the constraint terms)
+unless you also pass ``auxdata_inputs=True`` (see `Fit toy datasets`_).
 
 .. doctest:: minimize-nll-data
 
@@ -286,11 +287,81 @@ you pass as ``data`` to the likelihood compiled above:
     >>> fits
     [0.0, 1.17, 2.15]
 
-The toys randomize only the main measurement. The auxiliary data (the
-centres of the constraint terms) stay at their observed values, so the toys are
-conditional on them. pyhf's ``sample`` also draws the auxiliary data; a test
-statistic distribution built from these toys leaves out the fluctuations of
-the auxiliary measurements.
+These toys randomize only the main measurement. The auxiliary data, the
+global observables of the constraint terms, stay at their observed values, so
+the toys are conditional on them, and a test statistic distribution built from
+them leaves out the fluctuations of the auxiliary measurements.
+
+For full toys, which also draw each global observable from its constraint
+distribution at the given parameter values, as pyhf's ``make_pdf(pars).sample``
+does, pass ``include_auxdata=True`` to ``model.sample_data``. Compile the
+likelihood with ``auxdata_inputs=True`` as well as ``data_inputs=True``, so
+that its ``data`` mapping takes the counts and the auxiliary data of a toy
+together. The model below adds a ``normsys`` on the background, whose Gaussian
+constraint has one global observable:
+
+.. doctest:: minimize-nll-auxdata
+
+    >>> import numpy as np
+    >>> import pyhs3
+    >>> from scipy.optimize import minimize
+    >>> ws = pyhs3.from_hifa(
+    ...     {
+    ...         "channels": [
+    ...             {
+    ...                 "name": "SR",
+    ...                 "samples": [
+    ...                     {
+    ...                         "name": "signal",
+    ...                         "data": [5.0, 10.0],
+    ...                         "modifiers": [
+    ...                             {"name": "mu", "type": "normfactor", "data": None}
+    ...                         ],
+    ...                     },
+    ...                     {
+    ...                         "name": "background",
+    ...                         "data": [50.0, 60.0],
+    ...                         "modifiers": [
+    ...                             {
+    ...                                 "name": "bkg_norm",
+    ...                                 "type": "normsys",
+    ...                                 "data": {"hi": 1.1, "lo": 0.9},
+    ...                             }
+    ...                         ],
+    ...                     },
+    ...                 ],
+    ...             }
+    ...         ],
+    ...         "observations": [{"name": "SR", "data": [52.0, 75.0]}],
+    ...         "measurements": [{"name": "meas", "config": {"poi": "mu", "parameters": []}}],
+    ...         "version": "1.0.0",
+    ...     }
+    ... )
+    >>> model = ws.model(ws.analyses["meas"], progress=False)
+    >>> model.auxiliary_data  # Gauss(0 | bkg_norm, 1): one scalar global observable
+    {'constraint_bkg_norm': array(0.)}
+    >>> nll = model.compile_nll(data_inputs=True, auxdata_inputs=True)
+    >>> toys = model.sample_data(
+    ...     3, rng=np.random.default_rng(0), include_auxdata=True, mu=1.0, bkg_norm=0.0
+    ... )
+    >>> toys["model_SR"].shape, toys["constraint_bkg_norm"].shape  # (n, B) and (n,)
+    ((3, 2), (3,))
+    >>> fits = []
+    >>> for i in range(3):
+    ...     toy = {name: values[i] for name, values in toys.items()}
+    ...     result = minimize(
+    ...         nll.value_and_grad, nll.initial, args=(toy,), jac=True, bounds=nll.bounds
+    ...     )
+    ...     fits.append(round(float(result.x[nll.poi_indices[0]]), 2))
+    ...
+    >>> fits
+    [0.05, 1.64, 2.47]
+
+:attr:`~pyhs3.Model.auxiliary_data` lists the global observables with their
+observed values, which are the defaults of ``data``.
+:meth:`~pyhs3.Model.sample_data` raises ``NotImplementedError``, naming the
+term, for a likelihood with a constraint term whose global observable it
+cannot draw, instead of leaving that observable fixed.
 
 Reuse the compiled function across sessions
 -------------------------------------------

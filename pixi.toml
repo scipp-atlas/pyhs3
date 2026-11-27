@@ -151,6 +151,15 @@ build-clean = { cmd = "rm -rf build dist", description = "Clean build artifacts"
 build = { cmd = "python -m build", depends-on = ["build-clean"], description = "Build SDist and wheel distributions", outputs = ["dist"] }
 build-check = { cmd = "twine check --strict ./dist/*", depends-on = ["build"], description = "Run twine to check" }
 
+[feature.minimize.dependencies]
+# examples/ minimization and benchmark scripts
+iminuit = "*"
+psutil = "*"
+optimistix = "*"
+
+[feature.minimize.pypi-dependencies]
+aquarel = ">=0.0.7, <0.0.8"
+
 [environments]
 docs = ["docs", "jax", "plot"]
 dev = ["dev", "jax", "plot"]
@@ -160,6 +169,7 @@ py314 = ["test", "py314"]
 py312-jax = ["test", "py312", "jax"]
 py313-jax = ["test", "py313", "jax"]
 py314-jax = ["test", "py314", "jax"]
+minimize = ["minimize", "test", "py314", "jax", "plot"]
 
 
 [tasks]

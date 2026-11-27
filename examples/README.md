@@ -253,8 +253,8 @@ them from the repository root:
 - **`convert_workspace.py`**: strips the near-zero-weight dummy events from the
   `combData_*` entries of the bbyy workspace so pyhs3 uses the unweighted
   unbinned likelihood.
-- **`plot_scan.py`**: plots a `minimization_dihiggs.py` scan against the QuickFit
-  reference NLL stored in that script.
+- **`plot_scan.py`**: plots a `minimization_dihiggs.py` scan against the
+  QuickFit reference NLL stored in that script.
 - **`manual_nll_validation.py`**: manual, per-event NLL validation of the bbyy
   workspace against the reference `mu_HH` scan, with per-channel plots. It reads
   the workspace from `~/.local/skhepdata/` and ends in `breakpoint()` for

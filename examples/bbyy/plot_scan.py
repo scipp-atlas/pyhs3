@@ -30,7 +30,7 @@ from matplotlib import pyplot as plt
 
 _DEFAULT_SCAN = Path("runs/latest/scan_summary.json")
 _DEFAULT_SCRIPT = (
-    Path(__file__).resolve().parent / "examples" / "minimization_dihiggs.py"
+    Path(__file__).resolve().parent.parent / "minimization_dihiggs.py"
 )
 
 

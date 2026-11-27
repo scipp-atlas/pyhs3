@@ -1,6 +1,6 @@
 # pyhs3 Examples
 
-> **Branch note:** This directory exists only on the `profile-scan-script`
+> **Branch note:** This directory exists only on the `research/bbyy-validation`
 > branch and is **not** part of any release. It is a living sandbox — commits
 > accumulate here; no PR to `main` is ever opened from this branch.
 
@@ -239,4 +239,29 @@ pixi run -e minimize python examples/plot_comparisons.py \
   --reference-json reference_nll.json \
   --output-pdf comparison.pdf \
   --output-png comparison.png
+```
+
+---
+
+## `bbyy/`
+
+Helper scripts and reference data for the ATLAS diHiggs bbyy validation. Run
+them from the repository root:
+
+- **`compare_postfit.py`**: compares post-fit nuisance-parameter values from a
+  `minimization_dihiggs.py` run directory against a QuickFit log.
+- **`convert_workspace.py`**: strips the near-zero-weight dummy events from the
+  `combData_*` entries of the bbyy workspace so pyhs3 uses the unweighted
+  unbinned likelihood.
+- **`plot_scan.py`**: plots a `minimization_dihiggs.py` scan against the QuickFit
+  reference NLL stored in that script.
+- **`manual_nll_validation.py`**: manual, per-event NLL validation of the bbyy
+  workspace against the reference `mu_HH` scan, with per-channel plots. It reads
+  the workspace from `~/.local/skhepdata/` and ends in `breakpoint()` for
+  interactive inspection.
+- **`quickfit_bbyy_reference.json`**: QuickFit reference `mu_HH` scan, in the
+  format `plot_comparisons.py --reference-json` reads.
+
+```bash
+pixi run -e minimize python examples/bbyy/plot_scan.py --scan runs/latest/scan_summary.json
 ```

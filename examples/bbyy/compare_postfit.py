@@ -47,7 +47,7 @@ except ImportError:
 
 # Default workspace path (relative to this script's repo root).
 _WS_DEFAULT = (
-    Path(__file__).resolve().parent.parent
+    Path(__file__).resolve().parents[3]
     / "workspace_FINAL_ISOBUGFIX"
     / "WS-bbyy-non-resonant-non-param-isofix_unbinnedFix.json"
 ).resolve()

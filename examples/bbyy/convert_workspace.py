@@ -31,7 +31,7 @@ import sys
 from pathlib import Path
 
 _DEFAULT_INPUT = (
-    Path(__file__).resolve().parent
+    Path(__file__).resolve().parents[2]
     / "data"
     / "test_hs3_unbinned_pyhs3_validation_issue41.json"
 )

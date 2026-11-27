@@ -14,6 +14,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self, cast
 
+import numpy as np
+import numpy.typing as npt
 import pytensor.tensor as pt
 from pydantic import PrivateAttr
 from pytensor.graph.traversal import ancestors
@@ -527,6 +529,75 @@ class Distribution(Evaluable, ABC):
             LogProbTerms: per-event, per-channel, and constraint contributions.
         """
         return LogProbTerms(per_event=[log_expressions[self.name]])
+
+
+class SampleableDistribution(Distribution, ABC):
+    """
+    A distribution type that can draw values of one of its fields.
+
+    :meth:`pyhs3.Model.sample_data` draws the global observables of a
+    likelihood's constraint terms with it: the field that holds the global
+    observable is drawn from the distribution given the values of the other
+    fields at the chosen parameter point.  Drawing happens in two steps, so
+    that one compiled function evaluates the parameters of every constraint
+    term: :meth:`sampling_parameters` returns them as tensors, and
+    :meth:`sample` draws from their values.
+    """
+
+    #: Fields whose value :meth:`sample` can draw given the others, in the
+    #: order a constraint term's global observable is looked for.
+    sampled_fields: ClassVar[tuple[str, ...]] = ("x",)
+
+    def field_tensor(self, context: Context, field_name: str) -> TensorVar:
+        """The tensor ``context`` holds for one of this distribution's fields."""
+        return context[self._parameters[field_name]]
+
+    def _check_sampled_field(self, field_name: str) -> None:
+        """Raise if ``field_name`` is not one of :attr:`sampled_fields`."""
+        if field_name not in self.sampled_fields:
+            msg = (
+                f"{type(self).__name__} draws only {list(self.sampled_fields)}, "
+                f"not '{field_name}'."
+            )
+            raise ValueError(msg)
+
+    @abstractmethod
+    def sampling_parameters(
+        self, context: Context, field_name: str
+    ) -> dict[str, TensorVar]:
+        """Parameters of the distribution of ``field_name`` given the other fields.
+
+        Args:
+            context: Mapping of names to PyTensor variables.
+            field_name: One of :attr:`sampled_fields`.
+
+        Returns:
+            dict[str, TensorVar]: Tensors keyed by the names :meth:`sample`
+            reads, each a scalar or of the shape of the drawn field.
+
+        Raises:
+            ValueError: If ``field_name`` is not one of :attr:`sampled_fields`.
+        """
+
+    @abstractmethod
+    def sample(
+        self,
+        rng: np.random.Generator,
+        parameters: Mapping[str, npt.NDArray[np.float64]],
+        size: tuple[int, ...],
+    ) -> npt.NDArray[np.float64]:
+        """Draw values of the sampled field.
+
+        Args:
+            rng: Source of the random draws; the draws advance its state.
+            parameters: Values of the tensors of :meth:`sampling_parameters`,
+                each broadcastable to ``size``.
+            size: Shape of the result, e.g. ``(n, B)`` for ``n`` draws of a
+                field of shape ``(B,)``.
+
+        Returns:
+            numpy.ndarray: float64 draws of shape ``size``.
+        """
 
 
 class BatchableDistribution(Distribution, ABC):

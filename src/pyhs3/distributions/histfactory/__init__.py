@@ -23,10 +23,13 @@ from pyhs3.context import Context
 from pyhs3.distributions.core import Distribution
 from pyhs3.distributions.histfactory.data import SampleData
 from pyhs3.distributions.histfactory.modifiers import (
+    ConstraintPair,
     HasConstraint,
     Modifier,
     ParameterModifier,
     StatErrorModifier,
+    constraint_log_probability,
+    constraint_probability,
     gamma_constraint,
 )
 from pyhs3.distributions.histfactory.samples import Sample, Samples
@@ -390,7 +393,7 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
     # Docstring below refs private methods autodoc never renders (known gap: #327).
     def _build_barlow_beeston_lite_dist(
         self, context: Context
-    ) -> tuple[Distribution, Context] | None:
+    ) -> ConstraintPair | None:
         """Construct a single vectorized BB-lite constraint distribution.
 
         BB-lite uses shared gamma parameters across samples with a channel-level
@@ -399,7 +402,7 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         distribution over vector-valued inputs (see
         :func:`~pyhs3.distributions.histfactory.modifiers.gamma_constraint`), instead of one
         scalar distribution per bin (mirroring
-        :meth:`~pyhs3.distributions.histfactory.modifiers.ShapeSysModifier._build_bin_constraint`).
+        :meth:`~pyhs3.distributions.histfactory.modifiers.ShapeSysModifier.constraint_distribution`).
 
         The constraint is Gauss, Poisson or LogNormal, with relative
         uncertainty relerr = sigma/nu per bin:
@@ -463,9 +466,7 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         pair = self._build_barlow_beeston_lite_dist(context)
         if pair is None:
             return None
-
-        dist, augmented_context = pair
-        return cast(TensorVar, pt.prod(dist.expression(augmented_context)))  # type: ignore[no-untyped-call]
+        return constraint_probability(pair)
 
     def _make_barlow_beeston_lite_log_constraint(
         self, context: Context
@@ -479,9 +480,7 @@ class HistFactoryDistChannel(Distribution, HasInternalNodes):
         pair = self._build_barlow_beeston_lite_dist(context)
         if pair is None:
             return None
-
-        dist, augmented_context = pair
-        return cast(TensorVar, pt.sum(dist.log_expression(augmented_context)))  # type: ignore[no-untyped-call]
+        return constraint_log_probability(pair)
 
     def _compute_expected_rates(self, context: Context, total_bins: int) -> TensorVar:
         """

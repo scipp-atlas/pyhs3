@@ -19,7 +19,7 @@ from pytensor.configdefaults import config
 
 from pyhs3.context import Context
 from pyhs3.distributions.basic import GaussianDist, LogNormalDist, PoissonDist
-from pyhs3.distributions.core import Distribution
+from pyhs3.distributions.core import SampleableDistribution
 from pyhs3.distributions.histfactory import interpolations
 from pyhs3.distributions.histfactory.data import SampleData
 
@@ -27,6 +27,10 @@ from pyhs3.distributions.histfactory.data import SampleData
 from pyhs3.exceptions import custom_error_msg
 from pyhs3.networks import HasDependencies
 from pyhs3.typing.aliases import TensorVar
+
+#: A constraint distribution and the context it evaluates in.  Its ``x`` holds
+#: the constraint's global observable (auxiliary data).
+ConstraintPair = tuple[SampleableDistribution, Context]
 
 # Interpolation codes each modifier type accepts, named so other modules (such
 # as the pyhf converter) validate against the same set.
@@ -119,7 +123,7 @@ def gamma_constraint(
     sigma_rel: npt.NDArray[np.float64],
     constraint: Literal["Gauss", "Poisson", "LogNormal"],
     context: Context,
-) -> tuple[Distribution, Context]:
+) -> ConstraintPair:
     """Constraint distribution of per-bin parameters whose nominal value is 1.
 
     Shared by ``shapesys``, ``staterror`` (Barlow-Beeston full) and the
@@ -134,6 +138,10 @@ def gamma_constraint(
     - ``LogNormal``: LogNormal(1 | mu = ln gamma, sigma = sigma_rel), whose
       median is gamma
 
+    The distribution's ``x``, the (B,) constant ``1`` or ``tau``, is the
+    constraint's global observable (auxiliary data): a constant named
+    ``{name}_x`` of its own, so that a model can replace it.
+
     Args:
         name: Name of the constraint distribution; helper tensors are named after it.
         gamma: (B,) per-bin parameters.
@@ -145,24 +153,60 @@ def gamma_constraint(
         The constraint distribution and the context it evaluates in.
     """
     augmented_context = dict(context)
-    dist: Distribution
+    dist: SampleableDistribution
+    x_name = f"{name}_x"
     if constraint == "Poisson":
         tau = 1.0 / sigma_rel**2
-        x_name, mean_name = f"{name}_x", f"{name}_scaled"
-        augmented_context[x_name] = pt.constant(tau)
+        mean_name = f"{name}_scaled"
+        augmented_context[x_name] = pt.constant(tau, name=x_name)
         augmented_context[mean_name] = gamma * pt.constant(tau)
         dist = PoissonDist(name=name, x=x_name, mean=mean_name)
     elif constraint == "Gauss":
         mean_name, sigma_name = f"{name}_mean", f"{name}_sigma"
+        augmented_context[x_name] = pt.constant(np.ones_like(sigma_rel), name=x_name)
         augmented_context[mean_name] = gamma
         augmented_context[sigma_name] = pt.constant(sigma_rel)
-        dist = GaussianDist(name=name, x=1.0, mean=mean_name, sigma=sigma_name)
+        dist = GaussianDist(name=name, x=x_name, mean=mean_name, sigma=sigma_name)
     else:  # constraint == "LogNormal"
         mu_name, sigma_name = f"{name}_mu", f"{name}_sigma"
+        augmented_context[x_name] = pt.constant(np.ones_like(sigma_rel), name=x_name)
         augmented_context[mu_name] = pt.log(gamma)
         augmented_context[sigma_name] = pt.constant(sigma_rel)
-        dist = LogNormalDist(name=name, x=1.0, mu=mu_name, sigma=sigma_name)
+        dist = LogNormalDist(name=name, x=x_name, mu=mu_name, sigma=sigma_name)
     return dist, Context({**augmented_context, **dist.constants})
+
+
+def constraint_probability(pair: ConstraintPair | None) -> TensorVar:
+    """Probability of a constraint distribution: the product over its per-bin terms.
+
+    ``pair`` is what :meth:`HasConstraint.constraint_distribution` returns; a
+    single-parameter constraint is returned as is, a per-bin one (``x`` of
+    shape (B,)) is reduced to its product, and ``None`` (nothing
+    constrained) gives 1.
+    """
+    if pair is None:
+        return pt.constant(1.0)
+    dist, context = pair
+    terms = dist.expression(context)
+    if dist.field_tensor(context, "x").ndim == 0:
+        return terms
+    return cast(TensorVar, pt.prod(terms))  # type: ignore[no-untyped-call]
+
+
+def constraint_log_probability(pair: ConstraintPair | None) -> TensorVar:
+    """Log-space counterpart of :func:`constraint_probability`: the sum of per-bin log terms.
+
+    Evaluates the distribution's analytic ``log_expression`` rather than
+    ``pt.log`` of the probability, so the constraint stays finite where the
+    probability-space value would underflow to 0.0. ``None`` gives 0.
+    """
+    if pair is None:
+        return pt.constant(0.0)
+    dist, context = pair
+    terms = dist.log_expression(context)
+    if dist.field_tensor(context, "x").ndim == 0:
+        return terms
+    return cast(TensorVar, pt.sum(terms))  # type: ignore[no-untyped-call]
 
 
 class HasConstraint(ABC):
@@ -171,10 +215,24 @@ class HasConstraint(ABC):
     constraint: Literal["Gauss", "Poisson", "LogNormal"] | None
 
     @abstractmethod
+    def constraint_distribution(
+        self, context: Context, sample_data: SampleData
+    ) -> ConstraintPair | None:
+        """The constraint distribution and the context it evaluates in.
+
+        The distribution's ``x`` is the constraint's global observable
+        (auxiliary data), a constant of its own: of shape ``()`` for a
+        single-parameter modifier and ``(B',)`` for a per-bin one, ``B'`` the
+        number of constrained bins.  Each call builds a new distribution and
+        constant.  ``None`` if the modifier constrains no parameter.
+        """
+
     def make_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
         """Create constraint term for this modifier (probability space)."""
+        return constraint_probability(
+            self.constraint_distribution(context, sample_data)
+        )
 
-    @abstractmethod
     def log_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
         """Create constraint term for this modifier (log space).
 
@@ -184,6 +242,9 @@ class HasConstraint(ABC):
         constraint stays finite where the probability-space value would
         underflow to 0.0.
         """
+        return constraint_log_probability(
+            self.constraint_distribution(context, sample_data)
+        )
 
     def unconstrained_parameters(
         self,
@@ -205,39 +266,42 @@ class SingleParamConstraint(HasConstraint, ABC):
     name: str
     parameter: str
 
-    def _build_constraint(self, context: Context) -> tuple[Distribution, Context]:
+    def constraint_distribution(
+        self, context: Context, _: SampleData
+    ) -> ConstraintPair:
         """Construct the Gauss/Poisson/LogNormal constraint distribution.
 
         Shared by :meth:`make_constraint` and :meth:`log_constraint` so the
         parametrization (which distribution, and with which parameter/constant
-        values) is defined exactly once.
+        values) is defined exactly once.  The global observable ``x``, a
+        scalar constant named ``constraint_{name}_x``, is 0 for ``Gauss``
+        (Gauss(0 | alpha, 1)) and 1 for ``Poisson`` (Pois(1 | alpha)) and
+        ``LogNormal`` (LogNormal(1 | mu = alpha, sigma = 1)).
         """
         name = f"constraint_{self.name}"
-        constraint_dist: Distribution
+        x_name = f"{name}_x"
+        constraint_dist: SampleableDistribution
 
         if self.constraint == "Gauss":
+            x_value = 0.0
             constraint_dist = GaussianDist(
-                name=name, x=0.0, mean=self.parameter, sigma=1.0
+                name=name, x=x_name, mean=self.parameter, sigma=1.0
             )
         elif self.constraint == "Poisson":
-            constraint_dist = PoissonDist(name=name, x=1.0, mean=self.parameter)
+            x_value = 1.0
+            constraint_dist = PoissonDist(name=name, x=x_name, mean=self.parameter)
         else:  # self.constraint == "LogNormal"
+            x_value = 1.0
             constraint_dist = LogNormalDist(
-                name=name, x=1.0, mu=self.parameter, sigma=1.0
+                name=name, x=x_name, mu=self.parameter, sigma=1.0
             )
 
-        augmented_context = {**context, **constraint_dist.constants}
+        augmented_context = {
+            **context,
+            **constraint_dist.constants,
+            x_name: pt.constant(x_value, dtype="float64", name=x_name),
+        }
         return constraint_dist, Context(augmented_context)
-
-    def make_constraint(self, context: Context, _: SampleData) -> TensorVar:
-        """Create constraint term using a Gauss, Poisson, or LogNormal distribution."""
-        constraint_dist, augmented_context = self._build_constraint(context)
-        return constraint_dist.expression(augmented_context)
-
-    def log_constraint(self, context: Context, _: SampleData) -> TensorVar:
-        """Create constraint term using the analytic log form of the same distribution."""
-        constraint_dist, augmented_context = self._build_constraint(context)
-        return constraint_dist.log_expression(augmented_context)
 
 
 # Parameterized modifier base (single parameter)
@@ -445,9 +509,9 @@ class ShapeSysModifier(HasConstraint, ParametersModifier):
         """Apply shapesys modifier (shape systematic with constraints)."""
         return cast("TensorVar", rates * self.expression(context))
 
-    def _build_bin_constraint(
+    def constraint_distribution(
         self, context: Context, sample_data: SampleData
-    ) -> tuple[Distribution, Context] | None:
+    ) -> ConstraintPair | None:
         """Construct a single vectorized constraint distribution over all bins.
 
         Stacks the B' constrained per-bin nuisance parameters into one
@@ -485,24 +549,6 @@ class ShapeSysModifier(HasConstraint, ParametersModifier):
         unconstrained = (nominal_yields > 0) & (uncertainties <= 0)
         return [p for p, u in zip(self.parameters, unconstrained, strict=True) if u]
 
-    def make_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
-        """Create constraint term using PyTensor operations."""
-        pair = self._build_bin_constraint(context, sample_data)
-        if pair is None:
-            return pt.constant(1.0)
-
-        dist, augmented_context = pair
-        return cast(TensorVar, pt.prod(dist.expression(augmented_context)))  # type: ignore[no-untyped-call]
-
-    def log_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
-        """Create constraint term as the sum of per-bin log-probabilities."""
-        pair = self._build_bin_constraint(context, sample_data)
-        if pair is None:
-            return pt.constant(0.0)
-
-        dist, augmented_context = pair
-        return cast(TensorVar, pt.sum(dist.log_expression(augmented_context)))  # type: ignore[no-untyped-call]
-
 
 class StatErrorModifier(HasConstraint, ParametersModifier):
     """Statistical uncertainty modifier (Barlow-Beeston method)."""
@@ -525,14 +571,14 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
 
     def _build_bin_constraint(
         self, context: Context, sample_data: SampleData, data: StatErrorData
-    ) -> tuple[Distribution, Context] | None:
+    ) -> ConstraintPair | None:
         """Construct a single vectorized constraint distribution over all bins.
 
         Only used in BB-full mode. In BB-lite mode, constraints are built at
         channel level. Stacks the per-bin nuisance parameters into one
         length-B tensor and builds ONE distribution over vector-valued inputs
         (see :func:`gamma_constraint`), instead of one scalar distribution per
-        bin (mirroring :meth:`ShapeSysModifier._build_bin_constraint`).
+        bin (mirroring :meth:`ShapeSysModifier.constraint_distribution`).
 
         Returns ``None`` when there is nothing to constrain: either
         ``self.parameters`` is empty, or every bin was excluded. A bin with a
@@ -601,39 +647,17 @@ class StatErrorModifier(HasConstraint, ParametersModifier):
         unconstrained = (nominal_yields > 0) & (uncertainties <= 0)
         return [p for p, u in zip(self.parameters[:n], unconstrained, strict=True) if u]
 
-    def make_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
-        """Create constraint term using PyTensor operations.
+    def constraint_distribution(
+        self, context: Context, sample_data: SampleData
+    ) -> ConstraintPair | None:
+        """Construct the per-bin constraint distribution over the constrained bins.
 
         Only used in BB-full mode. In BB-lite mode, constraints are built at channel level.
         """
         if self.data is None:
-            msg = (
-                "StatErrorModifier.data is required for BB-full mode (make_constraint)"
-            )
+            msg = "StatErrorModifier.data is required for BB-full mode"
             raise ValueError(msg)
-
-        pair = self._build_bin_constraint(context, sample_data, self.data)
-        if pair is None:
-            return pt.constant(1.0)
-
-        dist, augmented_context = pair
-        return cast(TensorVar, pt.prod(dist.expression(augmented_context)))  # type: ignore[no-untyped-call]
-
-    def log_constraint(self, context: Context, sample_data: SampleData) -> TensorVar:
-        """Create constraint term as the sum of per-bin Gauss/Poisson log-probabilities.
-
-        Only used in BB-full mode. In BB-lite mode, constraints are built at channel level.
-        """
-        if self.data is None:
-            msg = "StatErrorModifier.data is required for BB-full mode (log_constraint)"
-            raise ValueError(msg)
-
-        pair = self._build_bin_constraint(context, sample_data, self.data)
-        if pair is None:
-            return pt.constant(0.0)
-
-        dist, augmented_context = pair
-        return cast(TensorVar, pt.sum(dist.log_expression(augmented_context)))  # type: ignore[no-untyped-call]
+        return self._build_bin_constraint(context, sample_data, self.data)
 
 
 # Discriminated union of all modifier types.

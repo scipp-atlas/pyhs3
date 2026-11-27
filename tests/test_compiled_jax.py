@@ -16,6 +16,12 @@ jax = pytest.importorskip("jax")
 from test_compiled import _EVENTS, _reference_nll, _workspace
 from test_compiled_data import _SWAPPED
 from test_compiled_data import _model as _binned_model
+from test_model_auxiliary_data import (
+    SWAPPED_AUXILIARY_DATA,
+    SWAPPED_COUNTS,
+    spec_model,
+    spec_model_with_lumi_auxdata,
+)
 
 from pyhs3.compiled import BatchedCompiledNLL, CompiledNLL
 
@@ -361,6 +367,63 @@ class TestJaxSwappedData:
         assert (first.from_cache, second.from_cache) == (False, True)
         assert second.value(X[1]) == pytest.approx(
             first.value(X[1], data=_SWAPPED), rel=1e-14
+        )
+
+
+@pytest.fixture(scope="module")
+def auxiliary():
+    """A model with every constraint type of pyhf and two (P,) parameter vectors."""
+    model = spec_model()
+    x = model.compile_nll().initial
+    return model, np.stack([x, np.linspace(0.8, 1.3, len(x))])
+
+
+# Counts and auxiliary data swapped together, as full toys pass them.
+_FULL_TOY = {**SWAPPED_COUNTS, **SWAPPED_AUXILIARY_DATA}
+
+
+class TestJaxAuxiliaryData:
+    def test_matches_the_c_backend(self, auxiliary):
+        model, X = auxiliary
+        c_nll = model.compile_nll(data_inputs=True, auxdata_inputs=True)
+        jax_nll = model.compile_nll(
+            backend="jax", data_inputs=True, auxdata_inputs=True
+        )
+
+        for x in X:
+            for data in (None, _FULL_TOY):
+                value, grad = jax_nll.value_and_grad(x, data=data)
+                assert value == pytest.approx(c_nll.value(x, data=data), rel=1e-12)
+                np.testing.assert_allclose(grad, c_nll.grad(x, data=data), rtol=1e-10)
+                np.testing.assert_allclose(
+                    jax_nll.hessian(x, data=data),
+                    c_nll.hessian(x, data=data),
+                    rtol=1e-9,
+                    atol=1e-12,
+                )
+
+    def test_batched_rows_share_the_data(self, auxiliary):
+        model, X = auxiliary
+        one = model.compile_nll(data_inputs=True, auxdata_inputs=True)
+        nll = model.compile_nll(
+            backend="jax", batched=True, data_inputs=True, auxdata_inputs=True
+        )
+
+        values = nll.value(X, data=_FULL_TOY)
+
+        np.testing.assert_allclose(
+            values, [one.value(row, data=_FULL_TOY) for row in X], rtol=1e-12
+        )
+
+    def test_cache_round_trip(self, tmp_path, auxiliary):
+        model, X = auxiliary
+        first = model.compile_nll(backend="jax", auxdata_inputs=True, cache=tmp_path)
+        other = spec_model_with_lumi_auxdata(0.99)
+        second = other.compile_nll(backend="jax", auxdata_inputs=True, cache=tmp_path)
+
+        assert (first.from_cache, second.from_cache) == (False, True)
+        assert second.value(X[1]) == pytest.approx(
+            other.compile_nll().value(X[1]), rel=1e-12
         )
 
 

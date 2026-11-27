@@ -645,3 +645,241 @@ class TestSymPyNamespaceClash:
         result = sympy_to_pytensor(expr, [x])
         f = function([x], result)
         assert np.isclose(f(value), expected, atol=1e-10)
+
+
+def _evaluate(expr_str: str, **values):
+    """Parse *expr_str* and evaluate it at *values*.
+
+    A scalar value becomes a ``pt.scalar`` input; a sequence becomes a
+    ``pt.vector`` input of shape ``(N,)`` (matching how observables are built).
+    Every free symbol of the expression must appear in *values*.
+    """
+    expr = parse_expression(expr_str)
+    assert {s.name for s in expr.free_symbols} == set(values)
+    variables = [
+        pt.vector(name) if np.ndim(value) else pt.scalar(name)
+        for name, value in values.items()
+    ]
+    result = sympy_to_pytensor(expr, variables)
+    f = function(variables, result, on_unused_input="ignore")
+    return f(*(np.asarray(v, dtype=float) for v in values.values()))
+
+
+class TestHS3GenericExpressionGrammar:
+    """Every construct of the HS3 generic expression grammar.
+
+    https://github.com/hep-statistics-serialization-standard/hep-statistics-serialization-standard/blob/master/docs/chapters/3.1_generic_expressions.md
+    """
+
+    @pytest.mark.parametrize(
+        ("expr_str", "values", "expected"),
+        [
+            # literals
+            pytest.param("3", {}, 3.0, id="integer"),
+            pytest.param("123.4", {}, 123.4, id="float"),
+            pytest.param("1.234e2", {}, 123.4, id="float-e"),
+            pytest.param("1.234E2", {}, 123.4, id="float-E"),
+            pytest.param("PI", {}, np.pi, id="PI"),
+            pytest.param("EULER", {}, np.e, id="EULER"),
+            pytest.param("PI*x", {"x": 3.0}, 3 * np.pi, id="PI-times-x"),
+            # issue #425: a constant inside a function call
+            pytest.param(
+                "exp(-x^2/2)/sqrt(2*PI)",
+                {"x": 0.5},
+                np.exp(-0.125) / np.sqrt(2 * np.pi),
+                id="gaussian-normalization",
+            ),
+            pytest.param("TRUE", {}, True, id="TRUE"),
+            pytest.param("FALSE", {}, False, id="FALSE"),
+            # arithmetic
+            pytest.param("x+y", {"x": 3.0, "y": 2.0}, 5.0, id="add"),
+            pytest.param("x-y", {"x": 3.0, "y": 2.0}, 1.0, id="sub"),
+            pytest.param("x*y", {"x": 3.0, "y": 2.0}, 6.0, id="mul"),
+            pytest.param("x/y", {"x": 3.0, "y": 2.0}, 1.5, id="div"),
+            pytest.param("1/2", {}, 0.5, id="div-literals-is-float"),
+            pytest.param("x^y", {"x": 3.0, "y": 2.0}, 9.0, id="pow-caret"),
+            pytest.param("x^2", {"x": 3.0}, 9.0, id="pow-caret-int"),
+            pytest.param("2^3^2", {}, 512.0, id="pow-right-assoc"),
+            pytest.param("-x^2", {"x": 3.0}, -9.0, id="neg-looser-than-pow"),
+            pytest.param("(x+1)*(x-1)", {"x": 3.0}, 8.0, id="brackets"),
+            pytest.param("((x+1)*((x)-1))", {"x": 3.0}, 8.0, id="nested-brackets"),
+            pytest.param("  x  +  1 ", {"x": 3.0}, 4.0, id="spaces"),
+            pytest.param("x+1", {"x": 3.0}, 4.0, id="no-spaces"),
+            # functions
+            pytest.param("exp(x)", {"x": 1.0}, np.e, id="exp"),
+            pytest.param("log(x)", {"x": np.e}, 1.0, id="log"),
+            pytest.param("sqrt(x)", {"x": 9.0}, 3.0, id="sqrt"),
+            pytest.param("abs(x)", {"x": -2.5}, 2.5, id="abs"),
+            pytest.param("floor(x)", {"x": 2.7}, 2.0, id="floor"),
+            pytest.param("floor(x)", {"x": -2.2}, -3.0, id="floor-negative"),
+            pytest.param("ceil(x)", {"x": 2.2}, 3.0, id="ceil"),
+            pytest.param("ceil(x)", {"x": -2.7}, -2.0, id="ceil-negative"),
+            pytest.param("pow(x,y)", {"x": 2.0, "y": 10.0}, 1024.0, id="pow"),
+            pytest.param("min(x,y)", {"x": 2.0, "y": 1.0}, 1.0, id="min"),
+            pytest.param("max(x,y)", {"x": 2.0, "y": 1.0}, 2.0, id="max"),
+            pytest.param("sin(x)", {"x": 0.5}, np.sin(0.5), id="sin"),
+            pytest.param("cos(x)", {"x": 0.5}, np.cos(0.5), id="cos"),
+            pytest.param("tan(x)", {"x": 0.5}, np.tan(0.5), id="tan"),
+            pytest.param("asin(x)", {"x": 0.5}, np.arcsin(0.5), id="asin"),
+            pytest.param("acos(x)", {"x": 0.5}, np.arccos(0.5), id="acos"),
+            pytest.param("atan(x)", {"x": 0.5}, np.arctan(0.5), id="atan"),
+            pytest.param("erf(x)", {"x": 0.5}, 0.5204998778130465, id="erf"),
+            # comparisons: exact equality for both == and ===
+            pytest.param("x==3", {"x": 3.0}, True, id="eq-true"),
+            pytest.param("x==3", {"x": 2.0}, False, id="eq-false"),
+            pytest.param("x===3", {"x": 3.0}, True, id="eq-strict-true"),
+            pytest.param("x===3", {"x": 2.0}, False, id="eq-strict-false"),
+            pytest.param("x!=3", {"x": 2.0}, True, id="ne-true"),
+            pytest.param("x!=3", {"x": 3.0}, False, id="ne-false"),
+            pytest.param("x!==3", {"x": 2.0}, True, id="ne-strict-true"),
+            pytest.param("x!==3", {"x": 3.0}, False, id="ne-strict-false"),
+            pytest.param("x<3", {"x": 2.0}, True, id="lt"),
+            pytest.param("x<=3", {"x": 3.0}, True, id="le"),
+            pytest.param("x>3", {"x": 3.0}, False, id="gt"),
+            pytest.param("x>=3", {"x": 3.0}, True, id="ge"),
+            # logical operators and C precedence
+            pytest.param("!(x>0)", {"x": 1.0}, False, id="not-1"),
+            pytest.param("!(x>0)", {"x": -1.0}, True, id="not-2"),
+            pytest.param("!TRUE", {}, False, id="not-literal"),
+            pytest.param("!(x!=3)", {"x": 3.0}, True, id="not-of-ne"),
+            pytest.param("(x>0)&&(x<2)", {"x": 1.0}, True, id="and"),
+            pytest.param("x>0&&x<2", {"x": 3.0}, False, id="and-no-brackets"),
+            pytest.param("(x>0)||(x<-2)", {"x": 1.0}, True, id="or"),
+            pytest.param("x>0 && x<2 || x>5", {"x": 1.0}, True, id="prec-1"),
+            pytest.param("x>0 && x<2 || x>5", {"x": 6.0}, True, id="prec-2"),
+            pytest.param("x>0 && x<2 || x>5", {"x": 3.0}, False, id="prec-3"),
+            pytest.param("x>5 || x>0 && x<2", {"x": 6.0}, True, id="prec-and-first"),
+            pytest.param("x<0 || x>0 && x<2", {"x": -1.0}, True, id="prec-or-first"),
+            pytest.param("x==1 && y==2", {"x": 1.0, "y": 2.0}, True, id="eq-and"),
+            # conditionals
+            pytest.param("x>0 ? x : -x", {"x": -4.0}, 4.0, id="ternary-false"),
+            pytest.param("x>0 ? x : -x", {"x": 4.0}, 4.0, id="ternary-true"),
+            pytest.param("ifelse(x>0, x, -x)", {"x": -4.0}, 4.0, id="ifelse"),
+            pytest.param("ifelse(x>0,x,-x)", {"x": 4.0}, 4.0, id="ifelse-no-spaces"),
+            pytest.param("x>0 && x<2 ? 10 : 20", {"x": 1.0}, 10.0, id="ternary-and"),
+            pytest.param("x<0 ? 1 : x<1 ? 2 : 3", {"x": 0.5}, 2.0, id="chain-mid"),
+            pytest.param("x<0 ? 1 : x<1 ? 2 : 3", {"x": 5.0}, 3.0, id="chain-end"),
+            pytest.param("x<0 ? 1 : x<1 ? 2 : 3", {"x": -5.0}, 1.0, id="chain-first"),
+            pytest.param(
+                "x>0 ? (y>0 ? 1 : 2) : 3", {"x": 1.0, "y": -1.0}, 2.0, id="nested-then"
+            ),
+            pytest.param(
+                "max(x>0 ? x : 0, y)", {"x": 2.0, "y": 1.0}, 2.0, id="ternary-in-args"
+            ),
+            pytest.param(
+                "pow(x>0 ? x : -x, 2) + 1", {"x": -3.0}, 10.0, id="ternary-in-pow"
+            ),
+            pytest.param(
+                "ifelse(x>0, x>1 ? 5 : 6, 7)", {"x": 0.5}, 6.0, id="ternary-in-ifelse"
+            ),
+            pytest.param(
+                "(x>0 ? 1 : 2) + (x>1 ? 10 : 20)", {"x": 2.0}, 11.0, id="ternary-sum"
+            ),
+        ],
+    )
+    def test_evaluates(self, expr_str, values, expected):
+        """Each construct evaluates to the value the spec defines."""
+        np.testing.assert_allclose(_evaluate(expr_str, **values), expected, rtol=1e-12)
+
+    def test_eq_stays_symbolic(self):
+        """``==`` does not collapse to a Python bool at parse time."""
+        expr = parse_expression("x==1")
+        assert isinstance(expr, sp.Eq)
+        assert expr.free_symbols == {sp.Symbol("x")}
+
+    def test_caret_is_power_not_xor(self):
+        """``^`` is exponentiation."""
+        assert parse_expression("x^2") == sp.Symbol("x") ** 2
+
+    @pytest.mark.parametrize("name", ["PI", "EULER", "TRUE", "FALSE"])
+    def test_reserved_names_are_not_free_symbols(self, name):
+        """Reserved names never become model parameters."""
+        assert parse_expression(name).free_symbols == set()
+
+    @pytest.mark.parametrize("name", ["PI", "EULER"])
+    def test_reserved_numeric_names_combine_with_symbols(self, name):
+        """A reserved name next to a variable leaves only the variable free."""
+        assert parse_expression(f"x*{name}").free_symbols == {sp.Symbol("x")}
+
+    def test_ternary_and_ifelse_are_equivalent(self):
+        """``c ? a : b`` and ``ifelse(c, a, b)`` both mean ``Piecewise``."""
+        x = sp.Symbol("x")
+        expected = sp.Piecewise((x, x > 0), (-x, True))
+        assert parse_expression("x>0 ? x : -x") == expected
+        assert parse_expression("ifelse(x>0, x, -x)") == expected
+
+    def test_not_binds_tighter_than_comparison(self):
+        """``!x>0`` is ``(!x)>0`` as in C; no boolean compares with ``0``: rejected."""
+        with pytest.raises(ExpressionParseError):
+            parse_expression("!x>0")
+
+    @pytest.mark.parametrize("expr_str", ["x && y", "x || y", "!x", "x ? 1 : 2"])
+    def test_logic_on_non_boolean_is_rejected(self, expr_str):
+        """Logical operators and conditions take booleans, not real numbers."""
+        with pytest.raises(ExpressionParseError):
+            parse_expression(expr_str)
+
+    def test_vector_observable_through_piecewise(self):
+        """A ``(3,)`` observable broadcasts elementwise through ``Piecewise``."""
+        x = np.array([-1.0, 0.5, 3.0])  # shape (3,)
+        result = _evaluate("x>0 && x<2 ? 10*x : -1", x=x)
+        assert result.shape == (3,)
+        np.testing.assert_allclose(result, [-1.0, 5.0, -1.0])
+
+    def test_vector_observable_with_scalar_parameter(self):
+        """A scalar parameter broadcasts against a ``(3,)`` observable."""
+        x = np.array([-1.0, 0.5, 3.0])  # shape (3,)
+        result = _evaluate("x>a ? x^2 : a", x=x, a=1.0)
+        assert result.shape == (3,)
+        np.testing.assert_allclose(result, [1.0, 1.0, 9.0])
+
+    def test_gradient_through_piecewise(self):
+        """``pytensor.grad`` differentiates the selected branch."""
+        expr = parse_expression("x>0 ? x^2 : -x")
+        x = pt.scalar("x")
+        result = sympy_to_pytensor(expr, [x])
+        g = function([x], pt.grad(result, x))
+        np.testing.assert_allclose(g(3.0), 6.0)
+        np.testing.assert_allclose(g(-3.0), -1.0)
+
+    def test_rootexport_ttHbb_expression(self):
+        """An expression exported from a ROOT ttHbb CP workspace."""
+        expr_str = (
+            "(-0.00651199*pow(kappa_tprime,2)*pow(cos(avalue*acos(-1)),2))+(0.20687677)"
+        )
+        kappa, avalue = 1.5, 0.3
+        expected = (
+            -0.00651199 * kappa**2 * np.cos(avalue * np.arccos(-1)) ** 2 + 0.20687677
+        )
+        np.testing.assert_allclose(
+            _evaluate(expr_str, kappa_tprime=kappa, avalue=avalue), expected
+        )
+
+    @pytest.mark.parametrize(
+        "expr_str",
+        [
+            "",
+            "x +",
+            "(x",
+            "x)",
+            "x ? 1",
+            "x>0 ? 1 :",
+            "x & y",
+            "x | y",
+            "x = 1",
+            "foo(x)",
+            "x.real",
+            "x[0]",
+            "lambda: 1",
+            "'a'",
+            "1j",
+            "ifelse(x>0, 1)",
+            "sin(x, y)",
+            "min()",
+            "__import__('os')",
+        ],
+    )
+    def test_invalid_expressions_raise(self, expr_str):
+        """Anything outside the grammar raises ``ExpressionParseError``."""
+        with pytest.raises(ExpressionParseError):
+            parse_expression(expr_str)

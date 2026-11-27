@@ -9,6 +9,7 @@ Gaussian of ``from_hifa``.  ``Model.auxiliary_data`` names them.
 from __future__ import annotations
 
 import copy
+import re
 from typing import Any
 
 import numpy as np
@@ -20,6 +21,7 @@ from scipy.special import gammaln
 from scipy.stats import norm
 
 import pyhs3
+from pyhs3 import model as model_module
 
 # SR and CR share the normsys bkg_norm; SR has a BB-lite staterror group, CR a
 # Poisson shapesys with one unconstrained (zero-uncertainty) bin, and every
@@ -320,6 +322,16 @@ class TestConstraintTypes:
     def test_staterror_lite(self, constraint, value):
         model = hs3_model([staterror(constraint, full=False)], parameters=GAMMAS)
         assert_allclose(model.auxiliary_data["constraint_bblite_SR"], value, rtol=1e-12)
+
+    def test_no_constrained_bin(self):
+        """A shapesys whose every bin has zero uncertainty has no term and no datum."""
+        modifier = {**shapesys("Poisson"), "data": {"vals": [0.0, 0.0]}}
+        model = hs3_model(
+            [normsys("Gauss"), modifier],
+            parameters={"alpha": 0.0},
+            const=GAMMAS,
+        )
+        assert set(model.auxiliary_data) == {"constraint_alpha"}
 
     def test_duplicate_constraint_names_stay_distinct(self):
         """BB-full staterror modifiers of one name on two samples each keep their term."""
@@ -727,3 +739,261 @@ def test_cache_key_tells_unnamed_global_observables_apart(tmp_path):
     assert nll.value(x, data=data) == pytest.approx(
         reference.value(x, data=data), rel=1e-12
     )
+
+
+# A point of SPEC away from the nominal values of its constrained parameters.
+POINT = {
+    "mu": 1.2,
+    "bkg_norm": 0.3,
+    "lumi": 1.05,
+    "stat_SR_bin_0": 1.05,
+    "stat_SR_bin_1": 0.97,
+    "sys_CR_bin_0": 1.1,
+    "sys_CR_bin_2": 0.92,
+}
+
+N_TOYS = 20_000
+
+
+def assert_moments(draws: np.ndarray, mean: Any, variance: Any) -> None:
+    """Mean within 5 standard errors and variance within 5% of the expected ones."""
+    stderr = np.sqrt(np.asarray(variance) / draws.shape[0])
+    assert np.all(np.abs(draws.mean(axis=0) - mean) < 5 * stderr)
+    assert_allclose(draws.var(axis=0), variance, rtol=0.05)
+
+
+class TestSampleAuxiliaryData:
+    def test_keys_and_shapes(self, model):
+        toys = model.sample_data(
+            4, rng=np.random.default_rng(0), include_auxdata=True, **POINT
+        )
+        assert set(toys) == set(model.observed_data) | set(SPEC_AUXILIARY_DATA)
+        assert toys["model_SR"].shape == (4, 2)
+        assert toys["constraint_bkg_norm"].shape == (4,)
+        assert toys["lumi_constraint_meas"].shape == (4,)
+        assert toys["constraint_bblite_model_SR"].shape == (4, 2)
+        assert toys["constraint_sys_CR"].shape == (4, 2)
+        for draws in toys.values():
+            assert draws.dtype == np.float64
+
+    def test_main_measurement_only_by_default(self, model):
+        toys = model.sample_data(4, rng=np.random.default_rng(0), **POINT)
+        assert list(toys) == list(model.observed_data)
+
+    def test_main_draws_come_first(self, model):
+        """The counts of a full toy are those of a main-measurement toy of the same seed."""
+        full = model.sample_data(
+            3, rng=np.random.default_rng(4), include_auxdata=True, **POINT
+        )
+        main = model.sample_data(3, rng=np.random.default_rng(4), **POINT)
+        for name, counts in main.items():
+            np.testing.assert_array_equal(full[name], counts)
+
+    def test_seeded_reproducibility(self, model):
+        first = model.sample_data(
+            5, rng=np.random.default_rng(42), include_auxdata=True, **POINT
+        )
+        second = model.sample_data(
+            5, rng=np.random.default_rng(42), include_auxdata=True, **POINT
+        )
+        for name in first:
+            np.testing.assert_array_equal(first[name], second[name])
+
+    def test_moments(self, model):
+        toys = model.sample_data(
+            N_TOYS, rng=np.random.default_rng(1), include_auxdata=True, **POINT
+        )
+        assert_moments(toys["constraint_bkg_norm"], POINT["bkg_norm"], 1.0)
+        assert_moments(toys["lumi_constraint_meas"], POINT["lumi"], 0.017**2)
+        gamma_sr = np.array([POINT["stat_SR_bin_0"], POINT["stat_SR_bin_1"]])
+        sigma_sr = np.array([5.0 / 50.0, 4.0 / 60.0])
+        assert_moments(toys["constraint_bblite_model_SR"], gamma_sr, sigma_sr**2)
+        # Poisson(gamma * tau): whole-number draws whose variance is the mean.
+        rate = np.array([POINT["sys_CR_bin_0"], POINT["sys_CR_bin_2"]]) * [100.0, 144.0]
+        assert_moments(toys["constraint_sys_CR"], rate, rate)
+        np.testing.assert_array_equal(
+            toys["constraint_sys_CR"], np.round(toys["constraint_sys_CR"])
+        )
+
+    def test_toys_feed_compiled_nll(self, model):
+        nll = model.compile_nll(data_inputs=True, auxdata_inputs=True)
+        x = nll.to_vector({name: POINT[name] for name in nll.parameter_names})
+        toys = model.sample_data(
+            3, rng=np.random.default_rng(2), include_auxdata=True, **POINT
+        )
+        for i in range(3):
+            toy = {name: draws[i] for name, draws in toys.items()}
+            assert np.isfinite(nll.value(x, data=toy))
+
+    def test_compiles_once(self, monkeypatch):
+        model = spec_model()
+        calls = []
+        compile_function = model_module.function
+
+        def counting_function(*args, **kwargs):
+            calls.append(kwargs.get("name"))
+            return compile_function(*args, **kwargs)
+
+        monkeypatch.setattr(model_module, "function", counting_function)
+        for _ in range(2):
+            model.sample_data(
+                2, rng=np.random.default_rng(0), include_auxdata=True, **POINT
+            )
+        assert calls == ["expected_data", "auxiliary_parameters"]
+
+    def test_missing_parameters(self, model):
+        point = {k: v for k, v in POINT.items() if k != "bkg_norm"}
+        with pytest.raises(ValueError, match="bkg_norm"):
+            model.sample_data(
+                2, rng=np.random.default_rng(0), include_auxdata=True, **point
+            )
+
+
+class TestSampleConstraintTypes:
+    @pytest.mark.parametrize(
+        ("constraint", "mean", "variance"),
+        # alpha = 0.5: Gauss(alpha, 1), Poisson(alpha), LogNormal(mu = alpha, 1).
+        [
+            ("Gauss", 0.5, 1.0),
+            ("Poisson", 0.5, 0.5),
+            ("LogNormal", np.exp(1.0), (np.e - 1.0) * np.exp(2.0)),
+        ],
+    )
+    def test_single_parameter(self, constraint, mean, variance):
+        model = hs3_model([normsys(constraint)], parameters={"alpha": 0.5})
+        toys = model.sample_data(
+            N_TOYS,
+            rng=np.random.default_rng(3),
+            include_auxdata=True,
+            mu=1.0,
+            alpha=0.5,
+        )
+        draws = toys["constraint_alpha"]
+        if constraint == "LogNormal":
+            # The log of the draws is Gauss(alpha, 1); the draws themselves
+            # are too heavy-tailed for a 5% variance check.
+            assert_moments(np.log(draws), 0.5, 1.0)
+        else:
+            assert_moments(draws, mean, variance)
+
+    def test_shapesys_lognormal(self):
+        model = hs3_model([shapesys("LogNormal")], parameters=GAMMAS)
+        toys = model.sample_data(
+            N_TOYS,
+            rng=np.random.default_rng(5),
+            include_auxdata=True,
+            mu=1.0,
+            gamma_0=1.2,
+            gamma_1=0.9,
+        )
+        # Median gamma, log-scale width sigma_rel = (0.2, 0.05).
+        assert_moments(
+            np.log(toys["constraint_sys"]), np.log([1.2, 0.9]), [0.2**2, 0.05**2]
+        )
+
+    def test_staterror_full_poisson(self):
+        model = hs3_model(
+            [staterror("Poisson", full=True)],
+            parameters=GAMMAS,
+            barlow_beeston_method="full",
+        )
+        toys = model.sample_data(
+            N_TOYS,
+            rng=np.random.default_rng(6),
+            include_auxdata=True,
+            mu=1.0,
+            gamma_0=1.1,
+            gamma_1=0.95,
+        )
+        rate = np.array([1.1, 0.95]) * [100.0, 400.0]
+        assert_moments(toys["constraint_stat"], rate, rate)
+
+    def test_root_style_gaussian(self):
+        """Gauss(alpha | nom_alpha, sigma): nom_alpha is drawn around alpha."""
+        aux = {
+            "name": "c",
+            "type": "gaussian_dist",
+            "x": "alpha",
+            "mean": "nom_alpha",
+            "sigma": 0.5,
+        }
+        model = hs3_model(
+            [normsys("Gauss")],
+            aux=[aux],
+            parameters={"alpha": 0.0},
+            const={"nom_alpha": 0.0},
+        )
+        toys = model.sample_data(
+            N_TOYS,
+            rng=np.random.default_rng(7),
+            include_auxdata=True,
+            mu=1.0,
+            alpha=-0.4,
+        )
+        assert_moments(toys["c"], -0.4, 0.25)
+
+
+class TestSampleErrors:
+    @pytest.mark.parametrize(
+        ("aux", "parameters", "const", "named"),
+        [
+            pytest.param(
+                {"name": "c", "type": "exponential_dist", "x": 1.0, "c": "alpha"},
+                {"alpha": -1.0},
+                {},
+                "'c' (ExponentialDist)",
+                id="type",
+            ),
+            pytest.param(
+                {
+                    "name": "c",
+                    "type": "gaussian_dist",
+                    "x": "alpha",
+                    "mean": "beta",
+                    "sigma": 1.0,
+                },
+                {"alpha": 0.0, "beta": 0.0},
+                {},
+                "'c' (GaussianDist)",
+                id="no_global_observable",
+            ),
+        ],
+    )
+    def test_unsampleable_term(self, aux, parameters, const, named):
+        model = hs3_model(
+            [normsys("Gauss")], aux=[aux], parameters=parameters, const=const
+        )
+        with pytest.raises(NotImplementedError, match=re.escape(named)):
+            model.sample_data(
+                2,
+                rng=np.random.default_rng(0),
+                include_auxdata=True,
+                mu=1.0,
+                **parameters,
+            )
+        # Toys of the main measurement alone stay available.
+        model.sample_data(2, rng=np.random.default_rng(0), mu=1.0, **parameters)
+
+    def test_non_finite_parameter(self):
+        # gamma_0 = 0 gives a LogNormal log-scale location of log(0) = -inf.
+        model = hs3_model([shapesys("LogNormal")], parameters=GAMMAS)
+        with pytest.raises(ValueError, match="constraint_sys"):
+            model.sample_data(
+                2,
+                rng=np.random.default_rng(0),
+                include_auxdata=True,
+                mu=1.0,
+                gamma_0=0.0,
+                gamma_1=1.0,
+            )
+
+    def test_negative_poisson_rate(self):
+        model = hs3_model([normsys("Poisson")], parameters={"alpha": 0.5})
+        with pytest.raises(ValueError, match="constraint_alpha"):
+            model.sample_data(
+                2,
+                rng=np.random.default_rng(0),
+                include_auxdata=True,
+                mu=1.0,
+                alpha=-0.5,
+            )

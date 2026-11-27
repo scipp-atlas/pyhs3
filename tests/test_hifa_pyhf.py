@@ -633,3 +633,149 @@ def test_inverse_hessian_matches_pyhf_covariance():
         correlations[np.ix_(order, order)],
         atol=1e-3,
     )
+
+
+# Auxiliary data of the specs whose every constraint term pyhs3 keeps (no
+# bin pyhf fixes with a dummy term): each pyhs3 constraint name with the
+# name of pyhf's modifier, whose slice of pyhf's auxdata it matches.
+AUXILIARY_DATA_SPECS = {
+    "1bin_normsys": {"constraint_bkg_norm": "bkg_norm"},
+    "2bin_histosys": {"constraint_bkg_norm": "bkg_norm"},
+    "2bin_2channel": {
+        "constraint_uncorr_bkguncrt_signal": "uncorr_bkguncrt_signal",
+        "constraint_uncorr_bkguncrt_control": "uncorr_bkguncrt_control",
+    },
+    "couplednorm": {"constraint_coupled_normsys": "coupled_normsys"},
+    "shared_nuispar_across_types": {"constraint_sharednuis": "sharednuis"},
+    "1bin_shapesys": {"constraint_uncorr_bkguncrt": "uncorr_bkguncrt"},
+    "staterror_multisample": {
+        "constraint_bblite_model_firstchannel": "stat_firstchannel"
+    },
+    "lumi_two_channels": {
+        "constraint_bkg_norm": "bkg_norm",
+        "lumi_constraint_meas": "lumi",
+    },
+    "lumi_fixed": {"lumi_constraint_meas": "lumi"},
+    "simplemodel_uncorrelated": {"constraint_uncorr_bkguncrt": "uncorr_bkguncrt"},
+}
+N_AUX_TOYS = 20_000
+
+
+@pytest.fixture(params=list(AUXILIARY_DATA_SPECS), scope="module")
+def aux_models(request):
+    """pyhf's model, pyhs3's model and the constraint-name mapping of a spec."""
+    spec = SPECS[request.param]
+    pyhf_model = pyhf.Workspace(spec).model(modifier_settings=MODIFIER_SETTINGS)
+    ws = from_hifa(spec)
+    model = ws.model(ws.analyses[measurement(ws)], progress=False)
+    return pyhf_model, model, ws, AUXILIARY_DATA_SPECS[request.param]
+
+
+def pyhf_auxdata_slices(pyhf_model) -> dict[str, slice]:
+    """Slice of pyhf's auxdata (and of the aux part of its samples) per modifier."""
+    slices, start = {}, 0
+    for name in pyhf_model.config.auxdata_order:
+        size = len(pyhf_model.config.param_set(name).auxdata)
+        slices[name] = slice(start, start + size)
+        start += size
+    return slices
+
+
+def to_pyhs3_auxdata(pyhf_model, model, mapping, auxdata) -> dict[str, np.ndarray]:
+    """pyhf auxiliary data (last axis ordered as pyhf's auxdata) keyed by pyhs3 name.
+
+    Each slice takes the shape of pyhs3's datum on its last axes: ``()`` for
+    a single-parameter constraint, ``(B,)`` for a per-bin one.
+    """
+    slices = pyhf_auxdata_slices(pyhf_model)
+    shapes = {name: values.shape for name, values in model.auxiliary_data.items()}
+    converted = {}
+    for name, pyhf_name in mapping.items():
+        values = np.asarray(auxdata)[..., slices[pyhf_name]]
+        converted[name] = values.reshape(values.shape[:-1] + shapes[name])
+    return converted
+
+
+def test_auxiliary_data_match_pyhf(aux_models):
+    pyhf_model, model, _, mapping = aux_models
+    expected = to_pyhs3_auxdata(pyhf_model, model, mapping, pyhf_model.config.auxdata)
+
+    actual = model.auxiliary_data
+
+    assert set(actual) == set(expected)
+    for name, values in expected.items():
+        assert_allclose(actual[name], values, rtol=1e-12, err_msg=name)
+
+
+def pyhf_toys(pyhf_model, points: list[dict[str, float]], shape, seed: int):
+    """pyhf's ``make_pdf(pars).sample(shape)`` at each point, stacked: ``(len(points), *shape, main + aux)``.
+
+    pyhf's numpy backend draws through SciPy from NumPy's global random
+    state, so it is seeded here and restored afterwards.
+    """
+    saved = np.random.get_state()  # noqa: NPY002
+    np.random.seed(seed)  # noqa: NPY002
+    try:
+        return np.stack(
+            [
+                pyhf_model.make_pdf(
+                    pyhf.tensorlib.astensor(pyhf_pars(pyhf_model, point))
+                ).sample(shape)
+                for point in points
+            ]
+        )
+    finally:
+        np.random.set_state(saved)  # noqa: NPY002
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_auxiliary_toys_match_pyhf_moments(aux_models, seed):
+    """Means and variances of seeded toys agree within their sampling errors."""
+    pyhf_model, model, ws, mapping = aux_models
+    (point,) = random_points(ws, seed, n=1)
+    # (n, main + aux) -> {pyhs3 name: (n,) or (n, B)}.
+    (reference_toys,) = pyhf_toys(pyhf_model, [point], (N_AUX_TOYS,), seed)
+    expected = to_pyhs3_auxdata(
+        pyhf_model, model, mapping, reference_toys[:, pyhf_model.config.nmaindata :]
+    )
+
+    toys = model.sample_data(
+        N_AUX_TOYS,
+        rng=np.random.default_rng(seed),
+        include_auxdata=True,
+        **point,
+    )
+
+    for name, reference in expected.items():
+        drawn = toys[name]
+        assert drawn.shape == reference.shape, name
+        # Two independent samples of N: the difference of their means has
+        # standard error sqrt(2 var / N); allow 5 of them.
+        variance = reference.var(axis=0)
+        stderr = np.sqrt(2.0 * variance / N_AUX_TOYS)
+        assert np.all(
+            np.abs(drawn.mean(axis=0) - reference.mean(axis=0)) < 5 * stderr
+        ), name
+        assert_allclose(drawn.var(axis=0), variance, rtol=0.06, err_msg=name)
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_nll_on_full_toys_matches_pyhf(aux_models, seed):
+    """pyhs3's NLL on pyhf's toys, counts and auxiliary data, is pyhf's logpdf."""
+    pyhf_model, model, ws, mapping = aux_models
+    points = random_points(ws, seed, n=3)
+    # (3, main + aux): one pyhf toy per parameter point.
+    toys = pyhf_toys(pyhf_model, points, (), seed)
+    nll = model.compile_nll(gradient=False, data_inputs=True, auxdata_inputs=True)
+    nmain = pyhf_model.config.nmaindata
+
+    for point, toy in zip(points, toys, strict=True):
+        data = {
+            f"model_{channel}": toy[:nmain][pyhf_model.config.channel_slices[channel]]
+            for channel in pyhf_model.config.channels
+        }
+        data.update(to_pyhs3_auxdata(pyhf_model, model, mapping, toy[nmain:]))
+        x = nll.to_vector({name: point[name] for name in nll.parameter_names})
+        assert -nll.value(x, data=data) == pytest.approx(
+            pyhf_logpdf(pyhf_model, toy, point), rel=RTOL
+        )

@@ -653,10 +653,9 @@ class Model:
         baked in at its parameter-set value.
 
         The result covers only the main measurement.  It holds no auxiliary
-        data (the Asimov values of the constraint terms' global observables):
-        the constraint centres are constants in the graph, so a fit could not
-        use them.  Channels other than HistFactory channels have no expected
-        bin counts and are left out.
+        data (the Asimov values of the constraint terms' global observables,
+        see :attr:`auxiliary_data`).  Channels other than HistFactory
+        channels have no expected bin counts and are left out.
 
         The first call compiles one function for all channels, which later
         calls reuse.
@@ -722,73 +721,113 @@ class Model:
                 if dist.name in self._hfdc_expected_rates
             ]
             outputs = [self._hfdc_expected_rates[name] for name in channels]
-            inputs = [
-                var for var in explicit_graph_inputs(outputs) if var.name is not None
-            ]
-            compiled = function(
-                inputs=inputs,
-                outputs=outputs,
-                mode=self.mode,
-                on_unused_input="ignore",
-                name="expected_data",
-            )
             self._expected_data_function = (
-                cast(Callable[..., list[npt.NDArray[np.float64]]], compiled),
-                [cast(str, var.name) for var in inputs],
+                *self._compile_parameter_function(outputs, "expected_data"),
                 channels,
             )
         compiled_function, names, channels = self._expected_data_function
+        values = self._call_parameter_function(
+            compiled_function, names, parametervalues
+        )
+        return dict(zip(channels, values, strict=True))
+
+    def _compile_parameter_function(
+        self, outputs: Sequence[TensorVar], name: str
+    ) -> tuple[Callable[..., list[npt.NDArray[np.float64]]], list[str]]:
+        """Compile ``outputs`` as a function of the free parameters they depend on.
+
+        Returns the function and the names of its inputs in positional
+        order.  Every ``const`` parameter is baked in.
+        """
+        inputs = [var for var in explicit_graph_inputs(outputs) if var.name is not None]
+        compiled = function(
+            inputs=inputs,
+            outputs=list(outputs),
+            mode=self.mode,
+            on_unused_input="ignore",
+            name=name,
+        )
+        return (
+            cast(Callable[..., list[npt.NDArray[np.float64]]], compiled),
+            [cast(str, var.name) for var in inputs],
+        )
+
+    @staticmethod
+    def _call_parameter_function(
+        compiled_function: Callable[..., list[npt.NDArray[np.float64]]],
+        names: Sequence[str],
+        parametervalues: Mapping[str, float | npt.NDArray[np.float64]],
+    ) -> list[npt.NDArray[np.float64]]:
+        """Evaluate a function of :meth:`_compile_parameter_function` at a parameter point."""
         if missing := sorted(set(names) - parametervalues.keys()):
             msg = f"No value for free parameter(s): {', '.join(missing)}."
             raise ValueError(msg)
-        values = compiled_function(
+        return compiled_function(
             *[np.asarray(parametervalues[name], dtype=np.float64) for name in names]
         )
-        return dict(zip(channels, values, strict=True))
 
     def sample_data(
         self,
         n: int,
         *,
         rng: np.random.Generator,
+        include_auxdata: bool = False,
         **parametervalues: float | npt.NDArray[np.float64],
     ) -> dict[str, npt.NDArray[np.float64]]:
-        """Toy datasets of the main measurement: Poisson draws around :meth:`expected_data`.
+        """Toy datasets: Poisson draws around :meth:`expected_data`, and optionally auxiliary data.
 
         Each bin of each HistFactory channel is drawn independently from a
         Poisson distribution whose mean is the bin's :meth:`expected_data` at
-        the given parameter values.  Row ``i`` of every channel together is
+        the given parameter values.  Row ``i`` of every array together is
         one toy dataset, keyed like :attr:`observed_data`, so it can be passed
         as the ``data`` of a likelihood compiled with
         ``compile_nll(data_inputs=True)``::
 
             nll.value(x, data={name: counts[i] for name, counts in toys.items()})
 
-        Only the main measurement is randomized.  The auxiliary data (the
-        centres of the constraint terms, the global observables) stay at
-        their observed values, which are constants in the graph.  These are
-        toys conditional on the observed auxiliary data, not the fully
-        frequentist toys of pyhf's ``sample``, which also draws the auxiliary
-        data: a test statistic distribution built from them leaves out the
-        fluctuations of the auxiliary measurements.
+        By default only the main measurement is randomized, and the
+        auxiliary data (the global observables of the constraint terms) stay
+        at their observed values: toys conditional on the observed auxiliary
+        data, whose test statistic distribution leaves out the fluctuations
+        of the auxiliary measurements.  With ``include_auxdata=True``, each
+        global observable of :attr:`auxiliary_data` is also drawn from its
+        constraint distribution at the given parameter values, as pyhf's
+        ``make_pdf(pars).sample`` does: Gauss(alpha, 1) for a ``Gauss``
+        single-parameter constraint, Poisson(gamma * tau) for a ``Poisson``
+        per-bin one, and so on.  These fully frequentist toys feed a
+        likelihood compiled with ``compile_nll(data_inputs=True,
+        auxdata_inputs=True)``.  The counts are drawn first, so a full toy
+        has the counts of a main-measurement toy drawn with the same seed.
 
         Args:
             n: Number of toy datasets.
             rng: Source of the random draws; the draws advance its state.
                 Seed it, e.g. ``numpy.random.default_rng(0)``, for
                 reproducible toys.
+            include_auxdata: Also draw the auxiliary data.
             **parametervalues: Scalar value of each free parameter, as for
                 :meth:`expected_data`.
 
         Returns:
             dict[str, numpy.ndarray]: For each HistFactory channel, keyed as
             :meth:`expected_data`, a float64 array of whole-number counts of
-            shape ``(n, B)``, ``B`` the channel's total number of bins.
+            shape ``(n, B)``, ``B`` the channel's total number of bins.  With
+            ``include_auxdata=True``, also a float64 array per entry of
+            :attr:`auxiliary_data`, keyed alike, of shape ``(n,)`` for a
+            scalar global observable and ``(n, B')`` for a per-bin one.
 
         Raises:
             ValueError: As for :meth:`expected_data`, or if an expected bin
                 count is negative or NaN, which no Poisson distribution has
-                as its mean.
+                as its mean.  With ``include_auxdata=True``, also if a
+                constraint distribution's parameters are not finite or
+                outside its domain (a negative Poisson rate, say).
+            NotImplementedError: With ``include_auxdata=True``, if a
+                constraint term of the likelihood has no global observable
+                pyhs3 can draw: a distribution other than a Gaussian,
+                Poisson or log-normal one, or one whose global observable is
+                not a constant (a number or ``const`` parameter), or is held
+                by another term.  The message names every such term.
 
         Examples:
             For the model of :meth:`expected_data`, three toys at ``mu = 2``:
@@ -833,6 +872,71 @@ class Model:
                 raise ValueError(msg)
             # rates has shape (B,); size (n, B) draws each row around it.
             toys[name] = rng.poisson(rates, size=(n, rates.shape[0])).astype(np.float64)
+        if include_auxdata:
+            toys.update(self._sample_auxiliary_data(n, rng, parametervalues))
+        return toys
+
+    def _sample_auxiliary_data(
+        self,
+        n: int,
+        rng: np.random.Generator,
+        parametervalues: Mapping[str, float | npt.NDArray[np.float64]],
+    ) -> dict[str, npt.NDArray[np.float64]]:
+        """Draw ``n`` values of each global observable of :attr:`auxiliary_data`.
+
+        Each is drawn from its constraint distribution, whose parameters
+        are evaluated at ``parametervalues`` by one function compiled at the
+        first call.  Returns arrays of shape ``(n,)`` or ``(n, B')``.
+        """
+        _ = self.log_prob
+        if self._unsampleable_auxiliary_terms:
+            terms = ", ".join(
+                f"'{name}' ({kind})"
+                for name, kind in self._unsampleable_auxiliary_terms.items()
+            )
+            msg = (
+                f"Cannot draw the auxiliary data of the constraint term(s) {terms}: "
+                "pyhs3 draws only a Gaussian, Poisson or log-normal term whose "
+                "global observable is a constant held by no other term. Use "
+                "include_auxdata=False for toys conditional on the observed "
+                "auxiliary data."
+            )
+            raise NotImplementedError(msg)
+        # One dict of symbolic sampling parameters per term, flattened into
+        # the outputs of one compiled function in the same order.
+        layout = {
+            name: term.distribution.sampling_parameters(term.context, term.field_name)
+            for name, term in self._auxiliary_terms.items()
+        }
+        if self._auxiliary_parameters_function is None:
+            outputs = [
+                tensor
+                for parameters in layout.values()
+                for tensor in parameters.values()
+            ]
+            self._auxiliary_parameters_function = self._compile_parameter_function(
+                outputs, "auxiliary_parameters"
+            )
+        values = iter(
+            self._call_parameter_function(
+                *self._auxiliary_parameters_function, parametervalues
+            )
+        )
+        toys = {}
+        for name, parameters in layout.items():
+            term = self._auxiliary_terms[name]
+            evaluated = {key: np.asarray(next(values)) for key in parameters}
+            try:
+                if not all(np.all(np.isfinite(v)) for v in evaluated.values()):
+                    msg = f"parameters {evaluated} are not all finite"
+                    raise ValueError(msg)
+                # Shape (n,) for a scalar observable, (n, B') per bin.
+                toys[name] = term.distribution.sample(
+                    rng, evaluated, (n, *np.shape(term.observable.data))
+                )
+            except ValueError as err:
+                msg = f"Cannot draw the auxiliary data of '{name}': {err}"
+                raise ValueError(msg) from err
         return toys
 
     @cached_property

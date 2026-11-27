@@ -14,7 +14,7 @@ import time
 import timeit
 import numpy as np
 from contextlib import contextmanager
-from pytensor.compile.function import function
+from pytensor.compile.maker import function
 import pytensor.tensor as pt
 import math
 import jax.numpy as jnp

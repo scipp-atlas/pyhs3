@@ -15,7 +15,7 @@ import timeit
 import numpy as np
 import pyhs3
 from contextlib import contextmanager
-from pytensor.compile.function import function
+from pytensor.compile.maker import function
 import pytensor.tensor as pt
 import math
 
@@ -60,6 +60,7 @@ def setup_pyhs3_workspace():
     """Create PyHS3 workspace with Gaussian distribution."""
 
     workspace_data = {
+      "metadata": {"hs3_version": "0.2"},
       "distributions": [
         {
           "mean": "mu",
@@ -92,6 +93,19 @@ def setup_pyhs3_workspace():
           "type": "product_domain"
         }
       ],
+      # The data + likelihood declare x as an observable so the model builds it
+      # as a vector input and pdf() takes the whole 1000-point grid in one call.
+      "data": [
+        {
+          "name": "x_grid",
+          "type": "unbinned",
+          "axes": [{"name": "x", "min": -10.0, "max": 10.0}],
+          "entries": [[0.0]]
+        }
+      ],
+      "likelihoods": [
+        {"name": "L_x_grid", "distributions": ["norm"], "data": ["x_grid"]}
+      ],
       "parameter_points": [
         {
           "name": "default_values",
@@ -113,7 +127,7 @@ def setup_pyhs3_workspace():
       ]
     }
 
-    return pyhs3.Workspace(workspace_data)
+    return pyhs3.Workspace(**workspace_data)
 
 def time_pytensor_mode(dist, inputs, mode, x_vals, mu_val, sigma_val, n_evals):
     func = function(
@@ -137,10 +151,14 @@ def time_pyhs3_mode(ws, mode, x_vals, mu_val, sigma_val, n_evals):
     """Time PyHS3 evaluation for a specific mode."""
     try:
         # Create model with specified mode
-        model = ws.model(mode=mode)
+        model = ws.model(0, mode=mode)
 
-        # Parameter values
-        params = {"mu": mu_val, "sigma": sigma_val, "x": x_vals}
+        # Parameter values (Model.pdf takes float64 arrays: scalar mu/sigma, vector x)
+        params = {
+            "mu": np.asarray(mu_val, dtype=np.float64),
+            "sigma": np.asarray(sigma_val, dtype=np.float64),
+            "x": np.asarray(x_vals, dtype=np.float64),
+        }
 
         # Setup function for timeit (includes JIT warm-up)
         def setup():
@@ -225,7 +243,7 @@ def main():
 
     for mode in pytensor_modes:
         print(f"Testing PyHS3 {mode} mode:")
-        total_time, time_per_eval = time_pyhs3_mode(ws, mode, x, [mu]*len(x), [sigma]*len(x), N_EVALUATIONS)
+        total_time, time_per_eval = time_pyhs3_mode(ws, mode, x, mu, sigma, N_EVALUATIONS)
 
         if total_time is not None:
             results[('pyhs3', mode)] = {

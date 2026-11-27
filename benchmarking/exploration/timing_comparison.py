@@ -16,7 +16,7 @@ import numpy as np
 from pathlib import Path
 
 import pytensor.compile
-from pytensor.graph.basic import explicit_graph_inputs
+from pytensor.graph.traversal import explicit_graph_inputs
 from pytensor.graph.fg import FunctionGraph
 from pytensor.link.jax.dispatch import jax_funcify
 import jax.numpy as jnp
@@ -43,7 +43,7 @@ except ImportError:
 
 # Configuration
 N_EVALUATIONS = 1000
-WORKSPACE_PATH = Path(__file__).parent / "tests/test_pdf/rf501_simultaneouspdf.json"
+WORKSPACE_PATH = Path(__file__).resolve().parents[2] / "tests/test_pdf/rf501_simultaneouspdf.json"
 
 # Evaluation point for the "model" distribution
 EVAL_POINT = {
@@ -142,7 +142,7 @@ def build_pyhs3_model(mode: str):
     try:
         # Load workspace and build model
         workspace = Workspace.load(WORKSPACE_PATH)
-        model = workspace.model(mode=mode if mode != 'JAX_TRANSPILE' else 'FAST_RUN', progress=False)
+        model = workspace.model(0, mode=mode if mode != 'JAX_TRANSPILE' else 'FAST_RUN', progress=False)
 
         # Get the compiled function and parameter order
         dist = model.distributions["model"]

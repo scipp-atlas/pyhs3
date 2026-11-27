@@ -282,7 +282,7 @@ def main() -> None:
             )
             plot_nll_curves([result], out)
         if args.plot_resid is not None:
-            from plot_residuals.py import plot_residual_and_offset
+            from plot_residuals import plot_residual_and_offset
 
             out = (
                 _default_resid_plot_path([result])

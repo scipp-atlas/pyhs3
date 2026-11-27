@@ -313,7 +313,7 @@ def main():
         ],
     )
     print("building model")
-    model = ws.model(parameter_set=merged_pset)
+    model = ws.model(0, parameter_set=merged_pset)
 
     with Path(cached_file).open("wb") as f:
         pickle.dump(model, f)
@@ -322,7 +322,7 @@ def main():
     like = asys.likelihood
 
     nlls = []
-    parameters = {par.name: par.value for par in model.parameterset}
+    parameters = {par.name: par.value for par in model.context.parameter_set}
 
     unbinned = [d for d in ws.data.root if getattr(d, "type", None) == "unbinned"]
 

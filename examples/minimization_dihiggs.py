@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import pytensor.tensor as pt
 from matplotlib import pyplot as plt
-from pytensor.compile.function import function
+from pytensor.compile.maker import function
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import explicit_graph_inputs
 from scipy.optimize import OptimizeResult, minimize
@@ -523,7 +523,7 @@ def compile_log_prob(
     # -----------------------------------------------------------------------
     log_prob_fn = function(
         inputs=free_inputs,
-        outputs=nll_reduced,
+        outputs=[nll_reduced],
         mode=model.mode,
         on_unused_input="ignore",
         name=model._likelihood.name,
@@ -634,7 +634,7 @@ def profile_nll(
     free_input_indices = []
     bounds = []
 
-    model_bounds = {axis.name: (axis.min, axis.max) for axis in model.domain.axes}
+    model_bounds = model.context.bounds
     for i, name in enumerate(input_names):
         if name in pinned:
             template.append(np.asarray(pinned[name]))

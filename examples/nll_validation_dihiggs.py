@@ -26,7 +26,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pytensor.tensor as pt
-from pytensor.compile.function import function
+from pytensor.compile.maker import function
 from pytensor.graph.traversal import explicit_graph_inputs
 from skhep_testdata import data_path as skhep_testdata_path
 
@@ -178,7 +178,7 @@ def compile_log_prob(model):
     ]
     log_prob_fn = function(
         inputs=inputs,
-        outputs=dist_expression,
+        outputs=[dist_expression],
         mode=model.mode,
         on_unused_input="ignore",
         name=model._likelihood.name,

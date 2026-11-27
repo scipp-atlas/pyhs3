@@ -190,7 +190,7 @@ def compile_log_prob(model: Any) -> tuple[Any, list[Any], float]:
     t0 = time.perf_counter()
     log_prob_fn = function(
         inputs=inputs,
-        outputs=dist_expression,
+        outputs=[dist_expression],
         mode=model.mode,
         on_unused_input="ignore",
         name=model._likelihood.name,
@@ -333,7 +333,7 @@ def profile_nll(
     free_input_indices: list[int] = []
     bounds_list: list[tuple[float, float]] = []
 
-    model_bounds = {axis.name: (axis.min, axis.max) for axis in model.domain.axes}
+    model_bounds = model.context.bounds
     for i, name in enumerate(input_names):
         if name in pinned:
             template.append(np.asarray(pinned[name]))

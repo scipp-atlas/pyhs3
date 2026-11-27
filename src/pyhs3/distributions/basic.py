@@ -10,8 +10,11 @@ as defined in the HS3 specification.
 from __future__ import annotations
 
 import math
-from typing import Literal, cast
+from collections.abc import Mapping
+from typing import ClassVar, Literal, cast
 
+import numpy as np
+import numpy.typing as npt
 import pytensor.tensor as pt
 import pytensor_distributions.exponential as Exponential
 import pytensor_distributions.lognormal as LogNormal
@@ -21,12 +24,12 @@ import pytensor_distributions.uniform as Uniform
 from pydantic import PrivateAttr
 
 from pyhs3.context import Context
-from pyhs3.distributions.core import Distribution
+from pyhs3.distributions.core import Distribution, SampleableDistribution
 from pyhs3.normalization import substitute_variable
 from pyhs3.typing.aliases import TensorVar
 
 
-class GaussianDist(Distribution):
+class GaussianDist(SampleableDistribution):
     r"""
     Gaussian (normal) probability distribution.
 
@@ -49,6 +52,30 @@ class GaussianDist(Distribution):
     mean: str | float | int
     sigma: str | float | int
     x: str | float | int
+
+    #: The density is symmetric in ``x`` and ``mean``, so either is drawn
+    #: from a Gaussian centred on the other.
+    sampled_fields: ClassVar[tuple[str, ...]] = ("x", "mean")
+
+    def sampling_parameters(
+        self, context: Context, field_name: str
+    ) -> dict[str, TensorVar]:
+        """Centre (the other of ``x`` and ``mean``) and width of the drawn field."""
+        self._check_sampled_field(field_name)
+        centre = "mean" if field_name == "x" else "x"
+        return {
+            "mean": self.field_tensor(context, centre),
+            "sigma": self.field_tensor(context, "sigma"),
+        }
+
+    def sample(
+        self,
+        rng: np.random.Generator,
+        parameters: Mapping[str, npt.NDArray[np.float64]],
+        size: tuple[int, ...],
+    ) -> npt.NDArray[np.float64]:
+        """Gaussian draws around ``parameters["mean"]`` of width ``parameters["sigma"]``."""
+        return rng.normal(parameters["mean"], parameters["sigma"], size=size)
 
     def likelihood(self, context: Context) -> TensorVar:
         """
@@ -337,7 +364,7 @@ class UniformDist(Distribution):
         return cast(TensorVar, log_density)
 
 
-class PoissonDist(Distribution):
+class PoissonDist(SampleableDistribution):
     r"""
     Poisson probability distribution.
 
@@ -358,6 +385,22 @@ class PoissonDist(Distribution):
     type: Literal["poisson_dist"] = "poisson_dist"
     mean: str | float | int
     x: str | float | int
+
+    def sampling_parameters(
+        self, context: Context, field_name: str
+    ) -> dict[str, TensorVar]:
+        """Rate of the drawn count ``x``."""
+        self._check_sampled_field(field_name)
+        return {"mean": self.field_tensor(context, "mean")}
+
+    def sample(
+        self,
+        rng: np.random.Generator,
+        parameters: Mapping[str, npt.NDArray[np.float64]],
+        size: tuple[int, ...],
+    ) -> npt.NDArray[np.float64]:
+        """Whole-number Poisson draws of rate ``parameters["mean"]``, as float64."""
+        return rng.poisson(parameters["mean"], size=size).astype(np.float64)
 
     def likelihood(self, context: Context) -> TensorVar:
         """
@@ -505,7 +548,7 @@ class ExponentialDist(Distribution):
         )
 
 
-class LogNormalDist(Distribution):
+class LogNormalDist(SampleableDistribution):
     r"""
     Log-normal probability distribution.
 
@@ -534,6 +577,25 @@ class LogNormalDist(Distribution):
     x: str | float | int
     mu: str | float | int
     sigma: str | float | int
+
+    def sampling_parameters(
+        self, context: Context, field_name: str
+    ) -> dict[str, TensorVar]:
+        """Log-scale location and width of the drawn ``x``."""
+        self._check_sampled_field(field_name)
+        return {
+            "mu": self.field_tensor(context, "mu"),
+            "sigma": self.field_tensor(context, "sigma"),
+        }
+
+    def sample(
+        self,
+        rng: np.random.Generator,
+        parameters: Mapping[str, npt.NDArray[np.float64]],
+        size: tuple[int, ...],
+    ) -> npt.NDArray[np.float64]:
+        """Log-normal draws whose logarithm has mean ``mu`` and width ``sigma``."""
+        return rng.lognormal(parameters["mu"], parameters["sigma"], size=size)
 
     def likelihood(self, context: Context) -> TensorVar:
         """
